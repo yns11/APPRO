@@ -1,0 +1,21 @@
+# Databricks Apps runtime configuration (used by `databricks apps deploy`).
+# The frontend is built by scripts/build.sh before upload; start.sh builds it on the fly only if
+# client/dist is missing (Node.js is available in the Databricks Apps runtime).
+command:
+  - bash
+  - start.sh
+env:
+  - name: APPRO_DATA_SOURCE
+    value: "uc"                      # "local" to run on the bundled seed CSV (demo)
+  - name: APPRO_UC_CATALOG
+    value: "main"
+  - name: APPRO_UC_SCHEMA
+    value: "appro"
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse         # SQL warehouse resource attached to the app (CAN_USE)
+  - name: PGHOST                     # Lakebase resource ("database") – transactional store
+    valueFrom: database
+  - name: APPRO_HORIZON_DAYS
+    value: "120"
+  - name: APPRO_LOG_LEVEL
+    value: "INFO"

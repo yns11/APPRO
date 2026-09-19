@@ -1,0 +1,58 @@
+# Databricks Asset Bundle – deploys the app with its resources.
+#   databricks bundle validate -t dev
+#   databricks apps deploy -t dev            # validates, uploads, applies config and STARTS the app
+# Variables must be provided per target (warehouse id, Lakebase project/branch/database).
+bundle:
+  name: appro
+
+variables:
+  warehouse_id:
+    description: SQL warehouse used to read the Unity Catalog tables
+  lakebase_branch:
+    description: Lakebase branch name (autoscaling project) used as transactional store
+  lakebase_database:
+    description: Lakebase database name
+    default: databricks_postgres
+  uc_catalog:
+    default: main
+  uc_schema:
+    default: appro
+
+resources:
+  apps:
+    appro:
+      name: appro
+      description: "APPRO – cockpit approvisionnement, MRP et simulation (remplace le classeur SIMULATION)"
+      source_code_path: .
+      config:
+        command: ["bash", "start.sh"]
+        env:
+          - name: APPRO_DATA_SOURCE
+            value: "uc"
+          - name: APPRO_UC_CATALOG
+            value: "${var.uc_catalog}"
+          - name: APPRO_UC_SCHEMA
+            value: "${var.uc_schema}"
+          - name: DATABRICKS_WAREHOUSE_ID
+            valueFrom: sql-warehouse
+          - name: PGHOST
+            valueFrom: database
+          - name: APPRO_HORIZON_DAYS
+            value: "120"
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: database
+          database:
+            database_name: ${var.lakebase_database}
+            instance_name: ${var.lakebase_branch}
+            permission: CAN_CONNECT_AND_CREATE
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production
