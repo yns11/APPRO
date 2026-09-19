@@ -8,12 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 from sqlalchemy.pool import StaticPool
+from tests.conftest import SEED
 
 from appro.api.main import create_app
 from appro.config import Settings
 from appro.data.store import Base
 from appro.services.context import AppContext, set_context
-from tests.conftest import SEED
 
 AS_OF = "2026-09-19"
 

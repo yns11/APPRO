@@ -6,8 +6,22 @@ from typing import Iterable
 
 import pandas as pd
 
-from ..engine.models import (ActualLine, Article, BomLine, Dataset, Movement, OrderLine, OrderStatus, OrderType,
-                             PlanLine, Program, Receipt, StockSnapshot, Supplier, SupplierLink)
+from ..engine.models import (
+    ActualLine,
+    Article,
+    BomLine,
+    Dataset,
+    Movement,
+    OrderLine,
+    OrderStatus,
+    OrderType,
+    PlanLine,
+    Program,
+    Receipt,
+    StockSnapshot,
+    Supplier,
+    SupplierLink,
+)
 from .schemas import as_date, parse_weekdays
 
 

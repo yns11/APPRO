@@ -13,11 +13,30 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..data.assembler import erp_dataset
-from ..data.store import (AppAdjustment, AppOrder, AppProductionActual, AppReceipt, IgnoredProposal, ParamOverride,
-                          PdpLine, PdpVersion, Scenario)
+from ..data.store import (
+    AppAdjustment,
+    AppOrder,
+    AppProductionActual,
+    AppReceipt,
+    IgnoredProposal,
+    ParamOverride,
+    PdpLine,
+    PdpVersion,
+    Scenario,
+)
 from ..engine import run_mrp
-from ..engine.models import (ActualLine, Dataset, EngineParams, Movement, MrpResult, OrderLine, OrderStatus, OrderType,
-                             PlanLine, Receipt)
+from ..engine.models import (
+    ActualLine,
+    Dataset,
+    EngineParams,
+    Movement,
+    MrpResult,
+    OrderLine,
+    OrderStatus,
+    OrderType,
+    PlanLine,
+    Receipt,
+)
 from ..engine.scenario import ScenarioEvent, apply_scenario
 from .context import AppContext
 

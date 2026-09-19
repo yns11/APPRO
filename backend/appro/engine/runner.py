@@ -9,7 +9,7 @@ import numpy as np
 from .alerts import classify_alerts, worst_severity
 from .calendar import WorkCalendar
 from .demand import DayIndex, actual_share, build_program_daily, explode_demand
-from .models import (Alert, ArticleResult, Dataset, EngineParams, MrpResult, OrderLine, OrderType, SupplyEvent)
+from .models import Alert, ArticleResult, Dataset, EngineParams, MrpResult, OrderLine, OrderType, SupplyEvent
 from .projection import coverage_days, first_negative, project_stock, target_stock
 from .proposals import generate_proposals
 

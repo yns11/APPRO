@@ -8,9 +8,24 @@ import numpy as np
 from appro.engine import run_mrp
 from appro.engine.calendar import WorkCalendar
 from appro.engine.demand import DayIndex, ceil_to_multiple, spread_week
-from appro.engine.models import (ActualLine, Article, BomLine, Dataset, EngineParams, Movement, OrderLine,
-                                 OrderStatus, OrderType, PlanLine, Program, Receipt, StockSnapshot, Supplier,
-                                 SupplierLink, AlertType)
+from appro.engine.models import (
+    ActualLine,
+    AlertType,
+    Article,
+    BomLine,
+    Dataset,
+    EngineParams,
+    Movement,
+    OrderLine,
+    OrderStatus,
+    OrderType,
+    PlanLine,
+    Program,
+    Receipt,
+    StockSnapshot,
+    Supplier,
+    SupplierLink,
+)
 from appro.engine.projection import coverage_days
 from appro.engine.scenario import ScenarioEvent, apply_scenario
 
