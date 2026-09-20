@@ -1,8 +1,8 @@
 name: CI
+# Désactivée sur push / pull request à la demande du propriétaire (économie de ressources) :
+# lancement manuel uniquement (onglet Actions → CI → Run workflow).
 on:
-  push:
-    branches: ["**"]
-  pull_request:
+  workflow_dispatch:
 jobs:
   backend:
     runs-on: ubuntu-latest

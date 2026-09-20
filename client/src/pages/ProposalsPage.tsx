@@ -1,109 +1,98 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, CheckCheck, Download, EyeOff, RotateCcw } from "lucide-react";
-import { useProposals, useWrite, useCockpit } from "@/lib/queries";
+import { Calculator, Download, Trash2 } from "lucide-react";
+import { useCells, useCockpit, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
 import { Badge, Button, Card, Empty, ErrorBox, Kpi, SkeletonBlock, useToast } from "@/components/ui";
-import { EntryDrawer, type EntryDraft } from "@/components/EntryDrawer";
-import { fmtDate, fmtInt, fmtQty } from "@/lib/format";
-import type { ProposalOut } from "@/lib/types";
+import { fmtDate, fmtDateTime, fmtInt, fmtQty } from "@/lib/format";
+import type { CbnReport } from "@/lib/types";
 
-/** Order workbench: accept / modify / ignore engine proposals, export the order book. */
+/**
+ * Net requirement run ("Calcul CBN") for the perimeter and the resulting simulated orders.
+ * A proposal and a typed simulated order are the same thing: one editable cell of the grid.
+ */
 export default function ProposalsPage() {
-  const { engineParams } = usePerimeter();
-  const [showIgnored, setShowIgnored] = useState(false);
-  const q = useProposals(showIgnored);
+  const { engineParams, perimeter } = usePerimeter();
   const cockpit = useCockpit();
+  const cells = useCells({ kind: "sim_order" });
   const toast = useToast();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [draft, setDraft] = useState<EntryDraft | null>(null);
-  const [supplierFilter, setSupplierFilter] = useState("");
-  const [onlyUrgent, setOnlyUrgent] = useState(false);
+  const [reset, setReset] = useState(true);
+  const [report, setReport] = useState<CbnReport | null>(null);
+  const [onlyCbn, setOnlyCbn] = useState(false);
+  const cbn = useWrite(() => api.post<CbnReport>("/api/cbn/run", { planner: engineParams.planner, scenario_id: engineParams.scenario_id, reset }),
+    (r) => { setReport(r); toast.push(`Calcul CBN terminé : ${r.proposals} commande(s) simulée(s) (${fmtQty(r.qty)}), ${r.urgent} urgente(s), ${r.removed} cellule(s) précédente(s) remplacée(s)`, r.urgent ? "info" : "success"); });
+  const delCell = useWrite((id: string) => api.del(`/api/entries/cells/${id}`), () => toast.push("Commande simulée supprimée"));
+  const clearCbn = useWrite(async (ids: string[]) => { await Promise.all(ids.map((id) => api.del(`/api/entries/cells/${id}`))); }, () => { setReport(null); toast.push("Résultats du CBN effacés"); });
 
-  const accept = useWrite((ps: ProposalOut[]) => api.post("/api/proposals/accept-batch", ps.map((p) => ({ article_id: p.article_id, supplier_id: p.supplier_id, delivery_date: p.delivery_date, qty: p.qty, proposal_id: p.proposal_id }))),
-    () => { toast.push("Propositions acceptées → commandes planifiées", "success"); setSelected(new Set()); });
-  const ignore = useWrite((p: ProposalOut) => api.post("/api/proposals/ignore", { article_id: p.article_id, supplier_id: p.supplier_id, delivery_date: p.delivery_date, reason: "ignorée depuis le plan de commandes" }), () => toast.push("Proposition ignorée"));
-  const unignoreAll = useWrite(async () => { const ig = await api.get<{ id: string }[]>("/api/proposals/ignored"); await Promise.all(ig.map((r) => api.del(`/api/proposals/ignored/${r.id}`))); }, () => toast.push("Propositions ignorées réactivées"));
+  const perimeterIds = useMemo(() => new Set((cockpit.data?.articles ?? []).map((a) => a.article_id)), [cockpit.data]);
+  const info = useMemo(() => Object.fromEntries((cockpit.data?.articles ?? []).map((a) => [a.article_id, a])), [cockpit.data]);
+  const rows = useMemo(() => (cells.data ?? []).filter((c) => (perimeterIds.size === 0 || perimeterIds.has(c.article_id)) && (!onlyCbn || c.source === "CBN")), [cells.data, perimeterIds, onlyCbn]);
+  const totals = useMemo(() => ({ qty: rows.reduce((s, c) => s + c.qty, 0), cbn: rows.filter((c) => c.source === "CBN").length, urgent: rows.filter((c) => c.note.includes("URGENT")).length, articles: new Set(rows.map((c) => c.article_id)).size }), [rows]);
 
-  const rows = useMemo(() => (q.data ?? []).filter((p) => (!supplierFilter || p.supplier_id === supplierFilter) && (!onlyUrgent || p.urgent)), [q.data, supplierFilter, onlyUrgent]);
-  const bySupplier = useMemo(() => {
-    const m = new Map<string, { name: string; count: number; qty: number; urgent: number }>();
-    rows.forEach((p) => { const k = p.supplier_id ?? "?"; const cur = m.get(k) ?? { name: p.supplier_name, count: 0, qty: 0, urgent: 0 }; cur.count++; cur.qty += p.qty; if (p.urgent) cur.urgent++; m.set(k, cur); });
-    return Array.from(m.entries()).sort((a, b) => b[1].count - a[1].count);
-  }, [rows]);
-  const unitOf = useMemo(() => Object.fromEntries((cockpit.data?.articles ?? []).map((a) => [a.article_id, { article_id: a.article_id, designation: a.designation, unit: a.unit }])), [cockpit.data]);
-
-  if (q.isError) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
-  const toggle = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const visibleIds = rows.filter((p) => !p.ignored).map((p) => p.proposal_id);
-  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
-  const selectedRows = rows.filter((p) => selected.has(p.proposal_id) && !p.ignored);
-  const urgent = (q.data ?? []).filter((p) => p.urgent && !p.ignored).length;
-
+  if (cells.isError) return <ErrorBox error={cells.error} retry={() => cells.refetch()} />;
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Propositions de commandes</h1><p>Besoins nets calculés par le moteur (MOQ, conditionnement, délai, jours de livraison, quotas). Acceptez, modifiez ou ignorez chaque proposition ; une proposition acceptée devient une commande planifiée, à transmettre à l'ERP.</p></div>
+        <div className="title"><h1>Calcul CBN & commandes simulées</h1><p>Le Calcul CBN (calcul des besoins nets) recalcule les propositions du périmètre — MOQ, conditionnement, délai, jours de livraison, quotas — et les écrit dans la ligne « Commandes simulées » du tableau de chaque article. Une proposition et une commande simulée saisie à la main sont la même chose : une cellule modifiable, sans décision à prendre. Les cellules saisies à la main sont conservées et prises en compte par le calcul.</p></div>
         <div className="actions">
-          <a className="btn" href={api.downloadUrl("/api/exports/orders.xlsx", { planner: engineParams.planner, scenario_id: engineParams.scenario_id })}><Download />Carnet + propositions (xlsx)</a>
-          <Button variant="primary" disabled={selectedRows.length === 0 || accept.isPending} onClick={() => accept.mutate(selectedRows)}><CheckCheck />Accepter la sélection ({selectedRows.length})</Button>
+          <label className="checkbox" title="Remplacer les cellules écrites par le précédent Calcul CBN (les saisies manuelles sont toujours conservées)"><input type="checkbox" checked={reset} onChange={(e) => setReset(e.target.checked)} />remplacer le CBN précédent</label>
+          <a className="btn" href={api.downloadUrl("/api/exports/orders.xlsx", { planner: engineParams.planner, scenario_id: engineParams.scenario_id })}><Download />Carnet (xlsx)</a>
+          <Button variant="primary" disabled={cbn.isPending} onClick={() => cbn.mutate(undefined)}><Calculator />{cbn.isPending ? "Calcul en cours…" : `Calcul CBN${perimeter.planner ? ` · ${perimeter.planner}` : ""}`}</Button>
         </div>
       </div>
 
       <div className="grid kpis">
-        <Kpi label="Propositions" value={q.data ? fmtInt(q.data.filter((p) => !p.ignored).length) : "…"} tone="brand" meta="à traiter" />
-        <Kpi label="Urgentes" value={q.data ? fmtInt(urgent) : "…"} tone={urgent ? "critical" : "ok"} meta="délai fournisseur non tenable" onClick={() => setOnlyUrgent((v) => !v)} active={onlyUrgent} />
-        <Kpi label="Fournisseurs concernés" value={bySupplier.length} meta={bySupplier.slice(0, 3).map(([id, s]) => `${id}: ${s.count}`).join(" · ")} />
-        <Kpi label="Ignorées" value={showIgnored ? (q.data ?? []).filter((p) => p.ignored).length : "masquées"} meta={<label className="checkbox"><input type="checkbox" checked={showIgnored} onChange={(e) => setShowIgnored(e.target.checked)} />afficher</label>} />
+        <Kpi label="Commandes simulées" value={cells.data ? fmtInt(rows.length) : "…"} tone="brand" meta={`${totals.articles} article(s) · ${fmtQty(totals.qty)} unités`} />
+        <Kpi label="Issues du CBN" value={cells.data ? fmtInt(totals.cbn) : "…"} meta={<label className="checkbox"><input type="checkbox" checked={onlyCbn} onChange={(e) => setOnlyCbn(e.target.checked)} />n'afficher que celles-ci</label>} />
+        <Kpi label="Urgentes" value={cells.data ? fmtInt(totals.urgent) : "…"} tone={totals.urgent ? "critical" : "ok"} meta="délai fournisseur non tenable (dernier calcul)" />
+        <Kpi label="Dernier calcul" value={report ? fmtInt(report.proposals) : "–"} meta={report ? `${report.articles} articles · ${fmtQty(report.qty)} · ${report.removed} remplacée(s)` : "aucun calcul dans cette session"} />
       </div>
 
-      <div className="grid cols-4">
-        <Card title="Par fournisseur" tight>
-          {bySupplier.length === 0 ? <Empty title="Aucune proposition" /> : (
+      {report && report.items.length > 0 && (
+        <Card title="Résultat du dernier Calcul CBN" hint="détail des besoins nets écrits en commandes simulées (urgentes en premier)" actions={<Button size="sm" variant="ghost" onClick={() => setReport(null)}>Masquer</Button>}>
+          <div className="scroll-x" style={{ maxHeight: 320 }}>
             <table className="tbl compact">
-              <thead><tr><th>Fournisseur</th><th className="num">Nb</th><th className="num" title="urgentes">Urg.</th></tr></thead>
-              <tbody>{bySupplier.map(([id, s]) => <tr key={id} className={`clickable ${supplierFilter === id ? "selected" : ""}`} onClick={() => setSupplierFilter(supplierFilter === id ? "" : id)}><td>{id}<span className="sub">{s.name}</span></td><td className="num">{s.count}</td><td className="num">{s.urgent ? <Badge tone="critical">{s.urgent}</Badge> : "–"}</td></tr>)}</tbody>
+              <thead><tr><th>Article</th><th>Fournisseur</th><th>Commander le</th><th>Livraison</th><th className="num">Quantité</th><th className="num">Besoin net</th><th className="num">Stock avant → après</th><th>Motif</th></tr></thead>
+              <tbody>{report.items.map((p) => (
+                <tr key={p.proposal_id}>
+                  <td><Link to={`/articles/${encodeURIComponent(p.article_id)}`}><b>{p.article_id}</b></Link><span className="sub">{p.designation}</span></td>
+                  <td>{p.supplier_id}<span className="sub">{p.supplier_name} · délai {p.lead_time_days} j</span></td>
+                  <td>{fmtDate(p.order_date)}{p.urgent && <span className="sub"><Badge tone="critical">urgent</Badge></span>}</td>
+                  <td>{fmtDate(p.delivery_date)}</td>
+                  <td className="num"><b>{fmtQty(p.qty, p.unit)}</b><span className="sub">MOQ {fmtQty(p.moq, p.unit)} · PLA {fmtQty(p.pack_qty, p.unit)}</span></td>
+                  <td className="num">{fmtQty(p.net_requirement, p.unit)}</td>
+                  <td className="num">{fmtQty(p.projected_stock_before, p.unit)} → {fmtQty(p.projected_stock_after, p.unit)}</td>
+                  <td className="small subtle" style={{ whiteSpace: "normal", minWidth: 220, maxWidth: 360 }}>{p.reason}</td>
+                </tr>
+              ))}</tbody>
             </table>
-          )}
+          </div>
         </Card>
-        <Card className="span-3" flush title="Plan de commandes" hint={supplierFilter ? `filtre : ${supplierFilter}` : "toutes les propositions, urgentes en premier"}
-          actions={<>{supplierFilter && <Button size="sm" onClick={() => setSupplierFilter("")}>Tous les fournisseurs</Button>}{showIgnored && <Button size="sm" onClick={() => unignoreAll.mutate(undefined)}><RotateCcw />Réactiver les ignorées</Button>}</>}>
-          {q.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock rows={8} /></div> : rows.length === 0 ? <Empty title="Aucune proposition" hint="Le stock simulé couvre les besoins sur l'horizon, ou les propositions sont désactivées dans les paramètres." /> : (
-            <div className="scroll-x">
-              <table className="tbl">
-                <thead><tr>
-                  <th><input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(visibleIds))} aria-label="Tout sélectionner" /></th>
-                  <th>Article</th><th>Fournisseur</th><th>Commander le</th><th>Livraison</th><th className="num">Quantité</th><th className="num">Besoin net</th><th className="num">Stock avant → après</th><th>Motif</th><th></th>
-                </tr></thead>
-                <tbody>
-                  {rows.map((p) => (
-                    <tr key={p.proposal_id} className={selected.has(p.proposal_id) ? "selected" : ""} style={p.ignored ? { opacity: 0.55 } : undefined}>
-                      <td>{!p.ignored && <input type="checkbox" checked={selected.has(p.proposal_id)} onChange={() => toggle(p.proposal_id)} />}</td>
-                      <td><Link to={`/articles/${encodeURIComponent(p.article_id)}`}><b>{p.article_id}</b></Link><span className="sub">{p.designation}</span></td>
-                      <td>{p.supplier_id}<span className="sub">{p.supplier_name} · délai {p.lead_time_days} j</span></td>
-                      <td>{fmtDate(p.order_date)}{p.urgent && <span className="sub"><Badge tone="critical">urgent</Badge></span>}</td>
-                      <td>{fmtDate(p.delivery_date)}</td>
-                      <td className="num"><b>{fmtQty(p.qty, p.unit)}</b> <span className="subtle">{p.unit}</span><span className="sub">MOQ {fmtQty(p.moq, p.unit)} · PLA {fmtQty(p.pack_qty, p.unit)}</span></td>
-                      <td className="num">{fmtQty(p.net_requirement, p.unit)}</td>
-                      <td className="num">{fmtQty(p.projected_stock_before, p.unit)} → {fmtQty(p.projected_stock_after, p.unit)}</td>
-                      <td className="small subtle" style={{ whiteSpace: "normal", minWidth: 220, maxWidth: 320 }} title={p.reason}>{p.reason.length > 110 ? `${p.reason.slice(0, 110)}…` : p.reason}</td>
-                      <td>{p.ignored ? <Badge tone="neutral">ignorée</Badge> : (
-                        <div className="row">
-                          <Button size="sm" variant="primary" title="Accepter" onClick={() => accept.mutate([p])}><Check /></Button>
-                          <Button size="sm" onClick={() => setDraft({ kind: "order", article_id: p.article_id, supplier_id: p.supplier_id, date: p.delivery_date, qty: p.qty, note: `d'après ${p.proposal_id}` })}>Modifier</Button>
-                          <Button size="sm" variant="ghost" title="Ignorer" onClick={() => ignore.mutate(p)}><EyeOff /></Button>
-                        </div>
-                      )}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </div>
-      <EntryDrawer draft={draft} onClose={() => setDraft(null)} articles={Object.values(unitOf)} />
+      )}
+
+      <Card flush title="Commandes simulées du périmètre" hint="modifiables dans le tableau de chaque fiche article ; supprimer une ligne efface la cellule"
+        actions={totals.cbn > 0 ? <Button size="sm" onClick={() => { if (window.confirm("Effacer toutes les commandes simulées issues du CBN (les saisies manuelles sont conservées) ?")) clearCbn.mutate(rows.filter((c) => c.source === "CBN").map((c) => c.id)); }}><Trash2 />Effacer le CBN</Button> : undefined}>
+        {cells.isLoading || cockpit.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock rows={8} /></div> : rows.length === 0 ? <Empty title="Aucune commande simulée" hint="Lancez le Calcul CBN ou saisissez des quantités dans le tableau de simulation d'un article." /> : (
+          <div className="scroll-x">
+            <table className="tbl">
+              <thead><tr><th>Article</th><th>Date de livraison</th><th className="num">Quantité</th><th>Saisie</th><th>Origine</th><th>Note</th><th>Modifié</th><th></th></tr></thead>
+              <tbody>{rows.map((c) => (
+                <tr key={c.id}>
+                  <td><Link to={`/articles/${encodeURIComponent(c.article_id)}`}><b>{c.article_id}</b></Link><span className="sub">{info[c.article_id]?.designation ?? ""}</span></td>
+                  <td>{fmtDate(c.date)}</td>
+                  <td className={`num ${c.qty < 0 ? "delta down" : ""}`}><b>{fmtQty(c.qty, info[c.article_id]?.unit)}</b> <span className="subtle">{info[c.article_id]?.unit ?? ""}</span></td>
+                  <td className="mono small">{c.expression}</td>
+                  <td><Badge tone={c.source === "CBN" ? "brand" : "outline"}>{c.source}</Badge>{c.note.includes("URGENT") && <span className="sub"><Badge tone="critical">urgent</Badge></span>}</td>
+                  <td className="small subtle" style={{ whiteSpace: "normal", minWidth: 220, maxWidth: 420 }} title={c.note}>{c.note.length > 140 ? `${c.note.slice(0, 140)}…` : c.note}</td>
+                  <td className="subtle small">{c.updated_by}<br />{fmtDateTime(c.updated_at)}</td>
+                  <td><Button size="sm" variant="ghost" title="Supprimer" onClick={() => delCell.mutate(c.id)}><Trash2 /></Button></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

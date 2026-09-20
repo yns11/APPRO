@@ -11,7 +11,7 @@ import { useToast } from "@/components/ui";
 const NAV = [
   { to: "/", label: "Cockpit du jour", icon: LayoutDashboard, end: true },
   { to: "/articles", label: "Fiches articles", icon: Activity },
-  { to: "/propositions", label: "Propositions", icon: ShoppingCart },
+  { to: "/propositions", label: "Calcul CBN & commandes simulées", icon: ShoppingCart },
   { to: "/simulation", label: "Scénarios & simulation", icon: FlaskConical },
   { to: "/saisies", label: "Saisies & journal", icon: PenLine },
   { to: "/imports", label: "Imports / exports", icon: FileSpreadsheet },

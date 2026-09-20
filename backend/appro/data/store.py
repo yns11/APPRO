@@ -159,18 +159,28 @@ class ParamOverride(Base):
     __table_args__ = (Index("ix_param_scope_keys", "scope", "key1", "key2", "field", unique=True),)
 
 
-class IgnoredProposal(Base):
-    """A proposal the planner chose to ignore (hidden until ``until_date``)."""
+class AppCell(Base):
+    """One editable cell of the simulation grid: a simulated order or an adjustment for one day.
 
-    __tablename__ = "app_ignored_proposals"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("IG"))
+    The planner types a quantity or an arithmetic expression; the evaluated quantity is stored
+    with the expression.  ``source`` is ``MANUAL`` (typed), ``CBN`` (written by the net
+    requirement run) or ``IMPORT`` (re-imported workbook).  One row per (article, date, kind,
+    source): a typed cell and a CBN result may coexist on the same day (the grid shows their sum);
+    typing on that day replaces both.
+    """
+
+    __tablename__ = "app_cells"
+    __table_args__ = (Index("ix_app_cells_key", "article_id", "date", "kind", "source", unique=True),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("AC"))
     article_id: Mapped[str] = mapped_column(String(40), index=True)
-    delivery_date: Mapped[dt.date] = mapped_column(Date)
-    supplier_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    reason: Mapped[str] = mapped_column(Text, default="")
-    until_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
-    created_by: Mapped[str] = mapped_column(String(120), default="")
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    date: Mapped[dt.date] = mapped_column(Date, index=True)
+    kind: Mapped[str] = mapped_column(String(12))                  # sim_order | adjustment
+    expression: Mapped[str] = mapped_column(String(200), default="")
+    qty: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(12), default="MANUAL")   # MANUAL | CBN | IMPORT
+    note: Mapped[str] = mapped_column(Text, default="")
+    updated_by: Mapped[str] = mapped_column(String(120), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class AuditLog(Base):

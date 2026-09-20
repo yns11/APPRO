@@ -1,4 +1,4 @@
-"""Cockpit, article projection, alerts, proposals and ad-hoc simulation endpoints."""
+"""Cockpit, article projection, alerts and ad-hoc simulation endpoints."""
 from __future__ import annotations
 
 import datetime as dt
@@ -63,7 +63,6 @@ def cockpit(planner: str | None = None, scenario_id: str | None = None, article_
                                                      late_order_policy=late_order_policy))
     except KeyError as exc:
         raise HTTPException(404, f"Scénario inconnu : {exc}")
-    names = _supplier_names(ctx)
     arts = sorted(result.articles.values(), key=lambda r: ({"critical": 0, "warning": 1, "info": 2}.get(r.kpis.get("severity") or "", 3),
                                                             r.kpis["coverage_sim_days"], r.article.article_id))
     meta = result.articles and next(iter(result.articles.values()))
@@ -72,7 +71,6 @@ def cockpit(planner: str | None = None, scenario_id: str | None = None, article_
         data_source=ctx.source.name, pdp_version=None if not meta else getattr(meta, "pdp_version", None),
         kpis=P.cockpit_kpis(result), articles=[P.article_summary(r) for r in arts],
         alerts=[P.alert_out(a, r.article.designation) for r in arts for a in r.alerts],
-        proposals=[P.proposal_out(p, r, names) for r in arts for p in r.proposals],
         diagnostics=result.diagnostics, weekly_supply_demand=P.weekly_supply_demand(result))
 
 
@@ -110,17 +108,6 @@ def alerts(planner: str | None = None, scenario_id: str | None = None, severity:
     if alert_type:
         out = [a for a in out if a.alert_type == alert_type]
     return out
-
-
-@router.get("/proposals", response_model=list[S.ProposalOut])
-def proposals(planner: str | None = None, scenario_id: str | None = None, include_ignored: bool = False,
-              ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id)
-    names = _supplier_names(ctx)
-    out = [P.proposal_out(p, r, names) for r in result.articles.values() for p in r.proposals]
-    if not include_ignored:
-        out = [p for p in out if not p.ignored]
-    return sorted(out, key=lambda p: (not p.urgent, p.order_date, p.article_id))
 
 
 @router.post("/simulate", response_model=S.CompareResponse)

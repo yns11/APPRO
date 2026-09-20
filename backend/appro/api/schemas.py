@@ -92,7 +92,6 @@ class ProposalOut(BaseModel):
     net_requirement: float
     reason: str
     urgent: bool
-    ignored: bool = False
     lead_time_days: int
     moq: float
     pack_qty: float
@@ -132,9 +131,8 @@ class CockpitKpis(BaseModel):
     low_coverage: int
     overstock: int
     late_orders: int
-    proposals: int
-    urgent_proposals: int
-    proposals_qty: float
+    sim_order_articles: int      # articles with at least one simulated order
+    sim_orders_qty: float        # total simulated orders (signed)
     open_firm_qty: float
     open_forecast_qty: float
     open_planned_qty: float
@@ -152,7 +150,6 @@ class CockpitResponse(BaseModel):
     kpis: CockpitKpis
     articles: list[ArticleSummary]
     alerts: list[AlertOut]
-    proposals: list[ProposalOut]
     diagnostics: list[str]
     weekly_supply_demand: list[dict[str, Any]]
 
@@ -181,11 +178,13 @@ class ProjectionResponse(BaseModel):
 
 # ------------------------------------------------------------------ entries
 class OrderIn(BaseModel):
+    """A real order placed with the supplier (firm).  Simulated orders are grid cells (``CellIn``)."""
+
     article_id: str
     supplier_id: str | None = None
     expected_date: dt.date
     qty: float = Field(gt=0)
-    order_type: Literal["PLANNED", "FIRM"] = "PLANNED"
+    order_type: Literal["FIRM"] = "FIRM"
     note: str = ""
 
 
@@ -271,23 +270,44 @@ class ProductionActualOut(ORM):
     created_at: dt.datetime
 
 
-# ------------------------------------------------------------------ proposals
-class ProposalDecision(BaseModel):
+# ------------------------------------------------------------------ simulation cells / CBN
+class CellIn(BaseModel):
     article_id: str
-    supplier_id: str | None = None
-    delivery_date: dt.date
-    qty: float = Field(gt=0)
-    order_type: Literal["PLANNED", "FIRM"] = "PLANNED"
-    proposal_id: str | None = None
-    note: str = ""
+    date: dt.date
+    kind: Literal["sim_order", "adjustment"] = "sim_order"
+    expression: str = Field("", max_length=200, description="quantité ou expression arithmétique ; vide = supprimer")
 
 
-class ProposalIgnore(BaseModel):
+class CellOut(ORM):
+    id: str
     article_id: str
-    supplier_id: str | None = None
-    delivery_date: dt.date
-    reason: str = ""
-    until_date: dt.date | None = None
+    date: dt.date
+    kind: str
+    expression: str
+    qty: float
+    source: str
+    note: str
+    updated_by: str
+    updated_at: dt.datetime
+
+
+class CbnRequest(BaseModel):
+    planner: str | None = None
+    article_ids: list[str] | None = None
+    scenario_id: str | None = None
+    reset: bool = True   # remove the cells written by the previous CBN run (typed cells are kept)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class CbnReport(BaseModel):
+    as_of: dt.date
+    articles: int
+    proposals: int
+    urgent: int
+    qty: float
+    removed: int
+    items: list[ProposalOut]
+    diagnostics: list[str]
 
 
 # ------------------------------------------------------------------ scenarios

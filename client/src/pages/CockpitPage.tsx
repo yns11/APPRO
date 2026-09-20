@@ -32,7 +32,7 @@ export default function CockpitPage() {
         case "warning": return a.severity === "warning";
         case "stockout": return !!a.kpis.first_stockout_firm || !!a.kpis.first_stockout_sim;
         case "late": return a.kpis.late_order_count > 0;
-        case "proposals": return a.kpis.proposal_count > 0;
+        case "proposals": return Math.abs(a.kpis.open_planned_qty) > 0;
         case "overstock": return a.alert_types.includes("OVERSTOCK");
         case "ok": return !a.severity;
         default: return true;
@@ -72,7 +72,7 @@ export default function CockpitPage() {
         <Kpi label="À surveiller" icon={<AlertTriangle size={14} />} tone="warning" value={k ? fmtInt(k.warning) : <Skeleton w={40} h={28} />} meta="couverture orange, retards" onClick={() => setFilter(filter === "warning" ? "all" : "warning")} active={filter === "warning"} />
         <Kpi label="Ruptures projetées" icon={<PackageSearch size={14} />} tone={k && k.stockouts_7d > 0 ? "critical" : "info"} value={k ? fmtInt(k.stockouts) : <Skeleton w={40} h={28} />} meta={k ? `${k.stockouts_7d} sous 7 jours (flux fermes)` : ""} onClick={() => setFilter(filter === "stockout" ? "all" : "stockout")} active={filter === "stockout"} />
         <Kpi label="Retards fournisseurs" icon={<Clock size={14} />} tone={k && k.late_orders > 0 ? "warning" : "ok"} value={k ? fmtInt(k.late_orders) : <Skeleton w={40} h={28} />} meta="commandes attendues non reçues" onClick={() => setFilter(filter === "late" ? "all" : "late")} active={filter === "late"} />
-        <Kpi label="Propositions" icon={<ShoppingCart size={14} />} tone="brand" value={k ? fmtInt(k.proposals) : <Skeleton w={40} h={28} />} meta={k ? `${k.urgent_proposals} urgentes · ${fmtQty(k.proposals_qty)} unités` : ""} onClick={() => nav("/propositions")} />
+        <Kpi label="Commandes simulées" icon={<ShoppingCart size={14} />} tone="brand" value={k ? fmtQty(k.sim_orders_qty) : <Skeleton w={40} h={28} />} meta={k ? `${k.sim_order_articles} article(s) · Calcul CBN` : ""} onClick={() => nav("/propositions")} />
         <Kpi label="Couverture moyenne" icon={<Layers size={14} />} value={k ? (k.avg_coverage_days ?? "–") : <Skeleton w={40} h={28} />} unit="jours" meta="stock simulé, articles avec besoin" />
         <Kpi label="En-cours fournisseurs" icon={<Truck size={14} />} value={k ? fmtQty(k.open_firm_qty) : <Skeleton w={40} h={28} />} meta={k ? `+ ${fmtQty(k.open_forecast_qty)} prévisionnelles ERP · + ${fmtQty(k.open_planned_qty)} saisies` : ""} />
         <Kpi label="Surstock" icon={<ArrowDownToLine size={14} />} tone="info" value={k ? fmtInt(k.overstock) : <Skeleton w={40} h={28} />} meta="articles au-dessus du seuil" onClick={() => setFilter(filter === "overstock" ? "all" : "overstock")} active={filter === "overstock"} />
@@ -92,7 +92,7 @@ export default function CockpitPage() {
           <div className="search"><Search /><input className="input sm" placeholder="Rechercher article, désignation, fournisseur…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 280 }} /></div>
           <select className="select sm" value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
             <option value="all">Tous</option><option value="critical">Critiques</option><option value="warning">À surveiller</option>
-            <option value="stockout">Ruptures</option><option value="late">Retards</option><option value="proposals">Avec propositions</option>
+            <option value="stockout">Ruptures</option><option value="late">Retards</option><option value="proposals">Avec commandes simulées</option>
             <option value="overstock">Surstock</option><option value="ok">Sans alerte</option>
           </select>
         </>}>
@@ -110,7 +110,7 @@ export default function CockpitPage() {
                   <Th k="stockout" sort={sort} setSort={setSort}>Rupture (ferme)</Th>
                   <Th k="demand" sort={sort} setSort={setSort} num>Besoin 30 j</Th>
                   <th className="num">En-cours</th>
-                  <th className="num">Propositions</th>
+                  <th className="num">Cdes simulées</th>
                   <th>Projection stock</th>
                   <th>Alertes</th>
                 </tr>
@@ -129,7 +129,7 @@ export default function CockpitPage() {
                       <td>{a.kpis.first_stockout_firm ? <Badge tone={d !== null && d <= 7 ? "critical" : "warning"}>{fmtDate(a.kpis.first_stockout_firm)} · J+{d}</Badge> : <span className="subtle">–</span>}</td>
                       <td className="num">{fmtQty(a.kpis.demand_next_30d, a.unit)}</td>
                       <td className="num">{fmtQty(a.kpis.open_firm_qty + a.kpis.open_forecast_qty + a.kpis.open_planned_qty, a.unit)}{a.kpis.late_order_count > 0 && <span className="sub" style={{ color: "var(--warning-fg)" }}>{a.kpis.late_order_count} en retard</span>}</td>
-                      <td className="num">{a.kpis.proposal_count > 0 ? <>{a.kpis.proposal_count} <span className="subtle">({fmtQty(a.kpis.proposed_qty, a.unit)})</span>{a.kpis.urgent_proposal_count > 0 && <span className="sub" style={{ color: "var(--critical-fg)" }}>{a.kpis.urgent_proposal_count} urgente(s)</span>}</> : <span className="subtle">–</span>}</td>
+                      <td className="num">{Math.abs(a.kpis.open_planned_qty) > 0 ? fmtQty(a.kpis.open_planned_qty, a.unit) : <span className="subtle">–</span>}</td>
                       <td><Sparkline values={a.sparkline} /></td>
                       <td><div className="chip-list">{a.alert_types.filter((t) => t !== "URGENT_PROPOSAL").map((t) => <span key={t} className="chip">{ALERT_LABELS[t] ?? t}</span>)}</div></td>
                     </tr>

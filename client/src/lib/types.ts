@@ -18,7 +18,7 @@ export interface AlertOut {
 }
 export interface ProposalOut {
   proposal_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string;
-  delivery_date: string; order_date: string; qty: number; net_requirement: number; reason: string; urgent: boolean; ignored: boolean;
+  delivery_date: string; order_date: string; qty: number; net_requirement: number; reason: string; urgent: boolean;
   lead_time_days: number; moq: number; pack_qty: number; projected_stock_before: number; projected_stock_after: number;
 }
 export interface SupplyEventOut { date: string; kind: string; ref: string; qty: number; supplier_id: string | null; order_type: string; source: string; late: boolean; }
@@ -40,14 +40,14 @@ export interface ArticleSummary {
 }
 export interface CockpitKpis {
   articles: number; critical: number; warning: number; stockouts: number; stockouts_7d: number; low_coverage: number; overstock: number;
-  late_orders: number; proposals: number; urgent_proposals: number; proposals_qty: number; open_firm_qty: number; open_forecast_qty: number; open_planned_qty: number;
+  late_orders: number; sim_order_articles: number; sim_orders_qty: number; open_firm_qty: number; open_forecast_qty: number; open_planned_qty: number;
   avg_coverage_days: number | null; demand_next_30d: number;
 }
 export interface WeeklyOutlook { week: string; week_start: string; stockout_articles: number; below_target_articles: number; proposals: number; proposed_qty: number; }
 export interface CockpitResponse {
   as_of: string; horizon_days: number; planner: string | null; scenario_id: string | null; data_source: string;
   pdp_version: { id: string; name: string } | null; kpis: CockpitKpis; articles: ArticleSummary[]; alerts: AlertOut[];
-  proposals: ProposalOut[]; diagnostics: string[]; weekly_supply_demand: WeeklyOutlook[];
+  diagnostics: string[]; weekly_supply_demand: WeeklyOutlook[];
 }
 export interface SeriesOut { key: string; label: string; values: number[]; }
 export interface ProjectionResponse {
@@ -59,6 +59,9 @@ export interface ProjectionResponse {
 export interface OrderOut { id: string; article_id: string; supplier_id: string | null; expected_date: string; qty: number; unit: string; order_type: string; status: string; source: string; erp_order_id: string | null; proposal_id: string | null; note: string; created_by: string; created_at: string; updated_at: string; }
 export interface ReceiptOut { id: string; article_id: string; supplier_id: string | null; order_id: string | null; receipt_date: string; qty: number; note: string; created_by: string; created_at: string; }
 export interface AdjustmentOut { id: string; article_id: string; date: string; qty: number; movement_type: string; comment: string; created_by: string; created_at: string; }
+export type CellKind = "sim_order" | "adjustment";
+export interface CellOut { id: string; article_id: string; date: string; kind: CellKind; expression: string; qty: number; source: string; note: string; updated_by: string; updated_at: string; }
+export interface CbnReport { as_of: string; articles: number; proposals: number; urgent: number; qty: number; removed: number; items: ProposalOut[]; diagnostics: string[]; }
 export interface ProductionOut { id: string; program_id: string; date: string; qty: number; created_by: string; created_at: string; }
 
 export interface ScenarioEvent { id?: string; seq?: number; kind: string; payload: Record<string, unknown>; label: string; }

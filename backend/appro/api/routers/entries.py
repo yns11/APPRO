@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...data.store import AppAdjustment, AppOrder, AppProductionActual, AppReceipt, audit
+from ...data.store import AppAdjustment, AppCell, AppOrder, AppProductionActual, AppReceipt, audit
+from ...services import mrp_service
 from ...services.context import AppContext
 from .. import schemas as S
 from ..deps import ctx_dep, current_user, session_dep
@@ -180,6 +181,44 @@ def delete_production(row_id: str, ctx: AppContext = Depends(ctx_dep), session: 
     if row is None:
         raise HTTPException(404, "Saisie inconnue")
     audit(session, user, "delete", "production", row.id, None, {"program_id": row.program_id, "date": str(row.date)})
+    session.delete(row)
+    session.commit()
+    ctx.bump()
+
+
+# ---------------------------------------------------------------- simulation grid cells
+@router.get("/cells", response_model=list[S.CellOut])
+def list_cells(article_id: str | None = None, kind: str | None = None, session: Session = Depends(session_dep)):
+    q = select(AppCell).order_by(AppCell.article_id, AppCell.date)
+    if article_id:
+        q = q.where(AppCell.article_id == article_id)
+    if kind:
+        q = q.where(AppCell.kind == kind)
+    return session.scalars(q).all()
+
+
+@router.put("/cells", response_model=S.CellOut | None)
+def upsert_cell(body: S.CellIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+                user: str = Depends(current_user)):
+    """Set a simulated order or an adjustment for one day from a quantity or an arithmetic
+    expression (``1200``, ``2*600-50``, ``(800+400)/2``…).  Empty or zero removes the cell."""
+    _unit_of(ctx, body.article_id)
+    try:
+        row = mrp_service.upsert_cell(ctx, session, user, body.article_id, body.date, body.kind, body.expression)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    session.commit()
+    ctx.bump()
+    return row
+
+
+@router.delete("/cells/{cell_id}", status_code=204)
+def delete_cell(cell_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+                user: str = Depends(current_user)):
+    row = session.get(AppCell, cell_id)
+    if row is None:
+        raise HTTPException(404, "Cellule inconnue")
+    audit(session, user, "delete", "cell", row.id, row.article_id, {"date": str(row.date), "kind": row.kind, "qty": row.qty})
     session.delete(row)
     session.commit()
     ctx.bump()

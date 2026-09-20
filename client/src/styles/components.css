@@ -127,6 +127,10 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 .pivot td.zero { color: var(--fg-subtle); }
 .pivot td.stock { font-weight: var(--fw-semibold); color: var(--brand-fg); }
 .pivot td.editable { cursor: cell; }
+.pivot td.editing { padding: 0; outline: 2px solid var(--brand); outline-offset: -2px; background: var(--bg-elev); }
+.pivot td .cell-input { width: 100%; min-width: 72px; height: 100%; border: 0; background: transparent; color: var(--fg); font: inherit; text-align: right; padding: 5px 8px; outline: none; }
+.pivot td.sim { color: var(--warning-fg); font-weight: var(--fw-medium); }
+.pivot td.sim.cbn { background: repeating-linear-gradient(45deg, transparent 0 4px, rgb(247 144 9 / 0.12) 4px 6px); }
 .pivot td.editable:hover { outline: 2px solid var(--brand); outline-offset: -2px; }
 .pivot td.event { position: relative; }
 .pivot td.event::after { content: ""; position: absolute; right: 2px; top: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--brand); }

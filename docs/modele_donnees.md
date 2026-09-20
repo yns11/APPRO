@@ -29,14 +29,14 @@ Créées automatiquement au démarrage (`Base.metadata.create_all`).
 
 | Table | Rôle |
 |---|---|
-| `app_orders` | commandes saisies ou issues de propositions : article, fournisseur, date attendue, qté, `order_type` (PLANNED/FIRM), `status` (OPEN/SENT/RECEIVED/CANCELLED), `source` (MANUAL/PROPOSAL/IMPORT), `proposal_id`, note, auteur, dates |
+| `app_orders` | commandes fermes saisies hors ERP : article, fournisseur, date attendue, qté, `order_type` (FIRM ; PLANNED conservé pour les anciennes lignes), `status` (OPEN/SENT/RECEIVED/CANCELLED), `source` (MANUAL/IMPORT), note, auteur, dates |
+| `app_cells` | cellules du tableau de simulation : article, date, `kind` (sim_order / adjustment), expression saisie, quantité évaluée (signée), `source` (MANUAL/CBN/IMPORT), note (motif CBN), auteur, date ; unique par (article, date, kind, source) : une cellule saisie et un résultat CBN peuvent coexister le même jour (le tableau affiche la somme ; une saisie ce jour-là remplace les deux) |
 | `app_receipts` | réceptions saisies (optionnellement rattachées à une commande app ou ERP) |
 | `app_adjustments` | ajustements de stock (±) |
 | `app_production_actual` | production réelle saisie par (programme, jour) – prime sur l'ERP |
 | `app_pdp_versions` / `app_pdp_lines` | versions de PDP importées ; une version active au plus |
 | `app_scenarios` / `app_scenario_events` | scénarios (paramètres JSON) et événements ordonnés (type + payload JSON) |
 | `app_param_overrides` | surcharges : `global` (règles moteur), `article` (seuils, cible…), `link` (MOQ, PLA, délai, quota…) |
-| `app_ignored_proposals` | propositions ignorées (article, date de livraison, fournisseur, jusqu'à) |
 | `app_audit_log` | journal : horodatage, utilisateur, action, objet, article, payload JSON |
 
 ## 3. Données de démonstration

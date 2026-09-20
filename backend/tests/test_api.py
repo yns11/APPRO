@@ -50,11 +50,10 @@ def test_cockpit(client):
     first = body["articles"][0]
     assert {"article_id", "kpis", "sparkline", "severity"} <= set(first)
     assert body["weekly_supply_demand"] and body["weekly_supply_demand"][0]["week"].startswith("2026-W")
-    # with proposals included in the simulation, no article stays in stockout
-    assert body["kpis"]["proposals"] > 0
+    # proposals are not computed on display: some articles run short until the CBN is run
+    assert body["kpis"]["sim_order_articles"] == 0
     for a in body["articles"]:
-        assert a["kpis"]["first_stockout_sim"] is None, a["article_id"]
-        assert a["kpis"]["max_shortage_sim"] == 0 and a["kpis"]["min_stock_sim"] >= 0, a["article_id"]
+        assert a["kpis"]["min_stock_sim"] >= 0 and a["kpis"]["proposal_count"] == 0, a["article_id"]
 
 
 def test_projection_day_and_week(client):
@@ -76,8 +75,11 @@ def test_projection_day_and_week(client):
 def test_entries_change_projection_and_audit(client):
     before = client.get("/api/articles/P-00001046/projection", params={"generate_proposals": "false"}).json()
     stock_before = next(s for s in before["series"] if s["key"] == "stock_sim")["values"]
+    # an order typed in the app is a real (firm) order: simulated orders are grid cells
+    assert client.post("/api/entries/orders", json={"article_id": "P-00001046", "supplier_id": "S-000545",
+                                                    "expected_date": "2026-09-25", "qty": 1600, "order_type": "PLANNED"}).status_code == 422
     r = client.post("/api/entries/orders", json={"article_id": "P-00001046", "supplier_id": "S-000545",
-                                                 "expected_date": "2026-09-25", "qty": 1600, "order_type": "PLANNED"})
+                                                 "expected_date": "2026-09-25", "qty": 1600})
     assert r.status_code == 201, r.text
     order = r.json()
     after = client.get("/api/articles/P-00001046/projection", params={"generate_proposals": "false"}).json()
@@ -86,12 +88,7 @@ def test_entries_change_projection_and_audit(client):
     assert stock_after[i] - stock_before[i] == pytest.approx(1600)
     firm_after = next(s for s in after["series"] if s["key"] == "stock_firm")["values"]
     firm_before = next(s for s in before["series"] if s["key"] == "stock_firm")["values"]
-    assert firm_after[i] == pytest.approx(firm_before[i])  # planned order is not firm
-    # send it -> becomes firm
-    client.patch(f"/api/entries/orders/{order['id']}", json={"status": "SENT"})
-    sent = client.get("/api/articles/P-00001046/projection", params={"generate_proposals": "false"}).json()
-    firm_sent = next(s for s in sent["series"] if s["key"] == "stock_firm")["values"]
-    assert firm_sent[i] - firm_before[i] == pytest.approx(1600)
+    assert firm_after[i] - firm_before[i] == pytest.approx(1600)  # firm layer too
     # receipt closes the order
     r = client.post("/api/entries/receipts", json={"article_id": "P-00001046", "order_id": order["id"],
                                                    "receipt_date": "2026-09-24", "qty": 1600})
@@ -105,31 +102,61 @@ def test_entries_change_projection_and_audit(client):
     log = client.get("/api/audit").json()
     assert log and log[0]["user"] == "quentin@example.com"
     actions = {e["action"] for e in log}
-    assert {"create", "update", "upsert"} <= actions
+    assert {"create", "upsert"} <= actions
 
 
-def test_proposals_accept_and_ignore(client):
-    props = client.get("/api/proposals", params={"planner": "QUENTIN"}).json()
-    assert props, "the seed portfolio should produce proposals"
-    p = props[0]
-    r = client.post("/api/proposals/accept", json={"article_id": p["article_id"], "supplier_id": p["supplier_id"],
-                                                   "delivery_date": p["delivery_date"], "qty": p["qty"],
-                                                   "proposal_id": p["proposal_id"]})
-    assert r.status_code == 201, r.text
-    assert r.json()["source"] == "PROPOSAL"
-    props2 = client.get("/api/proposals", params={"planner": "QUENTIN"}).json()
-    same = [q for q in props2 if q["article_id"] == p["article_id"] and q["delivery_date"] == p["delivery_date"]]
-    assert not same, "the accepted proposal must disappear (planned order now covers the need)"
-    q = props2[0]
-    r = client.post("/api/proposals/ignore", json={"article_id": q["article_id"], "supplier_id": q["supplier_id"],
-                                                   "delivery_date": q["delivery_date"], "reason": "test"})
-    assert r.status_code == 201
-    visible = client.get("/api/proposals", params={"planner": "QUENTIN"}).json()
-    assert not any(v["proposal_id"] == q["proposal_id"] for v in visible)
-    hidden = client.get("/api/proposals", params={"planner": "QUENTIN", "include_ignored": "true"}).json()
-    assert any(v["proposal_id"] == q["proposal_id"] and v["ignored"] for v in hidden)
-    ig = client.get("/api/proposals/ignored").json()
-    assert client.delete(f"/api/proposals/ignored/{ig[0]['id']}").status_code == 204
+def test_cells_and_cbn_run(client):
+    # type a simulated order with an expression, then an adjustment, on P-00001046
+    r = client.put("/api/entries/cells", json={"article_id": "P-00001046", "date": "2026-09-25", "kind": "sim_order",
+                                               "expression": "1000 + 2*100"})
+    assert r.status_code == 200, r.text
+    cell = r.json()
+    assert cell["qty"] == 1200 and cell["expression"] == "1000 + 2*100" and cell["source"] == "MANUAL"
+    assert client.put("/api/entries/cells", json={"article_id": "P-00001046", "date": "2026-09-25", "kind": "sim_order",
+                                                  "expression": "abc"}).status_code == 422
+    assert client.put("/api/entries/cells", json={"article_id": "NOPE", "date": "2026-09-25", "expression": "1"}).status_code == 404
+    r = client.put("/api/entries/cells", json={"article_id": "P-00001046", "date": "2026-09-23", "kind": "adjustment",
+                                               "expression": "-(30+20)"})
+    assert r.json()["qty"] == -50
+    proj = client.get("/api/articles/P-00001046/projection", params={"granularity": "day"}).json()
+    series = {x["key"]: x["values"] for x in proj["series"]}
+    i = proj["periods"].index("2026-09-25")
+    assert series["supply_planned"][i] == 1200 and series["adjustments"][proj["periods"].index("2026-09-23")] == -50
+    assert series["stock_sim"][i] - series["stock_forecast"][i] == pytest.approx(1200)
+    assert "supply_proposed" not in series and "target_stock" in series
+    # a negative simulated order is allowed ; an empty expression clears the cell
+    assert client.put("/api/entries/cells", json={"article_id": "P-00001046", "date": "2026-09-26", "expression": "-300"}).json()["qty"] == -300
+    assert client.put("/api/entries/cells", json={"article_id": "P-00001046", "date": "2026-09-26", "expression": ""}).json() is None
+    assert len(client.get("/api/entries/cells", params={"article_id": "P-00001046"}).json()) == 2
+
+    # a typed cell on the very day of a proposal: the proposal is added to it, the cell stays manual
+    assert client.put("/api/entries/cells", json={"article_id": "P-00003751", "date": "2026-09-21", "expression": "2*300-100"}).json()["qty"] == 500
+    # CBN run on the planner perimeter: proposals become simulated-order cells, no stockout remains
+    r = client.post("/api/cbn/run", json={"planner": "QUENTIN"})
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["articles"] == 16 and rep["proposals"] > 0 and rep["qty"] > 0 and rep["removed"] == 0
+    assert rep["items"][0]["proposal_id"].startswith("PR-")
+    cells = client.get("/api/entries/cells", params={"kind": "sim_order"}).json()
+    assert sum(1 for c in cells if c["source"] == "CBN") == rep["proposals"]
+    manual = next(c for c in cells if c["article_id"] == "P-00001046" and c["date"] == "2026-09-25")
+    assert manual["source"] == "MANUAL" and manual["qty"] >= 1200  # typed cells are kept
+    same_day = [c for c in cells if c["article_id"] == "P-00003751" and c["date"] == "2026-09-21"]
+    assert {c["source"] for c in same_day} == {"MANUAL", "CBN"} and next(c for c in same_day if c["source"] == "MANUAL")["qty"] == 500
+    # typing on that day replaces both cells by the typed value
+    assert client.put("/api/entries/cells", json={"article_id": "P-00003751", "date": "2026-09-21", "expression": "700"}).json()["qty"] == 700
+    assert [c["source"] for c in client.get("/api/entries/cells", params={"article_id": "P-00003751"}).json() if c["date"] == "2026-09-21"] == ["MANUAL"]
+    client.put("/api/entries/cells", json={"article_id": "P-00003751", "date": "2026-09-21", "expression": "2*300-100"})
+    body = client.get("/api/cockpit", params={"planner": "QUENTIN"}).json()
+    assert body["kpis"]["sim_order_articles"] > 0 and body["kpis"]["sim_orders_qty"] > 0
+    for a in body["articles"]:
+        assert a["kpis"]["first_stockout_sim"] is None, a["article_id"]
+    # a second run is reproducible: previous CBN cells are replaced, typed cells respected
+    rep2 = client.post("/api/cbn/run", json={"planner": "QUENTIN"}).json()
+    assert rep2["removed"] > 0 and rep2["proposals"] == rep["proposals"]
+    assert client.delete(f"/api/entries/cells/{manual['id']}").status_code == 204
+    assert client.delete(f"/api/entries/cells/{manual['id']}").status_code == 404
+    assert client.post("/api/cbn/run", json={"planner": "QUENTIN", "scenario_id": "nope"}).status_code == 404
 
 
 def test_scenarios_and_simulate(client):
@@ -225,20 +252,20 @@ def test_exports_and_reimport(client):
                                                           "article_ids": ["P-00001046", "P-00005775"]})
     assert r.status_code == 200 and r.headers["content-type"].startswith("application/vnd.openxmlformats")
     wb = load_workbook(io.BytesIO(r.content))
-    assert set(wb.sheetnames) == {"PARAMETRES", "ARTICLES", "SIMULATION", "ALERTES", "PROPOSITIONS", "CARNET_COMMANDES",
-                                  "SAISIES"}
+    assert set(wb.sheetnames) == {"PARAMETRES", "ARTICLES", "SIMULATION", "ALERTES", "CARNET_COMMANDES", "SAISIES"}
     ws = wb["SIMULATION"]
-    assert ws["A4"].value == "P-00001046" and ws["C4"].value == "Besoin"
+    assert ws["A4"].value == "P-00001046" and ws["C4"].value == "Besoin" and ws["C7"].value == "Commandes simulées"
     assert ws.cell(1, 5).value.startswith("2026-W")
     # the grid is made of formulas fed by the other sheets
-    assert str(ws["E12"].value).startswith("=IF(PARAMETRES!$B$5")          # stock ferme
-    assert "CARNET_COMMANDES" in str(ws["E5"].value) and "PROPOSITIONS" in str(ws["E8"].value)
-    assert "SAISIES" in str(ws["E9"].value) and "OFFSET" in str(ws["E16"].value) and "COUNTIF" in str(ws["E17"].value)
+    assert str(ws["E11"].value).startswith("=IF(PARAMETRES!$B$5")          # stock ferme
+    assert "CARNET_COMMANDES" in str(ws["E5"].value) and "SAISIES" in str(ws["E8"].value)
+    assert "OFFSET" in str(ws["E15"].value) and "COUNTIF" in str(ws["E16"].value)
     assert wb["ARTICLES"]["A2"].value == "P-00001046" and wb["ARTICLES"]["I2"].value > 0
-    assert str(wb["PROPOSITIONS"]["R2"].value).startswith("=IF(O2=")
     assert client.get("/api/exports/alerts.xlsx").status_code == 200
     assert client.get("/api/exports/orders.xlsx", params={"planner": "QUENTIN"}).status_code == 200
-    # fill the SAISIES sheet, decide on a proposal, post a receipt in the order book and re-import
+    # fill the SAISIES sheet, type simulated orders in the grid, post a receipt in the order book and re-import
+    ws["F7"] = 1500          # P-00001046, second week → simulated order on the Monday of that week
+    ws["G7"] = -250
     ws = wb["SAISIES"]
     ws.append(["COMMANDE", "P-00001046", "S-000545", "2026-10-20", 1600, "réimport", ""])
     ws.append(["RECEPTION", "P-00001046", "S-000545", "2026-09-22", 400, "", ""])
@@ -246,12 +273,6 @@ def test_exports_and_reimport(client):
     ws.append(["PRODUCTION", "mass-00040633", "", "2026-09-21", 250, "", ""])
     ws.append(["COMMANDE", "UNKNOWN", "", "2026-10-20", 5, "", ""])
     ws.append(["FOO", "P-00001046", "", "2026-10-20", 5, "", ""])
-    wp = wb["PROPOSITIONS"]
-    assert wp["A2"].value in ("P-00001046", "P-00005775")
-    wp["O2"] = "M"
-    wp["P2"] = 999
-    wp["Q2"] = "2026-11-02"
-    wp["O3"] = "A"  # empty row: ignored
     wo = wb["CARNET_COMMANDES"]
     assert wo["A2"].value in ("P-00001046", "P-00005775")
     wo["J2"] = 250
@@ -260,11 +281,11 @@ def test_exports_and_reimport(client):
     wb.save(buf)
     r = client.post("/api/imports/entries", files={"file": ("simu.xlsx", buf.getvalue())})
     assert r.status_code == 201, r.text
-    assert r.json()["created"] == 6 and r.json()["ignored"] == 2, r.json()
+    assert r.json()["created"] == 7 and r.json()["ignored"] == 2, r.json()
     orders = client.get("/api/entries/orders").json()
-    assert len(orders) == 2
-    modified = next(o for o in orders if o["qty"] == 999)
-    assert modified["expected_date"] == "2026-11-02" and modified["source"] == "PROPOSAL" and modified["proposal_id"].startswith("PR-")
+    assert len(orders) == 1 and orders[0]["source"] == "IMPORT"
+    cells = client.get("/api/entries/cells", params={"article_id": "P-00001046"}).json()
+    assert {(c["date"], c["qty"], c["source"]) for c in cells} == {("2026-09-21", 1500.0, "IMPORT"), ("2026-09-28", -250.0, "IMPORT")}
     receipts = client.get("/api/entries/receipts").json()
     assert len(receipts) == 2 and any(r["order_id"] == wo["D2"].value and r["qty"] == 250 for r in receipts)
     assert len(client.get("/api/entries/adjustments").json()) == 1

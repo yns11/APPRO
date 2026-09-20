@@ -22,12 +22,14 @@ from appro.engine.models import (
     PlanLine,
     Program,
     Receipt,
+    SimCell,
     StockSnapshot,
     Supplier,
     SupplierLink,
 )
 from appro.engine.projection import coverage_days
 from appro.engine.scenario import ScenarioEvent, apply_scenario
+from appro.services.expression import evaluate
 
 MON = dt.date(2026, 9, 21)  # Monday
 
@@ -149,7 +151,7 @@ def test_coverage_days_calendar_and_working():
 # ------------------------------------------------------------------ proposals
 def test_proposals_respect_moq_pack_lead_time_and_delivery_days():
     ds = make_dataset(stock=[StockSnapshot("A1", MON - dt.timedelta(days=1), 2600.0)])
-    params = EngineParams(as_of=MON, horizon_days=40)
+    params = EngineParams(as_of=MON, horizon_days=40, generate_proposals=True)
     r = run_mrp(ds, params).articles["A1"]
     assert r.proposals, "a proposal is expected: 2600 pcs cover ~13 days of 200/day"
     p = r.proposals[0]
@@ -172,7 +174,7 @@ def test_proposals_supplier_delivery_weekdays_and_quota():
     links = [SupplierLink("A1", "S1", moq=100, pack_qty=1, lead_time_days=2, quota_pct=50, priority=1),
              SupplierLink("A1", "S2", moq=100, pack_qty=1, lead_time_days=2, quota_pct=50, priority=2)]
     ds = make_dataset(links=links, stock=[StockSnapshot("A1", MON - dt.timedelta(days=1), 300.0)])
-    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=60)).articles["A1"]
+    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=60, generate_proposals=True)).articles["A1"]
     by_sup = {}
     for p in r.proposals:
         by_sup[p.supplier_id] = by_sup.get(p.supplier_id, 0) + p.qty
@@ -186,10 +188,10 @@ def test_proposals_supplier_delivery_weekdays_and_quota():
 def test_urgent_proposal_when_lead_time_cannot_be_met():
     ds = make_dataset(stock=[StockSnapshot("A1", MON - dt.timedelta(days=1), 100.0)],
                       links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=15)])
-    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40)).articles["A1"]
+    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, generate_proposals=True)).articles["A1"]
     assert r.proposals and r.proposals[0].urgent
     assert any(a.alert_type == AlertType.URGENT_PROPOSAL for a in r.alerts)
-    r2 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, respect_lead_time=True)).articles["A1"]
+    r2 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, respect_lead_time=True, generate_proposals=True)).articles["A1"]
     first = min(p.delivery_date for p in r2.proposals)
     assert first >= WorkCalendar().add_working_days(MON, 15)
     assert not any(p.urgent for p in r2.proposals)
@@ -197,7 +199,7 @@ def test_urgent_proposal_when_lead_time_cannot_be_met():
 
 def test_frozen_period_blocks_early_proposals():
     ds = make_dataset(stock=[StockSnapshot("A1", MON - dt.timedelta(days=1), 100.0)])
-    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, frozen_days=10)).articles["A1"]
+    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, frozen_days=10, generate_proposals=True)).articles["A1"]
     assert all(p.delivery_date > MON + dt.timedelta(days=10) for p in r.proposals)
 
 
@@ -292,7 +294,40 @@ def test_shortage_policy_backlog_vs_lost():
         assert r.kpis["first_stockout_firm"] == (MON + dt.timedelta(days=2)).isoformat()
         assert r.kpis["max_shortage_firm"] == 100
     # with proposals, the lost policy re-projects exactly: no unserved demand after the first delivery
-    lost_p = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, shortage_policy="lost")).articles["A1"]
+    lost_p = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, shortage_policy="lost", generate_proposals=True)).articles["A1"]
     first = min(p.delivery_date for p in lost_p.proposals)
     j = lost_p.dates.index(first)
     assert max(lost_p.shortage_sim[j:]) == 0
+
+
+# ------------------------------------------------------------------ simulation cells / expressions
+def test_simulation_cells_feed_the_layers():
+    ds = make_dataset(cells=[
+        SimCell("A1", MON + dt.timedelta(days=1), "sim_order", 300.0, "MANUAL"),
+        SimCell("A1", MON + dt.timedelta(days=2), "sim_order", -100.0, "CBN"),   # negative simulated order
+        SimCell("A1", MON + dt.timedelta(days=1), "adjustment", -40.0, "MANUAL"),
+    ])
+    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=10)).articles["A1"]
+    i = r.dates.index(MON)
+    # day0: 1000-200 = 800 ; day1: +300 sim -40 adj -200 → sim 860 / firm 560 ; day2: -100 sim -200 → sim 560 / firm 360
+    assert r.stock_firm[i + 1] == 560 and r.stock_sim[i + 1] == 860
+    assert r.stock_firm[i + 2] == 360 and r.stock_sim[i + 2] == 560
+    assert r.supply_planned[i + 1] == 300 and r.supply_planned[i + 2] == -100 and r.adjustments[i + 1] == -40
+    assert r.kpis["open_planned_qty"] == 200
+    kinds = {e.kind for e in r.events}
+    assert {"sim_order", "movement"} <= kinds
+    assert not r.proposals  # proposals are only computed by the CBN run
+
+
+def test_expression_evaluator():
+    assert evaluate("1200") == 1200
+    assert evaluate(" 1 200,5 ") == 1200.5
+    assert evaluate("(100+50)*3-20/4") == 445
+    assert evaluate("-500") == -500
+    assert evaluate("=2*(3+4)") == 14
+    for bad in ("abc", "2**8", "__import__('os')", "1/0", ""):
+        try:
+            evaluate(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} should be rejected")

@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Params } from "./api";
 import type {
-  AdjustmentOut, ArticleRef, AuditOut, BomRef, CockpitResponse, CompareResponse, LinkRef, OrderOut, ParamDoc, ParamOverrideOut,
-  PdpVersionOut, PlanLine, ProductionOut, ProgramRef, ProjectionResponse, ProposalOut, ReceiptOut, ScenarioOut, SupplierRef,
+  AdjustmentOut, ArticleRef, AuditOut, BomRef, CellOut, CockpitResponse, CompareResponse, LinkRef, OrderOut, ParamDoc, ParamOverrideOut,
+  PdpVersionOut, PlanLine, ProductionOut, ProgramRef, ProjectionResponse, ReceiptOut, ScenarioOut, SupplierRef,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
 
@@ -25,8 +25,7 @@ export function useCockpit(extra?: Params) {
 
 export function useProjection(articleId: string | undefined, extra?: Params) {
   const { engineParams, perimeter } = usePerimeter();
-  const params = { granularity: perimeter.granularity, scenario_id: engineParams.scenario_id, horizon_days: engineParams.horizon_days,
-    include_proposals_in_simulation: engineParams.include_proposals_in_simulation, ...extra };
+  const params = { granularity: perimeter.granularity, scenario_id: engineParams.scenario_id, horizon_days: engineParams.horizon_days, ...extra };
   return useQuery({
     queryKey: ["projection", articleId, params],
     queryFn: () => api.get<ProjectionResponse>(`/api/articles/${encodeURIComponent(articleId!)}/projection`, params),
@@ -35,11 +34,8 @@ export function useProjection(articleId: string | undefined, extra?: Params) {
   });
 }
 
-export function useProposals(includeIgnored = false) {
-  const { engineParams } = usePerimeter();
-  const params = { planner: engineParams.planner, scenario_id: engineParams.scenario_id, include_ignored: includeIgnored };
-  return useQuery({ queryKey: ["proposals", params], queryFn: () => api.get<ProposalOut[]>("/api/proposals", params), staleTime: 30_000 });
-}
+/** Simulation grid cells (simulated orders / adjustments typed by the planner or written by the CBN run). */
+export const useCells = (params?: Params) => useQuery({ queryKey: ["cells", params], queryFn: () => api.get<CellOut[]>("/api/entries/cells", params) });
 
 export const useArticles = (planner?: string | null) => useQuery({ queryKey: ["ref-articles", planner], queryFn: () => api.get<ArticleRef[]>("/api/reference/articles", { planner }), staleTime: 300_000 });
 export const useSuppliers = () => useQuery({ queryKey: ["ref-suppliers"], queryFn: () => api.get<SupplierRef[]>("/api/reference/suppliers"), staleTime: 300_000 });

@@ -55,8 +55,8 @@ def export_orders(planner: str | None = None, scenario_id: str | None = None,
 @router.post("/imports/entries", response_model=S.ImportReport, status_code=201)
 async def import_entries(file: UploadFile = File(...), ctx: AppContext = Depends(ctx_dep),
                          session: Session = Depends(session_dep), user: str = Depends(current_user)):
-    """Import the planner inputs of an exported workbook: ``SAISIES`` sheet, decisions of the
-    ``PROPOSITIONS`` sheet (A / M) and receipts typed in the ``CARNET_COMMANDES`` sheet."""
+    """Import the planner inputs of an exported workbook: ``SAISIES`` sheet, receipts typed in the
+    ``CARNET_COMMANDES`` sheet and the *Commandes simulées* row of the ``SIMULATION`` grid."""
     content = await file.read()
     try:
         entries, notes = excel_service.parse_entries_workbook(content)
@@ -76,10 +76,18 @@ async def import_entries(file: UploadFile = File(...), ctx: AppContext = Depends
             if e.key not in units:
                 notes.append(f"article inconnu : {e.key}")
                 continue
-            if e.kind == "COMMANDE":
+            if e.kind == "COMMANDE_SIMULEE":
+                try:
+                    row = mrp_service.upsert_cell(ctx, session, user, e.key, e.date, "sim_order",
+                                                  f"{e.qty:g}" if e.qty else "", source="IMPORT", note=e.comment)
+                except ValueError as exc:
+                    notes.append(f"{e.key} {e.date} : {exc}")
+                    continue
+                if row is None and not e.qty:
+                    continue  # empty cell, nothing stored
+            elif e.kind == "COMMANDE":
                 session.add(AppOrder(article_id=e.key, supplier_id=e.supplier_id, expected_date=e.date, qty=e.qty,
-                                     unit=units[e.key] or "PCE", note=e.comment, created_by=user,
-                                     source="PROPOSAL" if e.proposal_id else "IMPORT", proposal_id=e.proposal_id))
+                                     unit=units[e.key] or "PCE", note=e.comment, created_by=user, source="IMPORT"))
             elif e.kind == "RECEPTION":
                 session.add(AppReceipt(article_id=e.key, supplier_id=e.supplier_id, order_id=e.order_id,
                                        receipt_date=e.date, qty=e.qty, note=e.comment, created_by=user))

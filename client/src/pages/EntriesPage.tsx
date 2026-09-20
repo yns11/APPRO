@@ -29,7 +29,7 @@ export default function EntriesPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Saisies & journal</h1><p>Commandes planifiées / fermes, réceptions, ajustements de stock et production réelle saisis dans l'application. Ces données complètent l'ERP et sont tracées (qui, quoi, quand).</p></div>
+        <div className="title"><h1>Saisies & journal</h1><p>Commandes fermes passées hors ERP, réceptions, ajustements de stock et production réelle saisis dans l'application. Les commandes simulées se saisissent directement dans le tableau de simulation de la fiche article (ou par le Calcul CBN). Ces données complètent l'ERP et sont tracées (qui, quoi, quand).</p></div>
         <div className="actions"><Button variant="primary" onClick={() => setDraft({ kind: tab === "receipts" ? "receipt" : tab === "adjustments" ? "adjustment" : tab === "production" ? "production" : "order" })}><Plus />Nouvelle saisie</Button></div>
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[
@@ -38,7 +38,7 @@ export default function EntriesPage() {
         { id: "audit", label: "Journal des actions", count: audit.data?.length },
       ]} />
 
-      {tab === "orders" && <Card flush>{orders.isError ? <ErrorBox error={orders.error} /> : orders.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : !orders.data?.length ? <Empty title="Aucune commande saisie" hint="Acceptez une proposition ou saisissez une commande." /> : (
+      {tab === "orders" && <Card flush>{orders.isError ? <ErrorBox error={orders.error} /> : orders.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : !orders.data?.length ? <Empty title="Aucune commande ferme saisie" hint="Les commandes simulées se saisissent dans le tableau de la fiche article." /> : (
         <table className="tbl">
           <thead><tr><th>Article</th><th>Fournisseur</th><th>Livraison</th><th className="num">Quantité</th><th>Nature</th><th>Statut</th><th>Origine</th><th>Note</th><th>Créée</th><th></th></tr></thead>
           <tbody>{orders.data.map((o) => (

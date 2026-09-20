@@ -61,7 +61,7 @@ def test_workbook_formulas_match_engine(seed_source, tmp_path, policy):
 
 @pytest.mark.skipif(SOFFICE is None, reason="LibreOffice not installed")
 def test_workbook_reacts_to_entries(seed_source, tmp_path):
-    """Typing an order in SAISIES and a decision in PROPOSITIONS changes the simulated stock."""
+    """Typing in SAISIES and in the *Commandes simulées* row changes the simulated stock."""
     ds = erp_dataset(seed_source, planner="QUENTIN")
     res = run_mrp(ds, EngineParams(as_of=dt.date(2026, 9, 19), horizon_days=30))
     aid = "P-00001046"
@@ -71,19 +71,17 @@ def test_workbook_reacts_to_entries(seed_source, tmp_path):
                    (4, ["AJUSTEMENT", aid, "", dt.date(2026, 9, 22), -50])):
         for c, v in enumerate(row, start=1):
             ws.cell(r, c, v)
-    wp = wb["PROPOSITIONS"]
-    for r in range(2, wp.max_row + 1):
-        if wp.cell(r, 1).value == aid:
-            wp.cell(r, 15, "I")  # ignore every proposal
-    buf = __import__("io").BytesIO()
-    wb.save(buf)
-    calc = _recalculate(buf.getvalue(), tmp_path)["SIMULATION"]
     ar = res.articles[aid]
     i0 = ar.dates.index(res.as_of)
     top = SIM_HEADER_ROWS + 1
-    proposed = sum(ar.supply_proposed)
+    grid = wb["SIMULATION"]
+    j_sim = ar.dates.index(dt.date(2026, 9, 24)) - i0
+    grid.cell(top + ROW["sim_orders"], SIM_FIRST_COL + j_sim, "=2*300-100")   # Excel formula in the cell
+    buf = __import__("io").BytesIO()
+    wb.save(buf)
+    calc = _recalculate(buf.getvalue(), tmp_path)["SIMULATION"]
     j = ar.dates.index(dt.date(2026, 9, 30)) - i0
     got = calc.cell(top + ROW["stock_sim"], SIM_FIRST_COL + j).value
-    expected = ar.stock_sim_net[i0 + j] - proposed + 1000 - 50
+    expected = ar.stock_sim_net[i0 + j] + 1000 - 50 + 500
     assert abs(float(got) - expected) < 0.01
     assert abs(float(calc.cell(top + ROW["stock_firm"], SIM_FIRST_COL + j).value) - (ar.stock_firm_net[i0 + j] - 50)) < 0.01

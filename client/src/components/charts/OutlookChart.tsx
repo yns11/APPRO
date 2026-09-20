@@ -1,7 +1,7 @@
 import { Bar, CartesianGrid, ComposedChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { WeeklyOutlook } from "@/lib/types";
 
-/** Portfolio outlook: articles in stockout / below target per week + proposals to place. */
+/** Portfolio outlook: articles in stockout / below target per week + simulated orders to receive. */
 export function OutlookChart({ data, height = 220 }: { data: WeeklyOutlook[]; height?: number }) {
   const rows = data.map((w) => ({ ...w, label: w.week.replace("-W", " S") }));
   return (
@@ -14,7 +14,7 @@ export function OutlookChart({ data, height = 220 }: { data: WeeklyOutlook[]; he
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Bar dataKey="stockout_articles" name="Articles en rupture" stackId="a" fill="var(--critical)" />
         <Bar dataKey="below_target_articles" name="Articles sous cible" stackId="a" fill="var(--warning)" />
-        <Bar dataKey="proposals" name="Propositions à livrer" fill="var(--s-proposal)" fillOpacity={0.5} />
+        <Bar dataKey="proposals" name="Commandes simulées à livrer" fill="var(--s-proposal)" fillOpacity={0.5} />
       </ComposedChart>
     </ResponsiveContainer>
   );

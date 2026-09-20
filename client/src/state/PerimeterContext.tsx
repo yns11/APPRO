@@ -9,7 +9,6 @@ export interface Perimeter {
   scenarioId: string | null;
   horizonDays: number;
   granularity: "day" | "week";
-  includeProposals: boolean;
   theme: "light" | "dark" | "system";
 }
 
@@ -23,7 +22,7 @@ interface Ctx {
 }
 
 const KEY = "appro.perimeter.v1";
-const defaults: Perimeter = { planner: null, scenarioId: null, horizonDays: 120, granularity: "week", includeProposals: true, theme: "system" };
+const defaults: Perimeter = { planner: null, scenarioId: null, horizonDays: 120, granularity: "week", theme: "system" };
 
 function load(): Perimeter {
   try {
@@ -65,8 +64,7 @@ export function PerimeterProvider({ children }: { children: ReactNode }) {
   const set = useCallback((patch: Partial<Perimeter>) => setPerimeter((p) => ({ ...p, ...patch })), []);
   const engineParams = useMemo(() => ({
     planner: perimeter.planner, scenario_id: perimeter.scenarioId, horizon_days: perimeter.horizonDays,
-    include_proposals_in_simulation: perimeter.includeProposals,
-  }), [perimeter.planner, perimeter.scenarioId, perimeter.horizonDays, perimeter.includeProposals]);
+  }), [perimeter.planner, perimeter.scenarioId, perimeter.horizonDays]);
 
   const value = useMemo(() => ({ perimeter, set, config, configError: error as Error | null, engineParams }), [perimeter, set, config, error, engineParams]);
   return <PerimeterCtx.Provider value={value}>{children}</PerimeterCtx.Provider>;

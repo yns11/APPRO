@@ -13,8 +13,7 @@ SERIES_LABELS = [
     ("demand_plan", "Besoin (plan seul)"),
     ("supply_firm", "Commandes fermes"),
     ("supply_forecast", "Commandes prévisionnelles (ERP)"),
-    ("supply_planned", "Commandes planifiées (saisies)"),
-    ("supply_proposed", "Propositions"),
+    ("supply_planned", "Commandes simulées"),
     ("receipts", "Réceptions"),
     ("adjustments", "Ajustements"),
     ("stock_firm", "Stock ferme"),
@@ -29,8 +28,7 @@ SERIES_LABELS = [
     ("coverage_sim", "Couverture simulée (j)"),
     ("demand_actual_share", "Part du réel dans le besoin"),
 ]
-FLOWS = {"demand", "demand_plan", "supply_firm", "supply_forecast", "supply_planned", "supply_proposed", "receipts",
-         "adjustments"}
+FLOWS = {"demand", "demand_plan", "supply_firm", "supply_forecast", "supply_planned", "receipts", "adjustments"}
 SHORTAGES = {"shortage_firm", "shortage_forecast", "shortage_sim"}
 
 
@@ -45,7 +43,7 @@ def proposal_out(p: Proposal, ar: ArticleResult, supplier_names: dict[str, str])
         proposal_id=p.proposal_id, article_id=p.article_id, designation=ar.article.designation, unit=ar.article.unit,
         supplier_id=p.supplier_id, supplier_name=supplier_names.get(p.supplier_id or "", ""),
         delivery_date=p.delivery_date, order_date=p.order_date, qty=p.qty, net_requirement=p.net_requirement,
-        reason=p.reason, urgent=p.urgent, ignored=p.ignored, lead_time_days=p.lead_time_days, moq=p.moq,
+        reason=p.reason, urgent=p.urgent, lead_time_days=p.lead_time_days, moq=p.moq,
         pack_qty=p.pack_qty, projected_stock_before=p.projected_stock_before,
         projected_stock_after=p.projected_stock_after)
 
@@ -83,7 +81,6 @@ def article_summary(ar: ArticleResult) -> S.ArticleSummary:
 def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
     arts = list(result.articles.values())
     alerts = [a for r in arts for a in r.alerts]
-    props = [p for r in arts for p in r.proposals if not p.ignored]
     cov = [r.kpis["coverage_sim_days"] for r in arts if r.kpis["demand_horizon"] > 0]
     stockouts_7d = 0
     for r in arts:
@@ -99,9 +96,8 @@ def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
         low_coverage=sum(1 for a in alerts if a.alert_type.value == "LOW_COVERAGE"),
         overstock=sum(1 for a in alerts if a.alert_type.value == "OVERSTOCK"),
         late_orders=sum(r.kpis["late_order_count"] for r in arts),
-        proposals=len(props),
-        urgent_proposals=sum(1 for p in props if p.urgent),
-        proposals_qty=float(sum(p.qty for p in props)),
+        sim_order_articles=sum(1 for r in arts if abs(r.kpis["open_planned_qty"]) > 1e-9),
+        sim_orders_qty=float(sum(r.kpis["open_planned_qty"] for r in arts)),
         open_firm_qty=float(sum(r.kpis["open_firm_qty"] for r in arts)),
         open_forecast_qty=float(sum(r.kpis["open_forecast_qty"] for r in arts)),
         open_planned_qty=float(sum(r.kpis["open_planned_qty"] for r in arts)),
@@ -134,11 +130,12 @@ def weekly_supply_demand(result: MrpResult, weeks: int = 12) -> list[dict[str, A
             elif r.stock_sim[i] < r.target_stock[i]:
                 b["below_target_articles"] += 1
     for r in arts:
-        for p in r.proposals:
-            wk = iso_week_label(p.delivery_date)
-            if wk in buckets and not p.ignored:
-                buckets[wk]["proposals"] += 1
-                buckets[wk]["proposed_qty"] += p.qty
+        for e in r.events:
+            if e.kind == "sim_order":
+                wk = iso_week_label(e.date)
+                if wk in buckets:
+                    buckets[wk]["proposals"] += 1
+                    buckets[wk]["proposed_qty"] += e.qty
     return [{k: v for k, v in b.items() if not k.startswith("_")} for b in buckets.values()]
 
 
@@ -184,7 +181,7 @@ def compare_articles(base: MrpResult, scen: MrpResult) -> list[S.CompareArticle]
         if s is None:
             continue
         keys = ("stock_as_of_sim", "coverage_sim_days", "first_stockout_sim", "min_stock_sim", "max_shortage_sim",
-                "proposal_count", "proposed_qty", "urgent_proposal_count", "demand_next_30d", "severity")
+                "open_planned_qty", "demand_next_30d", "severity")
         out.append(S.CompareArticle(
             article_id=aid, designation=b.article.designation, unit=b.article.unit,
             base={k: b.kpis.get(k) for k in keys}, scenario={k: s.kpis.get(k) for k in keys},

@@ -4,21 +4,21 @@ import { useLinks, usePrograms, useWrite, useOrders } from "@/lib/queries";
 import { Button, Drawer, Field, useToast } from "@/components/ui";
 
 export type EntryKind = "order" | "receipt" | "adjustment" | "production";
-export interface EntryDraft { kind: EntryKind; article_id?: string; supplier_id?: string | null; date?: string; qty?: number; program_id?: string; order_id?: string | null; note?: string; order_type?: "PLANNED" | "FIRM"; }
+export interface EntryDraft { kind: EntryKind; article_id?: string; supplier_id?: string | null; date?: string; qty?: number; program_id?: string; order_id?: string | null; note?: string; order_type?: "FIRM"; }
 
-const TITLES: Record<EntryKind, string> = { order: "Nouvelle commande", receipt: "Nouvelle réception", adjustment: "Ajustement de stock", production: "Production réelle" };
+const TITLES: Record<EntryKind, string> = { order: "Nouvelle commande ferme", receipt: "Nouvelle réception", adjustment: "Ajustement de stock", production: "Production réelle" };
 
 /** One drawer for the four planner entries (order, receipt, adjustment, actual production). */
 export function EntryDrawer({ draft, onClose, articles }: { draft: EntryDraft | null; onClose: () => void; articles: { article_id: string; designation: string; unit: string }[] }) {
   const toast = useToast();
   const [form, setForm] = useState<EntryDraft>({ kind: "order" });
-  useEffect(() => { if (draft) setForm({ note: "", order_type: "PLANNED", ...draft }); }, [draft]);
+  useEffect(() => { if (draft) setForm({ note: "", order_type: "FIRM", ...draft }); }, [draft]);
   const { data: links } = useLinks(form.article_id);
   const { data: programs } = usePrograms();
   const { data: openOrders } = useOrders(form.kind === "receipt" && form.article_id ? { article_id: form.article_id, status: "OPEN" } : undefined);
   const write = useWrite(async (f: EntryDraft) => {
     switch (f.kind) {
-      case "order": return api.post("/api/entries/orders", { article_id: f.article_id, supplier_id: f.supplier_id || null, expected_date: f.date, qty: f.qty, order_type: f.order_type ?? "PLANNED", note: f.note ?? "" });
+      case "order": return api.post("/api/entries/orders", { article_id: f.article_id, supplier_id: f.supplier_id || null, expected_date: f.date, qty: f.qty, order_type: "FIRM", note: f.note ?? "" });
       case "receipt": return api.post("/api/entries/receipts", { article_id: f.article_id, supplier_id: f.supplier_id || null, order_id: f.order_id || null, receipt_date: f.date, qty: f.qty, note: f.note ?? "" });
       case "adjustment": return api.post("/api/entries/adjustments", { article_id: f.article_id, date: f.date, qty: f.qty, comment: f.note ?? "" });
       case "production": return api.post("/api/entries/production", { program_id: f.program_id, date: f.date, qty: f.qty });
@@ -36,7 +36,7 @@ export function EntryDrawer({ draft, onClose, articles }: { draft: EntryDraft | 
       <div className="form-grid">
         <Field label="Type" span2>
           <select className="select" value={form.kind} onChange={(e) => set({ kind: e.target.value as EntryKind })}>
-            <option value="order">Commande (planifiée ou ferme)</option>
+            <option value="order">Commande ferme (passée au fournisseur)</option>
             <option value="receipt">Réception</option>
             <option value="adjustment">Ajustement de stock (±)</option>
             <option value="production">Production réelle d'un programme</option>
@@ -66,11 +66,8 @@ export function EntryDrawer({ draft, onClose, articles }: { draft: EntryDraft | 
           </Field>
         )}
         {form.kind === "order" && (
-          <Field label="Statut" help="Planifiée = simulée seulement ; ferme = envoyée au fournisseur">
-            <select className="select" value={form.order_type ?? "PLANNED"} onChange={(e) => set({ order_type: e.target.value as "PLANNED" | "FIRM" })}>
-              <option value="PLANNED">Planifiée (non envoyée)</option>
-              <option value="FIRM">Ferme (envoyée)</option>
-            </select>
+          <Field label="Nature" help="Commande réelle, comptée dans le stock ferme. Pour simuler, saisir dans la ligne Commandes simulées du tableau.">
+            <div className="input" style={{ display: "flex", alignItems: "center" }}>Ferme (passée au fournisseur)</div>
           </Field>
         )}
         {form.kind === "receipt" && (

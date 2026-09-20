@@ -45,16 +45,23 @@ décide dans l'application (saisies, propositions).
 | Commande ERP `FIRM` (DELJIT / OA) | ✔ | ✔ | ✔ | quantité ouverte = commandée − reçue (`firm_sources`) |
 | Commande ERP `FORECAST` (DELFOR) | – | ✔ | ✔ | `forecast_sources` |
 | Commande app `FIRM` / statut `SENT` | ✔ | ✔ | ✔ | envoyée au fournisseur ; `app_firm_orders = simulated` la confine au stock simulé |
-| Commande app `PLANNED` | – | – | ✔ | saisie ou proposition acceptée, non envoyée (`simulated_sources`) |
+| **Commande simulée** (cellule du tableau) | – | – | ✔ | quantité signée par jour, saisie à la main ou écrite par le Calcul CBN (`simulated_sources`) |
 | Commande de scénario | – | – | ✔ | idem |
-| Proposition moteur | – | – | ✔ (option) | `include_proposals_in_simulation` [oui] |
+| Ajustement simulé (cellule du tableau) | ✔ | ✔ | ✔ | quantité signée par jour, saisie dans la ligne Ajustements |
 | Réception postérieure au snapshot | ✔ | ✔ | ✔ | fait physique : comptée à sa date ; **solde la commande** liée (plus de double compte) |
 | Ajustement (inventaire, casse…) | ✔ | ✔ | ✔ | fait physique : compté à sa date s'il est postérieur au snapshot |
 
 Lecture : le stock **ferme** répond à « que se passe-t-il si rien d'autre n'arrive ? », le stock
 **prévisionnel** à « l'ERP suffit-il ? » (les lignes DELFOR sont-elles à confirmer / avancer ?), le stock
-**simulé** à « mes décisions suffisent-elles ? ». Les propositions sont calculées sur le stock simulé
-(avant propositions) : elles ne proposent que ce que ni l'ERP ni les saisies ne couvrent.
+**simulé** à « mes décisions suffisent-elles ? ». Le Calcul CBN travaille sur le stock simulé : il ne
+propose que ce que ni l'ERP ni les commandes simulées déjà saisies ne couvrent.
+
+**Saisie dans le tableau** : les lignes *Commandes simulées* et *Ajustements* de la fiche article se
+saisissent directement dans la cellule, avec une quantité (négative possible) ou une expression
+arithmétique (`+ − × ÷`, parenthèses, ex. `2*600-50`) évaluée côté serveur (`services/expression.py`,
+aucun autre opérateur ni fonction). Une cellule vide efface la valeur ; en vue semaine la saisie se pose sur
+le premier jour de la semaine. Chaque cellule conserve son expression, son origine (`MANUAL`, `CBN`,
+`IMPORT`) et une note.
 
 * **Commande en retard** (date attendue < `as_of`, non reçue) → alerte `LATE_ORDER` et
   `late_order_policy` : `reschedule` [défaut, replanifiée au prochain jour ouvré], `ignore`, `keep`.
@@ -94,20 +101,36 @@ quantité affichée est le manque maximal.
 
 | Type | Sévérité | Règle |
 |---|---|---|
-| `STOCKOUT` (simulé) | critique | premier manque sur le stock simulé malgré saisies et propositions (`stockout_lookahead_days`) |
+| `STOCKOUT` (simulé) | critique | premier manque sur le stock simulé malgré les commandes simulées (`stockout_lookahead_days`) |
 | `STOCKOUT` (prévisionnel) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au‑delà | premier manque sur les flux ERP fermes + prévisionnels : commande à passer / proposition à valider (émise seulement si sa date diffère de la rupture ferme) |
 | `STOCKOUT` (ferme) | idem | premier manque sur les flux fermes ; le message indique jusqu'où les commandes prévisionnelles couvrent (à confirmer) ou qu'aucune ne couvre la date |
 | `LOW_COVERAGE` | critique si épuisement des flux fermes ≤ `alert_red_days` [3], avertissement si ≤ `alert_yellow_days` [= couverture cible] | basé sur l'épuisement du stock ferme (stock + commandes fermes), pas seulement sur le stock à date |
 | `OVERSTOCK` | info | couverture du stock à date ≥ `overstock_days` [max(30 ; 3 × cible)] |
 | `NEGATIVE_STOCK` | critique | stock de départ négatif dans l'ERP (inventaire / saisies à vérifier) |
 | `LATE_ORDER` | avertissement | commande attendue avant `as_of` et non reçue |
-| `URGENT_PROPOSAL` | critique | proposition dont la date de commande théorique est déjà passée |
+| `URGENT_PROPOSAL` | critique | lors du Calcul CBN : proposition dont la date de commande théorique est déjà passée (note « URGENT » sur la cellule) |
 | `NO_DEMAND` | info | aucun besoin sur l'horizon alors que du stock existe |
 | `MISSING_DATA` | avertissement / info | pas de snapshot, pas de fournisseur, pas de nomenclature |
 
 La sévérité d'un article est la pire de ses alertes.
 
-## 7. Propositions de commandes (calcul des besoins nets)
+## 7. Calcul CBN (calcul des besoins nets)
+
+Le calcul ne se fait **pas à chaque affichage** (`generate_proposals` [non]) : il est lancé par le bouton
+**Calcul CBN** (fiche article ou page *Calcul CBN & commandes simulées*, sur le périmètre choisi). Chaque
+proposition est écrite dans la cellule *Commandes simulées* de sa date de livraison ; une proposition et
+une commande simulée saisie à la main sont la même chose : une cellule modifiable, sans décision à prendre.
+Règles du lancement :
+
+* les cellules saisies à la main sont conservées et prises en compte (le CBN ne propose que le
+  complément) ; sur une date qui a déjà une cellule manuelle, le résultat CBN est une cellule
+  **distincte** (le tableau affiche la somme) ; une saisie sur cette date remplace les deux ;
+* les cellules écrites par le précédent Calcul CBN (origine `CBN`) sont **remplacées** (option
+  « remplacer le CBN précédent » [oui]) pour que le calcul soit reproductible ; une cellule CBN modifiée
+  à la main devient manuelle ;
+* la note de la cellule garde l'identifiant de la proposition, le fournisseur choisi, la date de commande
+  théorique, l'urgence et le motif ;
+* un scénario actif s'applique au calcul, mais les cellules écrites sont celles de la base (pas du scénario).
 
 Algorithme, par article, sur le stock simulé (solde net avant propositions) :
 
@@ -131,9 +154,8 @@ Algorithme, par article, sur le stock simulé (solde net avant propositions) :
    prévue : générer directement des actions « avancer / reculer / annuler » sur les commandes existantes,
    en plus des nouvelles commandes.
 
-Décisions possibles : **accepter** (→ commande planifiée, source `PROPOSAL`), **modifier** (saisie
-pré‑remplie), **ignorer** (masquée jusqu'à une date ; réactivable). Une proposition acceptée disparaît au
-calcul suivant puisque la commande planifiée couvre le besoin.
+Après le calcul, l'approvisionneur ajuste librement les cellules (quantité, date en déplaçant la valeur,
+suppression) ; un nouveau Calcul CBN repart de ces saisies.
 
 ## 8. Scénarios
 
@@ -158,9 +180,8 @@ travailler hors ligne et voir les stocks se recalculer, puis réimporter ses dé
 |---|---|
 | `PARAMETRES` | politique de manque, politique de cible, règle d'égalité de couverture (cellules modifiables lues par les formules) |
 | `ARTICLES` | stocks initiaux des trois couches, couverture cible, stock de sécurité, seuils, MOQ / PLA / délai (modifiables) |
-| `SIMULATION` | par article, 15 lignes : besoin (valeurs), commandes fermes / prévisionnelles / planifiées (`SUMIFS` sur le carnet), propositions retenues, saisies, réceptions & ajustements connus (valeurs), stocks ferme / prévisionnel / simulé, manque simulé, cible (`OFFSET` sur le besoin), couverture (`COUNTIF` sur le besoin cumulé) |
+| `SIMULATION` | par article, 14 lignes : besoin (valeurs), commandes fermes / prévisionnelles (`SUMIFS` sur le carnet), **commandes simulées (valeurs modifiables, formules Excel acceptées)**, saisies, réceptions & ajustements connus (valeurs), stocks ferme / prévisionnel / simulé, manque simulé, cible (`OFFSET` sur le besoin), couverture (`COUNTIF` sur le besoin cumulé) |
 | `CARNET_COMMANDES` | carnet ouvert : date, quantité, quantité reçue, date de réception, statut (`RECUE` / `ANNULEE`) modifiables ; *Reste à livrer* calculé |
-| `PROPOSITIONS` | décision `A` / `M` / `I`, quantité et date modifiées ; *Qté retenue* / *Date retenue* calculées |
 | `SAISIES` | commandes, réceptions, ajustements, production réelle (lignes libres) |
 | `ALERTES` | photo des alertes à l'export |
 
@@ -171,9 +192,9 @@ semaine, la cible porte sur `ARRONDI.SUP(couverture / 7)` semaines et la couvert
 s'ajoute au stock à sa date et réduit le reste à livrer de la commande. La conformité des formules avec le
 moteur est vérifiée par un test automatisé (recalcul LibreOffice, `tests/test_excel_formulas.py`).
 
-Réimport (page *Imports / exports*) : lignes `SAISIES`, décisions `A` / `M` des `PROPOSITIONS` (→ commandes
-planifiées rattachées à la proposition) et réceptions saisies dans le `CARNET_COMMANDES` (→ réceptions
-rattachées à la commande).
+Réimport (page *Imports / exports*) : lignes `SAISIES`, réceptions saisies dans le `CARNET_COMMANDES`
+(→ réceptions rattachées à la commande) et ligne *Commandes simulées* de `SIMULATION` (→ cellules, origine
+`IMPORT` ; elle **remplace** les commandes simulées de l'article sur les dates du classeur).
 
 ## 11. Hypothèses sur les données de démonstration
 

@@ -161,6 +161,22 @@ class Movement:
 
 
 @dataclass
+class SimCell:
+    """One editable cell of the simulation grid (planner entry or CBN result).
+
+    ``kind`` = ``sim_order`` (simulated order, signed quantity, counted in the *simulated* stock
+    only) or ``adjustment`` (signed stock adjustment counted in every layer).
+    """
+
+    article_id: str
+    date: dt.date
+    kind: Literal["sim_order", "adjustment"]
+    qty: float
+    source: str = "MANUAL"   # MANUAL | CBN | IMPORT
+    note: str = ""
+
+
+@dataclass
 class StockSnapshot:
     article_id: str
     snapshot_date: dt.date      # stock known at the END of this day
@@ -184,6 +200,7 @@ class Dataset:
     movements: list[Movement]
     stock: list[StockSnapshot]
     holidays: list[dt.date] = field(default_factory=list)
+    cells: list[SimCell] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -220,8 +237,8 @@ class EngineParams:
     coverage_tie_rule: Literal["covered", "not_covered"] = "covered"
     target_policy: Literal["coverage_days", "safety_qty", "max"] = "max"
 
-    # Proposals
-    generate_proposals: bool = True
+    # Proposals (net requirements): computed on demand by the "Calcul CBN" action, not on every run
+    generate_proposals: bool = False
     frozen_days: int = 0
     respect_lead_time: bool = False               # True: never propose a delivery before as_of + lead time
     delivery_shift: Literal["earlier", "later"] = "earlier"
@@ -286,7 +303,6 @@ class Proposal:
     pack_qty: float = 0.0
     projected_stock_before: float = 0.0
     projected_stock_after: float = 0.0
-    ignored: bool = False   # set by the service layer when the planner chose to ignore it
 
 
 @dataclass
@@ -294,7 +310,7 @@ class SupplyEvent:
     """One dated supply element shown in the article table / tooltips."""
 
     date: dt.date
-    kind: str               # order | receipt | movement | proposal
+    kind: str               # order | sim_order | receipt | movement | proposal
     ref: str
     qty: float
     supplier_id: str | None

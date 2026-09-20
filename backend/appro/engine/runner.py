@@ -68,6 +68,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     movements_by_article = defaultdict(list)
     for m in dataset.movements:
         movements_by_article[m.article_id].append(m)
+    cells_by_article = defaultdict(list)
+    for c in dataset.cells:
+        cells_by_article[c.article_id].append(c)
     # App receipts posted against an order reduce its open quantity (unless the ERP already did).
     app_received: dict[str, float] = defaultdict(float)
     for r in dataset.receipts:
@@ -159,6 +162,18 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
                 continue
             adjustments[i] += m.qty
             events.append(SupplyEvent(m.date, "movement", m.movement_id, m.qty, None, m.movement_type, m.source))
+        for c in cells_by_article.get(aid, []):
+            if c.date <= snap_date or c.qty == 0:
+                continue
+            i = index.offset(c.date)
+            if i is None:
+                continue
+            if c.kind == "sim_order":
+                supply_planned[i] += c.qty
+                events.append(SupplyEvent(c.date, "sim_order", f"SIM-{c.date.isoformat()}", c.qty, None, "SIMULATED", c.source))
+            else:
+                adjustments[i] += c.qty
+                events.append(SupplyEvent(c.date, "movement", f"ADJ-{c.date.isoformat()}", c.qty, None, "ADJUSTMENT", c.source))
 
         # zero everything before the snapshot day (unknown history)
         if i_snap > 0:
