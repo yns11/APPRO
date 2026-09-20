@@ -1,0 +1,147 @@
+/* ==========================================================================
+   APPRO design tokens
+   - Typographic scale: major third (ratio 1.25) from a 16px base
+   - Spacing scale: 4px base
+   - Semantic colors follow IBCS-inspired notation: actual/firm = solid & dark,
+     simulated/plan = outlined or dashed, proposals = accent, alerts = semantic
+   ========================================================================== */
+:root {
+  /* type */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --fs--2: 0.64rem;   /* 10.24px */
+  --fs--1: 0.8rem;    /* 12.8px  */
+  --fs-0: 1rem;       /* 16px    */
+  --fs-1: 1.25rem;    /* 20px    */
+  --fs-2: 1.5625rem;  /* 25px    */
+  --fs-3: 1.953rem;   /* 31.25px */
+  --fs-4: 2.441rem;   /* 39px    */
+  --lh-tight: 1.2;
+  --lh-normal: 1.5;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --tracking-caps: 0.06em;
+
+  /* spacing */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px;
+
+  /* radii & shadows */
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-pill: 999px;
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.06);
+  --shadow-md: 0 4px 12px rgb(16 24 40 / 0.08);
+  --shadow-lg: 0 12px 32px rgb(16 24 40 / 0.14);
+
+  /* layout */
+  --sidebar-w: 236px;
+  --topbar-h: 56px;
+  --content-max: 1560px;
+  --transition: 160ms ease;
+
+  /* neutral palette (light) */
+  --bg: #f5f7fb;
+  --bg-elev: #ffffff;
+  --bg-subtle: #eef1f6;
+  --bg-hover: #f0f3f9;
+  --border: #dfe4ec;
+  --border-strong: #c6cdd8;
+  --fg: #101828;
+  --fg-muted: #475467;
+  --fg-subtle: #667085;
+  --fg-inverse: #ffffff;
+
+  /* brand */
+  --brand: #2f5bea;
+  --brand-strong: #1f44c4;
+  --brand-soft: #e6ecfd;
+  --brand-fg: #1b3bb0;
+
+  /* semantic */
+  --critical: #d92d20;
+  --critical-soft: #fee4e2;
+  --critical-fg: #b42318;
+  --warning: #dc6803;
+  --warning-soft: #fef0c7;
+  --warning-fg: #b54708;
+  --ok: #079455;
+  --ok-soft: #dcfae6;
+  --ok-fg: #067647;
+  --info: #0086c9;
+  --info-soft: #e0f2fe;
+  --info-fg: #026aa2;
+
+  /* data series (chart) */
+  --s-demand: #667085;
+  --s-stock-firm: #1f44c4;
+  --s-stock-forecast: #0e9384;
+  --s-stock-sim: #7c3aed;
+  --s-shortage: #d92d20;
+  --s-target: #98a2b3;
+  --s-firm: #2f5bea;
+  --s-forecast: #7a95f2;
+  --s-planned: #b9c6f9;
+  --s-proposal: #f79009;
+  --s-receipt: #12b76a;
+  --s-adjust: #667085;
+  --s-plan-only: #c7ccd6;
+
+  /* table highlight */
+  --cell-neg: #fee4e2;
+  --cell-red: #fecdca;
+  --cell-yellow: #fef0c7;
+  --cell-green: #dcfae6;
+  --cell-past: #f8fafc;
+  --cell-today: #e6ecfd;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b1220;
+  --bg-elev: #111a2c;
+  --bg-subtle: #172239;
+  --bg-hover: #1a2640;
+  --border: #243149;
+  --border-strong: #34446a;
+  --fg: #e8edf6;
+  --fg-muted: #aab4c8;
+  --fg-subtle: #7d889f;
+  --fg-inverse: #0b1220;
+  --brand: #6b8cff;
+  --brand-strong: #8aa4ff;
+  --brand-soft: #1b2a55;
+  --brand-fg: #b7c6ff;
+  --critical: #f97066;
+  --critical-soft: #3b1512;
+  --critical-fg: #fda29b;
+  --warning: #fdb022;
+  --warning-soft: #3d2504;
+  --warning-fg: #fec84b;
+  --ok: #32d583;
+  --ok-soft: #0b2e1e;
+  --ok-fg: #6ce9a6;
+  --info: #36bffa;
+  --info-soft: #082a3d;
+  --info-fg: #7cd4fd;
+  --s-demand: #aab4c8;
+  --s-stock-firm: #8aa4ff;
+  --s-stock-forecast: #2ed3b7;
+  --s-stock-sim: #c4a4ff;
+  --s-shortage: #f97066;
+  --s-target: #6b7690;
+  --s-firm: #6b8cff;
+  --s-forecast: #4f6fd0;
+  --s-planned: #34446a;
+  --s-proposal: #fdb022;
+  --s-receipt: #32d583;
+  --s-adjust: #aab4c8;
+  --s-plan-only: #34446a;
+  --cell-neg: #3b1512;
+  --cell-red: #4a1a16;
+  --cell-yellow: #3d2504;
+  --cell-green: #0b2e1e;
+  --cell-past: #0e1628;
+  --cell-today: #1b2a55;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.6);
+}

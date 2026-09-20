@@ -1,0 +1,26 @@
+program_id,name,family,has_bom,active
+prog-assemblage-m3,Assemblage M3,M3,false,true
+prog-assemblage-m4,Assemblage M4,M4,false,true
+mass-00037796,Prépa stacks M3/M4,M3/M4,true,true
+mass-00040633,Stators M3,M3,true,true
+mass-00040922,Stators M4,M4,true,true
+prog-usinage-main-m3,Usinage main M3,M3,false,true
+prog-usinage-main-m4,Usinage main M4,M4,false,true
+prog-usinage-covers-m3,Usinage covers M3,M3,false,true
+prog-usinage-covers-m4,Usinage covers M4,M4,false,true
+prog-assemblage-m2-bev,Assemblage M2 BEV,M2 BEV,false,true
+prog-assemblage-m2-erad,Assemblage M2 ERAD,M2 ERAD,false,true
+mass-00044322,Stators M2 BEV,M2 BEV,true,true
+mass-00038804,Stators M2 ERAD,M2 ERAD,true,true
+mass-00042751,Stators M2 PHEV,M2 PHEV,true,true
+prog-rotors-m2-bev,Rotors M2 BEV,M2 BEV,false,true
+prog-rotors-m2-erad,Rotors M2 ERAD,M2 ERAD,false,true
+prog-rotors-m2-phev,Rotors M2 PHEV,M2 PHEV,false,true
+prog-onduleurs-m2-bev,Onduleurs M2 BEV,M2 BEV,false,true
+prog-onduleurs-m2-erad,Onduleurs M2 ERAD,M2 ERAD,false,true
+prog-onduleurs-m2-phev,Onduleurs M2 PHEV,M2 PHEV,false,true
+mass-00043530,Prépa stacks M2 BEV,M2 BEV,true,true
+mass-00044253,Prépa stacks M2 ERAD,M2 ERAD,true,true
+mass-00007041,Prépa stacks M2 PHEV,M2 PHEV,true,true
+prog-stators-m2-schmid,Stators M2 SCHMID,M2 SCHMID,false,true
+prog-capteurs-m2-phev,Capteurs M2 PHEV,M2 PHEV,false,true
