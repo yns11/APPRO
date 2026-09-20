@@ -74,10 +74,13 @@
   /* data series (chart) */
   --s-demand: #667085;
   --s-stock-firm: #1f44c4;
+  --s-stock-forecast: #0e9384;
   --s-stock-sim: #7c3aed;
+  --s-shortage: #d92d20;
   --s-target: #98a2b3;
   --s-firm: #2f5bea;
-  --s-planned: #93aafc;
+  --s-forecast: #7a95f2;
+  --s-planned: #b9c6f9;
   --s-proposal: #f79009;
   --s-receipt: #12b76a;
   --s-adjust: #667085;
@@ -121,10 +124,13 @@
   --info-fg: #7cd4fd;
   --s-demand: #aab4c8;
   --s-stock-firm: #8aa4ff;
+  --s-stock-forecast: #2ed3b7;
   --s-stock-sim: #c4a4ff;
+  --s-shortage: #f97066;
   --s-target: #6b7690;
   --s-firm: #6b8cff;
-  --s-planned: #3f5fbd;
+  --s-forecast: #4f6fd0;
+  --s-planned: #34446a;
   --s-proposal: #fdb022;
   --s-receipt: #32d583;
   --s-adjust: #aab4c8;

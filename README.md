@@ -9,11 +9,11 @@ scénarios *what-if*, saisies tracées et exports / imports Excel.
 | Fonction | Où |
 |---|---|
 | Cockpit du jour (KPI, alertes, perspective 12 semaines, portefeuille) | `/` |
-| Fiche article : courbes stock ferme / simulé / cible, tableau jour ou semaine, commandes & mouvements, propositions, alertes, données de base | `/articles/<ref>` |
+| Fiche article : courbes stock ferme / prévisionnel / simulé (jamais négatifs) + manque + cible, tableau jour ou semaine, commandes & mouvements, propositions, alertes, données de base | `/articles/<ref>` |
 | Plan de commandes : accepter / modifier / ignorer les propositions, export carnet | `/propositions` |
 | Scénarios : événements (commande, retard, PDP ×, réel, paramètres…), comparaison base ↔ scénario, activation globale | `/simulation` |
 | Saisies : commandes, réceptions, ajustements, production réelle ; journal des actions | `/saisies` |
-| Imports (PDP hebdo, saisies) / exports (simulation, alertes, carnet) | `/imports` |
+| Imports (PDP hebdo, réimport du classeur) / exports (simulation Excel **à formules**, alertes, carnet) | `/imports` |
 | Référentiel ERP + surcharges (seuils, MOQ, PLA, délais, quotas) | `/referentiel` |
 | Règles du moteur (paramétrables, documentées) | `/parametres` |
 

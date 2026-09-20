@@ -117,13 +117,13 @@ export default function ScenariosPage() {
                 </div>
                 <div className="table-wrap" style={{ marginTop: 16, maxHeight: 420 }}>
                   <table className="tbl compact">
-                    <thead><tr><th>Article</th><th className="num">Couverture base → scén.</th><th className="num">Stock mini base → scén.</th><th>Rupture base → scén.</th><th className="num">Propositions</th></tr></thead>
+                    <thead><tr><th>Article</th><th className="num">Couverture base → scén.</th><th className="num">Manque max base → scén.</th><th>Rupture base → scén.</th><th className="num">Propositions</th></tr></thead>
                     <tbody>
-                      {shown.articles.filter((r) => r.delta_min_stock !== 0 || r.delta_coverage !== 0 || r.stockout_changed || r.base.proposal_count !== r.scenario.proposal_count).map((r) => (
+                      {shown.articles.filter((r) => r.delta_min_stock !== 0 || r.delta_max_shortage !== 0 || r.delta_coverage !== 0 || r.stockout_changed || r.base.proposal_count !== r.scenario.proposal_count).map((r) => (
                         <tr key={r.article_id}>
                           <td><Link to={`/articles/${encodeURIComponent(r.article_id)}`}><b>{r.article_id}</b></Link><span className="sub">{r.designation}</span></td>
                           <td className="num">{String(r.base.coverage_sim_days)} → <b className={`delta ${r.delta_coverage > 0 ? "up" : r.delta_coverage < 0 ? "down" : ""}`}>{String(r.scenario.coverage_sim_days)}</b></td>
-                          <td className="num">{fmtQty(r.base.min_stock_sim as number, r.unit)} → <b className={`delta ${r.delta_min_stock > 0 ? "up" : r.delta_min_stock < 0 ? "down" : ""}`}>{fmtQty(r.scenario.min_stock_sim as number, r.unit)}</b></td>
+                          <td className="num">{fmtQty(r.base.max_shortage_sim as number, r.unit)} → <b className={`delta ${r.delta_max_shortage < 0 ? "up" : r.delta_max_shortage > 0 ? "down" : ""}`}>{fmtQty(r.scenario.max_shortage_sim as number, r.unit)}</b></td>
                           <td>{fmtDate(r.base.first_stockout_sim as string | null)} → {fmtDate(r.scenario.first_stockout_sim as string | null)}</td>
                           <td className="num">{String(r.base.proposal_count)} → {String(r.scenario.proposal_count)}</td>
                         </tr>

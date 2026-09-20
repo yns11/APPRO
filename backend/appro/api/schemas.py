@@ -136,6 +136,7 @@ class CockpitKpis(BaseModel):
     urgent_proposals: int
     proposals_qty: float
     open_firm_qty: float
+    open_forecast_qty: float
     open_planned_qty: float
     avg_coverage_days: float | None
     demand_next_30d: float
@@ -341,6 +342,7 @@ class CompareArticle(BaseModel):
     base: dict[str, Any]
     scenario: dict[str, Any]
     delta_min_stock: float
+    delta_max_shortage: float = 0.0
     delta_coverage: int
     stockout_changed: bool
 

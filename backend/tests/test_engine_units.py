@@ -112,7 +112,7 @@ def test_projection_firm_vs_simulated_and_receipts():
     assert r.stock_firm[i + 3] == 530
     assert r.stock_sim[i + 3] == 930
     assert r.kpis["open_firm_qty"] == 300
-    assert r.kpis["open_planned_qty"] == 400
+    assert r.kpis["open_forecast_qty"] == 400 and r.kpis["open_planned_qty"] == 0
 
 
 def test_late_order_policies():
@@ -158,11 +158,13 @@ def test_proposals_respect_moq_pack_lead_time_and_delivery_days():
     assert not p.urgent
     assert WorkCalendar().working_days_between(p.order_date, p.delivery_date) == 5
     assert p.delivery_date.isoweekday() <= 5
-    # stock never negative once proposals are included
+    # no unserved demand once proposals are included; the physical stock is never negative
     i = r.dates.index(MON)
-    assert min(r.stock_sim[i:]) >= 0
-    # firm stock does go negative -> stockout alert on firm scope
+    assert max(r.shortage_sim[i:]) == 0 and min(r.stock_sim) >= 0
+    # firm flows run out -> stockout alert on firm scope (no forecast order: single alert)
     assert any(a.alert_type == AlertType.STOCKOUT and a.scope == "firm" for a in r.alerts)
+    assert not any(a.alert_type == AlertType.STOCKOUT and a.scope == "forecast" for a in r.alerts)
+    assert r.kpis["max_shortage_firm"] > 0 and r.kpis["max_shortage_sim"] == 0
     assert r.kpis["proposal_count"] == len(r.proposals)
 
 
@@ -234,3 +236,63 @@ def test_scenario_events():
     what_if = run_mrp(sc, EngineParams(as_of=MON, horizon_days=10, generate_proposals=False)).articles["A1"]
     i = base.dates.index(MON)
     assert what_if.demand[i] == 300.0 and base.demand[i] == 200.0
+
+
+# ------------------------------------------------------------------ stock layers / shortage policy
+def test_three_stock_layers_are_cumulative():
+    ds = make_dataset(orders=[
+        OrderLine("F1", "A1", "S1", MON + dt.timedelta(days=1), 300, order_type=OrderType.FIRM),
+        OrderLine("D1", "A1", "S1", MON + dt.timedelta(days=2), 400, order_type=OrderType.FORECAST),
+        OrderLine("P1", "A1", "S1", MON + dt.timedelta(days=3), 500, order_type=OrderType.PLANNED, source="APP"),
+        OrderLine("A2", "A1", "S1", MON + dt.timedelta(days=4), 600, order_type=OrderType.FIRM, source="APP"),
+    ])
+    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=10, generate_proposals=False)).articles["A1"]
+    i = r.dates.index(MON)
+    # day0: 1000-200 = 800 ; +300 firm ; +400 forecast ; +500 planned ; +600 app firm (sent)
+    assert r.stock_firm[i + 1] == 900 and r.stock_forecast[i + 1] == 900 and r.stock_sim[i + 1] == 900
+    assert r.stock_firm[i + 2] == 700 and r.stock_forecast[i + 2] == 1100 and r.stock_sim[i + 2] == 1100
+    assert r.stock_firm[i + 3] == 500 and r.stock_forecast[i + 3] == 900 and r.stock_sim[i + 3] == 1400
+    assert r.stock_firm[i + 4] == 900 and r.stock_forecast[i + 4] == 1300 and r.stock_sim[i + 4] == 1800
+    assert (r.kpis["open_firm_qty"], r.kpis["open_forecast_qty"], r.kpis["open_planned_qty"]) == (900, 400, 500)
+    # app orders can be confined to the simulation layer
+    r2 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=10, generate_proposals=False,
+                                  app_firm_orders="simulated")).articles["A1"]
+    assert r2.stock_firm[i + 4] == 300 and r2.stock_forecast[i + 4] == 700 and r2.stock_sim[i + 4] == 1800
+
+
+def test_forecast_layer_stockout_alert():
+    # 700 on hand = 3.5 days ; a forecast order on Thursday postpones the ERP run-out, nothing else
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - dt.timedelta(days=1), 700.0)],
+                      orders=[OrderLine("D1", "A1", "S1", MON + dt.timedelta(days=3), 2000, order_type=OrderType.FORECAST)])
+    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, generate_proposals=False)).articles["A1"]
+    scopes = {a.scope: a for a in r.alerts if a.alert_type == AlertType.STOCKOUT}
+    assert set(scopes) == {"firm", "forecast", "simulated"}
+    assert scopes["firm"].date < scopes["forecast"].date == scopes["simulated"].date
+    assert "couvrent jusqu'au" in scopes["firm"].message
+    assert r.kpis["first_stockout_firm"] < r.kpis["first_stockout_forecast"] == r.kpis["first_stockout_sim"]
+
+
+def test_shortage_policy_backlog_vs_lost():
+    # 500 on hand, demand 200/day (Mon-Fri), receipt of 1000 on Thursday
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - dt.timedelta(days=1), 500.0)],
+                      orders=[OrderLine("F1", "A1", "S1", MON + dt.timedelta(days=3), 1000, order_type=OrderType.FIRM)])
+    backlog = run_mrp(ds, EngineParams(as_of=MON, horizon_days=6, generate_proposals=False)).articles["A1"]
+    lost = run_mrp(ds, EngineParams(as_of=MON, horizon_days=6, generate_proposals=False,
+                                    shortage_policy="lost")).articles["A1"]
+    i = backlog.dates.index(MON)
+    # Mon 300, Tue 100, Wed -100 (backlog) / 0 (lost, 100 lost), Thu +1000-200: 700 / 800
+    assert backlog.stock_firm[i:i + 4] == [300, 100, 0, 700]
+    assert backlog.stock_firm_net[i:i + 4] == [300, 100, -100, 700]
+    assert backlog.shortage_firm[i:i + 4] == [0, 0, 100, 0]
+    assert lost.stock_firm[i:i + 4] == [300, 100, 0, 800]
+    assert lost.stock_firm_net[i:i + 4] == [300, 100, 0, 800]
+    assert lost.shortage_firm[i:i + 4] == [0, 0, 100, 0]
+    for r in (backlog, lost):
+        assert min(r.stock_firm) >= 0
+        assert r.kpis["first_stockout_firm"] == (MON + dt.timedelta(days=2)).isoformat()
+        assert r.kpis["max_shortage_firm"] == 100
+    # with proposals, the lost policy re-projects exactly: no unserved demand after the first delivery
+    lost_p = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, shortage_policy="lost")).articles["A1"]
+    first = min(p.delivery_date for p in lost_p.proposals)
+    j = lost_p.dates.index(first)
+    assert max(lost_p.shortage_sim[j:]) == 0

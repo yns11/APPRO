@@ -54,7 +54,7 @@ def test_cockpit(client):
     assert body["kpis"]["proposals"] > 0
     for a in body["articles"]:
         assert a["kpis"]["first_stockout_sim"] is None, a["article_id"]
-        assert a["kpis"]["min_stock_sim"] >= -1e-6, a["article_id"]
+        assert a["kpis"]["max_shortage_sim"] == 0 and a["kpis"]["min_stock_sim"] >= 0, a["article_id"]
 
 
 def test_projection_day_and_week(client):
@@ -225,27 +225,47 @@ def test_exports_and_reimport(client):
                                                           "article_ids": ["P-00001046", "P-00005775"]})
     assert r.status_code == 200 and r.headers["content-type"].startswith("application/vnd.openxmlformats")
     wb = load_workbook(io.BytesIO(r.content))
-    assert set(wb.sheetnames) == {"PARAMETRES", "SIMULATION", "ALERTES", "PROPOSITIONS", "CARNET_COMMANDES", "SAISIES"}
+    assert set(wb.sheetnames) == {"PARAMETRES", "ARTICLES", "SIMULATION", "ALERTES", "PROPOSITIONS", "CARNET_COMMANDES",
+                                  "SAISIES"}
     ws = wb["SIMULATION"]
-    assert ws["A2"].value == "P-00001046" and ws["E2"].value == "Besoin"
-    assert ws.cell(1, 6).value.startswith("2026-W")
+    assert ws["A4"].value == "P-00001046" and ws["C4"].value == "Besoin"
+    assert ws.cell(1, 5).value.startswith("2026-W")
+    # the grid is made of formulas fed by the other sheets
+    assert str(ws["E12"].value).startswith("=IF(PARAMETRES!$B$5")          # stock ferme
+    assert "CARNET_COMMANDES" in str(ws["E5"].value) and "PROPOSITIONS" in str(ws["E8"].value)
+    assert "SAISIES" in str(ws["E9"].value) and "OFFSET" in str(ws["E16"].value) and "COUNTIF" in str(ws["E17"].value)
+    assert wb["ARTICLES"]["A2"].value == "P-00001046" and wb["ARTICLES"]["I2"].value > 0
+    assert str(wb["PROPOSITIONS"]["R2"].value).startswith("=IF(O2=")
     assert client.get("/api/exports/alerts.xlsx").status_code == 200
     assert client.get("/api/exports/orders.xlsx", params={"planner": "QUENTIN"}).status_code == 200
-    # fill the SAISIES sheet and re-import it
+    # fill the SAISIES sheet, decide on a proposal, post a receipt in the order book and re-import
     ws = wb["SAISIES"]
-    ws.delete_rows(2)
-    ws.append(["COMMANDE", "P-00001046", "S-000545", "2026-10-20", 1600, "réimport"])
-    ws.append(["RECEPTION", "P-00001046", "S-000545", "2026-09-22", 400, ""])
-    ws.append(["AJUSTEMENT", "P-00003751", "", "2026-09-21", -30, "casse"])
-    ws.append(["PRODUCTION", "mass-00040633", "", "2026-09-21", 250, ""])
-    ws.append(["COMMANDE", "UNKNOWN", "", "2026-10-20", 5, ""])
-    ws.append(["FOO", "P-00001046", "", "2026-10-20", 5, ""])
+    ws.append(["COMMANDE", "P-00001046", "S-000545", "2026-10-20", 1600, "réimport", ""])
+    ws.append(["RECEPTION", "P-00001046", "S-000545", "2026-09-22", 400, "", ""])
+    ws.append(["AJUSTEMENT", "P-00003751", "", "2026-09-21", -30, "casse", ""])
+    ws.append(["PRODUCTION", "mass-00040633", "", "2026-09-21", 250, "", ""])
+    ws.append(["COMMANDE", "UNKNOWN", "", "2026-10-20", 5, "", ""])
+    ws.append(["FOO", "P-00001046", "", "2026-10-20", 5, "", ""])
+    wp = wb["PROPOSITIONS"]
+    assert wp["A2"].value in ("P-00001046", "P-00005775")
+    wp["O2"] = "M"
+    wp["P2"] = 999
+    wp["Q2"] = "2026-11-02"
+    wp["O3"] = "A"  # empty row: ignored
+    wo = wb["CARNET_COMMANDES"]
+    assert wo["A2"].value in ("P-00001046", "P-00005775")
+    wo["J2"] = 250
+    wo["K2"] = "2026-09-23"
     buf = io.BytesIO()
     wb.save(buf)
     r = client.post("/api/imports/entries", files={"file": ("simu.xlsx", buf.getvalue())})
     assert r.status_code == 201, r.text
-    assert r.json()["created"] == 4 and r.json()["ignored"] == 2
-    assert len(client.get("/api/entries/orders").json()) == 1
-    assert len(client.get("/api/entries/receipts").json()) == 1
+    assert r.json()["created"] == 6 and r.json()["ignored"] == 2, r.json()
+    orders = client.get("/api/entries/orders").json()
+    assert len(orders) == 2
+    modified = next(o for o in orders if o["qty"] == 999)
+    assert modified["expected_date"] == "2026-11-02" and modified["source"] == "PROPOSAL" and modified["proposal_id"].startswith("PR-")
+    receipts = client.get("/api/entries/receipts").json()
+    assert len(receipts) == 2 and any(r["order_id"] == wo["D2"].value and r["qty"] == 250 for r in receipts)
     assert len(client.get("/api/entries/adjustments").json()) == 1
     assert len(client.get("/api/entries/production").json()) == 1

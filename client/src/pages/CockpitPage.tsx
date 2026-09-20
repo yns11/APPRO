@@ -4,7 +4,7 @@ import { AlertOctagon, AlertTriangle, ArrowDownToLine, Clock, Download, Layers, 
 import { useCockpit } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
-import { ALERT_LABELS, fmtDate, fmtInt, fmtQty, daysFrom } from "@/lib/format";
+import { ALERT_LABELS, SCOPE_LABELS, fmtDate, fmtInt, fmtQty, daysFrom } from "@/lib/format";
 import { Badge, Card, Empty, ErrorBox, Kpi, SeverityBadge, Skeleton, SkeletonBlock, Sparkline } from "@/components/ui";
 import { OutlookChart } from "@/components/charts/OutlookChart";
 import type { ArticleSummary, Severity } from "@/lib/types";
@@ -74,7 +74,7 @@ export default function CockpitPage() {
         <Kpi label="Retards fournisseurs" icon={<Clock size={14} />} tone={k && k.late_orders > 0 ? "warning" : "ok"} value={k ? fmtInt(k.late_orders) : <Skeleton w={40} h={28} />} meta="commandes attendues non reçues" onClick={() => setFilter(filter === "late" ? "all" : "late")} active={filter === "late"} />
         <Kpi label="Propositions" icon={<ShoppingCart size={14} />} tone="brand" value={k ? fmtInt(k.proposals) : <Skeleton w={40} h={28} />} meta={k ? `${k.urgent_proposals} urgentes · ${fmtQty(k.proposals_qty)} unités` : ""} onClick={() => nav("/propositions")} />
         <Kpi label="Couverture moyenne" icon={<Layers size={14} />} value={k ? (k.avg_coverage_days ?? "–") : <Skeleton w={40} h={28} />} unit="jours" meta="stock simulé, articles avec besoin" />
-        <Kpi label="En-cours fournisseurs" icon={<Truck size={14} />} value={k ? fmtQty(k.open_firm_qty) : <Skeleton w={40} h={28} />} meta={k ? `+ ${fmtQty(k.open_planned_qty)} planifiées / prévisionnelles` : ""} />
+        <Kpi label="En-cours fournisseurs" icon={<Truck size={14} />} value={k ? fmtQty(k.open_firm_qty) : <Skeleton w={40} h={28} />} meta={k ? `+ ${fmtQty(k.open_forecast_qty)} prévisionnelles ERP · + ${fmtQty(k.open_planned_qty)} saisies` : ""} />
         <Kpi label="Surstock" icon={<ArrowDownToLine size={14} />} tone="info" value={k ? fmtInt(k.overstock) : <Skeleton w={40} h={28} />} meta="articles au-dessus du seuil" onClick={() => setFilter(filter === "overstock" ? "all" : "overstock")} active={filter === "overstock"} />
       </div>
 
@@ -128,7 +128,7 @@ export default function CockpitPage() {
                       <td className="num subtle">{a.kpis.coverage_target_days} j</td>
                       <td>{a.kpis.first_stockout_firm ? <Badge tone={d !== null && d <= 7 ? "critical" : "warning"}>{fmtDate(a.kpis.first_stockout_firm)} · J+{d}</Badge> : <span className="subtle">–</span>}</td>
                       <td className="num">{fmtQty(a.kpis.demand_next_30d, a.unit)}</td>
-                      <td className="num">{fmtQty(a.kpis.open_firm_qty + a.kpis.open_planned_qty, a.unit)}{a.kpis.late_order_count > 0 && <span className="sub" style={{ color: "var(--warning-fg)" }}>{a.kpis.late_order_count} en retard</span>}</td>
+                      <td className="num">{fmtQty(a.kpis.open_firm_qty + a.kpis.open_forecast_qty + a.kpis.open_planned_qty, a.unit)}{a.kpis.late_order_count > 0 && <span className="sub" style={{ color: "var(--warning-fg)" }}>{a.kpis.late_order_count} en retard</span>}</td>
                       <td className="num">{a.kpis.proposal_count > 0 ? <>{a.kpis.proposal_count} <span className="subtle">({fmtQty(a.kpis.proposed_qty, a.unit)})</span>{a.kpis.urgent_proposal_count > 0 && <span className="sub" style={{ color: "var(--critical-fg)" }}>{a.kpis.urgent_proposal_count} urgente(s)</span>}</> : <span className="subtle">–</span>}</td>
                       <td><Sparkline values={a.sparkline} /></td>
                       <td><div className="chip-list">{a.alert_types.filter((t) => t !== "URGENT_PROPOSAL").map((t) => <span key={t} className="chip">{ALERT_LABELS[t] ?? t}</span>)}</div></td>
@@ -163,7 +163,7 @@ export function AlertList({ alerts, asOf }: { alerts: { article_id: string; desi
           <div className={`bar ${a.severity}`} />
           <div>
             <div className="msg"><Link to={`/articles/${encodeURIComponent(a.article_id)}`}><b>{a.article_id}</b></Link> · {a.message}</div>
-            <div className="who"><span>{ALERT_LABELS[a.alert_type] ?? a.alert_type}</span><span>{a.designation}</span>{a.scope === "firm" && <span>flux fermes</span>}{a.date && asOf && <span>J{daysFrom(a.date, asOf)! >= 0 ? "+" : ""}{daysFrom(a.date, asOf)}</span>}</div>
+            <div className="who"><span>{ALERT_LABELS[a.alert_type] ?? a.alert_type}</span><span>{a.designation}</span>{a.scope !== "data" && a.scope !== "simulated" && <span>flux {SCOPE_LABELS[a.scope] ?? a.scope}{a.scope === "firm" ? "s" : ""}</span>}{a.date && asOf && <span>J{daysFrom(a.date, asOf)! >= 0 ? "+" : ""}{daysFrom(a.date, asOf)}</span>}</div>
           </div>
         </div>
       ))}

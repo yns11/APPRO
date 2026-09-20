@@ -33,10 +33,11 @@ export function periodLabel(p: string, granularity: "day" | "week"): string {
 }
 export const ALERT_LABELS: Record<string, string> = {
   STOCKOUT: "Rupture", LOW_COVERAGE: "Couverture insuffisante", OVERSTOCK: "Surstock", LATE_ORDER: "Retard fournisseur",
-  URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock négatif",
+  URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock de départ négatif",
 };
 export const SEVERITY_LABELS: Record<string, string> = { critical: "Critique", warning: "À surveiller", info: "Info" };
 export const KIND_LABELS: Record<string, string> = { order: "Commande", receipt: "Réception", movement: "Ajustement", proposal: "Proposition" };
+export const SCOPE_LABELS: Record<string, string> = { firm: "ferme", forecast: "prévisionnel", simulated: "simulé", data: "données" };
 export const ORDER_TYPE_LABELS: Record<string, string> = { FIRM: "Ferme", FORECAST: "Prévisionnelle", PLANNED: "Planifiée", PROPOSAL: "Proposition", RECEIPT: "Réception" };
 export const EVENT_KIND_LABELS: Record<string, string> = {
   add_order: "Ajouter une commande", move_order: "Décaler une commande", change_order_qty: "Modifier une quantité", cancel_order: "Annuler une commande",

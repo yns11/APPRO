@@ -8,7 +8,7 @@ Algorithm (per article, on the *simulated* stock)::
             qty      = round_up(max(need, MOQ), pack_qty)
             delivery = nearest allowed delivery day (working day & supplier delivery weekday)
             order    = delivery - lead_time (working days); urgent when order < as_of
-            stock[delivery:] += qty                      # and continue scanning
+            re-project the simulated stock with the proposal and continue scanning
 
 Supplier choice follows the sourcing policy: ``quota`` (keep the cumulated proposed
 quantities close to the quota split, deterministic) or ``priority`` (always the priority-1
@@ -18,12 +18,14 @@ article / supplier link records.
 from __future__ import annotations
 
 import datetime as dt
+from typing import Callable
 
 import numpy as np
 
 from .calendar import WorkCalendar
 from .demand import DayIndex, ceil_to_multiple
 from .models import Article, EngineParams, Proposal, Supplier, SupplierLink
+from .projection import Projection
 
 EPS = 1e-6
 
@@ -98,8 +100,14 @@ def generate_proposals(
     params: EngineParams,
     seq_start: int = 1,
     supply_planned: np.ndarray | None = None,
+    reproject: Callable[[np.ndarray], Projection] | None = None,
 ) -> tuple[list[Proposal], np.ndarray, np.ndarray]:
-    """Return proposals, the proposed-supply series and the resulting simulated stock.
+    """Return proposals, the proposed-supply series and the resulting simulated net stock.
+
+    ``stock_sim`` is the *net* simulated balance before proposals.  ``reproject(proposed)``
+    recomputes the projection with the proposed supply added: it keeps the ``lost`` shortage
+    policy exact (a receipt that arrives after a lost day does not serve that day).  Without it
+    the proposal is simply added to the balance from its delivery day on (``backlog`` policy).
 
     ``supply_planned`` (forecast / planned, non-firm supply per day) is only used to enrich the
     reason of urgent proposals: when a later non-firm order exists, advancing it is usually the
@@ -155,8 +163,11 @@ def generate_proposals(
             order_date = calendar.add_working_days(delivery, -lead)
             urgent = order_date < as_of
             before = float(stock[k])
-            stock[j:] += qty
             proposed[j] += qty
+            if reproject is not None:
+                stock = reproject(proposed).net
+            else:
+                stock[j:] += qty
             if link:
                 proposed_by_supplier[link.supplier_id] = proposed_by_supplier.get(link.supplier_id, 0.0) + qty
             reason = f"Stock projeté {before:,.0f} < cible {target[k]:,.0f} le {index.dates[k].isoformat()}"

@@ -12,18 +12,26 @@ SERIES_LABELS = [
     ("demand", "Besoin"),
     ("demand_plan", "Besoin (plan seul)"),
     ("supply_firm", "Commandes fermes"),
-    ("supply_planned", "Commandes planifiées / prévisionnelles"),
+    ("supply_forecast", "Commandes prévisionnelles (ERP)"),
+    ("supply_planned", "Commandes planifiées (saisies)"),
     ("supply_proposed", "Propositions"),
     ("receipts", "Réceptions"),
     ("adjustments", "Ajustements"),
     ("stock_firm", "Stock ferme"),
+    ("stock_forecast", "Stock prévisionnel"),
     ("stock_sim", "Stock simulé"),
+    ("shortage_firm", "Manque ferme"),
+    ("shortage_forecast", "Manque prévisionnel"),
+    ("shortage_sim", "Manque simulé"),
     ("target_stock", "Stock cible"),
     ("coverage_firm", "Couverture ferme (j)"),
+    ("coverage_forecast", "Couverture prévisionnelle (j)"),
     ("coverage_sim", "Couverture simulée (j)"),
     ("demand_actual_share", "Part du réel dans le besoin"),
 ]
-FLOWS = {"demand", "demand_plan", "supply_firm", "supply_planned", "supply_proposed", "receipts", "adjustments"}
+FLOWS = {"demand", "demand_plan", "supply_firm", "supply_forecast", "supply_planned", "supply_proposed", "receipts",
+         "adjustments"}
+SHORTAGES = {"shortage_firm", "shortage_forecast", "shortage_sim"}
 
 
 def alert_out(a: Alert, designation: str = "") -> S.AlertOut:
@@ -95,6 +103,7 @@ def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
         urgent_proposals=sum(1 for p in props if p.urgent),
         proposals_qty=float(sum(p.qty for p in props)),
         open_firm_qty=float(sum(r.kpis["open_firm_qty"] for r in arts)),
+        open_forecast_qty=float(sum(r.kpis["open_forecast_qty"] for r in arts)),
         open_planned_qty=float(sum(r.kpis["open_planned_qty"] for r in arts)),
         avg_coverage_days=(round(sum(cov) / len(cov), 1) if cov else None),
         demand_next_30d=float(sum(r.kpis["demand_next_30d"] for r in arts)),
@@ -120,7 +129,7 @@ def weekly_supply_demand(result: MrpResult, weeks: int = 12) -> list[dict[str, A
     for b in buckets.values():
         i = b["_last"]
         for r in arts:
-            if r.stock_sim[i] < 0:
+            if r.shortage_sim[i] > 0:
                 b["stockout_articles"] += 1
             elif r.stock_sim[i] < r.target_stock[i]:
                 b["below_target_articles"] += 1
@@ -147,9 +156,11 @@ def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, suppl
     labels = list(groups)
     starts = [ar.dates[g[0]] for g in groups.values()]
     series = []
+    # a lost quantity is a flow (summed over the period); a backlog is a level (end of period)
+    lost = result.params.shortage_policy == "lost"
     for key, label in SERIES_LABELS:
         raw = getattr(ar, key)
-        if key in FLOWS:
+        if key in FLOWS or (lost and key in SHORTAGES):
             vals = [round(float(sum(raw[i] for i in g)), 3) for g in groups.values()]
         elif key == "demand_actual_share":
             vals = [round(float(sum(raw[i] for i in g) / len(g)), 3) for g in groups.values()]
@@ -172,12 +183,13 @@ def compare_articles(base: MrpResult, scen: MrpResult) -> list[S.CompareArticle]
         s = scen.articles.get(aid)
         if s is None:
             continue
-        keys = ("stock_as_of_sim", "coverage_sim_days", "first_stockout_sim", "min_stock_sim", "proposal_count",
-                "proposed_qty", "urgent_proposal_count", "demand_next_30d", "severity")
+        keys = ("stock_as_of_sim", "coverage_sim_days", "first_stockout_sim", "min_stock_sim", "max_shortage_sim",
+                "proposal_count", "proposed_qty", "urgent_proposal_count", "demand_next_30d", "severity")
         out.append(S.CompareArticle(
             article_id=aid, designation=b.article.designation, unit=b.article.unit,
             base={k: b.kpis.get(k) for k in keys}, scenario={k: s.kpis.get(k) for k in keys},
             delta_min_stock=float(s.kpis["min_stock_sim"] - b.kpis["min_stock_sim"]),
+            delta_max_shortage=float(s.kpis["max_shortage_sim"] - b.kpis["max_shortage_sim"]),
             delta_coverage=int(s.kpis["coverage_sim_days"] - b.kpis["coverage_sim_days"]),
             stockout_changed=(b.kpis.get("first_stockout_sim") != s.kpis.get("first_stockout_sim"))))
     return out

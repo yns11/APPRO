@@ -7,17 +7,28 @@ import numpy as np
 
 from .demand import DayIndex
 from .models import Alert, AlertType, Article, EngineParams, OrderLine, Proposal, Severity, SupplierLink
-from .projection import first_negative
+from .projection import Projection, first_shortage
+
+
+def _severity_by_horizon(days_ahead: int, lead: int, params: EngineParams) -> Severity:
+    """Inside the lead time nothing can be done any more; inside the firm horizon the planner
+    must act (confirm / order); beyond it the alert is informational."""
+    if days_ahead <= lead:
+        return Severity.CRITICAL
+    if days_ahead <= params.firm_horizon_days:
+        return Severity.WARNING
+    return Severity.INFO
 
 
 def classify_alerts(
     article: Article,
     index: DayIndex,
     as_of: dt.date,
-    stock_firm: np.ndarray,
-    stock_sim: np.ndarray,
-    coverage_firm: np.ndarray,
+    firm: Projection,
+    forecast: Projection,
+    sim: Projection,
     coverage_sim: np.ndarray,
+    stock_start: float,
     demand: np.ndarray,
     open_orders: list[OrderLine],
     late_orders: list[OrderLine],
@@ -47,40 +58,46 @@ def classify_alerts(
                             "Article absent des nomenclatures : aucun besoin calculé", scope="data"))
 
     # --- stock / coverage ----------------------------------------------------------
-    if stock_sim[i0] < -1e-6:
+    if stock_start < -1e-6:
         alerts.append(Alert(aid, AlertType.NEGATIVE_STOCK, Severity.CRITICAL,
-                            f"Stock négatif à date ({stock_sim[i0]:,.0f}) : vérifier inventaire / saisies",
-                            date=as_of, value=float(stock_sim[i0])))
+                            f"Stock de départ négatif dans l'ERP ({stock_start:,.0f}) : vérifier inventaire / saisies",
+                            date=as_of, value=float(stock_start), scope="data"))
 
-    for scope, stock in (("simulated", stock_sim), ("firm", stock_firm)):
-        k = first_negative(stock, i0, last)
-        if k is not None:
-            days_ahead = k - i0
-            worst = float(np.min(stock[k:]))
-            if scope == "simulated":
-                sev = Severity.CRITICAL
-                msg = f"Rupture projetée le {index.dates[k].isoformat()} (J+{days_ahead}), manque max {abs(worst):,.0f}"
-            else:
-                # inside the lead time nothing can be done any more; inside the firm horizon the
-                # planner must confirm forecast / planned orders; beyond it is informational.
-                if days_ahead <= lead:
-                    sev = Severity.CRITICAL
-                elif days_ahead <= params.firm_horizon_days:
-                    sev = Severity.WARNING
-                else:
-                    sev = Severity.INFO
-                msg = (f"Rupture sur flux fermes le {index.dates[k].isoformat()} (J+{days_ahead}) : "
-                       f"commandes prévisionnelles / planifiées à confirmer")
-            alerts.append(Alert(aid, AlertType.STOCKOUT, sev, msg, date=index.dates[k], value=worst,
-                                scope=scope, details={"days_ahead": days_ahead, "lead_time_days": lead}))
+    # Stockouts per layer.  A physical stock is never negative: a stockout is the first day
+    # with an unserved demand (backlog or lost quantity, see ``shortage_policy``).
+    k_sim = first_shortage(sim.shortage, i0, last)
+    k_fc = first_shortage(forecast.shortage, i0, last)
+    k_firm = first_shortage(firm.shortage, i0, last)
+    if k_sim is not None:
+        worst = float(np.max(sim.shortage[k_sim:]))
+        alerts.append(Alert(aid, AlertType.STOCKOUT, Severity.CRITICAL,
+                            f"Rupture simulée le {index.dates[k_sim].isoformat()} (J+{k_sim - i0}) malgré les saisies "
+                            f"et propositions, manque max {worst:,.0f}", date=index.dates[k_sim], value=worst,
+                            scope="simulated", details={"days_ahead": k_sim - i0, "lead_time_days": lead}))
+    if k_fc is not None and k_fc != k_firm:
+        worst = float(np.max(forecast.shortage[k_fc:]))
+        alerts.append(Alert(aid, AlertType.STOCKOUT, _severity_by_horizon(k_fc - i0, lead, params),
+                            f"Rupture sur flux ERP (fermes + prévisionnels) le {index.dates[k_fc].isoformat()} "
+                            f"(J+{k_fc - i0}) : commande à passer / proposition à valider", date=index.dates[k_fc],
+                            value=worst, scope="forecast", details={"days_ahead": k_fc - i0, "lead_time_days": lead}))
+    if k_firm is not None:
+        worst = float(np.max(firm.shortage[k_firm:]))
+        if k_fc is not None and k_fc > k_firm:
+            hint = (f"commandes prévisionnelles à confirmer (elles couvrent jusqu'au "
+                    f"{index.dates[k_fc - 1].isoformat()})")
+        else:
+            hint = "aucune commande prévisionnelle ne couvre cette date : commande à passer"
+        alerts.append(Alert(aid, AlertType.STOCKOUT, _severity_by_horizon(k_firm - i0, lead, params),
+                            f"Rupture sur flux fermes le {index.dates[k_firm].isoformat()} (J+{k_firm - i0}) : {hint}",
+                            date=index.dates[k_firm], value=worst, scope="firm",
+                            details={"days_ahead": k_firm - i0, "lead_time_days": lead}))
 
     # Coverage alerts are based on the *run-out* of the firm flows (on-hand stock + committed
-    # supply): the number of days before the firm stock becomes negative.  The pure on-hand
-    # coverage (``coverage_sim[i0]``) is a KPI but would flag most JIT articles every week.
+    # supply): the number of days before the firm stock cannot serve the demand.  The pure
+    # on-hand coverage (``coverage_sim[i0]``) is a KPI but would flag most JIT articles every week.
     cov = int(coverage_sim[i0])
-    k_firm = first_negative(stock_firm, i0, last)
     runout_firm = (k_firm - i0) if k_firm is not None else None
-    if stock_sim[i0] >= -1e-6 and demand[i0:].sum() > 0:
+    if sim.shortage[i0] <= 1e-9 and demand[i0:].sum() > 0:
         if runout_firm is not None and runout_firm <= article.alert_red_days:
             alerts.append(Alert(aid, AlertType.LOW_COVERAGE, Severity.CRITICAL,
                                 f"Flux fermes épuisés dans {runout_firm} j (≤ seuil rouge {article.alert_red_days} j) ; "
@@ -95,10 +112,10 @@ def classify_alerts(
             alerts.append(Alert(aid, AlertType.OVERSTOCK, Severity.INFO,
                                 f"Surstock : le stock à date couvre {cov} j de besoin (≥ {article.overstock_days} j)",
                                 date=as_of, value=cov))
-    if demand[i0:].sum() <= 1e-9 and stock_sim[i0] > 0:
+    if demand[i0:].sum() <= 1e-9 and sim.stock[i0] > 0:
         alerts.append(Alert(aid, AlertType.NO_DEMAND, Severity.INFO,
                             "Aucun besoin sur l'horizon alors que du stock existe (article dormant ?)",
-                            date=as_of, value=float(stock_sim[i0])))
+                            date=as_of, value=float(sim.stock[i0])))
 
     # --- supply --------------------------------------------------------------------
     for o in late_orders:

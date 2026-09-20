@@ -40,8 +40,11 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "proposal_lookahead_days": ("Limiter les propositions à J + n (vide = tout l'horizon)", None),
     "stockout_lookahead_days": ("Limiter la détection de rupture à J + n (vide = tout l'horizon)", None),
     "firm_horizon_days": ("Horizon ferme : une rupture sur flux fermes au-delà est informative", None),
-    "firm_sources": ("Types de commandes comptés dans le stock ferme", None),
-    "simulated_sources": ("Types de commandes comptés dans le stock simulé", None),
+    "shortage_policy": ("Besoin non servi : reporté (backlog, stock net négatif) ou perdu (stock borné à 0)", ["backlog", "lost"]),
+    "firm_sources": ("Types de commandes du stock ferme (FIRM = DELJIT / OA / saisie envoyée)", None),
+    "forecast_sources": ("Types ajoutés au stock prévisionnel (FORECAST = DELFOR)", None),
+    "simulated_sources": ("Types ajoutés au stock simulé (PLANNED = saisies / propositions acceptées)", None),
+    "app_firm_orders": ("Commandes saisies marquées envoyées : couche ferme, ou simulation seulement", ["firm", "simulated"]),
 }
 
 

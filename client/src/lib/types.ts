@@ -24,11 +24,14 @@ export interface ProposalOut {
 export interface SupplyEventOut { date: string; kind: string; ref: string; qty: number; supplier_id: string | null; order_type: string; source: string; late: boolean; }
 
 export interface ArticleKpis {
-  stock_on_hand: number; snapshot_date: string; stock_as_of_firm: number; stock_as_of_sim: number;
-  coverage_firm_days: number; coverage_sim_days: number; coverage_target_days: number; target_stock: number;
-  first_stockout_sim: string | null; first_stockout_firm: string | null; min_stock_sim: number; min_stock_firm: number;
+  stock_on_hand: number; snapshot_date: string; shortage_policy: "backlog" | "lost";
+  stock_as_of_firm: number; stock_as_of_forecast: number; stock_as_of_sim: number;
+  coverage_firm_days: number; coverage_forecast_days: number; coverage_sim_days: number; coverage_target_days: number; target_stock: number;
+  first_stockout_firm: string | null; first_stockout_forecast: string | null; first_stockout_sim: string | null;
+  min_stock_firm: number; min_stock_forecast: number; min_stock_sim: number;
+  max_shortage_firm: number; max_shortage_forecast: number; max_shortage_sim: number;
   demand_next_7d: number; demand_next_30d: number; demand_horizon: number; avg_daily_demand_30d: number;
-  open_firm_qty: number; open_planned_qty: number; proposed_qty: number; proposal_count: number; urgent_proposal_count: number;
+  open_firm_qty: number; open_forecast_qty: number; open_planned_qty: number; proposed_qty: number; proposal_count: number; urgent_proposal_count: number;
   late_order_count: number; late_order_qty: number; alert_count: number; severity: Severity | null; actual_share_30d: number;
 }
 export interface ArticleSummary {
@@ -37,7 +40,7 @@ export interface ArticleSummary {
 }
 export interface CockpitKpis {
   articles: number; critical: number; warning: number; stockouts: number; stockouts_7d: number; low_coverage: number; overstock: number;
-  late_orders: number; proposals: number; urgent_proposals: number; proposals_qty: number; open_firm_qty: number; open_planned_qty: number;
+  late_orders: number; proposals: number; urgent_proposals: number; proposals_qty: number; open_firm_qty: number; open_forecast_qty: number; open_planned_qty: number;
   avg_coverage_days: number | null; demand_next_30d: number;
 }
 export interface WeeklyOutlook { week: string; week_start: string; stockout_articles: number; below_target_articles: number; proposals: number; proposed_qty: number; }
@@ -60,7 +63,7 @@ export interface ProductionOut { id: string; program_id: string; date: string; q
 
 export interface ScenarioEvent { id?: string; seq?: number; kind: string; payload: Record<string, unknown>; label: string; }
 export interface ScenarioOut { id: string; name: string; description: string; status: string; params: Record<string, unknown>; events: ScenarioEvent[]; created_by: string; created_at: string; updated_at: string; }
-export interface CompareArticle { article_id: string; designation: string; unit: string; base: Record<string, unknown>; scenario: Record<string, unknown>; delta_min_stock: number; delta_coverage: number; stockout_changed: boolean; }
+export interface CompareArticle { article_id: string; designation: string; unit: string; base: Record<string, unknown>; scenario: Record<string, unknown>; delta_min_stock: number; delta_max_shortage: number; delta_coverage: number; stockout_changed: boolean; }
 export interface CompareResponse { as_of: string; base_kpis: CockpitKpis; scenario_kpis: CockpitKpis; articles: CompareArticle[]; diagnostics: string[]; }
 
 export interface ParamDoc { field: string; default: unknown; type: string; description: string; options: string[] | null; }

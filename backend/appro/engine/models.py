@@ -205,14 +205,17 @@ class EngineParams:
     missing_actual_policy: Literal["plan", "zero"] = "plan"
     consumption_offset_days: int = 0              # <0: components consumed before the production day
 
-    # Supply
-    firm_sources: tuple[str, ...] = ("FIRM",)     # order types counted in the *firm* stock
-    simulated_sources: tuple[str, ...] = ("FIRM", "FORECAST", "PLANNED")  # counted in the simulated stock
+    # Supply – three cumulative stock layers: firm ⊂ forecast ⊂ simulated
+    firm_sources: tuple[str, ...] = ("FIRM",)          # order types in the *firm* stock
+    forecast_sources: tuple[str, ...] = ("FORECAST",)  # added to the firm flows → *forecast* stock
+    simulated_sources: tuple[str, ...] = ("PLANNED",)  # added to the forecast flows → *simulated* stock
+    app_firm_orders: Literal["firm", "simulated"] = "firm"  # app orders marked sent: firm layer, or simulation only
     include_proposals_in_simulation: bool = True
     late_order_policy: Literal["reschedule", "ignore", "keep"] = "reschedule"
     orders_source: Literal["merged", "erp", "app"] = "merged"
 
     # Coverage / stock policy
+    shortage_policy: Literal["backlog", "lost"] = "backlog"  # unserved demand: carried forward or lost
     coverage_unit: Literal["calendar", "working"] = "calendar"
     coverage_tie_rule: Literal["covered", "not_covered"] = "covered"
     target_policy: Literal["coverage_days", "safety_qty", "max"] = "max"
@@ -263,7 +266,7 @@ class Alert:
     message: str
     date: dt.date | None = None
     value: float | None = None
-    scope: Literal["firm", "simulated", "data"] = "simulated"
+    scope: Literal["firm", "forecast", "simulated", "data"] = "simulated"
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -310,14 +313,24 @@ class ArticleResult:
     demand: list[float]
     demand_plan: list[float]
     demand_actual_share: list[float]
-    supply_firm: list[float]
-    supply_planned: list[float]
-    supply_proposed: list[float]
+    supply_firm: list[float]          # committed orders
+    supply_forecast: list[float]      # ERP forecast schedule lines
+    supply_planned: list[float]       # app / scenario planned orders (not sent)
+    supply_proposed: list[float]      # engine proposals
     receipts: list[float]
     adjustments: list[float]
+    # physical stocks (never negative), unserved demand and net balances per layer
     stock_firm: list[float]
+    stock_forecast: list[float]
     stock_sim: list[float]
+    shortage_firm: list[float]
+    shortage_forecast: list[float]
+    shortage_sim: list[float]
+    stock_firm_net: list[float]
+    stock_forecast_net: list[float]
+    stock_sim_net: list[float]
     coverage_firm: list[int]
+    coverage_forecast: list[int]
     coverage_sim: list[int]
     target_stock: list[float]
     events: list[SupplyEvent]

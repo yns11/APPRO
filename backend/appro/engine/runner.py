@@ -10,7 +10,7 @@ from .alerts import classify_alerts, worst_severity
 from .calendar import WorkCalendar
 from .demand import DayIndex, actual_share, build_program_daily, explode_demand
 from .models import Alert, ArticleResult, Dataset, EngineParams, MrpResult, OrderLine, OrderType, SupplyEvent
-from .projection import coverage_days, first_negative, project_stock, target_stock
+from .projection import Projection, coverage_days, first_shortage, project_stock, target_stock
 from .proposals import generate_proposals
 
 
@@ -99,6 +99,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         snap_date = index.dates[i_snap]
 
         supply_firm = np.zeros(n)
+        supply_forecast = np.zeros(n)
         supply_planned = np.zeros(n)
         receipts = np.zeros(n)
         adjustments = np.zeros(n)
@@ -127,14 +128,19 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             i = index.offset(day)
             if i is None:
                 continue
-            open_orders.append(o)
             typ = o.order_type.value
-            if typ in params.firm_sources:
+            layer_type = typ
+            if o.source != "ERP" and params.app_firm_orders == "simulated":
+                layer_type = "PLANNED"  # planner entries never feed the firm / forecast layers
+            if layer_type in params.firm_sources:
                 supply_firm[i] += qty
-            elif typ in params.simulated_sources:
+            elif layer_type in params.forecast_sources:
+                supply_forecast[i] += qty
+            elif layer_type in params.simulated_sources:
                 supply_planned[i] += qty
             else:
                 continue
+            open_orders.append(o)
             events.append(SupplyEvent(day, "order", o.order_id, qty, o.supplier_id, typ, o.source, late))
 
         for r in receipts_by_article.get(aid, []):
@@ -156,56 +162,71 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
 
         # zero everything before the snapshot day (unknown history)
         if i_snap > 0:
-            for arr in (supply_firm, supply_planned, receipts, adjustments):
+            for arr in (supply_firm, supply_forecast, supply_planned, receipts, adjustments):
                 arr[:i_snap] = 0.0
         demand_proj = demand.copy()
         demand_proj[:i_snap + 1] = 0.0  # snapshot day already consumed
 
-        base_supply_firm = supply_firm + receipts
-        stock_firm = project_stock(stock_start, base_supply_firm, adjustments, demand_proj)
-        stock_sim = project_stock(stock_start, base_supply_firm + supply_planned, adjustments, demand_proj)
-        if i_snap > 0:
-            stock_firm[:i_snap] = stock_start
-            stock_sim[:i_snap] = stock_start
+        # three cumulative layers: firm ⊂ forecast ⊂ simulated
+        def project(supply: np.ndarray) -> Projection:
+            return project_stock(stock_start, supply, adjustments, demand_proj, params.shortage_policy, i_snap)
+
+        supply_firm_all = supply_firm + receipts
+        supply_forecast_all = supply_firm_all + supply_forecast
+        supply_sim_all = supply_forecast_all + supply_planned
+        firm = project(supply_firm_all)
+        forecast = project(supply_forecast_all)
+        sim = project(supply_sim_all)
         target = target_stock(demand, article, index, calendar, params)
 
         proposals, supply_proposed = [], np.zeros(n)
         if params.generate_proposals:
-            proposals, supply_proposed, stock_after = generate_proposals(
-                article, links_by_article.get(aid, []), suppliers, stock_sim, demand, target,
-                index, calendar, as_of, params, supply_planned=supply_planned)
+            proposals, supply_proposed, _ = generate_proposals(
+                article, links_by_article.get(aid, []), suppliers, sim.net, demand, target,
+                index, calendar, as_of, params, supply_planned=supply_forecast + supply_planned,
+                reproject=lambda extra: project(supply_sim_all + extra))
             if params.include_proposals_in_simulation:
-                stock_sim = stock_after
+                sim = project(supply_sim_all + supply_proposed)
                 for p in proposals:
                     events.append(SupplyEvent(p.delivery_date, "proposal", p.proposal_id, p.qty, p.supplier_id,
                                               "PROPOSAL", "ENGINE", p.urgent))
-        cov_firm = coverage_days(stock_firm, demand, index, calendar, params.coverage_unit, params.coverage_tie_rule)
-        cov_sim = coverage_days(stock_sim, demand, index, calendar, params.coverage_unit, params.coverage_tie_rule)
+        cov = {name: coverage_days(layer.net, demand, index, calendar, params.coverage_unit, params.coverage_tie_rule)
+               for name, layer in (("firm", firm), ("forecast", forecast), ("sim", sim))}
 
-        alerts = classify_alerts(article, index, as_of, stock_firm, stock_sim, cov_firm, cov_sim, demand,
+        alerts = classify_alerts(article, index, as_of, firm, forecast, sim, cov["sim"], stock_start, demand,
                                  open_orders, late_orders, proposals, links_by_article.get(aid, []),
                                  aid in bom_articles, snap is not None, params)
-        k_sim = first_negative(stock_sim, i_as_of)
-        k_firm = first_negative(stock_firm, i_as_of)
+        last = None if params.stockout_lookahead_days is None else i_as_of + params.stockout_lookahead_days
+        k = {name: first_shortage(layer.shortage, i_as_of, last)
+             for name, layer in (("firm", firm), ("forecast", forecast), ("sim", sim))}
         horizon_slice = slice(i_as_of, n)
         kpis = {
             "stock_on_hand": float(stock_start),
             "snapshot_date": snap_date.isoformat(),
-            "stock_as_of_firm": float(stock_firm[i_as_of]),
-            "stock_as_of_sim": float(stock_sim[i_as_of]),
-            "coverage_firm_days": int(cov_firm[i_as_of]),
-            "coverage_sim_days": int(cov_sim[i_as_of]),
+            "shortage_policy": params.shortage_policy,
+            "stock_as_of_firm": float(firm.stock[i_as_of]),
+            "stock_as_of_forecast": float(forecast.stock[i_as_of]),
+            "stock_as_of_sim": float(sim.stock[i_as_of]),
+            "coverage_firm_days": int(cov["firm"][i_as_of]),
+            "coverage_forecast_days": int(cov["forecast"][i_as_of]),
+            "coverage_sim_days": int(cov["sim"][i_as_of]),
             "coverage_target_days": int(article.coverage_target_days),
             "target_stock": float(target[i_as_of]),
-            "first_stockout_sim": index.dates[k_sim].isoformat() if k_sim is not None else None,
-            "first_stockout_firm": index.dates[k_firm].isoformat() if k_firm is not None else None,
-            "min_stock_sim": float(np.min(stock_sim[horizon_slice])),
-            "min_stock_firm": float(np.min(stock_firm[horizon_slice])),
+            "first_stockout_firm": index.dates[k["firm"]].isoformat() if k["firm"] is not None else None,
+            "first_stockout_forecast": index.dates[k["forecast"]].isoformat() if k["forecast"] is not None else None,
+            "first_stockout_sim": index.dates[k["sim"]].isoformat() if k["sim"] is not None else None,
+            "min_stock_firm": float(np.min(firm.stock[horizon_slice])),
+            "min_stock_forecast": float(np.min(forecast.stock[horizon_slice])),
+            "min_stock_sim": float(np.min(sim.stock[horizon_slice])),
+            "max_shortage_firm": float(np.max(firm.shortage[horizon_slice])),
+            "max_shortage_forecast": float(np.max(forecast.shortage[horizon_slice])),
+            "max_shortage_sim": float(np.max(sim.shortage[horizon_slice])),
             "demand_next_7d": float(demand[i_as_of + 1:i_as_of + 8].sum()),
             "demand_next_30d": float(demand[i_as_of + 1:i_as_of + 31].sum()),
             "demand_horizon": float(demand[horizon_slice].sum()),
             "avg_daily_demand_30d": float(demand[i_as_of + 1:i_as_of + 31].sum() / max(1, min(30, n - i_as_of - 1))),
             "open_firm_qty": float(supply_firm[horizon_slice].sum()),
+            "open_forecast_qty": float(supply_forecast[horizon_slice].sum()),
             "open_planned_qty": float(supply_planned[horizon_slice].sum()),
             "proposed_qty": float(supply_proposed.sum()),
             "proposal_count": len(proposals),
@@ -219,10 +240,15 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         results[aid] = ArticleResult(
             article=article, start_date=start, as_of=as_of, dates=index.dates,
             demand=demand.tolist(), demand_plan=dplan.tolist(), demand_actual_share=share.tolist(),
-            supply_firm=supply_firm.tolist(), supply_planned=supply_planned.tolist(),
-            supply_proposed=supply_proposed.tolist(), receipts=receipts.tolist(), adjustments=adjustments.tolist(),
-            stock_firm=stock_firm.tolist(), stock_sim=stock_sim.tolist(),
-            coverage_firm=cov_firm.tolist(), coverage_sim=cov_sim.tolist(), target_stock=target.tolist(),
+            supply_firm=supply_firm.tolist(), supply_forecast=supply_forecast.tolist(),
+            supply_planned=supply_planned.tolist(), supply_proposed=supply_proposed.tolist(),
+            receipts=receipts.tolist(), adjustments=adjustments.tolist(),
+            stock_firm=firm.stock.tolist(), stock_forecast=forecast.stock.tolist(), stock_sim=sim.stock.tolist(),
+            shortage_firm=firm.shortage.tolist(), shortage_forecast=forecast.shortage.tolist(),
+            shortage_sim=sim.shortage.tolist(),
+            stock_firm_net=firm.net.tolist(), stock_forecast_net=forecast.net.tolist(), stock_sim_net=sim.net.tolist(),
+            coverage_firm=cov["firm"].tolist(), coverage_forecast=cov["forecast"].tolist(),
+            coverage_sim=cov["sim"].tolist(), target_stock=target.tolist(),
             events=sorted(events, key=lambda e: (e.date, e.kind, e.ref)), alerts=alerts, proposals=proposals,
             kpis=kpis, suppliers=links_by_article.get(aid, []), diagnostics=notes,
         )

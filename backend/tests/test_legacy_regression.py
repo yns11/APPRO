@@ -64,7 +64,7 @@ def test_projected_stock_matches_excel(legacy, legacy_result):
     for aid, exp in legacy["articles"].items():
         got = result.articles[aid]
         idx = got.dates.index(start)
-        mine = np.array(got.stock_firm[idx: idx + len(exp["stock"])])
+        mine = np.array(got.stock_firm_net[idx: idx + len(exp["stock"])])
         theirs = np.array([v for v in exp["stock"]], dtype=float)
         assert np.allclose(mine, theirs, atol=0.05), f"{aid}: stock differs (max diff {np.abs(mine - theirs).max()})"
 

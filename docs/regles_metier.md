@@ -34,17 +34,27 @@ entre crochets. Les variantes possibles sont listées pour chaque règle.
    décale la consommation (ex. −1 : composants consommés la veille).
 4. Un PDP importé et **actif** remplace le plan ERP pour les programmes qu'il contient.
 
-## 3. Approvisionnements
+## 3. Approvisionnements et couches de stock
 
-| Élément | Ferme | Simulé | Règle |
-|---|---|---|---|
-| Commande ERP `FIRM` (DELJIT / OA) | ✔ | ✔ | quantité ouverte = commandée − reçue |
-| Commande ERP `FORECAST` (DELFOR) | – | ✔ | `forecast` compté dans le stock simulé seulement (`simulated_sources`) |
-| Commande app `PLANNED` | – | ✔ | saisie ou proposition acceptée, non envoyée |
-| Commande app `FIRM` / statut `SENT` | ✔ | ✔ | envoyée au fournisseur |
-| Proposition moteur | – | ✔ (option) | `include_proposals_in_simulation` [oui] |
-| Réception postérieure au snapshot | ✔ | ✔ | comptée à sa date ; **solde la commande** liée (plus de double compte) |
-| Ajustement (inventaire, casse…) | ✔ | ✔ | compté à sa date s'il est postérieur au snapshot |
+Trois stocks **cumulatifs** sont projetés (ferme ⊂ prévisionnel ⊂ simulé) : les deux premiers reposent
+sur les données ERP (EDI ferme puis EDI prévisionnel), le troisième ajoute ce que l'approvisionneur
+décide dans l'application (saisies, propositions).
+
+| Élément | Ferme | Prévisionnel | Simulé | Règle |
+|---|---|---|---|---|
+| Commande ERP `FIRM` (DELJIT / OA) | ✔ | ✔ | ✔ | quantité ouverte = commandée − reçue (`firm_sources`) |
+| Commande ERP `FORECAST` (DELFOR) | – | ✔ | ✔ | `forecast_sources` |
+| Commande app `FIRM` / statut `SENT` | ✔ | ✔ | ✔ | envoyée au fournisseur ; `app_firm_orders = simulated` la confine au stock simulé |
+| Commande app `PLANNED` | – | – | ✔ | saisie ou proposition acceptée, non envoyée (`simulated_sources`) |
+| Commande de scénario | – | – | ✔ | idem |
+| Proposition moteur | – | – | ✔ (option) | `include_proposals_in_simulation` [oui] |
+| Réception postérieure au snapshot | ✔ | ✔ | ✔ | fait physique : comptée à sa date ; **solde la commande** liée (plus de double compte) |
+| Ajustement (inventaire, casse…) | ✔ | ✔ | ✔ | fait physique : compté à sa date s'il est postérieur au snapshot |
+
+Lecture : le stock **ferme** répond à « que se passe-t-il si rien d'autre n'arrive ? », le stock
+**prévisionnel** à « l'ERP suffit-il ? » (les lignes DELFOR sont-elles à confirmer / avancer ?), le stock
+**simulé** à « mes décisions suffisent-elles ? ». Les propositions sont calculées sur le stock simulé
+(avant propositions) : elles ne proposent que ce que ni l'ERP ni les saisies ne couvrent.
 
 * **Commande en retard** (date attendue < `as_of`, non reçue) → alerte `LATE_ORDER` et
   `late_order_policy` : `reschedule` [défaut, replanifiée au prochain jour ouvré], `ignore`, `keep`.
@@ -52,16 +62,31 @@ entre crochets. Les variantes possibles sont listées pour chaque règle.
 * Une réception app rattachée à une commande ERP réduit la quantité ouverte de celle-ci tant que l'ERP
   ne l'a pas intégrée (à supprimer ensuite ; l'écran *Saisies* le rappelle).
 
-## 4. Projection de stock
+## 4. Projection de stock et besoin non servi
 
-`stock[j] = stock[j−1] + approvisionnements[j] + ajustements[j] − besoin[j]`, à partir du stock du snapshot
-(`qty_on_hand − qty_blocked`). Deux séries : **stock ferme** et **stock simulé** (cf. tableau ci-dessus).
+`x[j] = stock[j−1] + approvisionnements[j] + ajustements[j] − besoin[j]`, à partir du stock du snapshot
+(`qty_on_hand − qty_blocked`), pour chacune des trois couches.
+
+Un stock physique n'est **jamais négatif** : l'application affiche le stock physique et, séparément, le
+**manque** (besoin non servi). Le sort de ce besoin non servi est un paramètre, `shortage_policy` :
+
+* `backlog` [défaut, logique MRP « projected available balance »] : le besoin non servi est **reporté** ;
+  le solde net `x` devient négatif, les réceptions suivantes servent d'abord ce retard. Stock affiché
+  `= max(x, 0)`, manque `= max(−x, 0)` (retard cumulé). C'est le comportement à retenir quand la
+  production non faite est **décalée** (le composant sera consommé plus tard) ;
+* `lost` : le besoin non servi est **perdu** ; `stock[j] = max(x, 0)` et le manque du jour est la
+  quantité non servie ce jour-là. À retenir quand la production non faite est **abandonnée** (le besoin ne
+  se reporte pas). Le classeur exporté applique la même règle (cellule *Politique de manque*).
+
+Les propositions, couvertures et alertes utilisent le solde net de la couche (`backlog`) ou le stock borné
+(`lost`) ; dans les deux cas la **date de rupture** est le premier jour où un manque apparaît et la
+quantité affichée est le manque maximal.
 
 ## 5. Couverture et stock cible
 
 * **Couverture (jours)** sur chaque jour : nombre de jours futurs dont le besoin cumulé est couvert par le
   stock du jour. `coverage_unit` : `calendar` [défaut, comme le classeur] ou `working` ;
-  `coverage_tie_rule` : `covered` [défaut] ou `not_covered` (classeur). Stock négatif → 0.
+  `coverage_tie_rule` : `covered` [défaut] ou `not_covered` (classeur). Manque (solde négatif) → 0.
 * **Stock cible** (`target_policy`) : `coverage_days` = besoin des `coverage_target_days` prochains jours ;
   `safety_qty` = stock de sécurité fixe ; `max` [défaut] = le plus grand des deux.
 
@@ -69,11 +94,12 @@ entre crochets. Les variantes possibles sont listées pour chaque règle.
 
 | Type | Sévérité | Règle |
 |---|---|---|
-| `STOCKOUT` (simulé) | critique | premier jour où le stock simulé < 0 (`stockout_lookahead_days`) |
-| `STOCKOUT` (ferme) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au‑delà | premier jour où le stock ferme < 0 : commandes prévisionnelles / planifiées à confirmer |
+| `STOCKOUT` (simulé) | critique | premier manque sur le stock simulé malgré saisies et propositions (`stockout_lookahead_days`) |
+| `STOCKOUT` (prévisionnel) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au‑delà | premier manque sur les flux ERP fermes + prévisionnels : commande à passer / proposition à valider (émise seulement si sa date diffère de la rupture ferme) |
+| `STOCKOUT` (ferme) | idem | premier manque sur les flux fermes ; le message indique jusqu'où les commandes prévisionnelles couvrent (à confirmer) ou qu'aucune ne couvre la date |
 | `LOW_COVERAGE` | critique si épuisement des flux fermes ≤ `alert_red_days` [3], avertissement si ≤ `alert_yellow_days` [= couverture cible] | basé sur l'épuisement du stock ferme (stock + commandes fermes), pas seulement sur le stock à date |
 | `OVERSTOCK` | info | couverture du stock à date ≥ `overstock_days` [max(30 ; 3 × cible)] |
-| `NEGATIVE_STOCK` | critique | stock négatif à la date de référence (inventaire / saisies à vérifier) |
+| `NEGATIVE_STOCK` | critique | stock de départ négatif dans l'ERP (inventaire / saisies à vérifier) |
 | `LATE_ORDER` | avertissement | commande attendue avant `as_of` et non reçue |
 | `URGENT_PROPOSAL` | critique | proposition dont la date de commande théorique est déjà passée |
 | `NO_DEMAND` | info | aucun besoin sur l'horizon alors que du stock existe |
@@ -83,7 +109,7 @@ La sévérité d'un article est la pire de ses alertes.
 
 ## 7. Propositions de commandes (calcul des besoins nets)
 
-Algorithme, par article, sur le stock simulé :
+Algorithme, par article, sur le stock simulé (solde net avant propositions) :
 
 1. À partir de `as_of + 1 + frozen_days` [0] : dès que `stock[d] < cible[d]` → **point de commande atteint**.
 2. **Niveau de recomplètement** = cible + besoin du prochain cycle de commande (`lot_policy` :
@@ -98,7 +124,8 @@ Algorithme, par article, sur le stock simulé :
 6. **Date de commande** = livraison − `lead_time_days` ouvrés. Si elle est antérieure à `as_of`, la
    proposition est **urgente** (`respect_lead_time` [non] : `oui` interdit toute livraison avant
    `as_of + délai` et laisse apparaître la rupture).
-7. La proposition est injectée dans le stock simulé et l'itération continue (`proposal_lookahead_days`).
+7. Le stock simulé est **re-projeté** avec la proposition (exact aussi en politique `lost`) et l'itération
+   continue (`proposal_lookahead_days`).
 8. Pour une proposition **urgente**, le motif indique la première commande prévisionnelle / planifiée
    ultérieure qui pourrait être **avancée** à la place (message d'exception MRP « avancer »). Évolution
    prévue : générer directement des actions « avancer / reculer / annuler » sur les commandes existantes,
@@ -121,7 +148,34 @@ Ordre de priorité : **saisie applicative > ERP** pour un même objet (réel de 
 réception rattachée à une commande, PDP actif). Chaque écriture (saisie, décision, import, paramètre) est
 journalisée avec l'utilisateur (`x-forwarded-email` sur Databricks Apps), l'action et le contenu.
 
-## 10. Hypothèses sur les données de démonstration
+## 10. Classeur Excel « vivant »
+
+L'export *Simulation* n'est pas un état figé : l'onglet `SIMULATION` est constitué de **formules** qui
+reproduisent les règles ci-dessus, alimentées par des onglets de saisie. L'approvisionneur peut donc
+travailler hors ligne et voir les stocks se recalculer, puis réimporter ses décisions.
+
+| Onglet | Rôle |
+|---|---|
+| `PARAMETRES` | politique de manque, politique de cible, règle d'égalité de couverture (cellules modifiables lues par les formules) |
+| `ARTICLES` | stocks initiaux des trois couches, couverture cible, stock de sécurité, seuils, MOQ / PLA / délai (modifiables) |
+| `SIMULATION` | par article, 15 lignes : besoin (valeurs), commandes fermes / prévisionnelles / planifiées (`SUMIFS` sur le carnet), propositions retenues, saisies, réceptions & ajustements connus (valeurs), stocks ferme / prévisionnel / simulé, manque simulé, cible (`OFFSET` sur le besoin), couverture (`COUNTIF` sur le besoin cumulé) |
+| `CARNET_COMMANDES` | carnet ouvert : date, quantité, quantité reçue, date de réception, statut (`RECUE` / `ANNULEE`) modifiables ; *Reste à livrer* calculé |
+| `PROPOSITIONS` | décision `A` / `M` / `I`, quantité et date modifiées ; *Qté retenue* / *Date retenue* calculées |
+| `SAISIES` | commandes, réceptions, ajustements, production réelle (lignes libres) |
+| `ALERTES` | photo des alertes à l'export |
+
+Récurrence par colonne (jour ou semaine ISO) : `x = stock précédent + commandes + réceptions & ajustements
+− besoin`, `stock = SI(politique = "lost" ; MAX(0 ; x) ; x)`, `manque = MAX(0 ; −x)`. En granularité
+semaine, la cible porte sur `ARRONDI.SUP(couverture / 7)` semaines et la couverture est comptée en semaines
+(approximation assumée ; le jour reste la granularité de référence). Une réception saisie dans le carnet
+s'ajoute au stock à sa date et réduit le reste à livrer de la commande. La conformité des formules avec le
+moteur est vérifiée par un test automatisé (recalcul LibreOffice, `tests/test_excel_formulas.py`).
+
+Réimport (page *Imports / exports*) : lignes `SAISIES`, décisions `A` / `M` des `PROPOSITIONS` (→ commandes
+planifiées rattachées à la proposition) et réceptions saisies dans le `CARNET_COMMANDES` (→ réceptions
+rattachées à la commande).
+
+## 11. Hypothèses sur les données de démonstration
 
 Le classeur ne contient ni délais, ni conditionnements, ni quotas : le jeu de démonstration
 (`data/seed`, généré par `scripts/extract_seed_from_excel.py`) utilise `pack_qty = MOQ`, des délais

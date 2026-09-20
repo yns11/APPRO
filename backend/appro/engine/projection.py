@@ -4,12 +4,22 @@ Core recurrence (per day ``d`` after the snapshot day)::
 
     stock[d] = stock[d-1] + supply[d] + adjustments[d] - demand[d]
 
-Two stocks are projected:
+Three cumulative stock layers are projected (see ``runner.py``):
 
-* **firm stock** – only *committed* supply (ERP firm orders / schedule lines, app orders that
-  were sent to the supplier, receipts posted after the snapshot);
-* **simulated stock** – firm supply + forecast schedule lines + planned (not yet sent) orders
-  + accepted proposals + engine proposals (when enabled).
+* **firm stock** – on-hand stock + *committed* supply (ERP firm orders / schedule lines, app
+  orders sent to the supplier, receipts and adjustments posted after the snapshot);
+* **forecast stock** – firm + ERP forecast schedule lines (DELFOR);
+* **simulated stock** – forecast + planned (app) orders + scenario orders + engine proposals.
+
+A physical stock can never be negative.  ``shortage_policy`` decides what happens to the
+demand that cannot be served:
+
+* ``backlog`` (default, MRP "projected available balance") – the unserved demand is carried
+  forward: the *net* balance goes negative and the next receipts serve the backlog first.
+  ``stock = max(net, 0)`` and ``shortage = max(-net, 0)`` (cumulated backlog);
+* ``lost`` – the unserved demand is lost (production is not caught up):
+  ``stock[d] = max(stock[d-1] + supply[d] + adjustments[d] - demand[d], 0)`` and ``shortage[d]``
+  is the quantity that could not be served on day ``d``.
 
 Coverage on day ``d`` = number of *future* days whose cumulated demand is covered by
 ``stock[d]`` (calendar or working days).  Target stock on day ``d`` = demand of the next
@@ -18,6 +28,7 @@ Coverage on day ``d`` = number of *future* days whose cumulated demand is covere
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -31,16 +42,36 @@ def cumulative_demand(demand: np.ndarray) -> np.ndarray:
     return np.cumsum(demand)
 
 
-def project_stock(stock_start: float, supply: np.ndarray, adjustments: np.ndarray,
-                  demand: np.ndarray) -> np.ndarray:
-    """Vectorised projection; index 0 is the snapshot day (stock known at end of day)."""
-    n = len(demand)
-    stock = np.empty(n)
-    stock[0] = stock_start
-    if n > 1:
-        delta = supply[1:] + adjustments[1:] - demand[1:]
-        stock[1:] = stock_start + np.cumsum(delta)
-    return stock
+@dataclass
+class Projection:
+    """Daily series of one stock layer (all aligned on the day index)."""
+
+    net: np.ndarray        # projected available balance (< 0 = backlog, ``backlog`` policy only)
+    stock: np.ndarray      # physical stock, never negative
+    shortage: np.ndarray   # backlog policy: cumulated backlog ; lost policy: demand lost that day
+
+    def __len__(self) -> int:
+        return len(self.net)
+
+
+def project_stock(stock_start: float, supply: np.ndarray, adjustments: np.ndarray, demand: np.ndarray,
+                  policy: str = "backlog", i_snap: int = 0) -> Projection:
+    """Vectorised projection from the snapshot day ``i_snap`` (stock known at the end of that day).
+
+    Days up to and including ``i_snap`` keep the snapshot stock.  The ``lost`` policy is the
+    Skorokhod reflection of the cumulated balance at 0: ``stock = c - min(0, running_min(c))``.
+    """
+    delta = np.asarray(supply, dtype=float) + np.asarray(adjustments, dtype=float) - np.asarray(demand, dtype=float)
+    delta = delta.copy()
+    delta[:i_snap + 1] = 0.0
+    net = float(stock_start) + np.cumsum(delta)
+    if policy == "lost":
+        floor = np.minimum(0.0, np.minimum.accumulate(net))
+        stock = net - floor
+        prev = np.concatenate([[float(stock_start)], stock[:-1]])
+        shortage = np.maximum(0.0, -(prev + delta))
+        return Projection(net=stock.copy(), stock=stock, shortage=shortage)
+    return Projection(net=net, stock=np.maximum(net, 0.0), shortage=np.maximum(-net, 0.0))
 
 
 def coverage_days(stock: np.ndarray, demand: np.ndarray, index: DayIndex, calendar: WorkCalendar,
@@ -93,10 +124,11 @@ def target_stock(demand: np.ndarray, article: Article, index: DayIndex, calendar
     return np.maximum(cov_target, safety)
 
 
-def first_negative(stock: np.ndarray, from_idx: int, to_idx: int | None = None) -> int | None:
-    stop = len(stock) if to_idx is None else min(len(stock), to_idx + 1)
-    neg = np.where(stock[from_idx:stop] < -1e-9)[0]
-    return int(neg[0]) + from_idx if len(neg) else None
+def first_shortage(shortage: np.ndarray, from_idx: int, to_idx: int | None = None) -> int | None:
+    """First day index in ``[from_idx, to_idx]`` with an unserved demand (None if none)."""
+    stop = len(shortage) if to_idx is None else min(len(shortage), to_idx + 1)
+    hit = np.where(shortage[from_idx:stop] > 1e-9)[0]
+    return int(hit[0]) + from_idx if len(hit) else None
 
 
 def date_of(index: DayIndex, i: int) -> dt.date:

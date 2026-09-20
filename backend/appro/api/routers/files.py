@@ -6,6 +6,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...data.store import AppAdjustment, AppOrder, AppProductionActual, AppReceipt, audit
@@ -54,7 +55,8 @@ def export_orders(planner: str | None = None, scenario_id: str | None = None,
 @router.post("/imports/entries", response_model=S.ImportReport, status_code=201)
 async def import_entries(file: UploadFile = File(...), ctx: AppContext = Depends(ctx_dep),
                          session: Session = Depends(session_dep), user: str = Depends(current_user)):
-    """Import the ``SAISIES`` sheet of an exported simulation workbook."""
+    """Import the planner inputs of an exported workbook: ``SAISIES`` sheet, decisions of the
+    ``PROPOSITIONS`` sheet (A / M) and receipts typed in the ``CARNET_COMMANDES`` sheet."""
     content = await file.read()
     try:
         entries, notes = excel_service.parse_entries_workbook(content)
@@ -76,10 +78,16 @@ async def import_entries(file: UploadFile = File(...), ctx: AppContext = Depends
                 continue
             if e.kind == "COMMANDE":
                 session.add(AppOrder(article_id=e.key, supplier_id=e.supplier_id, expected_date=e.date, qty=e.qty,
-                                     unit=units[e.key] or "PCE", note=e.comment, created_by=user, source="IMPORT"))
+                                     unit=units[e.key] or "PCE", note=e.comment, created_by=user,
+                                     source="PROPOSAL" if e.proposal_id else "IMPORT", proposal_id=e.proposal_id))
             elif e.kind == "RECEPTION":
-                session.add(AppReceipt(article_id=e.key, supplier_id=e.supplier_id, receipt_date=e.date, qty=e.qty,
-                                       note=e.comment, created_by=user))
+                session.add(AppReceipt(article_id=e.key, supplier_id=e.supplier_id, order_id=e.order_id,
+                                       receipt_date=e.date, qty=e.qty, note=e.comment, created_by=user))
+                app_order = session.get(AppOrder, e.order_id) if e.order_id else None
+                if app_order is not None:
+                    received = sum(r.qty for r in session.scalars(select(AppReceipt).where(AppReceipt.order_id == app_order.id))) + e.qty
+                    if received >= app_order.qty - 1e-9:
+                        app_order.status = "RECEIVED"
             else:
                 session.add(AppAdjustment(article_id=e.key, date=e.date, qty=e.qty, comment=e.comment, created_by=user))
         created += 1

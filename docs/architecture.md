@@ -12,7 +12,7 @@
 │     presenters : résultats moteur → schémas Pydantic                                    │
 │  backend/appro/services                                                                 │
 │     mrp_service : assemblage (ERP + saisies + surcharges + PDP actif + scénario) → moteur, cache │
-│     excel_service : export / import xlsx (openpyxl)                                     │
+│     excel_service : export xlsx à formules / import (openpyxl)                            │
 │  backend/appro/engine  (pur Python + NumPy, sans I/O)                                   │
 │     calendar · demand · projection · proposals · alerts · scenario · runner             │
 │  backend/appro/data                                                                     │
