@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from ..engine.calendar import iso_week_label
+from ..engine.calendar import iso_week_label, iso_week_monday
 from ..engine.models import Alert, ArticleResult, MrpResult, Proposal, SupplierLink
 from . import schemas as S
 
@@ -13,8 +13,9 @@ SERIES_LABELS = [
     ("demand_plan", "Besoin (plan seul)"),
     ("supply_firm", "Commandes fermes"),
     ("supply_forecast", "Commandes prévisionnelles (ERP)"),
-    ("supply_planned", "Commandes simulées"),
     ("receipts", "Réceptions"),
+    ("sim_receipts", "Réceptions simulées"),
+    ("supply_proposed", "Complément CBN"),
     ("adjustments", "Ajustements"),
     ("stock_firm", "Stock ferme"),
     ("stock_forecast", "Stock prévisionnel"),
@@ -28,7 +29,8 @@ SERIES_LABELS = [
     ("coverage_sim", "Couverture simulée (j)"),
     ("demand_actual_share", "Part du réel dans le besoin"),
 ]
-FLOWS = {"demand", "demand_plan", "supply_firm", "supply_forecast", "supply_planned", "receipts", "adjustments"}
+FLOWS = {"demand", "demand_plan", "supply_firm", "supply_forecast", "sim_receipts", "supply_proposed", "receipts",
+         "adjustments"}
 SHORTAGES = {"shortage_firm", "shortage_forecast", "shortage_sim"}
 
 
@@ -81,6 +83,7 @@ def article_summary(ar: ArticleResult) -> S.ArticleSummary:
 def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
     arts = list(result.articles.values())
     alerts = [a for r in arts for a in r.alerts]
+    props = [p for r in arts for p in r.proposals]
     cov = [r.kpis["coverage_sim_days"] for r in arts if r.kpis["demand_horizon"] > 0]
     stockouts_7d = 0
     for r in arts:
@@ -96,11 +99,13 @@ def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
         low_coverage=sum(1 for a in alerts if a.alert_type.value == "LOW_COVERAGE"),
         overstock=sum(1 for a in alerts if a.alert_type.value == "OVERSTOCK"),
         late_orders=sum(r.kpis["late_order_count"] for r in arts),
-        sim_order_articles=sum(1 for r in arts if abs(r.kpis["open_planned_qty"]) > 1e-9),
-        sim_orders_qty=float(sum(r.kpis["open_planned_qty"] for r in arts)),
+        proposals=len(props),
+        urgent_proposals=sum(1 for p in props if p.urgent),
+        proposals_qty=float(sum(p.qty for p in props)),
+        sim_receipt_articles=sum(1 for r in arts if r.kpis["sim_receipt_days"] > 0),
+        sim_receipts_qty=float(sum(r.kpis["sim_receipts_qty"] for r in arts)),
         open_firm_qty=float(sum(r.kpis["open_firm_qty"] for r in arts)),
         open_forecast_qty=float(sum(r.kpis["open_forecast_qty"] for r in arts)),
-        open_planned_qty=float(sum(r.kpis["open_planned_qty"] for r in arts)),
         avg_coverage_days=(round(sum(cov) / len(cov), 1) if cov else None),
         demand_next_30d=float(sum(r.kpis["demand_next_30d"] for r in arts)),
     )
@@ -130,31 +135,39 @@ def weekly_supply_demand(result: MrpResult, weeks: int = 12) -> list[dict[str, A
             elif r.stock_sim[i] < r.target_stock[i]:
                 b["below_target_articles"] += 1
     for r in arts:
-        for e in r.events:
-            if e.kind == "sim_order":
-                wk = iso_week_label(e.date)
-                if wk in buckets:
-                    buckets[wk]["proposals"] += 1
-                    buckets[wk]["proposed_qty"] += e.qty
+        for p in r.proposals:
+            wk = iso_week_label(p.delivery_date)
+            if wk in buckets:
+                buckets[wk]["proposals"] += 1
+                buckets[wk]["proposed_qty"] += p.qty
     return [{k: v for k, v in b.items() if not k.startswith("_")} for b in buckets.values()]
 
 
-def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, supplier_names: dict[str, str],
-                   programs: list[dict[str, Any]], from_date: dt.date | None = None) -> S.ProjectionResponse:
-    start = from_date or (result.as_of - dt.timedelta(days=result.params.history_days))
-    idxs = [i for i, d in enumerate(ar.dates) if d >= start]
+def period_groups(dates: list[dt.date], as_of: dt.date, granularity: str, focus_weeks: int,
+                  start: dt.date | None = None) -> dict[str, list[int]]:
+    """Group the day indexes into columns.
+
+    * ``day``: one column per day ; ``week``: one column per ISO week ;
+    * ``default``: one column per day for the current ISO week and the next ``focus_weeks`` weeks,
+      one column per ISO week before (past) and after (far future).
+    Column keys are ISO dates for day columns and ISO week labels for week columns.
+    """
     groups: dict[str, list[int]] = {}
-    if granularity == "week":
-        for i in idxs:
-            groups.setdefault(iso_week_label(ar.dates[i]), []).append(i)
-    else:
-        for i in idxs:
-            groups[ar.dates[i].isoformat()] = [i]
-    labels = list(groups)
-    starts = [ar.dates[g[0]] for g in groups.values()]
-    series = []
-    # a lost quantity is a flow (summed over the period); a backlog is a level (end of period)
-    lost = result.params.shortage_policy == "lost"
+    focus_start = iso_week_monday(as_of)
+    focus_end = focus_start + dt.timedelta(days=7 * (max(int(focus_weeks), 0) + 1))  # exclusive
+    for i, d in enumerate(dates):
+        if start and d < start:
+            continue
+        if granularity == "week" or (granularity == "default" and not (focus_start <= d < focus_end)):
+            key = iso_week_label(d)
+        else:
+            key = d.isoformat()
+        groups.setdefault(key, []).append(i)
+    return groups
+
+
+def series_out(ar: ArticleResult, groups: dict[str, list[int]], lost: bool) -> list[S.SeriesOut]:
+    out = []
     for key, label in SERIES_LABELS:
         raw = getattr(ar, key)
         if key in FLOWS or (lost and key in SHORTAGES):
@@ -163,15 +176,45 @@ def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, suppl
             vals = [round(float(sum(raw[i] for i in g) / len(g)), 3) for g in groups.values()]
         else:
             vals = [round(float(raw[g[-1]]), 3) for g in groups.values()]
-        series.append(S.SeriesOut(key=key, label=label, values=vals))
+        out.append(S.SeriesOut(key=key, label=label, values=vals))
+    return out
+
+
+def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, supplier_names: dict[str, str],
+                   programs: list[dict[str, Any]], from_date: dt.date | None = None) -> S.ProjectionResponse:
+    start = from_date or (result.as_of - dt.timedelta(days=result.params.history_days))
+    groups = period_groups(ar.dates, result.as_of, granularity, result.params.focus_weeks, start)
     return S.ProjectionResponse(
-        article=article_ref(ar), as_of=result.as_of, granularity=granularity, periods=labels, period_start=starts,
-        series=series,
+        article=article_ref(ar), as_of=result.as_of, granularity=granularity, periods=list(groups),
+        period_start=[ar.dates[g[0]] for g in groups.values()], period_end=[ar.dates[g[-1]] for g in groups.values()],
+        series=series_out(ar, groups, result.params.shortage_policy == "lost"),
         events=[S.SupplyEventOut(**e.__dict__) for e in ar.events if e.date >= start],
         proposals=[proposal_out(p, ar, supplier_names) for p in ar.proposals],
         alerts=[alert_out(a, ar.article.designation) for a in ar.alerts],
         kpis=ar.kpis, suppliers=[link_out(l, supplier_names) for l in ar.suppliers], programs=programs,
         diagnostics=ar.diagnostics + result.diagnostics)
+
+
+def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str],
+             programs_of: dict[str, list[str]], from_date: dt.date | None = None) -> S.GridResponse:
+    """Multi-article supply table: every article on the same columns."""
+    start = from_date or (result.as_of - dt.timedelta(days=result.params.history_days))
+    arts = list(result.articles.values())
+    if not arts:
+        return S.GridResponse(as_of=result.as_of, granularity=granularity, periods=[], period_start=[], period_end=[],
+                              articles=[], diagnostics=result.diagnostics)
+    dates = arts[0].dates
+    groups = period_groups(dates, result.as_of, granularity, result.params.focus_weeks, start)
+    lost = result.params.shortage_policy == "lost"
+    return S.GridResponse(
+        as_of=result.as_of, granularity=granularity, periods=list(groups),
+        period_start=[dates[g[0]] for g in groups.values()], period_end=[dates[g[-1]] for g in groups.values()],
+        articles=[S.GridArticle(article=article_ref(ar), series=series_out(ar, groups, lost),
+                                events=[S.SupplyEventOut(**e.__dict__) for e in ar.events if e.date >= start],
+                                kpis=ar.kpis, suppliers=[link_out(l, supplier_names) for l in ar.suppliers],
+                                programs=programs_of.get(ar.article.article_id, []))
+                  for ar in sorted(arts, key=lambda r: r.article.article_id)],
+        diagnostics=result.diagnostics)
 
 
 def compare_articles(base: MrpResult, scen: MrpResult) -> list[S.CompareArticle]:
@@ -181,7 +224,7 @@ def compare_articles(base: MrpResult, scen: MrpResult) -> list[S.CompareArticle]
         if s is None:
             continue
         keys = ("stock_as_of_sim", "coverage_sim_days", "first_stockout_sim", "min_stock_sim", "max_shortage_sim",
-                "open_planned_qty", "demand_next_30d", "severity")
+                "proposal_count", "proposed_qty", "urgent_proposal_count", "demand_next_30d", "severity")
         out.append(S.CompareArticle(
             article_id=aid, designation=b.article.designation, unit=b.article.unit,
             base={k: b.kpis.get(k) for k in keys}, scenario={k: s.kpis.get(k) for k in keys},

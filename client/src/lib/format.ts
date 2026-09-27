@@ -27,8 +27,10 @@ export function daysFrom(iso: string | null | undefined, from: string): number |
   return differenceInCalendarDays(parseISO(iso), parseISO(from));
 }
 export function isWeekend(iso: string): boolean { const d = parseISO(iso).getDay(); return d === 0 || d === 6; }
-export function periodLabel(p: string, granularity: "day" | "week"): string {
-  if (granularity === "week") return p.replace("-W", " S");
+/** A column key is either an ISO week label ("2026-W38") or an ISO date. */
+export const isWeekKey = (p: string) => p.includes("-W");
+export function periodLabel(p: string, _granularity?: string): string {
+  if (isWeekKey(p)) return p.replace("-W", " S");
   return fmtDate(p, "EEE dd/MM");
 }
 export const ALERT_LABELS: Record<string, string> = {
@@ -36,9 +38,9 @@ export const ALERT_LABELS: Record<string, string> = {
   URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock de départ négatif",
 };
 export const SEVERITY_LABELS: Record<string, string> = { critical: "Critique", warning: "À surveiller", info: "Info" };
-export const KIND_LABELS: Record<string, string> = { order: "Commande", receipt: "Réception", movement: "Ajustement", sim_order: "Commande simulée", proposal: "Proposition" };
+export const KIND_LABELS: Record<string, string> = { order: "Commande", receipt: "Réception", movement: "Ajustement", sim_receipt: "Réception simulée", proposal: "Complément CBN" };
 export const SCOPE_LABELS: Record<string, string> = { firm: "ferme", forecast: "prévisionnel", simulated: "simulé", data: "données" };
-export const ORDER_TYPE_LABELS: Record<string, string> = { FIRM: "Ferme", FORECAST: "Prévisionnelle", PLANNED: "Planifiée", SIMULATED: "Simulée", ADJUSTMENT: "Ajustement", PROPOSAL: "Proposition", RECEIPT: "Réception" };
+export const ORDER_TYPE_LABELS: Record<string, string> = { FIRM: "Ferme", FORECAST: "Prévisionnelle", PLANNED: "Planifiée", SIMULATED: "Réception simulée", ADJUSTMENT: "Ajustement", PROPOSAL: "Complément CBN", RECEIPT: "Réception" };
 export const EVENT_KIND_LABELS: Record<string, string> = {
   add_order: "Ajouter une commande", move_order: "Décaler une commande", change_order_qty: "Modifier une quantité", cancel_order: "Annuler une commande",
   plan_factor: "PDP × facteur", set_plan: "Fixer une semaine de PDP", set_actual: "Production réelle", add_movement: "Ajustement de stock",

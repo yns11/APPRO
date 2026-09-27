@@ -9,19 +9,19 @@ import { fmtQty, periodLabel } from "@/lib/format";
  *  - simulated stock: dotted line (entries + proposals added)
  *  - unserved demand (shortage) of the simulated layer: red bars below the axis
  *  - target stock: thin grey dashed reference
- *  - supply bars stacked by commitment (firm / forecast / receipts), simulated orders hatched, adjustments
- *    in grey (signed), demand bars below the axis
+ *  - supply bars stacked by commitment (firm / forecast / receipts), simulated receipts hatched, CBN complement
+ *    in light orange, adjustments in grey (signed), demand bars below the axis
  * Stocks are physical: never negative.
  */
 export function StockChart({ data, height = 300 }: { data: ProjectionResponse; height?: number }) {
   const s = (k: string) => data.series.find((x) => x.key === k)?.values ?? [];
   const rows = data.periods.map((p, i) => ({
     period: p, label: periodLabel(p, data.granularity),
-    demand: -(s("demand")[i] ?? 0), firm: s("supply_firm")[i] ?? 0, forecast: s("supply_forecast")[i] ?? 0, simulated: s("supply_planned")[i] ?? 0,
-    adjustments: s("adjustments")[i] ?? 0, receipts: s("receipts")[i] ?? 0, shortage: -(s("shortage_sim")[i] ?? 0),
+    demand: -(s("demand")[i] ?? 0), firm: s("supply_firm")[i] ?? 0, forecast: s("supply_forecast")[i] ?? 0, simulated: s("sim_receipts")[i] ?? 0,
+    proposed: s("supply_proposed")[i] ?? 0, adjustments: s("adjustments")[i] ?? 0, receipts: s("receipts")[i] ?? 0, shortage: -(s("shortage_sim")[i] ?? 0),
     stock_firm: s("stock_firm")[i] ?? 0, stock_forecast: s("stock_forecast")[i] ?? 0, stock_sim: s("stock_sim")[i] ?? 0, target: s("target_stock")[i] ?? 0,
   }));
-  const asOfLabel = data.granularity === "week" ? data.periods.find((_p, i) => data.period_start[i] <= data.as_of && (data.period_start[i + 1] ?? "9999") > data.as_of) : data.as_of;
+  const asOfLabel = data.periods.find((_p, i) => data.period_start[i] <= data.as_of && data.as_of <= (data.period_end[i] ?? "9999"));
   const unit = data.article.unit;
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -42,7 +42,8 @@ export function StockChart({ data, height = 300 }: { data: ProjectionResponse; h
         <Bar yAxisId="qty" dataKey="receipts" name="Réceptions" stackId="flow" fill="var(--s-receipt)" />
         <Bar yAxisId="qty" dataKey="firm" name="Cdes fermes" stackId="flow" fill="var(--s-firm)" />
         <Bar yAxisId="qty" dataKey="forecast" name="Cdes prévisionnelles (ERP)" stackId="flow" fill="var(--s-forecast)" />
-        <Bar yAxisId="qty" dataKey="simulated" name="Cdes simulées" stackId="flow" fill="url(#hatch)" stroke="var(--s-proposal)" />
+        <Bar yAxisId="qty" dataKey="simulated" name="Réceptions simulées" stackId="flow" fill="url(#hatch)" stroke="var(--s-proposal)" />
+        <Bar yAxisId="qty" dataKey="proposed" name="Complément CBN" stackId="flow" fill="var(--s-proposal)" fillOpacity={0.45} />
         <Bar yAxisId="qty" dataKey="adjustments" name="Ajustements" stackId="flow" fill="var(--s-adjust)" fillOpacity={0.8} />
         <Bar yAxisId="qty" dataKey="shortage" name="Manque simulé" stackId="short" fill="var(--s-shortage)" fillOpacity={0.7} />
         <Area yAxisId="qty" type="monotone" dataKey="target" name="Stock cible" stroke="var(--s-target)" strokeDasharray="2 3" fill="var(--s-target)" fillOpacity={0.06} dot={false} />
@@ -54,13 +55,13 @@ export function StockChart({ data, height = 300 }: { data: ProjectionResponse; h
   );
 }
 
-function ChartTooltip({ active, payload, label, unit, granularity }: { active?: boolean; payload?: { name: string; value: number; color?: string }[]; label?: string; unit: string; granularity: "day" | "week" }) {
+function ChartTooltip({ active, payload, label, unit, granularity }: { active?: boolean; payload?: { name: string; value: number; color?: string }[]; label?: string; unit: string; granularity: string }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="tooltip-box">
       <div className="t">{periodLabel(String(label), granularity)}</div>
       {payload.filter((p) => p.value !== 0 || p.name.startsWith("Stock")).map((p) => (
-        <div key={p.name} className="r"><span style={{ color: p.color }}>{p.name}</span><b>{p.name === "Ajustements" || p.name === "Cdes simulées" ? (p.value < 0 ? "−" : "") + fmtQty(Math.abs(p.value), unit) : fmtQty(Math.abs(p.value), unit)}</b></div>
+        <div key={p.name} className="r"><span style={{ color: p.color }}>{p.name}</span><b>{p.name === "Ajustements" || p.name === "Réceptions simulées" ? (p.value < 0 ? "−" : "") + fmtQty(Math.abs(p.value), unit) : fmtQty(Math.abs(p.value), unit)}</b></div>
       ))}
     </div>
   );

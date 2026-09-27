@@ -37,37 +37,52 @@ entre crochets. Les variantes possibles sont listées pour chaque règle.
 ## 3. Approvisionnements et couches de stock
 
 Trois stocks **cumulatifs** sont projetés (ferme ⊂ prévisionnel ⊂ simulé) : les deux premiers reposent
-sur les données ERP (EDI ferme puis EDI prévisionnel), le troisième ajoute ce que l'approvisionneur
-décide dans l'application (saisies, propositions).
+sur les données ERP (EDI ferme puis EDI prévisionnel), le troisième ajoute ce que l'approvisionneur simule
+dans le tableau (réceptions simulées) et le complément CBN calculé par le moteur.
+
+Notation par jour : **R** = réceptions du jour (postérieures au snapshot), **F** = commandes fermes
+restantes du jour, **P** = commandes prévisionnelles du jour, **S** = réception simulée saisie,
+**A** = ajustements, **CBN** = complément calculé.
+
+| Jour calculé | Stock ferme | Stock prévisionnel | Stock simulé |
+|---|---|---|---|
+| Avant la référence | R + A | R + A | R + A |
+| À la référence | R + F + A | R + F + P + A | S vide : R + F + P + A ; S saisie : **MAX(R, S)** + A |
+| Après la référence | F + A | F + P + A | S vide : F + P + A ; S saisie : **S** + A |
+
+Une cellule S **vide** conserve les commandes attendues (F + P) ; **0** est une saisie explicite qui les
+remplace (rien n'arrive) ; effacer la saisie rétablit F + P. La réception simulée prend donc le pas sur
+les commandes attendues du jour, ce qui permet de simuler un retard (0 ce jour-là, la quantité un autre
+jour), une livraison partielle ou excédentaire. Le complément CBN (§ 7) s'ajoute ensuite au stock simulé
+seulement. Les réceptions et ajustements sont des faits physiques comptés dans les trois couches (R est
+nul après la référence en pratique).
 
 | Élément | Ferme | Prévisionnel | Simulé | Règle |
 |---|---|---|---|---|
-| Commande ERP `FIRM` (DELJIT / OA) | ✔ | ✔ | ✔ | quantité ouverte = commandée − reçue (`firm_sources`) |
-| Commande ERP `FORECAST` (DELFOR) | – | ✔ | ✔ | `forecast_sources` |
-| Commande app `FIRM` / statut `SENT` | ✔ | ✔ | ✔ | envoyée au fournisseur ; `app_firm_orders = simulated` la confine au stock simulé |
-| **Commande simulée** (cellule du tableau) | – | – | ✔ | quantité signée par jour, saisie à la main ou écrite par le Calcul CBN (`simulated_sources`) |
-| Commande de scénario | – | – | ✔ | idem |
-| Ajustement simulé (cellule du tableau) | ✔ | ✔ | ✔ | quantité signée par jour, saisie dans la ligne Ajustements |
-| Réception postérieure au snapshot | ✔ | ✔ | ✔ | fait physique : comptée à sa date ; **solde la commande** liée (plus de double compte) |
-| Ajustement (inventaire, casse…) | ✔ | ✔ | ✔ | fait physique : compté à sa date s'il est postérieur au snapshot |
+| Commande ERP `FIRM` (DELJIT / OA) | ✔ | ✔ | ✔ sauf S saisie | quantité ouverte = commandée − reçue (`firm_sources`) |
+| Commande ERP `FORECAST` (DELFOR) | – | ✔ | ✔ sauf S saisie | `forecast_sources` ; `forecast_date_policy` : date réelle [défaut] ou lundi de la semaine |
+| Commande app `FIRM` (saisie) | ✔ | ✔ | ✔ sauf S saisie | commande réelle passée hors ERP ; `app_firm_orders = simulated` la confine à la couche prévisionnelle |
+| Commande de scénario | – | ✔ | ✔ sauf S saisie | idem prévisionnel |
+| **Réception simulée S** (cellule) | – | – | ✔ | remplace F + P du jour ; MAX(R, S) le jour de référence |
+| Complément CBN | – | – | ✔ (option) | `include_proposals_in_simulation` [oui] |
+| Réception postérieure au snapshot | ✔ | ✔ | ✔ | fait physique ; **solde la commande** liée (plus de double compte) |
+| Ajustement (inventaire, casse, cellule du tableau) | ✔ | ✔ | ✔ | fait physique, quantité signée |
 
-Lecture : le stock **ferme** répond à « que se passe-t-il si rien d'autre n'arrive ? », le stock
-**prévisionnel** à « l'ERP suffit-il ? » (les lignes DELFOR sont-elles à confirmer / avancer ?), le stock
-**simulé** à « mes décisions suffisent-elles ? ». Le Calcul CBN travaille sur le stock simulé : il ne
-propose que ce que ni l'ERP ni les commandes simulées déjà saisies ne couvrent.
+Lecture : le stock **ferme** répond à « que se passe-t-il si rien d'autre n'arrive que le ferme ? », le
+stock **prévisionnel** à « l'ERP suffit-il ? », le stock **simulé** à « mes hypothèses de livraison
+suffisent-elles, et que faut-il en plus (complément CBN) ? ».
 
-**Saisie dans le tableau** : les lignes *Commandes simulées* et *Ajustements* de la fiche article se
-saisissent directement dans la cellule, avec une quantité (négative possible) ou une expression
-arithmétique (`+ − × ÷`, parenthèses, ex. `2*600-50`) évaluée côté serveur (`services/expression.py`,
-aucun autre opérateur ni fonction). Une cellule vide efface la valeur ; en vue semaine la saisie se pose sur
-le premier jour de la semaine. Chaque cellule conserve son expression, son origine (`MANUAL`, `CBN`,
-`IMPORT`) et une note.
+**Saisie dans le tableau** : les lignes *Réceptions simulées* et *Ajustements* se saisissent directement
+dans la cellule (fiche article ou tableau d'approvisionnement), avec une quantité (négative possible pour
+un ajustement) ou une expression arithmétique (`+ − × ÷`, parenthèses, ex. `2*600-50`) évaluée côté serveur
+(`services/expression.py`, aucun autre opérateur ni fonction). Une cellule vidée est effacée ; `0` est une
+valeur. En vue semaine la saisie se pose sur le premier jour de la colonne. Chaque cellule conserve son
+expression, son origine (`MANUAL`, `IMPORT`) et une note.
 
-* **Commande en retard** (date attendue < `as_of`, non reçue) → alerte `LATE_ORDER` et
-  `late_order_policy` : `reschedule` [défaut, replanifiée au prochain jour ouvré], `ignore`, `keep`.
-* **Source des commandes** (`orders_source`) : `merged` [défaut], `erp`, `app` — bascule ERP / saisies.
-* Une réception app rattachée à une commande ERP réduit la quantité ouverte de celle-ci tant que l'ERP
-  ne l'a pas intégrée (à supprimer ensuite ; l'écran *Saisies* le rappelle).
+**Calendrier d'affichage** (`focus_weeks` [2]) : le mode *Par défaut* détaille jour par jour la semaine en
+cours et les `focus_weeks` semaines suivantes, et agrège en semaines ISO le passé et le futur au-delà ;
+les modes *Jour* et *Semaine* sont uniformes. Une semaine agrégée affiche la somme des flux et la valeur
+de fin de semaine des stocks.
 
 ## 4. Projection de stock et besoin non servi
 
@@ -101,36 +116,27 @@ quantité affichée est le manque maximal.
 
 | Type | Sévérité | Règle |
 |---|---|---|
-| `STOCKOUT` (simulé) | critique | premier manque sur le stock simulé malgré les commandes simulées (`stockout_lookahead_days`) |
+| `STOCKOUT` (simulé) | critique | premier manque sur le stock simulé malgré les réceptions simulées et le complément CBN (`stockout_lookahead_days`) |
 | `STOCKOUT` (prévisionnel) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au‑delà | premier manque sur les flux ERP fermes + prévisionnels : commande à passer / proposition à valider (émise seulement si sa date diffère de la rupture ferme) |
 | `STOCKOUT` (ferme) | idem | premier manque sur les flux fermes ; le message indique jusqu'où les commandes prévisionnelles couvrent (à confirmer) ou qu'aucune ne couvre la date |
 | `LOW_COVERAGE` | critique si épuisement des flux fermes ≤ `alert_red_days` [3], avertissement si ≤ `alert_yellow_days` [= couverture cible] | basé sur l'épuisement du stock ferme (stock + commandes fermes), pas seulement sur le stock à date |
 | `OVERSTOCK` | info | couverture du stock à date ≥ `overstock_days` [max(30 ; 3 × cible)] |
 | `NEGATIVE_STOCK` | critique | stock de départ négatif dans l'ERP (inventaire / saisies à vérifier) |
 | `LATE_ORDER` | avertissement | commande attendue avant `as_of` et non reçue |
-| `URGENT_PROPOSAL` | critique | lors du Calcul CBN : proposition dont la date de commande théorique est déjà passée (note « URGENT » sur la cellule) |
+| `URGENT_PROPOSAL` | critique | complément CBN dont la date de commande théorique est déjà passée |
 | `NO_DEMAND` | info | aucun besoin sur l'horizon alors que du stock existe |
 | `MISSING_DATA` | avertissement / info | pas de snapshot, pas de fournisseur, pas de nomenclature |
 
 La sévérité d'un article est la pire de ses alertes.
 
-## 7. Calcul CBN (calcul des besoins nets)
+## 7. Complément CBN (calcul des besoins nets)
 
-Le calcul ne se fait **pas à chaque affichage** (`generate_proposals` [non]) : il est lancé par le bouton
-**Calcul CBN** (fiche article ou page *Calcul CBN & commandes simulées*, sur le périmètre choisi). Chaque
-proposition est écrite dans la cellule *Commandes simulées* de sa date de livraison ; une proposition et
-une commande simulée saisie à la main sont la même chose : une cellule modifiable, sans décision à prendre.
-Règles du lancement :
-
-* les cellules saisies à la main sont conservées et prises en compte (le CBN ne propose que le
-  complément) ; sur une date qui a déjà une cellule manuelle, le résultat CBN est une cellule
-  **distincte** (le tableau affiche la somme) ; une saisie sur cette date remplace les deux ;
-* les cellules écrites par le précédent Calcul CBN (origine `CBN`) sont **remplacées** (option
-  « remplacer le CBN précédent » [oui]) pour que le calcul soit reproductible ; une cellule CBN modifiée
-  à la main devient manuelle ;
-* la note de la cellule garde l'identifiant de la proposition, le fournisseur choisi, la date de commande
-  théorique, l'urgence et le motif ;
-* un scénario actif s'applique au calcul, mais les cellules écrites sont celles de la base (pas du scénario).
+Le complément CBN est recalculé **automatiquement** à chaque calcul (`generate_proposals` [oui]) sur le
+stock simulé, c'est-à-dire après les réceptions simulées saisies : il ne propose que ce que ni l'ERP ni
+les hypothèses de l'approvisionneur ne couvrent. Il apparaît dans la ligne *Complément CBN* du tableau et
+dans la page du même nom (liste par fournisseur, urgences, export du carnet). `proposal_placement`
+[`working_days`] : livraison proposée n'importe quel jour ouvré autorisé par le fournisseur, ou `monday` :
+livraisons regroupées le lundi (quel que soit le calendrier du fournisseur).
 
 Algorithme, par article, sur le stock simulé (solde net avant propositions) :
 
@@ -154,23 +160,40 @@ Algorithme, par article, sur le stock simulé (solde net avant propositions) :
    prévue : générer directement des actions « avancer / reculer / annuler » sur les commandes existantes,
    en plus des nouvelles commandes.
 
-Après le calcul, l'approvisionneur ajuste librement les cellules (quantité, date en déplaçant la valeur,
-suppression) ; un nouveau Calcul CBN repart de ces saisies.
+Pour transformer une proposition en hypothèse ferme, l'approvisionneur saisit la quantité en réception
+simulée à la date voulue : le complément CBN se recalcule aussitôt sans elle.
 
-## 8. Scénarios
+## 8. Paramètres d'article par semaine
+
+Les paramètres de politique de stock (couverture cible, seuils rouge / orange, surstock, stock de sécurité,
+cycle de commande) sont fixes par article dans le référentiel ; le bouton « Semaines » ouvre un calendrier
+hebdomadaire prérempli avec ces valeurs, où chaque valeur peut être personnalisée pour une semaine ISO
+(surcharge `article_week`, réversible). Le moteur applique la valeur de la semaine du jour calculé : cible
+et niveau de recomplètement jour par jour, seuils d'alerte de la semaine de référence.
+
+## 9. Impact sur les programmes
+
+Pour chaque programme et chaque semaine, la production **réalisable** est le PDP pondéré par la part
+servable de son composant le plus contraint : `part_c(j) = 1 − besoin non servi_c(j) / besoin_c(j)`,
+`réalisable(j) = PDP(j) × min_c part_c(j)`, évaluée pour quatre stocks : **à date** (rien n'arrive),
+ferme, prévisionnel et simulé. Le besoin non servi du jour est la quantité perdue (`lost`) ou
+l'augmentation du retard (`backlog`). La page *Impact programmes* affiche le % réalisable par semaine, le
+premier impact et les composants limitants (`engine/programs.py`).
+
+## 10. Scénarios
 
 Un scénario est une liste d'événements appliqués sur une copie des données avant calcul :
 ajout / décalage / modification / annulation de commande, facteur ou valeur de PDP, production réelle,
 ajustement de stock, paramètre article ou fournisseur, et des paramètres moteur (horizon…). Comparaison
 base ↔ scénario par KPI et par article ; un scénario « actif » s'applique à toutes les pages et exports.
 
-## 9. Traçabilité et priorité des données
+## 11. Traçabilité et priorité des données
 
 Ordre de priorité : **saisie applicative > ERP** pour un même objet (réel de production d'un jour,
 réception rattachée à une commande, PDP actif). Chaque écriture (saisie, décision, import, paramètre) est
 journalisée avec l'utilisateur (`x-forwarded-email` sur Databricks Apps), l'action et le contenu.
 
-## 10. Classeur Excel « vivant »
+## 12. Classeur Excel « vivant »
 
 L'export *Simulation* n'est pas un état figé : l'onglet `SIMULATION` est constitué de **formules** qui
 reproduisent les règles ci-dessus, alimentées par des onglets de saisie. L'approvisionneur peut donc
@@ -180,7 +203,7 @@ travailler hors ligne et voir les stocks se recalculer, puis réimporter ses dé
 |---|---|
 | `PARAMETRES` | politique de manque, politique de cible, règle d'égalité de couverture (cellules modifiables lues par les formules) |
 | `ARTICLES` | stocks initiaux des trois couches, couverture cible, stock de sécurité, seuils, MOQ / PLA / délai (modifiables) |
-| `SIMULATION` | par article, 14 lignes : besoin (valeurs), commandes fermes / prévisionnelles (`SUMIFS` sur le carnet), **commandes simulées (valeurs modifiables, formules Excel acceptées)**, saisies, réceptions & ajustements connus (valeurs), stocks ferme / prévisionnel / simulé, manque simulé, cible (`OFFSET` sur le besoin), couverture (`COUNTIF` sur le besoin cumulé) |
+| `SIMULATION` | par article, 17 lignes : besoin (valeurs), commandes fermes F / prévisionnelles P (`SUMIFS` sur le carnet), réceptions connues R, **réceptions simulées S** (vide / 0 / valeur, formules Excel acceptées), complément CBN, saisies (commandes, réceptions, ajustements), ajustements connus A, stocks ferme / prévisionnel / simulé (règles du § 3, `IF(S="", R+F+P, S)`, `MAX(R,S)` le jour de référence), manque simulé, cible (`OFFSET` sur le besoin), couverture (`COUNTIF` sur le besoin cumulé) |
 | `CARNET_COMMANDES` | carnet ouvert : date, quantité, quantité reçue, date de réception, statut (`RECUE` / `ANNULEE`) modifiables ; *Reste à livrer* calculé |
 | `SAISIES` | commandes, réceptions, ajustements, production réelle (lignes libres) |
 | `ALERTES` | photo des alertes à l'export |
@@ -193,10 +216,11 @@ s'ajoute au stock à sa date et réduit le reste à livrer de la commande. La co
 moteur est vérifiée par un test automatisé (recalcul LibreOffice, `tests/test_excel_formulas.py`).
 
 Réimport (page *Imports / exports*) : lignes `SAISIES`, réceptions saisies dans le `CARNET_COMMANDES`
-(→ réceptions rattachées à la commande) et ligne *Commandes simulées* de `SIMULATION` (→ cellules, origine
-`IMPORT` ; elle **remplace** les commandes simulées de l'article sur les dates du classeur).
+(→ réceptions rattachées à la commande) et ligne *Réceptions simulées* de `SIMULATION` (→ cellules, origine
+`IMPORT` : valeur, 0 explicite ou vide ; elle **remplace** les réceptions simulées de l'article sur les
+dates du classeur).
 
-## 11. Hypothèses sur les données de démonstration
+## 13. Hypothèses sur les données de démonstration
 
 Le classeur ne contient ni délais, ni conditionnements, ni quotas : le jeu de démonstration
 (`data/seed`, généré par `scripts/extract_seed_from_excel.py`) utilise `pack_qty = MOQ`, des délais

@@ -55,11 +55,11 @@ def fill_level(target: np.ndarray, demand_cum: np.ndarray, i: int, article: Arti
     """Level to reach after the delivery: target + demand of the next order cycle."""
     if article.lot_policy == "fixed_lot":
         return float(target[i])
-    cycle = int(article.order_cycle_days or 0)
+    cycle = int(article.param_at("order_cycle_days", index.dates[i]) or 0)
     if article.lot_policy == "coverage" and cycle <= 0:
         return float(target[i])
     n = len(target)
-    cov = int(article.coverage_target_days or 0)
+    cov = int(article.param_at("coverage_target_days", index.dates[i]) or 0)
     if params.coverage_unit == "working":
         end_cov = min(n - 1, i + (calendar.add_working_days(index.dates[i], cov) - index.dates[i]).days)
         end_cycle = min(n - 1, end_cov + (calendar.add_working_days(index.dates[end_cov], cycle) - index.dates[end_cov]).days)
@@ -136,6 +136,8 @@ def generate_proposals(
             supplier = suppliers.get(link.supplier_id) if link else None
             lead = int(link.lead_time_days) if link else 0
             weekdays = supplier.delivery_weekdays if supplier else None
+            if params.proposal_placement == "monday":
+                weekdays = frozenset({1})  # deliveries grouped on Mondays whatever the supplier days
             earliest_date = index.dates[earliest_idx]
             if params.respect_lead_time and link:
                 earliest_date = max(earliest_date, calendar.add_working_days(as_of, lead))

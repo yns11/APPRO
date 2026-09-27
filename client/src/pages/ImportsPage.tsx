@@ -16,7 +16,7 @@ export default function ImportsPage() {
   const [report, setReport] = useState<ImportReport | null>(null);
   const [pdpName, setPdpName] = useState("");
   const [activate, setActivate] = useState(true);
-  const [granularity, setGranularity] = useState<"day" | "week">(perimeter.granularity);
+  const [granularity, setGranularity] = useState<"day" | "week">(perimeter.granularity === "week" ? "week" : "day");
   const [selection, setSelection] = useState<string[]>([]);
   const pdpInput = useRef<HTMLInputElement>(null);
   const entriesInput = useRef<HTMLInputElement>(null);
@@ -34,7 +34,7 @@ export default function ImportsPage() {
 
   return (
     <div className="page">
-      <div className="page-header"><div className="title"><h1>Imports / exports</h1><p>Importez un plan de production (format legacy « SOP - PDP » ou format long), exportez la simulation dans un classeur Excel « vivant » (formules) et réimportez ce que vous y avez saisi : onglet SAISIES, réceptions saisies dans le CARNET_COMMANDES et ligne Commandes simulées de l'onglet SIMULATION.</p></div></div>
+      <div className="page-header"><div className="title"><h1>Imports / exports</h1><p>Importez un plan de production (format legacy « SOP - PDP » ou format long), exportez la simulation dans un classeur Excel « vivant » (formules) et réimportez ce que vous y avez saisi : onglet SAISIES, réceptions saisies dans le CARNET_COMMANDES et ligne Réceptions simulées de l'onglet SIMULATION.</p></div></div>
 
       <div className="grid cols-2">
         <Card title="Importer un PDP hebdomadaire" hint="xlsx · 1re colonne : programme (nom ou id) · en-têtes : S11-26, 2026-W11, 2028W24 ou dates">
@@ -50,7 +50,7 @@ export default function ImportsPage() {
           <p className="note" style={{ marginTop: 12 }}>Un PDP importé et actif remplace le plan ERP pour les programmes qu'il contient. Désactivez-le pour revenir au plan ERP. Les versions restent conservées pour comparaison.</p>
         </Card>
 
-        <Card title="Exporter la simulation" hint="Classeur à formules : PARAMETRES, ARTICLES, SIMULATION (stocks ferme / prévisionnel / simulé, manque, cible, couverture recalculés dans Excel ; ligne Commandes simulées modifiable), ALERTES, CARNET_COMMANDES, SAISIES">
+        <Card title="Exporter la simulation" hint="Classeur à formules : PARAMETRES, ARTICLES, SIMULATION (stocks ferme / prévisionnel / simulé, manque, cible, couverture recalculés dans Excel ; lignes Réceptions simulées et Complément CBN modifiables), ALERTES, CARNET_COMMANDES, SAISIES">
           <div className="form-grid">
             <Field label="Granularité"><select className="select" value={granularity} onChange={(e) => setGranularity(e.target.value as "day" | "week")}><option value="day">Jour</option><option value="week">Semaine</option></select></Field>
             <Field label="Périmètre"><input className="input" readOnly value={`${perimeter.planner ?? "tous"} · ${engineParams.horizon_days} j${perimeter.scenarioId ? " · scénario" : ""}`} /></Field>
@@ -66,7 +66,7 @@ export default function ImportsPage() {
             <a className="btn" href={api.downloadUrl("/api/exports/orders.xlsx", { planner: engineParams.planner, scenario_id: engineParams.scenario_id })}><Download />Carnet de commandes</a>
           </div>
           <div className="divider" style={{ margin: "16px 0" }} />
-          <h4>Réimporter un classeur (SAISIES, réceptions CARNET, ligne Commandes simulées)</h4>
+          <h4>Réimporter un classeur (SAISIES, réceptions CARNET, ligne Réceptions simulées)</h4>
           <input ref={entriesInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importEntries.mutate(f); e.target.value = ""; }} />
           <Button style={{ marginTop: 8 }} onClick={() => entriesInput.current?.click()} disabled={importEntries.isPending}><Upload />{importEntries.isPending ? "Import…" : "Choisir le classeur"}</Button>
           {importEntries.error && <div className="error-box" style={{ marginTop: 12 }}>{(importEntries.error as Error).message}</div>}

@@ -36,7 +36,6 @@ from ..engine.models import (
     OrderStatus,
     OrderType,
     PlanLine,
-    Proposal,
     Receipt,
     SimCell,
 )
@@ -49,6 +48,9 @@ log = logging.getLogger(__name__)
 ARTICLE_FIELDS = {"coverage_target_days": int, "alert_red_days": int, "alert_yellow_days": int,
                   "overstock_days": int, "safety_stock_qty": float, "lot_policy": str, "order_cycle_days": int,
                   "fixed_lot_qty": float, "active": lambda v: str(v).lower() in ("true", "1", "oui")}
+# stock-policy parameters that may be customised per ISO week (scope ``article_week``, key2 = "2026-W40")
+ARTICLE_WEEK_FIELDS = {"coverage_target_days": int, "alert_red_days": int, "alert_yellow_days": int,
+                       "overstock_days": int, "safety_stock_qty": float, "order_cycle_days": int}
 LINK_FIELDS = {"moq": float, "pack_qty": float, "lead_time_days": int, "quota_pct": float, "priority": int,
                "active": lambda v: str(v).lower() in ("true", "1", "oui")}
 GLOBAL_FIELDS = {f.name: f.type for f in dataclasses.fields(EngineParams)}
@@ -62,6 +64,8 @@ def apply_overrides(ds: Dataset, overrides: list[ParamOverride]) -> list[str]:
         try:
             if o.scope == "article" and o.key1 in arts and o.field in ARTICLE_FIELDS:
                 setattr(arts[o.key1], o.field, ARTICLE_FIELDS[o.field](o.value))
+            elif o.scope == "article_week" and o.key1 in arts and o.field in ARTICLE_WEEK_FIELDS:
+                arts[o.key1].weekly.setdefault(o.key2, {})[o.field] = ARTICLE_WEEK_FIELDS[o.field](o.value)
             elif o.scope == "link" and (o.key1, o.key2) in links and o.field in LINK_FIELDS:
                 setattr(links[(o.key1, o.key2)], o.field, LINK_FIELDS[o.field](o.value))
         except (TypeError, ValueError) as exc:
@@ -199,85 +203,30 @@ def compute(ctx: AppContext, session: Session, planner: str | None = None, artic
 # =============================================================================
 # Simulation cells and net requirement run (CBN)
 # =============================================================================
-USER_SOURCES = ("MANUAL", "IMPORT")
-
-
 def upsert_cell(ctx: AppContext, session: Session, user: str, article_id: str, date: dt.date, kind: str,
                 expression: str, source: str = "MANUAL", note: str = "") -> AppCell | None:
-    """Create / update / delete the cell (article, date, kind, source) from a quantity or an expression.
+    """Create / update / delete the cell (article, date, kind) from a quantity or an expression.
 
-    * a *user* source (``MANUAL`` / ``IMPORT``) replaces every other cell of that day and kind: what
-      the planner types is the whole simulated quantity of the day;
-    * a ``CBN`` cell is kept apart from the typed one (both are counted); a second CBN quantity on
-      the same day is added to the existing CBN cell.
-    An empty expression (or a zero result) deletes the cell.  Returns the row, or None when the
-    cell was deleted.  Does not commit.
+    A blank expression deletes the cell.  An explicit ``0`` is kept: for a simulated receipt it
+    means "nothing arrives that day" (it replaces the expected orders).  Returns the row, or None
+    when the cell was deleted.  Does not commit.
     """
-    qty = evaluate(expression) if expression.strip() else 0.0
+    blank = not expression.strip()
+    qty = 0.0 if blank else evaluate(expression)
     rows = session.scalars(select(AppCell).where(AppCell.article_id == article_id, AppCell.date == date,
                                                  AppCell.kind == kind)).all()
-    row = next((r for r in rows if r.source == source), None)
-    if source in USER_SOURCES:
-        for other in rows:
-            if other is not row:
-                audit(session, user, "delete", "cell", other.id, article_id,
-                      {"date": date.isoformat(), "kind": kind, "replaced_by": source})
-                session.delete(other)
-    elif row is not None:  # CBN on a day that already has a CBN cell: add up
-        qty = row.qty + qty
-        prev = row.expression.strip() if row.expression else f"{row.qty:g}"
-        if any(op in prev for op in "+-*/"):
-            prev = f"({prev})"
-        expression = f"{prev}+{expression}"
-        note = f"{row.note} ; {note}".strip(" ;") if row.note else note
-    if abs(qty) < 1e-9:
+    row = rows[0] if rows else None
+    for other in rows[1:]:
+        session.delete(other)
+    if blank:
         if row is not None:
             audit(session, user, "delete", "cell", row.id, article_id, {"date": date.isoformat(), "kind": kind})
             session.delete(row)
         return None
     if row is None:
-        row = AppCell(article_id=article_id, date=date, kind=kind, source=source)
+        row = AppCell(article_id=article_id, date=date, kind=kind)
         session.add(row)
-    row.expression, row.qty, row.note, row.updated_by = expression.strip(), float(qty), note, user
+    row.expression, row.qty, row.source, row.note, row.updated_by = expression.strip(), float(qty), source, note, user
     audit(session, user, "upsert", "cell", row.id, article_id,
           {"date": date.isoformat(), "kind": kind, "expression": row.expression, "qty": row.qty, "source": source})
     return row
-
-
-def run_cbn(ctx: AppContext, session: Session, user: str, planner: str | None = None,
-            article_ids: list[str] | None = None, scenario_id: str | None = None, reset: bool = True,
-            **param_overrides: Any) -> tuple[MrpResult, list[Proposal], int]:
-    """Net requirement run: compute the proposals on the *current* simulated stock (which already
-    contains the typed simulated orders) and write them into the simulated-order cells.
-
-    With ``reset`` the cells previously written by a CBN run are removed first, so the run is
-    reproducible; typed cells are always kept and respected (a typed cell and a CBN result may
-    coexist on the same day).
-    Returns the result, the proposals written and the number of cells removed.
-    """
-    perimeter = erp_dataset(ctx.source, planner=planner, article_ids=article_ids)
-    ids = {a.article_id for a in perimeter.articles}
-    removed = 0
-    if reset:
-        for row in session.scalars(select(AppCell).where(AppCell.kind == "sim_order", AppCell.source == "CBN")):
-            if row.article_id in ids:
-                session.delete(row)
-                removed += 1
-        session.flush()
-        ctx.bump()
-    result = compute(ctx, session, planner=planner, article_ids=article_ids, scenario_id=scenario_id,
-                     generate_proposals=True, include_proposals_in_simulation=True, **param_overrides)
-    written: list[Proposal] = []
-    for r in result.articles.values():
-        for p in r.proposals:
-            note = f"{p.proposal_id} · {p.supplier_id or '?'} · commander le {p.order_date.isoformat()}"
-            if p.urgent:
-                note += " · URGENT"
-            upsert_cell(ctx, session, user, p.article_id, p.delivery_date, "sim_order", f"{p.qty:g}", source="CBN",
-                        note=f"{note} · {p.reason}")
-            written.append(p)
-    audit(session, user, "cbn_run", "cbn", planner or "all", None,
-          {"articles": len(result.articles), "proposals": len(written), "removed": removed, "scenario": scenario_id})
-    session.commit()
-    ctx.bump()
-    return result, written, removed

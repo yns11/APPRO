@@ -160,24 +160,23 @@ class ParamOverride(Base):
 
 
 class AppCell(Base):
-    """One editable cell of the simulation grid: a simulated order or an adjustment for one day.
+    """One editable cell of the simulation grid: a simulated receipt or an adjustment for one day.
 
     The planner types a quantity or an arithmetic expression; the evaluated quantity is stored
-    with the expression.  ``source`` is ``MANUAL`` (typed), ``CBN`` (written by the net
-    requirement run) or ``IMPORT`` (re-imported workbook).  One row per (article, date, kind,
-    source): a typed cell and a CBN result may coexist on the same day (the grid shows their sum);
-    typing on that day replaces both.
+    with the expression (an explicit 0 is a value: for a simulated receipt it replaces the expected
+    orders of the day).  ``source`` is ``MANUAL`` (typed) or ``IMPORT`` (re-imported workbook).
+    One row per (article, date, kind).
     """
 
     __tablename__ = "app_cells"
-    __table_args__ = (Index("ix_app_cells_key", "article_id", "date", "kind", "source", unique=True),)
+    __table_args__ = (Index("ix_app_cells_key", "article_id", "date", "kind", unique=True),)
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("AC"))
     article_id: Mapped[str] = mapped_column(String(40), index=True)
     date: Mapped[dt.date] = mapped_column(Date, index=True)
-    kind: Mapped[str] = mapped_column(String(12))                  # sim_order | adjustment
+    kind: Mapped[str] = mapped_column(String(12))                  # sim_receipt | adjustment
     expression: Mapped[str] = mapped_column(String(200), default="")
     qty: Mapped[float] = mapped_column(Float)
-    source: Mapped[str] = mapped_column(String(12), default="MANUAL")   # MANUAL | CBN | IMPORT
+    source: Mapped[str] = mapped_column(String(12), default="MANUAL")   # MANUAL | IMPORT
     note: Mapped[str] = mapped_column(Text, default="")
     updated_by: Mapped[str] = mapped_column(String(120), default="")
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

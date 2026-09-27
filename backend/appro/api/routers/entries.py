@@ -200,8 +200,9 @@ def list_cells(article_id: str | None = None, kind: str | None = None, session: 
 @router.put("/cells", response_model=S.CellOut | None)
 def upsert_cell(body: S.CellIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                 user: str = Depends(current_user)):
-    """Set a simulated order or an adjustment for one day from a quantity or an arithmetic
-    expression (``1200``, ``2*600-50``, ``(800+400)/2``…).  Empty or zero removes the cell."""
+    """Set a simulated receipt or an adjustment for one day from a quantity or an arithmetic
+    expression (``1200``, ``2*600-50``, ``(800+400)/2``…).  Empty removes the cell; ``0`` is an
+    explicit value (a simulated receipt of 0 means nothing arrives that day)."""
     _unit_of(ctx, body.article_id)
     try:
         row = mrp_service.upsert_cell(ctx, session, user, body.article_id, body.date, body.kind, body.expression)

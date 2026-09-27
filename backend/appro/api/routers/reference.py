@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -31,8 +32,11 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "coverage_unit": ("Unité de couverture : jours calendaires ou ouvrés", ["calendar", "working"]),
     "coverage_tie_rule": ("Un jour dont le besoin cumulé égale le stock est-il couvert ?", ["covered", "not_covered"]),
     "target_policy": ("Stock cible : couverture, stock de sécurité fixe, ou le max des deux", ["coverage_days", "safety_qty", "max"]),
-    "generate_proposals": ("Calculer les propositions à chaque affichage (non : seulement via « Calcul CBN »)", None),
-    "include_proposals_in_simulation": ("Calcul CBN : injecter chaque proposition avant de chercher la suivante", None),
+    "generate_proposals": ("Calculer le complément CBN (propositions) à chaque calcul", None),
+    "include_proposals_in_simulation": ("Inclure le complément CBN dans le stock simulé", None),
+    "proposal_placement": ("Livraisons proposées : tout jour ouvré (et jour de livraison fournisseur) ou lundis seulement", ["working_days", "monday"]),
+    "forecast_date_policy": ("Commandes prévisionnelles : à leur date réelle ou ramenées au lundi de leur semaine", ["actual", "week_monday"]),
+    "focus_weeks": ("Calendrier « Par défaut » : nombre de semaines détaillées jour par jour après la semaine en cours", None),
     "frozen_days": ("Période gelée : aucune proposition livrable avant J + n", None),
     "respect_lead_time": ("Ne jamais proposer une livraison avant J + délai fournisseur", None),
     "delivery_shift": ("Jour de livraison non autorisé : avancer ou reculer", ["earlier", "later"]),
@@ -42,9 +46,8 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "firm_horizon_days": ("Horizon ferme : une rupture sur flux fermes au-delà est informative", None),
     "shortage_policy": ("Besoin non servi : reporté (backlog, stock net négatif) ou perdu (stock borné à 0)", ["backlog", "lost"]),
     "firm_sources": ("Types de commandes du stock ferme (FIRM = DELJIT / OA / saisie envoyée)", None),
-    "forecast_sources": ("Types ajoutés au stock prévisionnel (FORECAST = DELFOR)", None),
-    "simulated_sources": ("Types ajoutés au stock simulé (PLANNED = saisies / propositions acceptées)", None),
-    "app_firm_orders": ("Commandes saisies marquées envoyées : couche ferme, ou simulation seulement", ["firm", "simulated"]),
+    "forecast_sources": ("Types ajoutés au stock prévisionnel (FORECAST = DELFOR, PLANNED = anciennes saisies planifiées)", None),
+    "app_firm_orders": ("Commandes saisies dans l'application : couche ferme, ou prévisionnelle seulement", ["firm", "simulated"]),
 }
 
 
@@ -165,7 +168,9 @@ def list_overrides(scope: str | None = None, key1: str | None = None, session: S
 def upsert_override(body: S.ParamOverrideIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                     user: str = Depends(current_user)):
     allowed = {"global": set(mrp_service.GLOBAL_FIELDS), "article": set(mrp_service.ARTICLE_FIELDS),
-               "link": set(mrp_service.LINK_FIELDS)}[body.scope]
+               "article_week": set(mrp_service.ARTICLE_WEEK_FIELDS), "link": set(mrp_service.LINK_FIELDS)}[body.scope]
+    if body.scope == "article_week" and not re.fullmatch(r"\d{4}-W\d{2}", body.key2 or ""):
+        raise HTTPException(422, "key2 doit être une semaine ISO, ex. 2026-W40")
     if body.field not in allowed:
         raise HTTPException(422, f"Champ non paramétrable pour {body.scope} : {body.field}. Autorisés : {sorted(allowed)}")
     if body.scope == "global":
@@ -182,7 +187,7 @@ def upsert_override(body: S.ParamOverrideIn, ctx: AppContext = Depends(ctx_dep),
     else:
         row.value, row.updated_by = value, user
     audit(session, user, "set_param", "param_override", f"{body.scope}/{body.key1}/{body.key2}/{body.field}",
-          body.key1 if body.scope in ("article", "link") else None, {"value": value})
+          body.key1 if body.scope in ("article", "article_week", "link") else None, {"value": value})
     session.commit()
     ctx.bump()
     return row

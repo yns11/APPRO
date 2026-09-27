@@ -97,20 +97,23 @@ def classify_alerts(
     # on-hand coverage (``coverage_sim[i0]``) is a KPI but would flag most JIT articles every week.
     cov = int(coverage_sim[i0])
     runout_firm = (k_firm - i0) if k_firm is not None else None
+    red = article.param_at("alert_red_days", as_of)
+    yellow = article.param_at("alert_yellow_days", as_of)
+    overstock = article.param_at("overstock_days", as_of)
     if sim.shortage[i0] <= 1e-9 and demand[i0:].sum() > 0:
-        if runout_firm is not None and runout_firm <= article.alert_red_days:
+        if runout_firm is not None and runout_firm <= red:
             alerts.append(Alert(aid, AlertType.LOW_COVERAGE, Severity.CRITICAL,
-                                f"Flux fermes épuisés dans {runout_firm} j (≤ seuil rouge {article.alert_red_days} j) ; "
+                                f"Flux fermes épuisés dans {runout_firm} j (≤ seuil rouge {red:g} j) ; "
                                 f"stock à date : {cov} j de besoin",
                                 date=index.dates[k_firm], value=runout_firm, scope="firm"))
-        elif runout_firm is not None and runout_firm <= article.alert_yellow_days:
+        elif runout_firm is not None and runout_firm <= yellow:
             alerts.append(Alert(aid, AlertType.LOW_COVERAGE, Severity.WARNING,
-                                f"Flux fermes épuisés dans {runout_firm} j (≤ seuil orange {article.alert_yellow_days} j) ; "
+                                f"Flux fermes épuisés dans {runout_firm} j (≤ seuil orange {yellow:g} j) ; "
                                 f"stock à date : {cov} j de besoin",
                                 date=index.dates[k_firm], value=runout_firm, scope="firm"))
-        elif article.overstock_days and cov >= article.overstock_days:
+        elif overstock and cov >= overstock:
             alerts.append(Alert(aid, AlertType.OVERSTOCK, Severity.INFO,
-                                f"Surstock : le stock à date couvre {cov} j de besoin (≥ {article.overstock_days} j)",
+                                f"Surstock : le stock à date couvre {cov} j de besoin (≥ {overstock:g} j)",
                                 date=as_of, value=cov))
     if demand[i0:].sum() <= 1e-9 and sim.stock[i0] > 0:
         alerts.append(Alert(aid, AlertType.NO_DEMAND, Severity.INFO,

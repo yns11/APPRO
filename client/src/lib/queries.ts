@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Params } from "./api";
 import type {
-  AdjustmentOut, ArticleRef, AuditOut, BomRef, CellOut, CockpitResponse, CompareResponse, LinkRef, OrderOut, ParamDoc, ParamOverrideOut,
-  PdpVersionOut, PlanLine, ProductionOut, ProgramRef, ProjectionResponse, ReceiptOut, ScenarioOut, SupplierRef,
+  AdjustmentOut, ArticleRef, AuditOut, BomRef, CellOut, CockpitResponse, CompareResponse, GridResponse, LinkRef, OrderOut, ParamDoc, ParamOverrideOut,
+  PdpVersionOut, PlanLine, ProductionOut, ProgramImpactResponse, ProgramRef, ProjectionResponse, ProposalOut, ReceiptOut, ScenarioOut, SupplierRef,
+  WeeklyParamsResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
 
@@ -34,8 +35,31 @@ export function useProjection(articleId: string | undefined, extra?: Params) {
   });
 }
 
-/** Simulation grid cells (simulated orders / adjustments typed by the planner or written by the CBN run). */
+export function useProposals() {
+  const { engineParams } = usePerimeter();
+  const params = { planner: engineParams.planner, scenario_id: engineParams.scenario_id };
+  return useQuery({ queryKey: ["proposals", params], queryFn: () => api.get<ProposalOut[]>("/api/proposals", params), staleTime: 30_000 });
+}
+
+/** Multi-article supply table (same columns for every article). */
+export function useGrid(extra?: Params) {
+  const { engineParams, perimeter } = usePerimeter();
+  const params = { planner: engineParams.planner, scenario_id: engineParams.scenario_id, horizon_days: engineParams.horizon_days, granularity: perimeter.granularity, ...extra };
+  return useQuery({ queryKey: ["grid", params], queryFn: () => api.get<GridResponse>("/api/grid", params), staleTime: 30_000 });
+}
+
+export function useProgramImpact() {
+  const { engineParams } = usePerimeter();
+  const params = { planner: engineParams.planner, scenario_id: engineParams.scenario_id, horizon_days: engineParams.horizon_days };
+  return useQuery({ queryKey: ["program-impact", params], queryFn: () => api.get<ProgramImpactResponse>("/api/programs/impact", params), staleTime: 30_000 });
+}
+
+/** Simulation grid cells (simulated receipts / adjustments typed by the planner). */
 export const useCells = (params?: Params) => useQuery({ queryKey: ["cells", params], queryFn: () => api.get<CellOut[]>("/api/entries/cells", params) });
+export const useWeeklyParams = (articleId: string | null, weeks = 26) => useQuery({
+  queryKey: ["weekly-params", articleId, weeks], enabled: !!articleId,
+  queryFn: () => api.get<WeeklyParamsResponse>(`/api/articles/${encodeURIComponent(articleId!)}/weekly-params`, { weeks }),
+});
 
 export const useArticles = (planner?: string | null) => useQuery({ queryKey: ["ref-articles", planner], queryFn: () => api.get<ArticleRef[]>("/api/reference/articles", { planner }), staleTime: 300_000 });
 export const useSuppliers = () => useQuery({ queryKey: ["ref-suppliers"], queryFn: () => api.get<SupplierRef[]>("/api/reference/suppliers"), staleTime: 300_000 });

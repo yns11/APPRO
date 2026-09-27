@@ -20,12 +20,15 @@ Exports
   ALERTES             snapshot of the alerts at export time (values)
   ==================  =====================================================================
 
-  The *Commandes simulées* row holds the simulated orders (typed cells and CBN results) as
-  editable values: it is re-imported as such.
+  The *Réceptions simulées* row holds the simulated receipts typed in the app (blank = not
+  typed, 0 = nothing arrives): on a typed day it replaces the expected orders in the simulated
+  stock.  It is re-imported as such.  *Complément CBN* holds the proposals as editable values.
 
   Stock recurrence per period (same as the engine, one column per day or ISO week)::
 
-      x           = stock[p-1] + orders[p] + receipts & adjustments[p] - demand[p]
+      firm      : x = stock[p-1] + R + F + A - demand
+      forecast  : x = stock[p-1] + R + F + P + A - demand
+      simulated : x = stock[p-1] + IF(S = "", R + F + P, IF(reference day, MAX(R, S), S)) + CBN + A - demand
       stock[p]    = IF(shortage policy = "lost", MAX(0, x), x)
       shortage[p] = MAX(0, -x)
       target[p]   = demand of the next N periods (and/or safety stock)
@@ -39,7 +42,7 @@ Imports
   (program names in column A, week labels ``S11-26`` / ``2028W24`` / ``2026-W11`` / dates in row 1)
   or a long layout (``program_id, week_start, qty``).
 * ``parse_entries_workbook`` – the ``SAISIES`` sheet (orders, receipts, adjustments, actuals),
-  the receipts typed in the ``CARNET_COMMANDES`` sheet and the *Commandes simulées* row of the
+  the receipts typed in the ``CARNET_COMMANDES`` sheet and the *Réceptions simulées* row of the
   ``SIMULATION`` grid.
 """
 from __future__ import annotations
@@ -84,12 +87,15 @@ ENTRY_FORMAT_ROWS = 200   # rows of SAISIES pre-formatted as dates (Excel recogn
 # Row layout of one article block in SIMULATION (offset → key, label, kind)
 BLOCK = [
     ("demand", "Besoin", "input"),
-    ("orders_firm", "Commandes fermes (carnet)", "formula"),
-    ("orders_forecast", "Commandes prévisionnelles ERP (carnet)", "formula"),
-    ("sim_orders", "Commandes simulées", "input"),
+    ("orders_firm", "Commandes fermes F (carnet)", "formula"),
+    ("orders_forecast", "Commandes prévisionnelles P (carnet)", "formula"),
+    ("known_receipts", "Réceptions connues R", "input"),
+    ("sim_receipts", "Réceptions simulées S (vide = non saisie, 0 = rien n'arrive)", "input"),
+    ("cbn", "Complément CBN", "input"),
     ("entries_orders", "Saisies : commandes (SAISIES)", "formula"),
-    ("entries_receipts", "Saisies : réceptions & ajustements (SAISIES, carnet)", "formula"),
-    ("known_receipts", "Réceptions & ajustements connus", "input"),
+    ("entries_receipts", "Saisies : réceptions (SAISIES, carnet)", "formula"),
+    ("entries_adjust", "Saisies : ajustements (SAISIES)", "formula"),
+    ("known_adjustments", "Ajustements connus A", "input"),
     ("stock_firm", "Stock ferme", "stock"),
     ("stock_forecast", "Stock prévisionnel", "stock"),
     ("stock_sim", "Stock simulé", "stock"),
@@ -185,11 +191,11 @@ def _parameters_sheet(ws, result: MrpResult, granularity: str, meta: dict[str, A
     ws.cell(r, 1, "Mode d'emploi").font = BOLD
     notes = [
         "Cellules bleues sur fond jaune = saisies ; cellules noires = formules (ne pas écraser).",
-        "SIMULATION : les lignes Besoin, Commandes simulées et Réceptions & ajustements connus sont des valeurs modifiables (formules Excel acceptées) ; les autres lignes se recalculent.",
-        "Commandes simulées = commandes saisies dans l'application et résultats du Calcul CBN, par jour (quantité signée).",
+        "SIMULATION : les lignes Besoin, Réceptions connues, Réceptions simulées, Complément CBN et Ajustements connus sont des valeurs modifiables (formules Excel acceptées) ; les autres lignes se recalculent.",
+        "Réceptions simulées : une valeur saisie remplace les commandes attendues (F + P) du jour dans le stock simulé ; 0 = rien n'arrive ; vide = commandes conservées. Le jour de référence, MAX(R, S) est retenu.",
         "CARNET_COMMANDES : modifier la date attendue / la quantité, saisir une quantité reçue et sa date, ou un statut RECUE / ANNULEE.",
         "SAISIES : nouvelles commandes, réceptions, ajustements (quantité signée) ou production réelle ; date au format date.",
-        "Réimport dans l'application (Imports / exports) : SAISIES, réceptions saisies dans le CARNET et ligne Commandes simulées (remplace les commandes simulées de l'article).",
+        "Réimport dans l'application (Imports / exports) : SAISIES, réceptions saisies dans le CARNET et ligne Réceptions simulées (remplace les réceptions simulées de l'article).",
         "Stock net = stock physique − manque (backlog) ; un stock physique n'est jamais négatif.",
     ]
     for i, t in enumerate(notes, start=r + 1):
@@ -310,30 +316,37 @@ def _simulation_grid(ws, result: MrpResult, ids: list[str], granularity: str, st
             v = float(sum(ar.demand[i] for i in idxs))
             cell("demand", round(v, 3) if v else 0).font = BLUE_FONT
             ws.cell(rows["demand"], c).fill = INPUT_FILL
-            v = float(sum(ar.receipts[i] + ar.adjustments[i] for i in idxs))
-            cell("known_receipts", round(v, 3) if v else 0).font = BLUE_FONT
-            ws.cell(rows["known_receipts"], c).fill = INPUT_FILL
-            v = float(sum(ar.supply_planned[i] for i in idxs))
-            cell("sim_orders", round(v, 3) if v else None).font = BLUE_FONT
-            ws.cell(rows["sim_orders"], c).fill = INPUT_FILL
+            for key, series in (("known_receipts", ar.receipts), ("known_adjustments", ar.adjustments), ("cbn", ar.supply_proposed)):
+                v = float(sum(series[i] for i in idxs))
+                cell(key, round(v, 3) if v else 0).font = BLUE_FONT
+                ws.cell(rows[key], c).fill = INPUT_FILL
+            # simulated receipts: blank when not typed, the typed value (0 included) otherwise
+            typed = [i for i in idxs if ar.sim_receipt_mask[i]]
+            v = round(float(sum(ar.sim_receipts[i] for i in typed)), 3) if typed else None
+            cell("sim_receipts", v).font = BLUE_FONT
+            ws.cell(rows["sim_receipts"], c).fill = INPUT_FILL
             cell("orders_firm", "=" + _sumifs(o_rest, (o_art, f"$A{rows['orders_firm']}"), (o_type, '"FIRM"'), *crit_date))
-            cell("orders_forecast", "=" + _sumifs(o_rest, (o_art, f"$A{rows['orders_forecast']}"), (o_type, '"FORECAST"'), *crit_date))
+            cell("orders_forecast", "=" + _sumifs(o_rest, (o_art, f"$A{rows['orders_forecast']}"), (o_type, '"FORECAST"'), *crit_date)
+                 + "+" + _sumifs(o_rest, (o_art, f"$A{rows['orders_forecast']}"), (o_type, '"PLANNED"'), *crit_date))
             e_crit = ((e_art, f"$A{rows['entries_orders']}"), (e_date, f'">="&{col}$2'), (e_date, f'"<="&{col}$3'))
             cell("entries_orders", "=" + _sumifs(e_qty, (e_type, '"COMMANDE"'), *e_crit))
             cell("entries_receipts", "=" + _sumifs(e_qty, (e_type, '"RECEPTION"'), *e_crit)
-                 + "+" + _sumifs(e_qty, (e_type, '"AJUSTEMENT"'), *e_crit)
                  + "+" + _sumifs(o_recv, (o_art, f"$A{rows['entries_receipts']}"), (o_recv_date, f'">="&{col}$2'), (o_recv_date, f'"<="&{col}$3')))
-            # stock layers
-            flows = f"{col}{rows['entries_receipts']}+{col}{rows['known_receipts']}-{col}{rows['demand']}"
-            firm_in = f"{col}{rows['orders_firm']}"
-            fc_in = firm_in + f"+{col}{rows['orders_forecast']}"
-            sim_in = fc_in + f"+{col}{rows['sim_orders']}+{col}{rows['entries_orders']}"
+            cell("entries_adjust", "=" + _sumifs(e_qty, (e_type, '"AJUSTEMENT"'), *e_crit))
+            # stock layers (R = known + typed receipts ; A = known + typed adjustments ; S typed replaces F + P)
+            r_tot = f"({col}{rows['known_receipts']}+{col}{rows['entries_receipts']})"
+            a_tot = f"{col}{rows['known_adjustments']}+{col}{rows['entries_adjust']}-{col}{rows['demand']}"
+            f_in, p_in, s_cell = f"{col}{rows['orders_firm']}", f"{col}{rows['orders_forecast']}", f"{col}{rows['sim_receipts']}"
+            firm_in = f"{r_tot}+{f_in}"
+            fc_in = f"{r_tot}+{f_in}+{p_in}"
+            s_typed = f"MAX({r_tot},{s_cell})" if (first_period and start == result.as_of) else s_cell
+            sim_in = f'IF({s_cell}="",{fc_in},{s_typed})+{col}{rows["cbn"]}+{col}{rows["entries_orders"]}'
             for key, inflow in (("stock_firm", firm_in), ("stock_forecast", fc_in), ("stock_sim", sim_in)):
                 prev_ref = f"$D{rows[key]}" if first_period else f"{prev}{rows[key]}"
-                x = f"{prev_ref}+{inflow}+{flows}"
+                x = f"{prev_ref}+{inflow}+{a_tot}"
                 cell(key, f'=IF({P_SHORTAGE}="lost",MAX(0,{x}),{x})').font = BOLD
             prev_ref = f"$D{rows['stock_sim']}" if first_period else f"{prev}{rows['stock_sim']}"
-            cell("shortage_sim", f"=MAX(0,-({prev_ref}+{sim_in}+{flows}))")
+            cell("shortage_sim", f"=MAX(0,-({prev_ref}+{sim_in}+{a_tot}))")
             # target: demand of the next N periods and/or safety stock
             n_per = f"{art}I${k}" if not week else f"ROUNDUP({art}I${k}/7,0)"
             cov = f"IF({n_per}>0,SUM(OFFSET({col}{rows['demand']},0,1,1,{n_per})),0)"
@@ -408,7 +421,7 @@ def _orders_sheet(ws, result: MrpResult, ids: list[str], start: dt.date | None =
         if not ar:
             continue
         for e in ar.events:
-            if e.kind != "order" or e.order_type == "PLANNED" or (start and e.date < start):
+            if e.kind != "order" or (start and e.date < start):
                 continue
             ws.append([aid, ar.article.designation, e.order_type, e.ref, e.supplier_id, e.date, e.qty, e.source,
                        "OUI" if e.late else "", None, None, None, None])
@@ -555,14 +568,14 @@ def parse_pdp_workbook(content: bytes, program_names: dict[str, str], sheet: str
 
 @dataclass
 class ParsedEntry:
-    kind: str           # COMMANDE | RECEPTION | AJUSTEMENT | PRODUCTION | COMMANDE_SIMULEE
+    kind: str           # COMMANDE | RECEPTION | AJUSTEMENT | PRODUCTION | RECEPTION_SIMULEE
     key: str            # article_id or program_id
     supplier_id: str | None
     date: dt.date
     qty: float
     comment: str
     order_id: str | None = None      # receipt posted against an order (app id or ERP reference)
-    proposal_id: str | None = None   # order created from a proposal decision
+    expression: str = ""             # RECEPTION_SIMULEE: typed value ("" = blank cell → cleared)
 
 
 def _to_date(v: Any) -> dt.date | None:
@@ -596,8 +609,8 @@ def parse_entries_workbook(content: bytes) -> tuple[list[ParsedEntry], list[str]
 
     * ``SAISIES`` rows: type, article / program, supplier, date, qty, comment, order reference;
     * ``CARNET_COMMANDES`` rows with a received quantity → receipts against the order reference;
-    * ``SIMULATION`` grid, row *Commandes simulées*: one ``COMMANDE_SIMULEE`` entry per period
-      (value or empty → the cell of that day is set / cleared; a week maps to its first day).
+    * ``SIMULATION`` grid, row *Réceptions simulées*: one ``RECEPTION_SIMULEE`` entry per period
+      (value, 0 or blank → the cell of that day is set / set to 0 / cleared; a week maps to its first day).
     """
     wb = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
     entries: list[ParsedEntry] = []
@@ -643,7 +656,7 @@ def parse_entries_workbook(content: bytes) -> tuple[list[ParsedEntry], list[str]
         rows = list(wb["SIMULATION"].iter_rows(values_only=True))
         if len(rows) > SIM_HEADER_ROWS:
             starts = [_to_date(v) for v in rows[1][SIM_FIRST_COL - 1:]]
-            label = BLOCK[ROW["sim_orders"]][1]
+            label = BLOCK[ROW["sim_receipts"]][1]
             for r in rows[SIM_HEADER_ROWS:]:
                 if not r or len(r) < 3 or _text(r[2]) != label or r[0] in (None, ""):
                     continue
@@ -655,6 +668,7 @@ def parse_entries_workbook(content: bytes) -> tuple[list[ParsedEntry], list[str]
                     if qty is None and v not in (None, ""):
                         notes.append(f"SIMULATION {r[0]} {day} : valeur non numérique ignorée ({v!r}) – recalculer le classeur")
                         continue
-                    entries.append(ParsedEntry("COMMANDE_SIMULEE", _text(r[0]), None, day, qty or 0.0,
-                                               "réimport de la ligne Commandes simulées"))
+                    entries.append(ParsedEntry("RECEPTION_SIMULEE", _text(r[0]), None, day, qty or 0.0,
+                                               "réimport de la ligne Réceptions simulées",
+                                               expression="" if qty is None else f"{qty:g}"))
     return entries, notes

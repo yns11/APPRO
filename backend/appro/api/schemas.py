@@ -131,11 +131,13 @@ class CockpitKpis(BaseModel):
     low_coverage: int
     overstock: int
     late_orders: int
-    sim_order_articles: int      # articles with at least one simulated order
-    sim_orders_qty: float        # total simulated orders (signed)
+    proposals: int
+    urgent_proposals: int
+    proposals_qty: float
+    sim_receipt_articles: int    # articles with at least one simulated receipt typed
+    sim_receipts_qty: float      # total simulated receipts typed (signed)
     open_firm_qty: float
     open_forecast_qty: float
-    open_planned_qty: float
     avg_coverage_days: float | None
     demand_next_30d: float
 
@@ -150,6 +152,7 @@ class CockpitResponse(BaseModel):
     kpis: CockpitKpis
     articles: list[ArticleSummary]
     alerts: list[AlertOut]
+    proposals: list[ProposalOut]
     diagnostics: list[str]
     weekly_supply_demand: list[dict[str, Any]]
 
@@ -163,15 +166,44 @@ class SeriesOut(BaseModel):
 class ProjectionResponse(BaseModel):
     article: ArticleRef
     as_of: dt.date
-    granularity: Literal["day", "week"]
-    periods: list[str]
+    granularity: Literal["default", "day", "week"]
+    periods: list[str]              # ISO date (day column) or ISO week label (week column)
     period_start: list[dt.date]
+    period_end: list[dt.date]
     series: list[SeriesOut]
     events: list[SupplyEventOut]
     proposals: list[ProposalOut]
     alerts: list[AlertOut]
     kpis: dict[str, Any]
     suppliers: list[LinkRef]
+    programs: list[dict[str, Any]]
+    diagnostics: list[str]
+
+
+class GridArticle(BaseModel):
+    """One article of the multi-article supply table (same series as the article projection)."""
+
+    article: ArticleRef
+    series: list[SeriesOut]
+    events: list[SupplyEventOut]
+    kpis: dict[str, Any]
+    suppliers: list[LinkRef]
+    programs: list[str]
+
+
+class GridResponse(BaseModel):
+    as_of: dt.date
+    granularity: Literal["default", "day", "week"]
+    periods: list[str]
+    period_start: list[dt.date]
+    period_end: list[dt.date]
+    articles: list[GridArticle]
+    diagnostics: list[str]
+
+
+class ProgramImpactResponse(BaseModel):
+    as_of: dt.date
+    weeks: list[str]
     programs: list[dict[str, Any]]
     diagnostics: list[str]
 
@@ -274,8 +306,8 @@ class ProductionActualOut(ORM):
 class CellIn(BaseModel):
     article_id: str
     date: dt.date
-    kind: Literal["sim_order", "adjustment"] = "sim_order"
-    expression: str = Field("", max_length=200, description="quantité ou expression arithmétique ; vide = supprimer")
+    kind: Literal["sim_receipt", "adjustment"] = "sim_receipt"
+    expression: str = Field("", max_length=200, description="quantité ou expression arithmétique ; vide = effacer ; 0 = rien n'arrive")
 
 
 class CellOut(ORM):
@@ -291,23 +323,18 @@ class CellOut(ORM):
     updated_at: dt.datetime
 
 
-class CbnRequest(BaseModel):
-    planner: str | None = None
-    article_ids: list[str] | None = None
-    scenario_id: str | None = None
-    reset: bool = True   # remove the cells written by the previous CBN run (typed cells are kept)
-    params: dict[str, Any] = Field(default_factory=dict)
+class WeeklyParamRow(BaseModel):
+    week: str
+    week_start: dt.date
+    values: dict[str, float]
+    overridden: list[str]
 
 
-class CbnReport(BaseModel):
-    as_of: dt.date
-    articles: int
-    proposals: int
-    urgent: int
-    qty: float
-    removed: int
-    items: list[ProposalOut]
-    diagnostics: list[str]
+class WeeklyParamsResponse(BaseModel):
+    article_id: str
+    fields: list[str]
+    defaults: dict[str, float]
+    weeks: list[WeeklyParamRow]
 
 
 # ------------------------------------------------------------------ scenarios
@@ -377,7 +404,7 @@ class CompareResponse(BaseModel):
 
 # ------------------------------------------------------------------ params / pdp / audit
 class ParamOverrideIn(BaseModel):
-    scope: Literal["global", "article", "link"]
+    scope: Literal["global", "article", "article_week", "link"]
     key1: str = ""
     key2: str = ""
     field: str

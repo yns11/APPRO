@@ -66,7 +66,7 @@ export function EntryDrawer({ draft, onClose, articles }: { draft: EntryDraft | 
           </Field>
         )}
         {form.kind === "order" && (
-          <Field label="Nature" help="Commande réelle, comptée dans le stock ferme. Pour simuler, saisir dans la ligne Commandes simulées du tableau.">
+          <Field label="Nature" help="Commande réelle, comptée dans le stock ferme. Pour simuler une livraison, saisir dans la ligne Réceptions simulées du tableau.">
             <div className="input" style={{ display: "flex", alignItems: "center" }}>Ferme (passée au fournisseur)</div>
           </Field>
         )}

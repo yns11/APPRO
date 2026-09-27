@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Search } from "lucide-react";
+import { CalendarDays, Search } from "lucide-react";
+import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { useArticles, useBom, useLinks, useOverrides, usePlan, usePrograms, useSuppliers, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
@@ -16,6 +17,7 @@ export default function ReferencePage() {
   const [tab, setTab] = useState<Tab>("articles");
   const [search, setSearch] = useState("");
   const [program, setProgram] = useState<string>("");
+  const [weeklyOf, setWeeklyOf] = useState<string | null>(null);
   const toast = useToast();
   const articles = useArticles(perimeter.planner);
   const suppliers = useSuppliers();
@@ -44,7 +46,7 @@ export default function ReferencePage() {
 
       {tab === "articles" && <Card flush>{articles.isError ? <ErrorBox error={articles.error} /> : articles.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : (
         <table className="tbl compact">
-          <thead><tr><th>Article</th><th>Unité</th><th>Appro</th><th className="num">Couverture cible (j)</th><th className="num">Seuil rouge (j)</th><th className="num">Seuil orange (j)</th><th className="num">Surstock (j)</th><th className="num">Stock sécurité</th><th className="num">Cycle cde (j)</th><th>Actif</th></tr></thead>
+          <thead><tr><th>Article</th><th>Unité</th><th>Appro</th><th className="num">Couverture cible (j)</th><th className="num">Seuil rouge (j)</th><th className="num">Seuil orange (j)</th><th className="num">Surstock (j)</th><th className="num">Stock sécurité</th><th className="num">Cycle cde (j)</th><th>Actif</th><th title="Personnaliser par semaine">Semaines</th></tr></thead>
           <tbody>{(articles.data ?? []).filter((a) => !s || `${a.article_id} ${a.designation}`.toLowerCase().includes(s)).map((a) => (
             <tr key={a.article_id}>
               <td><Link to={`/articles/${encodeURIComponent(a.article_id)}`}><b>{a.article_id}</b></Link><span className="sub">{a.designation}</span></td>
@@ -56,10 +58,12 @@ export default function ReferencePage() {
               <td className="num"><Editable scope="article" key1={a.article_id} field="safety_stock_qty" value={a.safety_stock_qty} unit={a.unit} /></td>
               <td className="num"><Editable scope="article" key1={a.article_id} field="order_cycle_days" value={a.order_cycle_days} /></td>
               <td>{a.active ? <Badge tone="ok">oui</Badge> : <Badge tone="neutral">non</Badge>}</td>
+              <td><Button size="sm" variant="ghost" title="Personnaliser ces paramètres semaine par semaine" aria-label={`Paramètres hebdomadaires ${a.article_id}`} onClick={() => setWeeklyOf(a.article_id)}><CalendarDays /></Button></td>
             </tr>
           ))}</tbody>
         </table>
       )}</Card>}
+      <WeeklyParamsDrawer articleId={weeklyOf} onClose={() => setWeeklyOf(null)} />
 
       {tab === "links" && <Card flush>{links.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : (
         <table className="tbl compact">

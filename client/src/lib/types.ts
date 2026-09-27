@@ -31,7 +31,7 @@ export interface ArticleKpis {
   min_stock_firm: number; min_stock_forecast: number; min_stock_sim: number;
   max_shortage_firm: number; max_shortage_forecast: number; max_shortage_sim: number;
   demand_next_7d: number; demand_next_30d: number; demand_horizon: number; avg_daily_demand_30d: number;
-  open_firm_qty: number; open_forecast_qty: number; open_planned_qty: number; proposed_qty: number; proposal_count: number; urgent_proposal_count: number;
+  open_firm_qty: number; open_forecast_qty: number; sim_receipts_qty: number; sim_receipt_days: number; proposed_qty: number; proposal_count: number; urgent_proposal_count: number;
   late_order_count: number; late_order_qty: number; alert_count: number; severity: Severity | null; actual_share_30d: number;
 }
 export interface ArticleSummary {
@@ -40,28 +40,38 @@ export interface ArticleSummary {
 }
 export interface CockpitKpis {
   articles: number; critical: number; warning: number; stockouts: number; stockouts_7d: number; low_coverage: number; overstock: number;
-  late_orders: number; sim_order_articles: number; sim_orders_qty: number; open_firm_qty: number; open_forecast_qty: number; open_planned_qty: number;
-  avg_coverage_days: number | null; demand_next_30d: number;
+  late_orders: number; proposals: number; urgent_proposals: number; proposals_qty: number; sim_receipt_articles: number; sim_receipts_qty: number;
+  open_firm_qty: number; open_forecast_qty: number; avg_coverage_days: number | null; demand_next_30d: number;
 }
 export interface WeeklyOutlook { week: string; week_start: string; stockout_articles: number; below_target_articles: number; proposals: number; proposed_qty: number; }
 export interface CockpitResponse {
   as_of: string; horizon_days: number; planner: string | null; scenario_id: string | null; data_source: string;
   pdp_version: { id: string; name: string } | null; kpis: CockpitKpis; articles: ArticleSummary[]; alerts: AlertOut[];
-  diagnostics: string[]; weekly_supply_demand: WeeklyOutlook[];
+  proposals: ProposalOut[]; diagnostics: string[]; weekly_supply_demand: WeeklyOutlook[];
 }
 export interface SeriesOut { key: string; label: string; values: number[]; }
+export type Granularity = "default" | "day" | "week";
 export interface ProjectionResponse {
-  article: ArticleRef; as_of: string; granularity: "day" | "week"; periods: string[]; period_start: string[]; series: SeriesOut[];
+  article: ArticleRef; as_of: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; series: SeriesOut[];
   events: SupplyEventOut[]; proposals: ProposalOut[]; alerts: AlertOut[]; kpis: ArticleKpis; suppliers: LinkRef[];
   programs: { program_id: string; name: string; qty_per: number; unit: string; production_next_30d: number }[]; diagnostics: string[];
 }
+export interface GridArticle { article: ArticleRef; series: SeriesOut[]; events: SupplyEventOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; programs: string[]; }
+export interface GridResponse { as_of: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; articles: GridArticle[]; diagnostics: string[]; }
+export type ImpactLayer = "onhand" | "firm" | "forecast" | "sim";
+export interface ProgramImpact {
+  program_id: string; name: string; components: number; planned: number[];
+  feasible: Record<ImpactLayer, number[]>; limiting: Record<ImpactLayer, { article_id: string; share: number }[][]>; first_impact: Record<ImpactLayer, string | null>;
+}
+export interface ProgramImpactResponse { as_of: string; weeks: string[]; programs: ProgramImpact[]; diagnostics: string[]; }
+export interface WeeklyParamRow { week: string; week_start: string; values: Record<string, number>; overridden: string[]; }
+export interface WeeklyParamsResponse { article_id: string; fields: string[]; defaults: Record<string, number>; weeks: WeeklyParamRow[]; }
 
 export interface OrderOut { id: string; article_id: string; supplier_id: string | null; expected_date: string; qty: number; unit: string; order_type: string; status: string; source: string; erp_order_id: string | null; proposal_id: string | null; note: string; created_by: string; created_at: string; updated_at: string; }
 export interface ReceiptOut { id: string; article_id: string; supplier_id: string | null; order_id: string | null; receipt_date: string; qty: number; note: string; created_by: string; created_at: string; }
 export interface AdjustmentOut { id: string; article_id: string; date: string; qty: number; movement_type: string; comment: string; created_by: string; created_at: string; }
-export type CellKind = "sim_order" | "adjustment";
+export type CellKind = "sim_receipt" | "adjustment";
 export interface CellOut { id: string; article_id: string; date: string; kind: CellKind; expression: string; qty: number; source: string; note: string; updated_by: string; updated_at: string; }
-export interface CbnReport { as_of: string; articles: number; proposals: number; urgent: number; qty: number; removed: number; items: ProposalOut[]; diagnostics: string[]; }
 export interface ProductionOut { id: string; program_id: string; date: string; qty: number; created_by: string; created_at: string; }
 
 export interface ScenarioEvent { id?: string; seq?: number; kind: string; payload: Record<string, unknown>; label: string; }

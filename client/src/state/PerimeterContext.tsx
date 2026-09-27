@@ -8,7 +8,7 @@ export interface Perimeter {
   planner: string | null;
   scenarioId: string | null;
   horizonDays: number;
-  granularity: "day" | "week";
+  granularity: "default" | "day" | "week";
   theme: "light" | "dark" | "system";
 }
 
@@ -22,7 +22,7 @@ interface Ctx {
 }
 
 const KEY = "appro.perimeter.v1";
-const defaults: Perimeter = { planner: null, scenarioId: null, horizonDays: 120, granularity: "week", theme: "system" };
+const defaults: Perimeter = { planner: null, scenarioId: null, horizonDays: 120, granularity: "default", theme: "system" };
 
 function load(): Perimeter {
   try {

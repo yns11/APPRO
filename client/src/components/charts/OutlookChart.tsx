@@ -14,7 +14,7 @@ export function OutlookChart({ data, height = 220 }: { data: WeeklyOutlook[]; he
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Bar dataKey="stockout_articles" name="Articles en rupture" stackId="a" fill="var(--critical)" />
         <Bar dataKey="below_target_articles" name="Articles sous cible" stackId="a" fill="var(--warning)" />
-        <Bar dataKey="proposals" name="Commandes simulées à livrer" fill="var(--s-proposal)" fillOpacity={0.5} />
+        <Bar dataKey="proposals" name="Compléments CBN à livrer" fill="var(--s-proposal)" fillOpacity={0.5} />
       </ComposedChart>
     </ResponsiveContainer>
   );

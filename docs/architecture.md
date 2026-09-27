@@ -3,7 +3,7 @@
 ```
 ┌────────────────────────────── Databricks App « appro » ──────────────────────────────┐
 │  client/  (React 18 + TypeScript + Vite)      ──── build ───►  client/dist (statique)  │
-│     pages : cockpit, fiche article, calcul CBN, scénarios, saisies, imports, référentiel, paramètres │
+│     pages : cockpit, fiche article, tableau d'appro, complément CBN, impact programmes, scénarios, saisies, imports, référentiel, paramètres │
 │     state : PerimeterContext (appro, scénario, horizon, granularité, thème)             │
 │     lib   : api.ts (fetch typé), queries.ts (TanStack Query), format.ts                 │
 │                                       │ /api (JSON, xlsx)                               │
@@ -39,14 +39,14 @@
   nouveaux événements de scénario = une branche dans `scenario.apply_scenario`.
 * **Conception UI** (voir `client/src/styles/tokens.css`) : jetons de design (couleurs sémantiques, échelle
   typographique ratio 1,25, espacements 4 px, rayons, ombres), mode clair / sombre, notation inspirée
-  IBCS : ferme = trait plein foncé, prévisionnel = tirets, simulé = pointillé, cible = référence grise, commandes simulées = hachures ;
+  IBCS : ferme = trait plein foncé, prévisionnel = tirets, simulé = pointillé, cible = référence grise, réceptions simulées = hachures, complément CBN = orange clair ;
   états chargement / vide / erreur / partiel sur chaque vue ; chaque KPI porte unité, période et fraîcheur.
 
 ## Flux de calcul d'une page
 
 1. Le client appelle `/api/cockpit` ou `/api/articles/{id}/projection` avec le périmètre courant.
 2. `mrp_service.compute` construit les paramètres (défauts ← configuration ← surcharges globales ←
-   requête), assemble le `Dataset` (dont les cellules du tableau), applique le scénario, exécute `run_mrp` ; `run_cbn` écrit les propositions en cellules.
+   requête), assemble le `Dataset` (dont les cellules du tableau), applique le scénario, exécute `run_mrp` (dont l'impact programmes).
 3. Les présentateurs agrègent (jour / semaine) et sérialisent ; le client affiche, avec états.
 4. Toute écriture (saisie, décision, import, paramètre) journalise dans `app_audit_log` et incrémente la
    version des données → invalidation du cache serveur et des requêtes client.

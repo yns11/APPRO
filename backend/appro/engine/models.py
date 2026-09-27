@@ -32,6 +32,21 @@ class Article:
     active: bool = True
     service_rate_tracked: bool = False
     dhrq: str = ""
+    # per-ISO-week overrides of the stock policy: {"2026-W40": {"coverage_target_days": 10, ...}}
+    weekly: dict[str, dict[str, float]] = field(default_factory=dict)
+
+    def param_at(self, name: str, day: dt.date) -> float:
+        """Value of a stock-policy parameter on ``day`` (weekly override, else the article value)."""
+        if self.weekly:
+            y, w, _ = day.isocalendar()
+            week = self.weekly.get(f"{y}-W{w:02d}")
+            if week and name in week:
+                return week[name]
+        return getattr(self, name)
+
+
+WEEKLY_FIELDS = ("coverage_target_days", "alert_red_days", "alert_yellow_days", "overstock_days",
+                 "safety_stock_qty", "order_cycle_days")
 
 
 @dataclass
@@ -162,17 +177,18 @@ class Movement:
 
 @dataclass
 class SimCell:
-    """One editable cell of the simulation grid (planner entry or CBN result).
+    """One editable cell of the simulation grid.
 
-    ``kind`` = ``sim_order`` (simulated order, signed quantity, counted in the *simulated* stock
-    only) or ``adjustment`` (signed stock adjustment counted in every layer).
+    ``kind`` = ``sim_receipt`` (simulated receipt: on that day it *replaces* the expected firm
+    and forecast orders in the *simulated* stock – an explicit 0 means nothing arrives) or
+    ``adjustment`` (signed stock adjustment counted in every layer).
     """
 
     article_id: str
     date: dt.date
-    kind: Literal["sim_order", "adjustment"]
+    kind: Literal["sim_receipt", "adjustment"]
     qty: float
-    source: str = "MANUAL"   # MANUAL | CBN | IMPORT
+    source: str = "MANUAL"   # MANUAL | IMPORT
     note: str = ""
 
 
@@ -222,11 +238,11 @@ class EngineParams:
     missing_actual_policy: Literal["plan", "zero"] = "plan"
     consumption_offset_days: int = 0              # <0: components consumed before the production day
 
-    # Supply – three cumulative stock layers: firm ⊂ forecast ⊂ simulated
-    firm_sources: tuple[str, ...] = ("FIRM",)          # order types in the *firm* stock
-    forecast_sources: tuple[str, ...] = ("FORECAST",)  # added to the firm flows → *forecast* stock
-    simulated_sources: tuple[str, ...] = ("PLANNED",)  # added to the forecast flows → *simulated* stock
-    app_firm_orders: Literal["firm", "simulated"] = "firm"  # app orders marked sent: firm layer, or simulation only
+    # Supply – three cumulative stock layers: firm ⊂ forecast ⊂ simulated (see runner.py)
+    firm_sources: tuple[str, ...] = ("FIRM",)                    # order types in the *firm* stock (F)
+    forecast_sources: tuple[str, ...] = ("FORECAST", "PLANNED")  # added to the firm flows → *forecast* stock (P)
+    app_firm_orders: Literal["firm", "simulated"] = "firm"  # app orders marked sent: firm layer, or forecast layer only
+    forecast_date_policy: Literal["actual", "week_monday"] = "actual"  # forecast orders on their date or on the Monday
     include_proposals_in_simulation: bool = True
     late_order_policy: Literal["reschedule", "ignore", "keep"] = "reschedule"
     orders_source: Literal["merged", "erp", "app"] = "merged"
@@ -237,8 +253,9 @@ class EngineParams:
     coverage_tie_rule: Literal["covered", "not_covered"] = "covered"
     target_policy: Literal["coverage_days", "safety_qty", "max"] = "max"
 
-    # Proposals (net requirements): computed on demand by the "Calcul CBN" action, not on every run
-    generate_proposals: bool = False
+    # Proposals (net requirements, "Complément CBN"): computed on every run on the simulated stock
+    generate_proposals: bool = True
+    proposal_placement: Literal["working_days", "monday"] = "working_days"  # delivery on any working day or Mondays only
     frozen_days: int = 0
     respect_lead_time: bool = False               # True: never propose a delivery before as_of + lead time
     delivery_shift: Literal["earlier", "later"] = "earlier"
@@ -248,6 +265,9 @@ class EngineParams:
     # Alerts
     stockout_lookahead_days: int | None = None    # None: whole horizon
     firm_horizon_days: int = 28                   # firm-flow stockouts beyond this are informational
+
+    # Display
+    focus_weeks: int = 2                          # default calendar: days for the current week + N weeks, then weeks
 
     def copy_with(self, **changes: Any) -> "EngineParams":
         data = self.__dict__.copy()
@@ -310,7 +330,7 @@ class SupplyEvent:
     """One dated supply element shown in the article table / tooltips."""
 
     date: dt.date
-    kind: str               # order | sim_order | receipt | movement | proposal
+    kind: str               # order | sim_receipt | receipt | movement | proposal
     ref: str
     qty: float
     supplier_id: str | None
@@ -329,16 +349,18 @@ class ArticleResult:
     demand: list[float]
     demand_plan: list[float]
     demand_actual_share: list[float]
-    supply_firm: list[float]          # committed orders
-    supply_forecast: list[float]      # ERP forecast schedule lines
-    supply_planned: list[float]       # app / scenario planned orders (not sent)
-    supply_proposed: list[float]      # engine proposals
-    receipts: list[float]
-    adjustments: list[float]
+    supply_firm: list[float]          # F – committed orders still expected
+    supply_forecast: list[float]      # P – ERP forecast schedule lines (+ legacy planned app orders)
+    sim_receipts: list[float]         # S – simulated receipts typed by the planner (0 where not typed)
+    sim_receipt_mask: list[bool]      # True where S is typed (an explicit 0 replaces F + P)
+    supply_proposed: list[float]      # engine proposals ("Complément CBN")
+    receipts: list[float]             # R – receipts posted after the snapshot
+    adjustments: list[float]          # A – adjustments (ERP, app, grid cells)
     # physical stocks (never negative), unserved demand and net balances per layer
     stock_firm: list[float]
     stock_forecast: list[float]
     stock_sim: list[float]
+    shortage_onhand: list[float]      # unserved demand with the on-hand stock only (no supply at all)
     shortage_firm: list[float]
     shortage_forecast: list[float]
     shortage_sim: list[float]
@@ -366,6 +388,7 @@ class MrpResult:
     articles: dict[str, ArticleResult]
     program_daily: dict[str, dict[dt.date, float]]
     diagnostics: list[str] = field(default_factory=list)
+    program_impact: dict[str, Any] = field(default_factory=dict)   # see engine/programs.py
 
     @property
     def alerts(self) -> list[Alert]:

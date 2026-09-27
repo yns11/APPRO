@@ -56,7 +56,7 @@ def export_orders(planner: str | None = None, scenario_id: str | None = None,
 async def import_entries(file: UploadFile = File(...), ctx: AppContext = Depends(ctx_dep),
                          session: Session = Depends(session_dep), user: str = Depends(current_user)):
     """Import the planner inputs of an exported workbook: ``SAISIES`` sheet, receipts typed in the
-    ``CARNET_COMMANDES`` sheet and the *Commandes simulées* row of the ``SIMULATION`` grid."""
+    ``CARNET_COMMANDES`` sheet and the *Réceptions simulées* row of the ``SIMULATION`` grid."""
     content = await file.read()
     try:
         entries, notes = excel_service.parse_entries_workbook(content)
@@ -76,15 +76,15 @@ async def import_entries(file: UploadFile = File(...), ctx: AppContext = Depends
             if e.key not in units:
                 notes.append(f"article inconnu : {e.key}")
                 continue
-            if e.kind == "COMMANDE_SIMULEE":
+            if e.kind == "RECEPTION_SIMULEE":
                 try:
-                    row = mrp_service.upsert_cell(ctx, session, user, e.key, e.date, "sim_order",
-                                                  f"{e.qty:g}" if e.qty else "", source="IMPORT", note=e.comment)
+                    row = mrp_service.upsert_cell(ctx, session, user, e.key, e.date, "sim_receipt", e.expression,
+                                                  source="IMPORT", note=e.comment)
                 except ValueError as exc:
                     notes.append(f"{e.key} {e.date} : {exc}")
                     continue
-                if row is None and not e.qty:
-                    continue  # empty cell, nothing stored
+                if row is None:
+                    continue  # blank cell: nothing stored (or an existing cell cleared)
             elif e.kind == "COMMANDE":
                 session.add(AppOrder(article_id=e.key, supplier_id=e.supplier_id, expected_date=e.date, qty=e.qty,
                                      unit=units[e.key] or "PCE", note=e.comment, created_by=user, source="IMPORT"))

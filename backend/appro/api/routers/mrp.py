@@ -1,4 +1,4 @@
-"""Cockpit, article projection, alerts and ad-hoc simulation endpoints."""
+"""Cockpit, article projection, multi-article grid, programme impact, alerts, proposals and ad-hoc simulation."""
 from __future__ import annotations
 
 import datetime as dt
@@ -7,6 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from ...engine.models import WEEKLY_FIELDS
 from ...engine.scenario import ScenarioEvent
 from ...services import mrp_service
 from ...services.context import AppContext
@@ -63,6 +64,7 @@ def cockpit(planner: str | None = None, scenario_id: str | None = None, article_
                                                      late_order_policy=late_order_policy))
     except KeyError as exc:
         raise HTTPException(404, f"Scénario inconnu : {exc}")
+    names = _supplier_names(ctx)
     arts = sorted(result.articles.values(), key=lambda r: ({"critical": 0, "warning": 1, "info": 2}.get(r.kpis.get("severity") or "", 3),
                                                             r.kpis["coverage_sim_days"], r.article.article_id))
     meta = result.articles and next(iter(result.articles.values()))
@@ -71,11 +73,12 @@ def cockpit(planner: str | None = None, scenario_id: str | None = None, article_
         data_source=ctx.source.name, pdp_version=None if not meta else getattr(meta, "pdp_version", None),
         kpis=P.cockpit_kpis(result), articles=[P.article_summary(r) for r in arts],
         alerts=[P.alert_out(a, r.article.designation) for r in arts for a in r.alerts],
+        proposals=[P.proposal_out(p, r, names) for r in arts for p in r.proposals],
         diagnostics=result.diagnostics, weekly_supply_demand=P.weekly_supply_demand(result))
 
 
 @router.get("/articles/{article_id}/projection", response_model=S.ProjectionResponse)
-def projection(article_id: str, granularity: Literal["day", "week"] = "day", scenario_id: str | None = None,
+def projection(article_id: str, granularity: Literal["default", "day", "week"] = "default", scenario_id: str | None = None,
                horizon_days: int | None = ENGINE_QUERY["horizon_days"], as_of: dt.date | None = None,
                production_mode: str | None = None, orders_source: str | None = None, coverage_unit: str | None = None,
                generate_proposals: bool | None = None, include_proposals_in_simulation: bool | None = None,
@@ -98,6 +101,84 @@ def projection(article_id: str, granularity: Literal["day", "week"] = "day", sce
     return P.projection_out(ar, result, granularity, _supplier_names(ctx), _programs_for(ctx, article_id, result))
 
 
+def _programs_of(ctx: AppContext) -> dict[str, list[str]]:
+    bom = ctx.source.table("ref_bom")
+    out: dict[str, list[str]] = {}
+    for r in bom.to_dict("records"):
+        out.setdefault(r["article_id"], []).append(r["program_id"])
+    return out
+
+
+@router.get("/grid", response_model=S.GridResponse)
+def grid(planner: str | None = None, scenario_id: str | None = None, article_ids: list[str] | None = Query(None),
+         program_id: str | None = None, supplier_id: str | None = None,
+         granularity: Literal["default", "day", "week"] = "default",
+         horizon_days: int | None = ENGINE_QUERY["horizon_days"], history_days: int | None = Query(None, ge=0, le=365),
+         ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Supply table of several articles on the same columns (filters: articles, programme, supplier)."""
+    ids = set(article_ids or [])
+    if program_id:
+        bom = ctx.source.table("ref_bom")
+        prog_ids = set(bom[bom["program_id"] == program_id]["article_id"])
+        ids = ids & prog_ids if ids else prog_ids
+        if not ids:
+            ids = {"__none__"}
+    if supplier_id:
+        lk = ctx.source.table("ref_article_suppliers")
+        sup_ids = set(lk[lk["supplier_id"] == supplier_id]["article_id"])
+        ids = ids & sup_ids if ids else sup_ids
+        if not ids:
+            ids = {"__none__"}
+    try:
+        result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
+                                     scenario_id=scenario_id,
+                                     **_param_kwargs(horizon_days=horizon_days, history_days=history_days))
+    except KeyError as exc:
+        raise HTTPException(404, f"Scénario inconnu : {exc}")
+    return P.grid_out(result, granularity, _supplier_names(ctx), _programs_of(ctx))
+
+
+@router.get("/programs/impact", response_model=S.ProgramImpactResponse)
+def programs_impact(planner: str | None = None, scenario_id: str | None = None,
+                    horizon_days: int | None = ENGINE_QUERY["horizon_days"],
+                    ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Feasible production per programme and week, for the on-hand / firm / forecast / simulated stocks."""
+    try:
+        result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id,
+                                     **_param_kwargs(horizon_days=horizon_days))
+    except KeyError as exc:
+        raise HTTPException(404, f"Scénario inconnu : {exc}")
+    return S.ProgramImpactResponse(as_of=result.as_of, weeks=result.program_impact.get("weeks", []),
+                                   programs=result.program_impact.get("programs", []), diagnostics=result.diagnostics)
+
+
+@router.get("/articles/{article_id}/weekly-params", response_model=S.WeeklyParamsResponse)
+def weekly_params(article_id: str, weeks: int = Query(26, ge=1, le=104), ctx: AppContext = Depends(ctx_dep),
+                  session: Session = Depends(session_dep)):
+    """Stock-policy parameters per ISO week from the reference week (article values, weekly overrides)."""
+    from sqlalchemy import select
+
+    from ...data.assembler import erp_dataset
+    from ...data.store import ParamOverride
+    from ...engine.calendar import iso_week_label, iso_week_monday
+    from ...engine.runner import resolve_as_of
+    ds = erp_dataset(ctx.source, article_ids=[article_id])
+    if not ds.articles:
+        raise HTTPException(404, f"Article inconnu : {article_id}")
+    mrp_service.apply_overrides(ds, session.scalars(select(ParamOverride).where(ParamOverride.scope != "global")).all())
+    a = ds.articles[0]
+    params = mrp_service.build_params(ctx, session)
+    monday = iso_week_monday(resolve_as_of(ds, params))
+    rows = []
+    for k in range(weeks):
+        d = monday + dt.timedelta(days=7 * k)
+        wk = iso_week_label(d)
+        rows.append(S.WeeklyParamRow(week=wk, week_start=d, values={f: float(a.param_at(f, d)) for f in WEEKLY_FIELDS},
+                                     overridden=sorted(a.weekly.get(wk, {}).keys())))
+    return S.WeeklyParamsResponse(article_id=article_id, fields=list(WEEKLY_FIELDS),
+                                  defaults={f: float(getattr(a, f)) for f in WEEKLY_FIELDS}, weeks=rows)
+
+
 @router.get("/alerts", response_model=list[S.AlertOut])
 def alerts(planner: str | None = None, scenario_id: str | None = None, severity: str | None = None,
            alert_type: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
@@ -108,6 +189,16 @@ def alerts(planner: str | None = None, scenario_id: str | None = None, severity:
     if alert_type:
         out = [a for a in out if a.alert_type == alert_type]
     return out
+
+
+@router.get("/proposals", response_model=list[S.ProposalOut])
+def proposals(planner: str | None = None, scenario_id: str | None = None,
+              ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Net requirements ("Complément CBN") computed on the simulated stock of the perimeter."""
+    result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id)
+    names = _supplier_names(ctx)
+    out = [P.proposal_out(p, r, names) for r in result.articles.values() for p in r.proposals]
+    return sorted(out, key=lambda p: (not p.urgent, p.order_date, p.article_id))
 
 
 @router.post("/simulate", response_model=S.CompareResponse)

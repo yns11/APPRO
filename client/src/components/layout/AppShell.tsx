@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, BookOpen, ClipboardList, FileSpreadsheet, FlaskConical, LayoutDashboard, Menu, Moon, PenLine, Settings, ShoppingCart, Sun, Monitor, RefreshCw } from "lucide-react";
+import { Activity, BookOpen, ClipboardList, Factory, FileSpreadsheet, FlaskConical, LayoutDashboard, Menu, Moon, PenLine, Settings, ShoppingCart, Sun, Monitor, RefreshCw, Table } from "lucide-react";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useInvalidateAll, useScenarios } from "@/lib/queries";
 import { Button } from "@/components/ui";
@@ -11,7 +11,9 @@ import { useToast } from "@/components/ui";
 const NAV = [
   { to: "/", label: "Cockpit du jour", icon: LayoutDashboard, end: true },
   { to: "/articles", label: "Fiches articles", icon: Activity },
-  { to: "/propositions", label: "Calcul CBN & commandes simulées", icon: ShoppingCart },
+  { to: "/tableau", label: "Tableau d'approvisionnement", icon: Table },
+  { to: "/propositions", label: "Complément CBN", icon: ShoppingCart },
+  { to: "/programmes", label: "Impact programmes", icon: Factory },
   { to: "/simulation", label: "Scénarios & simulation", icon: FlaskConical },
   { to: "/saisies", label: "Saisies & journal", icon: PenLine },
   { to: "/imports", label: "Imports / exports", icon: FileSpreadsheet },

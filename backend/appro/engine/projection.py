@@ -107,20 +107,21 @@ def target_stock(demand: np.ndarray, article: Article, index: DayIndex, calendar
     """Target / safety level per day according to the article policy."""
     n = len(demand)
     cum = np.concatenate([[0.0], np.cumsum(demand)])  # cum[k] = Σ demand[0..k-1]
-    days = max(int(article.coverage_target_days or 0), 0)
+    # the coverage target and the safety stock may change from one ISO week to another
+    days = np.array([max(int(article.param_at("coverage_target_days", d) or 0), 0) for d in index.dates])
+    safety = np.array([float(article.param_at("safety_stock_qty", d) or 0.0) for d in index.dates])
     if params.coverage_unit == "working":
         # translate N working days into a calendar span for each day
         end_idx = np.empty(n, dtype=int)
         for i, d in enumerate(index.dates):
-            end_idx[i] = min(n - 1, i + (calendar.add_working_days(d, days) - d).days)
+            end_idx[i] = min(n - 1, i + (calendar.add_working_days(d, int(days[i])) - d).days)
     else:
         end_idx = np.minimum(np.arange(n) + days, n - 1)
     cov_target = cum[end_idx + 1] - cum[np.arange(n) + 1]  # Σ demand[i+1 .. end_idx]
-    safety = float(article.safety_stock_qty or 0.0)
     if params.target_policy == "coverage_days":
         return cov_target
     if params.target_policy == "safety_qty":
-        return np.full(n, safety)
+        return safety
     return np.maximum(cov_target, safety)
 
 
