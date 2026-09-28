@@ -160,12 +160,12 @@ class ParamOverride(Base):
 
 
 class AppCell(Base):
-    """One editable cell of the simulation grid: a simulated receipt or an adjustment for one day.
+    """One adjustment typed in the simulation grid (signed quantity or arithmetic expression).
 
-    The planner types a quantity or an arithmetic expression; the evaluated quantity is stored
-    with the expression (an explicit 0 is a value: for a simulated receipt it replaces the expected
-    orders of the day).  ``source`` is ``MANUAL`` (typed) or ``IMPORT`` (re-imported workbook).
-    One row per (article, date, kind).
+    Any date is accepted: dated on or before the reference day it corrects the reference stock
+    and persists until the planner removes it (the ERP stock is never written by the app).
+    ``source`` is ``MANUAL`` (typed) or ``IMPORT`` (re-imported workbook).  One row per
+    (article, date, kind) ; ``kind`` is ``adjustment`` (legacy rows of other kinds are ignored).
     """
 
     __tablename__ = "app_cells"
@@ -173,7 +173,7 @@ class AppCell(Base):
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("AC"))
     article_id: Mapped[str] = mapped_column(String(40), index=True)
     date: Mapped[dt.date] = mapped_column(Date, index=True)
-    kind: Mapped[str] = mapped_column(String(12))                  # sim_receipt | adjustment
+    kind: Mapped[str] = mapped_column(String(12), default="adjustment")
     expression: Mapped[str] = mapped_column(String(200), default="")
     qty: Mapped[float] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String(12), default="MANUAL")   # MANUAL | IMPORT
@@ -182,35 +182,30 @@ class AppCell(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
-class AppOrderAction(Base):
-    """Planner action on one order (delivery slot), applied to the simulated stock only.
+class AppPlanLine(Base):
+    """One line of the planner's delivery plan (the only object the planner edits).
 
-    ``order_id`` is the ERP synthetic identifier (``supplier|article|date|firm``) or an app order
-    id.  ``kind``: ``reschedule`` (``tranches_json`` = ``[{"date": "2026-10-13", "qty": 1000}, …]``,
-    the uncovered remainder stays at the ERP date), ``cancel`` (nothing will be delivered) or
-    ``close`` (qualified as received / dead).  ``erp_json`` keeps the ERP state seen when the
-    action was saved (date, open quantity) for information.  One action per order.
+    ``order_id`` set: the line overrides the ERP order (delivery slot) of that id in the plan
+    stock – date / quantity changed, order split in several lines, or quantity 0 ; a forecast
+    slot id takes the forecast into the plan.  ``order_id`` empty: free line (stop-gap, delivery
+    outside any order, accepted CBN proposal).  ``erp_json`` keeps the ERP state seen when the
+    line was saved (date, open quantity) for comparison.
     """
 
-    __tablename__ = "app_order_actions"
-    __table_args__ = (Index("ix_app_order_actions_order", "order_id", unique=True),)
-    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("OA"))
-    order_id: Mapped[str] = mapped_column(String(120))
+    __tablename__ = "app_plan_lines"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("PL"))
     article_id: Mapped[str] = mapped_column(String(40), index=True)
+    order_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     supplier_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    kind: Mapped[str] = mapped_column(String(12), default="reschedule")   # reschedule | cancel | close
-    tranches_json: Mapped[str] = mapped_column(Text, default="[]")
-    erp_json: Mapped[str] = mapped_column(Text, default="{}")
+    date: Mapped[dt.date] = mapped_column(Date, index=True)
+    qty: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(12), default="MANUAL")   # MANUAL | IMPORT | CBN
     note: Mapped[str] = mapped_column(Text, default="")
-    source: Mapped[str] = mapped_column(String(12), default="MANUAL")   # MANUAL | IMPORT
+    erp_json: Mapped[str] = mapped_column(Text, default="{}")
     created_by: Mapped[str] = mapped_column(String(120), default="")
     updated_by: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
-
-    @property
-    def tranches(self) -> list[dict[str, Any]]:
-        return json.loads(self.tranches_json or "[]")
 
     @property
     def erp(self) -> dict[str, Any]:

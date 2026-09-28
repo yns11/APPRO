@@ -1,7 +1,10 @@
 """Production plan (PDP) versions imported from Excel."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+import datetime as dt
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -21,6 +24,23 @@ def _out(session: Session, v: PdpVersion) -> S.PdpVersionOut:
     return S.PdpVersionOut(id=v.id, name=v.name, source_file=v.source_file, note=v.note, active=v.active,
                            imported_by=v.imported_by, imported_at=v.imported_at, line_count=stats[0], programs=stats[1],
                            first_week=stats[2], last_week=stats[3])
+
+
+@router.get("/template.xlsx")
+def template(weeks: int = Query(26, ge=4, le=104), ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Template of the weekly PDP to import: one row per programme with a bill of material, one
+    column per ISO week from the current week."""
+    from ...data.assembler import erp_dataset
+    from ...engine.calendar import iso_week_monday
+    from ...engine.runner import resolve_as_of
+    from ...services import mrp_service
+    ds = erp_dataset(ctx.source)
+    with_bom = {b.program_id for b in ds.bom}
+    programs = [(p.program_id, p.name) for p in ds.programs if p.program_id in with_bom and p.active]
+    monday = iso_week_monday(resolve_as_of(ds, mrp_service.build_params(ctx, session)))
+    content = excel_service.pdp_template_workbook(programs, monday, weeks)
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="modele_pdp_{dt.date.today().isoformat()}.xlsx"'})
 
 
 @router.get("/versions", response_model=list[S.PdpVersionOut])

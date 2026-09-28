@@ -4,7 +4,7 @@ import { useLinks, usePrograms, useWrite, useOrders } from "@/lib/queries";
 import { Button, Drawer, Field, useToast } from "@/components/ui";
 
 export type EntryKind = "order" | "receipt" | "adjustment" | "production";
-export interface EntryDraft { kind: EntryKind; article_id?: string; supplier_id?: string | null; date?: string; qty?: number; program_id?: string; order_id?: string | null; note?: string; order_type?: "FIRM"; }
+export interface EntryDraft { kind: EntryKind; article_id?: string; supplier_id?: string | null; date?: string; qty?: number; program_id?: string; order_id?: string | null; note?: string; order_type?: "FIRM"; force?: boolean; }
 
 const TITLES: Record<EntryKind, string> = { order: "Nouvelle commande ferme", receipt: "Nouvelle réception", adjustment: "Ajustement de stock", production: "Production réelle" };
 
@@ -18,7 +18,7 @@ export function EntryDrawer({ draft, onClose, articles }: { draft: EntryDraft | 
   const { data: openOrders } = useOrders(form.kind === "receipt" && form.article_id ? { article_id: form.article_id, status: "OPEN" } : undefined);
   const write = useWrite(async (f: EntryDraft) => {
     switch (f.kind) {
-      case "order": return api.post("/api/entries/orders", { article_id: f.article_id, supplier_id: f.supplier_id || null, expected_date: f.date, qty: f.qty, order_type: "FIRM", note: f.note ?? "" });
+      case "order": return api.post("/api/entries/orders", { article_id: f.article_id, supplier_id: f.supplier_id || null, expected_date: f.date, qty: f.qty, order_type: "FIRM", note: f.note ?? "", force: !!f.force });
       case "receipt": return api.post("/api/entries/receipts", { article_id: f.article_id, supplier_id: f.supplier_id || null, order_id: f.order_id || null, receipt_date: f.date, qty: f.qty, note: f.note ?? "" });
       case "adjustment": return api.post("/api/entries/adjustments", { article_id: f.article_id, date: f.date, qty: f.qty, comment: f.note ?? "" });
       case "production": return api.post("/api/entries/production", { program_id: f.program_id, date: f.date, qty: f.qty });
@@ -66,8 +66,8 @@ export function EntryDrawer({ draft, onClose, articles }: { draft: EntryDraft | 
           </Field>
         )}
         {form.kind === "order" && (
-          <Field label="Nature" help="Commande réelle, comptée dans le stock ferme. Pour simuler une livraison, saisir dans la ligne Réceptions simulées du tableau.">
-            <div className="input" style={{ display: "flex", alignItems: "center" }}>Ferme (passée au fournisseur)</div>
+          <Field label="Nature" help="Commande réelle hors ERP, comptée dans les deux scenarios. Pour une livraison attendue sans commande, ajouter une ligne libre au plan.">
+            <label className="checkbox" style={{ height: 34 }}><input type="checkbox" checked={!!form.force} onChange={(e) => set({ force: e.target.checked })} />commande ancienne encore due (date passée)</label>
           </Field>
         )}
         {form.kind === "receipt" && (
@@ -78,7 +78,7 @@ export function EntryDrawer({ draft, onClose, articles }: { draft: EntryDraft | 
             </select>
           </Field>
         )}
-        <Field label={form.kind === "order" ? "Date de livraison attendue" : "Date"}>
+        <Field label={form.kind === "order" ? "Date de livraison attendue" : "Date"} help={form.kind === "receipt" ? "Fait constaté : après le stock de référence, au plus tard aujourd'hui" : form.kind === "adjustment" ? "Toute date ; jusqu'à aujourd'hui = correction du stock de référence" : undefined}>
           <input className="input" type="date" value={form.date ?? ""} onChange={(e) => set({ date: e.target.value })} />
         </Field>
         <Field label={`Quantité${unit ? ` (${unit})` : ""}`} help={form.kind === "adjustment" ? "Négatif pour une sortie / casse" : undefined}>

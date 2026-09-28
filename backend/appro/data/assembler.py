@@ -15,7 +15,7 @@ from ..engine.models import (
     OrderLine,
     OrderStatus,
     OrderType,
-    PlanLine,
+    PdpLine,
     Program,
     Receipt,
     StockSnapshot,
@@ -66,7 +66,7 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
            for r in _records(bom_df) if r["article_id"] in ids]
     needed_programs = {b.program_id for b in bom}
 
-    plan = [PlanLine(r["program_id"], as_date(r["week_start"]), float(r["qty"]), r["version"])
+    pdp = [PdpLine(r["program_id"], as_date(r["week_start"]), float(r["qty"]), r["version"])
             for r in _records(source.table("fct_production_plan")) if r["program_id"] in needed_programs]
     actuals = [ActualLine(r["program_id"], as_date(r["date"]), float(r["qty"]))
                for r in _records(source.table("fct_production_actual")) if r["program_id"] in needed_programs]
@@ -101,6 +101,6 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
             cur.qty_on_hand += float(r["qty_on_hand"])
             cur.qty_blocked += float(r["qty_blocked"] or 0)
 
-    return Dataset(articles=articles, suppliers=suppliers, links=links, programs=programs, bom=bom, plan=plan,
+    return Dataset(articles=articles, suppliers=suppliers, links=links, programs=programs, bom=bom, pdp=pdp,
                    actuals=actuals, orders=orders, receipts=receipts, movements=movements,
                    stock=list(stock.values()), holidays=list(holidays or []), meta={"source": source.name})

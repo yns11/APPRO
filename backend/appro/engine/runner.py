@@ -9,20 +9,10 @@ import numpy as np
 from .alerts import classify_alerts, worst_severity
 from .calendar import WorkCalendar
 from .demand import DayIndex, actual_share, build_program_daily, explode_demand
-from .models import (
-    Alert,
-    ArticleResult,
-    Dataset,
-    EngineParams,
-    MrpResult,
-    OrderAction,
-    OrderLine,
-    OrderType,
-    SupplyEvent,
-)
-from .orders import build_order_flows
+from .models import Alert, ArticleResult, Dataset, EngineParams, MrpResult, OrderLine, OrderType, PlanLine, SupplyEvent
+from .plan import build_supply_flows
 from .programs import program_impact
-from .projection import Projection, coverage_days, first_shortage, project_stock, target_stock
+from .projection import Projection, coverage_days, first_shortage, project_stock, reconstruct_history, target_stock
 from .proposals import generate_proposals
 
 
@@ -49,7 +39,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
 
     # ---------------------------------------------------------------- demand
     program_eff, program_plan, actual_mask, diag = build_program_daily(
-        dataset.plan, dataset.actuals, calendar, index, params, as_of)
+        dataset.pdp, dataset.actuals, calendar, index, params, as_of)
     diagnostics.extend(diag)
     demand_eff = explode_demand(program_eff, dataset.bom, index, params.consumption_offset_days)
     demand_plan = explode_demand(program_plan, dataset.bom, index, params.consumption_offset_days)
@@ -73,9 +63,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     cells_by_article = defaultdict(list)
     for c in dataset.cells:
         cells_by_article[c.article_id].append(c)
-    actions_by_article: dict[str, dict[str, OrderAction]] = defaultdict(dict)
-    for act in dataset.actions:
-        actions_by_article[act.article_id][act.order_id] = act
+    plan_by_article: dict[str, list[PlanLine]] = defaultdict(list)
+    for line in dataset.plan:
+        plan_by_article[line.article_id].append(line)
     # App receipts posted against an order reduce its open quantity (unless the ERP already did).
     app_received: dict[str, float] = defaultdict(float)
     for r in dataset.receipts:
@@ -87,6 +77,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     n = index.n
     i_as_of = index.offset(as_of)
     assert i_as_of is not None
+    day_idx = np.arange(n)
 
     for article in selected:
         aid = article.article_id
@@ -94,172 +85,156 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         demand = demand_eff.get(aid, np.zeros(n))
         dplan = demand_plan.get(aid, np.zeros(n))
         share = actual_share(program_eff, actual_mask, dataset.bom, aid, index)
+        consumed = np.where(day_idx < i_as_of, demand, 0.0)
+        required = np.where(day_idx >= i_as_of, demand, 0.0)
 
         snap = snapshots.get(aid)
         if snap is not None:
             i_snap = index.offset(snap.snapshot_date)
-            stock_start = snap.qty_on_hand - (snap.qty_blocked or 0.0)
+            stock_snapshot = snap.qty_on_hand - (snap.qty_blocked or 0.0)
             if i_snap is None:
                 notes.append(f"snapshot du {snap.snapshot_date} hors fenêtre : projection depuis le début de fenêtre")
                 i_snap = 0
         else:
-            i_snap, stock_start = 0, 0.0
+            i_snap, stock_snapshot = 0, 0.0
         snap_date = index.dates[i_snap]
 
         receipts = np.zeros(n)           # R
-        adjustments = np.zeros(n)        # A
-        sim_receipts = np.zeros(n)       # S
-        sim_mask = np.zeros(n, dtype=bool)
+        adjustments = np.zeros(n)        # A (dated after the snapshot)
+        past_adjust = np.zeros(n)        # planner adjustments dated on/before the snapshot (reference corrections)
+        erp_past = np.zeros(n)           # ERP movements dated on/before the snapshot: already in the ERP stock
         events: list[SupplyEvent] = []
 
-        # Orders: ERP placement (F, P), planner actions (F′, P′), late policy, same-day matching
-        flows = build_order_flows(orders_by_article.get(aid, []), actions_by_article.get(aid, {}),
-                                  receipts_by_article.get(aid, []), app_received, index, calendar, as_of, params)
-        supply_firm, supply_forecast = flows.supply_firm, flows.supply_forecast
-        supply_firm_sim, supply_forecast_sim = flows.supply_firm_sim, flows.supply_forecast_sim
+        # Orders and delivery plan: ERP layer, plan layer, past history, not-received orders
+        flows = build_supply_flows(orders_by_article.get(aid, []), plan_by_article.get(aid, []),
+                                   receipts_by_article.get(aid, []), app_received, index, as_of, params)
         events.extend(flows.events)
 
         for r in receipts_by_article.get(aid, []):
-            if r.receipt_date <= snap_date:
-                continue  # already in the on-hand stock
             i = index.offset(r.receipt_date)
             if i is None:
                 continue
             receipts[i] += r.qty
             events.append(SupplyEvent(r.receipt_date, "receipt", r.receipt_id, r.qty, r.supplier_id, "RECEIPT", r.source))
         for m in movements_by_article.get(aid, []):
-            if m.date <= snap_date:
-                continue
             i = index.offset(m.date)
             if i is None:
                 continue
-            adjustments[i] += m.qty
+            if m.date > snap_date:
+                adjustments[i] += m.qty
+            elif m.source == "ERP":
+                erp_past[i] += m.qty      # history only: the ERP snapshot already contains it
+            else:
+                past_adjust[i] += m.qty
             events.append(SupplyEvent(m.date, "movement", m.movement_id, m.qty, None, m.movement_type, m.source))
         for c in cells_by_article.get(aid, []):
-            if c.date < as_of:
-                continue  # simulation cells only apply from the reference date
+            if c.qty == 0:
+                continue
             i = index.offset(c.date)
             if i is None:
+                if c.date <= snap_date:
+                    past_adjust[0] += c.qty   # older than the window: still corrects the reference stock
                 continue
-            if c.kind == "sim_receipt":
-                sim_receipts[i] += c.qty
-                sim_mask[i] = True
-                events.append(SupplyEvent(c.date, "sim_receipt", f"SIM-{c.date.isoformat()}", c.qty, None, "SIMULATED", c.source))
-            else:
-                if c.qty == 0:
-                    continue
-                adjustments[i] += c.qty
-                events.append(SupplyEvent(c.date, "movement", f"ADJ-{c.date.isoformat()}", c.qty, None, "ADJUSTMENT", c.source))
+            (adjustments if c.date > snap_date else past_adjust)[i] += c.qty
+            events.append(SupplyEvent(c.date, "movement", f"ADJ-{c.date.isoformat()}", c.qty, None, "ADJUSTMENT", c.source))
 
-        # zero everything before the snapshot day (unknown history)
-        if i_snap > 0:
-            for arr in (supply_firm, supply_forecast, supply_firm_sim, supply_forecast_sim, receipts, adjustments,
-                        sim_receipts):
-                arr[:i_snap] = 0.0
-            sim_mask[:i_snap] = False
+        # Reference stock = ERP snapshot + planner corrections dated on/before the snapshot
+        reference_correction = float(past_adjust.sum())
+        stock_start = stock_snapshot + reference_correction
+        history = reconstruct_history(stock_start, receipts, past_adjust + erp_past, consumed, i_snap)
         demand_proj = demand.copy()
         demand_proj[:i_snap + 1] = 0.0  # snapshot day already consumed
+        adjust_proj = adjustments.copy()
+        adjust_proj[:i_snap + 1] = 0.0
+        receipts_proj = receipts.copy()
+        receipts_proj[:i_snap + 1] = 0.0
 
-        # Layer inflows (docs/regles_metier.md § 3):
-        #   firm       R + F                      (ERP as is, late orders per policy)
-        #   forecast   R + F + P
-        #   simulated  R + F′ + S [+ P′ if sim_includes_forecast] + CBN
-        # F′ = firm orders after the planner actions ; S is additive ; a typed S blocks the CBN
-        # that day ; on the reference day the orders are matched against the receipts of the day.
-        inflow_firm = receipts + supply_firm
-        inflow_forecast = inflow_firm + supply_forecast
-        inflow_sim = receipts + supply_firm_sim + sim_receipts
-        if params.sim_includes_forecast:
-            inflow_sim = inflow_sim + supply_forecast_sim
-        actions_row = supply_firm_sim - supply_firm
+        # Layer inflows (docs/regles_metier.md § 3): ERP = R + firm orders as is ; Plan = R + delivery plan
+        inflow_erp = receipts_proj + flows.orders_firm
+        inflow_plan = receipts_proj + flows.plan
 
         def project(supply: np.ndarray) -> Projection:
-            return project_stock(stock_start, supply, adjustments, demand_proj, params.shortage_policy, i_snap)
+            proj = project_stock(stock_start, supply, adjust_proj, demand_proj, params.shortage_policy, i_snap)
+            proj.net[:i_snap + 1] = history
+            proj.stock[:i_snap + 1] = np.maximum(history, 0.0)
+            return proj
 
         onhand = project(np.zeros(n))
-        firm = project(inflow_firm)
-        forecast = project(inflow_forecast)
-        sim = project(inflow_sim)
+        erp = project(inflow_erp)
+        plan = project(inflow_plan)
         target = target_stock(demand, article, index, calendar, params)
 
         proposals, supply_proposed = [], np.zeros(n)
         if params.generate_proposals:
             proposals, supply_proposed, _ = generate_proposals(
-                article, links_by_article.get(aid, []), suppliers, sim.net, demand, target,
-                index, calendar, as_of, params, supply_planned=supply_forecast,
-                reproject=lambda extra: project(inflow_sim + extra), blocked=sim_mask)
-            if params.include_proposals_in_simulation:
-                sim = project(inflow_sim + supply_proposed)
+                article, links_by_article.get(aid, []), suppliers, plan.net, demand, target,
+                index, calendar, as_of, params, supply_planned=flows.orders_forecast,
+                reproject=lambda extra: project(inflow_plan + extra))
+            if params.include_proposals_in_plan:
+                plan = project(inflow_plan + supply_proposed)
                 for p in proposals:
                     events.append(SupplyEvent(p.delivery_date, "proposal", p.proposal_id, p.qty, p.supplier_id,
                                               "PROPOSAL", "ENGINE", p.urgent))
         cov = {name: coverage_days(layer.net, demand, index, calendar, params.coverage_unit, params.coverage_tie_rule)
-               for name, layer in (("firm", firm), ("forecast", forecast), ("sim", sim))}
+               for name, layer in (("erp", erp), ("plan", plan))}
 
-        to_qualify = flows.to_qualify
-        alerts = classify_alerts(article, index, as_of, firm, forecast, sim, cov["sim"], stock_start, demand,
-                                 flows.states, proposals, links_by_article.get(aid, []),
+        alerts = classify_alerts(article, index, as_of, erp, plan, cov["plan"], stock_start, demand,
+                                 flows.orders, proposals, links_by_article.get(aid, []),
                                  aid in bom_articles, snap is not None, params)
         last = None if params.stockout_lookahead_days is None else i_as_of + params.stockout_lookahead_days
-        k = {name: first_shortage(layer.shortage, i_as_of, last)
-             for name, layer in (("firm", firm), ("forecast", forecast), ("sim", sim))}
+        k = {name: first_shortage(layer.shortage, i_as_of, last) for name, layer in (("erp", erp), ("plan", plan))}
         horizon_slice = slice(i_as_of, n)
+        not_received = flows.not_received
         kpis = {
-            "stock_on_hand": float(stock_start),
+            "stock_on_hand": float(stock_snapshot),
+            "reference_correction": reference_correction,
+            "stock_reference": float(stock_start),
             "snapshot_date": snap_date.isoformat(),
             "shortage_policy": params.shortage_policy,
-            "stock_as_of_firm": float(firm.stock[i_as_of]),
-            "stock_as_of_forecast": float(forecast.stock[i_as_of]),
-            "stock_as_of_sim": float(sim.stock[i_as_of]),
-            "coverage_firm_days": int(cov["firm"][i_as_of]),
-            "coverage_forecast_days": int(cov["forecast"][i_as_of]),
-            "coverage_sim_days": int(cov["sim"][i_as_of]),
+            "stock_as_of_erp": float(erp.stock[i_as_of]),
+            "stock_as_of_plan": float(plan.stock[i_as_of]),
+            "coverage_erp_days": int(cov["erp"][i_as_of]),
+            "coverage_plan_days": int(cov["plan"][i_as_of]),
             "coverage_target_days": int(article.param_at("coverage_target_days", as_of)),
             "target_stock": float(target[i_as_of]),
-            "first_stockout_firm": index.dates[k["firm"]].isoformat() if k["firm"] is not None else None,
-            "first_stockout_forecast": index.dates[k["forecast"]].isoformat() if k["forecast"] is not None else None,
-            "first_stockout_sim": index.dates[k["sim"]].isoformat() if k["sim"] is not None else None,
-            "min_stock_firm": float(np.min(firm.stock[horizon_slice])),
-            "min_stock_forecast": float(np.min(forecast.stock[horizon_slice])),
-            "min_stock_sim": float(np.min(sim.stock[horizon_slice])),
-            "max_shortage_firm": float(np.max(firm.shortage[horizon_slice])),
-            "max_shortage_forecast": float(np.max(forecast.shortage[horizon_slice])),
-            "max_shortage_sim": float(np.max(sim.shortage[horizon_slice])),
+            "first_stockout_erp": index.dates[k["erp"]].isoformat() if k["erp"] is not None else None,
+            "first_stockout_plan": index.dates[k["plan"]].isoformat() if k["plan"] is not None else None,
+            "min_stock_erp": float(np.min(erp.stock[horizon_slice])),
+            "min_stock_plan": float(np.min(plan.stock[horizon_slice])),
+            "max_shortage_erp": float(np.max(erp.shortage[horizon_slice])),
+            "max_shortage_plan": float(np.max(plan.shortage[horizon_slice])),
             "demand_next_7d": float(demand[i_as_of + 1:i_as_of + 8].sum()),
             "demand_next_30d": float(demand[i_as_of + 1:i_as_of + 31].sum()),
             "demand_horizon": float(demand[horizon_slice].sum()),
             "avg_daily_demand_30d": float(demand[i_as_of + 1:i_as_of + 31].sum() / max(1, min(30, n - i_as_of - 1))),
-            "open_firm_qty": float(supply_firm[horizon_slice].sum()),
-            "open_firm_sim_qty": float(supply_firm_sim[horizon_slice].sum()),
-            "open_forecast_qty": float(supply_forecast[horizon_slice].sum()),
-            "action_count": sum(1 for st in flows.states if st.action_id),
-            "review_count": sum(1 for st in flows.states if st.review),
-            "sim_receipts_qty": float(sim_receipts[horizon_slice].sum()),
-            "sim_receipt_days": int(sim_mask[horizon_slice].sum()),
+            "open_firm_qty": float(flows.orders_firm[horizon_slice].sum()),
+            "open_forecast_qty": float(flows.orders_forecast[horizon_slice].sum()),
+            "plan_qty": float(flows.plan[horizon_slice].sum()),
+            "plan_line_count": sum(1 for l in flows.lines if l.origin in ("override", "free")),
+            "backlog_qty": float(sum(o.qty_open for o in not_received)),
+            "backlog_count": len(not_received),
             "proposed_qty": float(supply_proposed.sum()),
             "proposal_count": len(proposals),
             "urgent_proposal_count": sum(1 for p in proposals if p.urgent),
-            "late_order_count": len(to_qualify),
-            "late_order_qty": float(sum(st.qty_open for st in to_qualify)),
             "alert_count": len(alerts),
             "severity": (worst_severity(alerts).value if alerts else None),
             "actual_share_30d": float(share[i_as_of - 30 if i_as_of >= 30 else 0:i_as_of + 1].mean()) if i_as_of > 0 else 0.0,
         }
         results[aid] = ArticleResult(
             article=article, start_date=start, as_of=as_of, dates=index.dates,
-            demand=demand.tolist(), demand_plan=dplan.tolist(), demand_actual_share=share.tolist(),
-            supply_firm=supply_firm.tolist(), supply_firm_sim=supply_firm_sim.tolist(), actions=actions_row.tolist(),
-            supply_forecast=supply_forecast.tolist(),
-            sim_receipts=sim_receipts.tolist(), sim_receipt_mask=sim_mask.tolist(),
-            supply_proposed=supply_proposed.tolist(), receipts=receipts.tolist(), adjustments=adjustments.tolist(),
-            stock_firm=firm.stock.tolist(), stock_forecast=forecast.stock.tolist(), stock_sim=sim.stock.tolist(),
-            shortage_onhand=onhand.shortage.tolist(), shortage_firm=firm.shortage.tolist(),
-            shortage_forecast=forecast.shortage.tolist(), shortage_sim=sim.shortage.tolist(),
-            stock_firm_net=firm.net.tolist(), stock_forecast_net=forecast.net.tolist(), stock_sim_net=sim.net.tolist(),
-            coverage_firm=cov["firm"].tolist(), coverage_forecast=cov["forecast"].tolist(),
-            coverage_sim=cov["sim"].tolist(), target_stock=target.tolist(),
+            demand=demand.tolist(), consumed=consumed.tolist(), required=required.tolist(), demand_plan=dplan.tolist(),
+            demand_actual_share=share.tolist(),
+            orders_firm=flows.orders_firm.tolist(), orders_firm_hist=flows.orders_firm_hist.tolist(),
+            orders_forecast=flows.orders_forecast.tolist(), receipts=receipts.tolist(),
+            plan=flows.plan.tolist(), plan_hist=flows.plan_hist.tolist(), supply_proposed=supply_proposed.tolist(),
+            adjustments=(adjustments + past_adjust + erp_past).tolist(), reference_correction=reference_correction,
+            stock_erp=erp.stock.tolist(), stock_plan=plan.stock.tolist(),
+            shortage_onhand=onhand.shortage.tolist(), shortage_erp=erp.shortage.tolist(), shortage_plan=plan.shortage.tolist(),
+            stock_erp_net=erp.net.tolist(), stock_plan_net=plan.net.tolist(),
+            coverage_erp=cov["erp"].tolist(), coverage_plan=cov["plan"].tolist(), target_stock=target.tolist(),
             events=sorted(events, key=lambda e: (e.date, e.kind, e.ref)), alerts=alerts, proposals=proposals,
-            kpis=kpis, suppliers=links_by_article.get(aid, []), orders=flows.states, diagnostics=notes,
+            kpis=kpis, suppliers=links_by_article.get(aid, []), orders=flows.orders, plan_lines=flows.lines,
+            diagnostics=notes,
         )
 
     program_daily = {pid: {index.dates[i]: float(v) for i, v in enumerate(arr) if v}

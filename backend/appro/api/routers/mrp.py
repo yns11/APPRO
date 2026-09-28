@@ -66,7 +66,7 @@ def cockpit(planner: str | None = None, scenario_id: str | None = None, article_
         raise HTTPException(404, f"Scénario inconnu : {exc}")
     names = _supplier_names(ctx)
     arts = sorted(result.articles.values(), key=lambda r: ({"critical": 0, "warning": 1, "info": 2}.get(r.kpis.get("severity") or "", 3),
-                                                            r.kpis["coverage_sim_days"], r.article.article_id))
+                                                            r.kpis["coverage_plan_days"], r.article.article_id))
     meta = result.articles and next(iter(result.articles.values()))
     return S.CockpitResponse(
         as_of=result.as_of, horizon_days=result.params.horizon_days, planner=planner, scenario_id=scenario_id,
@@ -142,7 +142,7 @@ def grid(planner: str | None = None, scenario_id: str | None = None, article_ids
 def programs_impact(planner: str | None = None, scenario_id: str | None = None,
                     horizon_days: int | None = ENGINE_QUERY["horizon_days"],
                     ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Feasible production per programme and week, for the on-hand / firm / forecast / simulated stocks."""
+    """Feasible production per programme and week, for the on-hand / ERP / plan stocks."""
     try:
         result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id,
                                      **_param_kwargs(horizon_days=horizon_days))
@@ -181,20 +181,20 @@ def weekly_params(article_id: str, weeks: int = Query(26, ge=1, le=104), ctx: Ap
 
 @router.get("/orders", response_model=list[S.OrderStateOut])
 def orders(planner: str | None = None, scenario_id: str | None = None, article_id: str | None = None,
-           status: list[str] | None = Query(None), to_qualify: bool = False,
+           status: list[str] | None = Query(None), not_received: bool = False,
            ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Open orders (delivery slots) of the perimeter with their planner action and status.
+    """Open orders (delivery slots) of the perimeter with their plan quantity and status.
 
-    ``to_qualify=true`` keeps the past orders still open in the ERP (excluded from the stocks):
-    to be qualified as received elsewhere, really late (action « attendue le… ») or closed."""
+    ``not_received=true`` keeps the past ERP orders still open (excluded from the stocks): to be
+    dated in the plan if they still arrive, or closed."""
     try:
         result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id,
                                      article_ids=[article_id] if article_id else None)
     except KeyError as exc:
         raise HTTPException(404, f"Scénario inconnu : {exc}")
     out = [P.order_state_out(o, r) for r in result.articles.values() for o in r.orders]
-    if to_qualify:
-        out = [o for o in out if o.status in ("late", "late_sim")]
+    if not_received:
+        out = [o for o in out if o.status == "not_received"]
     if status:
         out = [o for o in out if o.status in status]
     return sorted(out, key=lambda o: (o.expected_date, o.article_id, o.order_id))
@@ -215,7 +215,7 @@ def alerts(planner: str | None = None, scenario_id: str | None = None, severity:
 @router.get("/proposals", response_model=list[S.ProposalOut])
 def proposals(planner: str | None = None, scenario_id: str | None = None,
               ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Net requirements ("Complément CBN") computed on the simulated stock of the perimeter."""
+    """Net requirements ("Complément CBN") computed on the plan stock of the perimeter."""
     result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id)
     names = _supplier_names(ctx)
     out = [P.proposal_out(p, r, names) for r in result.articles.values() for p in r.proposals]

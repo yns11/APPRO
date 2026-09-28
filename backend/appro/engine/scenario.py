@@ -20,7 +20,7 @@ import datetime as dt
 from dataclasses import dataclass, field
 from typing import Any
 
-from .models import ActualLine, Dataset, Movement, OrderLine, OrderStatus, OrderType, PlanLine
+from .models import ActualLine, Dataset, Movement, OrderLine, OrderStatus, OrderType, PdpLine
 
 
 @dataclass
@@ -74,7 +74,7 @@ def apply_scenario(dataset: Dataset, events: list[ScenarioEvent]) -> tuple[Datas
                 pid = p.get("program_id")
                 d_from = _date(p["from"]) if p.get("from") else None
                 d_to = _date(p["to"]) if p.get("to") else None
-                for line in ds.plan:
+                for line in ds.pdp:
                     if pid and line.program_id != pid:
                         continue
                     if d_from and line.week_start + dt.timedelta(days=6) < d_from:
@@ -85,12 +85,12 @@ def apply_scenario(dataset: Dataset, events: list[ScenarioEvent]) -> tuple[Datas
             elif ev.kind == "set_plan":
                 ws = _date(p["week_start"])
                 found = False
-                for line in ds.plan:
+                for line in ds.pdp:
                     if line.program_id == p["program_id"] and line.week_start == ws:
                         line.qty = float(p["qty"])
                         found = True
                 if not found:
-                    ds.plan.append(PlanLine(p["program_id"], ws, float(p["qty"]), version="SCENARIO"))
+                    ds.pdp.append(PdpLine(p["program_id"], ws, float(p["qty"]), version="SCENARIO"))
             elif ev.kind == "set_actual":
                 d = _date(p["date"])
                 ds.actuals = [a for a in ds.actuals if not (a.program_id == p["program_id"] and a.date == d)]

@@ -28,7 +28,9 @@ resources:
         command: ["bash", "start.sh"]
         env:
           - name: APPRO_DATA_SOURCE
-            value: "uc"
+            value: "lakebase"
+          - name: APPRO_LAKEBASE_SCHEMA
+            value: "appro_erp"
           - name: APPRO_UC_CATALOG
             value: "${var.uc_catalog}"
           - name: APPRO_UC_SCHEMA

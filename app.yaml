@@ -6,14 +6,16 @@ command:
   - start.sh
 env:
   - name: APPRO_DATA_SOURCE
-    value: "uc"                      # "local" to run on the bundled seed CSV (demo)
+    value: "lakebase"                # "lakebase": UC synced tables in the app database ; "uc": SQL warehouse ; "local": seed CSV (demo)
+  - name: APPRO_LAKEBASE_SCHEMA
+    value: "appro_erp"               # PostgreSQL schema of the synced tables
   - name: APPRO_UC_CATALOG
-    value: "main"
+    value: "main"                    # mode "uc" only
   - name: APPRO_UC_SCHEMA
     value: "appro"
-  - name: DATABRICKS_WAREHOUSE_ID
-    valueFrom: sql-warehouse         # SQL warehouse resource attached to the app (CAN_USE)
-  - name: PGHOST                     # Lakebase resource ("database") – transactional store
+  # - name: DATABRICKS_WAREHOUSE_ID  # mode "uc" only: SQL warehouse resource attached to the app (CAN_USE)
+  #   valueFrom: sql-warehouse
+  - name: PGHOST                     # Lakebase resource ("database") – app store and synced tables
     valueFrom: database
   - name: APPRO_HORIZON_DAYS
     value: "120"

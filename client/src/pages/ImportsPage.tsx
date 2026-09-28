@@ -34,10 +34,10 @@ export default function ImportsPage() {
 
   return (
     <div className="page">
-      <div className="page-header"><div className="title"><h1>Imports / exports</h1><p>Importez un plan de production (format legacy « SOP - PDP » ou format long), exportez la simulation dans un classeur Excel « vivant » (formules) et réimportez ce que vous y avez saisi : onglet SAISIES, réceptions saisies dans le CARNET_COMMANDES et ligne Réceptions simulées de l'onglet SIMULATION.</p></div></div>
+      <div className="page-header"><div className="title"><h1>Imports / exports</h1><p>Importez le PDP hebdomadaire (modèle à télécharger, format legacy « SOP - PDP » ou format long), exportez la simulation dans un classeur Excel à formules et réimportez ce que vous y avez saisi : onglets SAISIES et PLAN.</p></div></div>
 
       <div className="grid cols-2">
-        <Card title="Importer un PDP hebdomadaire" hint="xlsx · 1re colonne : programme (nom ou id) · en-têtes : S11-26, 2026-W11, 2028W24 ou dates">
+        <Card title="Importer un PDP hebdomadaire" hint="xlsx · 1re colonne : programme (nom ou id) · en-têtes : 2026-W11, S11-26, 2028W24 ou dates" actions={<a className="btn sm" href={api.downloadUrl("/api/pdp/template.xlsx", { weeks: 26 })}><Download />Modèle</a>}>
           <div className="form-grid">
             <Field label="Nom de la version"><input className="input" value={pdpName} onChange={(e) => setPdpName(e.target.value)} placeholder="ex. PDP S38 – v2" /></Field>
             <Field label="Activation"><label className="checkbox" style={{ height: 34 }}><input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} />activer immédiatement</label></Field>
@@ -50,7 +50,7 @@ export default function ImportsPage() {
           <p className="note" style={{ marginTop: 12 }}>Un PDP importé et actif remplace le plan ERP pour les programmes qu'il contient. Désactivez-le pour revenir au plan ERP. Les versions restent conservées pour comparaison.</p>
         </Card>
 
-        <Card title="Exporter la simulation" hint="Classeur à formules : PARAMETRES, ARTICLES, SIMULATION (stocks ferme / prévisionnel / simulé, manque, cible, couverture recalculés dans Excel ; lignes Réceptions simulées et Complément CBN modifiables), ALERTES, CARNET_COMMANDES, SAISIES">
+        <Card title="Exporter la simulation" hint="Classeur à formules : PARAMETRES, ARTICLES, SIMULATION (Scenario ERP / Plan, manque, cible, couverture recalculés dans Excel), PLAN (plan de livraison modifiable), SAISIES, ALERTES">
           <div className="form-grid">
             <Field label="Granularité"><select className="select" value={granularity} onChange={(e) => setGranularity(e.target.value as "day" | "week")}><option value="day">Jour</option><option value="week">Semaine</option></select></Field>
             <Field label="Périmètre"><input className="input" readOnly value={`${perimeter.planner ?? "tous"} · ${engineParams.horizon_days} j${perimeter.scenarioId ? " · scénario" : ""}`} /></Field>
@@ -63,10 +63,10 @@ export default function ImportsPage() {
           <div className="row wrap" style={{ marginTop: 12 }}>
             <a className="btn primary" href={exportUrl}><Download />Simulation (xlsx)</a>
             <a className="btn" href={api.downloadUrl("/api/exports/alerts.xlsx", { planner: engineParams.planner, scenario_id: engineParams.scenario_id })}><Download />Alertes</a>
-            <a className="btn" href={api.downloadUrl("/api/exports/orders.xlsx", { planner: engineParams.planner, scenario_id: engineParams.scenario_id })}><Download />Carnet de commandes</a>
+            <a className="btn" href={api.downloadUrl("/api/exports/orders.xlsx", { planner: engineParams.planner, scenario_id: engineParams.scenario_id })}><Download />Plan de livraison</a>
           </div>
           <div className="divider" style={{ margin: "16px 0" }} />
-          <h4>Réimporter un classeur (SAISIES, réceptions CARNET, ligne Réceptions simulées)</h4>
+          <h4>Réimporter un classeur (SAISIES, PLAN)</h4>
           <input ref={entriesInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importEntries.mutate(f); e.target.value = ""; }} />
           <Button style={{ marginTop: 8 }} onClick={() => entriesInput.current?.click()} disabled={importEntries.isPending}><Upload />{importEntries.isPending ? "Import…" : "Choisir le classeur"}</Button>
           {importEntries.error && <div className="error-box" style={{ marginTop: 12 }}>{(importEntries.error as Error).message}</div>}

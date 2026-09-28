@@ -45,7 +45,7 @@ def legacy_result(seed_source, legacy):
             o.qty_received = 0.0
     params = EngineParams(as_of=start + dt.timedelta(days=1), horizon_days=len(legacy["dates"]) - 2, history_days=1,
                           spread_rounding="per_day", coverage_unit="calendar", coverage_tie_rule="not_covered",
-                          late_order_policy="keep", firm_sources=("FIRM", "FORECAST"), generate_proposals=False)
+                          firm_sources=("FIRM", "FORECAST"), generate_proposals=False, production_mode="actual_then_plan", missing_actual_policy="plan")
     return run_mrp(ds, params), start
 
 
@@ -64,7 +64,7 @@ def test_projected_stock_matches_excel(legacy, legacy_result):
     for aid, exp in legacy["articles"].items():
         got = result.articles[aid]
         idx = got.dates.index(start)
-        mine = np.array(got.stock_firm_net[idx: idx + len(exp["stock"])])
+        mine = np.array(got.stock_erp_net[idx: idx + len(exp["stock"])])
         theirs = np.array([v for v in exp["stock"]], dtype=float)
         assert np.allclose(mine, theirs, atol=0.05), f"{aid}: stock differs (max diff {np.abs(mine - theirs).max()})"
 
@@ -79,8 +79,8 @@ def test_coverage_matches_excel(legacy, legacy_result):
             i = got.dates.index(d)
             # the legacy coverage is capped by its own (870-day) grid; ours by the test horizon
             expected = min(cov, len(got.dates) - 1 - i)
-            if got.coverage_firm[i] != expected:
-                mismatches.append((aid, day, got.coverage_firm[i], expected))
+            if got.coverage_erp[i] != expected:
+                mismatches.append((aid, day, got.coverage_erp[i], expected))
     assert not mismatches, mismatches[:10]
 
 

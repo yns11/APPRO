@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Params } from "./api";
 import type {
-  ActionOut, AdjustmentOut, ArticleRef, AuditOut, BomRef, CellOut, OrderStateOut, CockpitResponse, CompareResponse, GridResponse, LinkRef, OrderOut, ParamDoc, ParamOverrideOut,
+  AdjustmentOut, ArticleRef, AuditOut, BomRef, CellOut, OrderStateOut, PlanLineOut, CockpitResponse, CompareResponse, GridResponse, LinkRef, OrderOut, ParamDoc, ParamOverrideOut,
   PdpVersionOut, PlanLine, ProductionOut, ProgramImpactResponse, ProgramRef, ProjectionResponse, ProposalOut, ReceiptOut, ScenarioOut, SupplierRef,
   WeeklyParamsResponse,
 } from "./types";
@@ -54,16 +54,16 @@ export function useProgramImpact() {
   return useQuery({ queryKey: ["program-impact", params], queryFn: () => api.get<ProgramImpactResponse>("/api/programs/impact", params), staleTime: 30_000 });
 }
 
-/** Open orders (delivery slots) of the perimeter with their status and planner action ; ``to_qualify`` = past orders still open. */
+/** Open orders (delivery slots) of the perimeter with their status and plan quantity ; ``not_received`` = past ERP orders still open. */
 export function useOrderStates(extra?: Params) {
   const { engineParams } = usePerimeter();
   const params = { planner: engineParams.planner, scenario_id: engineParams.scenario_id, ...extra };
   return useQuery({ queryKey: ["order-states", params], queryFn: () => api.get<OrderStateOut[]>("/api/orders", params), staleTime: 30_000 });
 }
-/** Planner actions on orders (stored). */
-export const useActions = (params?: Params) => useQuery({ queryKey: ["actions", params], queryFn: () => api.get<ActionOut[]>("/api/entries/actions", params) });
+/** Stored lines of the delivery plan. */
+export const usePlanLines = (params?: Params) => useQuery({ queryKey: ["plan-lines", params], queryFn: () => api.get<PlanLineOut[]>("/api/entries/plan", params) });
 
-/** Simulation grid cells (simulated receipts / adjustments typed by the planner). */
+/** Simulation grid cells (adjustments typed by the planner). */
 export const useCells = (params?: Params) => useQuery({ queryKey: ["cells", params], queryFn: () => api.get<CellOut[]>("/api/entries/cells", params) });
 export const useWeeklyParams = (articleId: string | null, weeks = 26) => useQuery({
   queryKey: ["weekly-params", articleId, weeks], enabled: !!articleId,

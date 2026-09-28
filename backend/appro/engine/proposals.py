@@ -1,6 +1,6 @@
 """Order proposals: net requirement, lot sizing, delivery-day and lead-time rules.
 
-Algorithm (per article, on the *simulated* stock)::
+Algorithm (per article, on the *plan* stock)::
 
     for each day d from the first proposable day to the end of the lookahead:
         if stock[d] < target[d]:                         # reorder point reached
@@ -71,14 +71,10 @@ def fill_level(target: np.ndarray, demand_cum: np.ndarray, i: int, article: Arti
 
 
 def _delivery_day(candidate: dt.date, earliest: dt.date, latest: dt.date, calendar: WorkCalendar,
-                  weekdays: frozenset[int] | None, shift: str, blocked: frozenset[dt.date] = frozenset()
-                  ) -> dt.date | None:
-    """Nearest allowed delivery day for ``candidate`` inside ``[earliest, latest]`` (None if none).
-
-    ``blocked`` days (a simulated receipt typed by the planner, 0 included) never receive a
-    proposal: the planner has decided what arrives that day."""
+                  weekdays: frozenset[int] | None, shift: str) -> dt.date | None:
+    """Nearest allowed delivery day for ``candidate`` inside ``[earliest, latest]`` (None if none)."""
     def allowed(d: dt.date) -> bool:
-        return calendar.is_open_weekday(d, weekdays) and d not in blocked
+        return calendar.is_open_weekday(d, weekdays)
 
     if shift == "earlier":
         d = candidate
@@ -108,7 +104,6 @@ def generate_proposals(
     seq_start: int = 1,
     supply_planned: np.ndarray | None = None,
     reproject: Callable[[np.ndarray], Projection] | None = None,
-    blocked: np.ndarray | None = None,
 ) -> tuple[list[Proposal], np.ndarray, np.ndarray]:
     """Return proposals, the proposed-supply series and the resulting simulated net stock.
 
@@ -117,8 +112,9 @@ def generate_proposals(
     policy exact (a receipt that arrives after a lost day does not serve that day).  Without it
     the proposal is simply added to the balance from its delivery day on (``backlog`` policy).
 
-    ``blocked`` marks the days where the planner typed a simulated receipt: no proposal is placed
-    there (CBN constraint), the delivery moves to the nearest allowed day.
+    ``shortfall_tolerance_days`` (parameter): a dip under the target that recovers by itself within
+    that many working days, without any unserved demand, is ignored (no proposal for a one-day
+    gap the planner accepts).
 
     ``supply_planned`` (forecast / planned, non-firm supply per day) is only used to enrich the
     reason of urgent proposals: when a later non-firm order exists, advancing it is usually the
@@ -139,11 +135,21 @@ def generate_proposals(
     if params.proposal_lookahead_days is not None:
         last_idx = min(last_idx, as_of_idx + int(params.proposal_lookahead_days))
     proposed_by_supplier: dict[str, float] = {}
-    blocked_days = frozenset(index.dates[k] for k in np.where(blocked)[0]) if blocked is not None else frozenset()
+    tolerance = max(int(params.shortfall_tolerance_days), 0)
     seq = seq_start
     i = earliest_idx
     while i <= last_idx:
         if stock[i] < target[i] - EPS:
+            if tolerance:
+                # tolerated dip: back above target within N working days and never below zero
+                k, days = i, 0
+                while k + 1 < n and stock[k] < target[k] - EPS and stock[k] >= -EPS and days <= tolerance:
+                    k += 1
+                    if calendar.is_working_day(index.dates[k]):
+                        days += 1
+                if stock[k] >= target[k] - EPS and days <= tolerance and min(stock[i:k + 1]) >= -EPS:
+                    i = k + 1
+                    continue
             link = choose_supplier(links, proposed_by_supplier, params.sourcing_policy)
             supplier = suppliers.get(link.supplier_id) if link else None
             lead = int(link.lead_time_days) if link else 0
@@ -154,7 +160,7 @@ def generate_proposals(
             if params.respect_lead_time and link:
                 earliest_date = max(earliest_date, calendar.add_working_days(as_of, lead))
             delivery = _delivery_day(index.dates[i], earliest_date, index.dates[last_idx], calendar,
-                                     weekdays, params.delivery_shift, blocked_days)
+                                     weekdays, params.delivery_shift)
             if delivery is None:
                 break  # no feasible delivery day inside the horizon
             j = index.offset(delivery)

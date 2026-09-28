@@ -17,7 +17,7 @@ from ..data.store import (
     AppAdjustment,
     AppCell,
     AppOrder,
-    AppOrderAction,
+    AppPlanLine,
     AppProductionActual,
     AppReceipt,
     ParamOverride,
@@ -33,7 +33,6 @@ from ..engine.models import (
     EngineParams,
     Movement,
     MrpResult,
-    OrderAction,
     OrderLine,
     OrderStatus,
     OrderType,
@@ -41,6 +40,7 @@ from ..engine.models import (
     Receipt,
     SimCell,
 )
+from ..engine.models import PdpLine as EnginePdpLine
 from ..engine.scenario import ScenarioEvent, apply_scenario
 from .context import AppContext
 from .expression import evaluate
@@ -141,13 +141,11 @@ def app_entries_into_dataset(ds: Dataset, session: Session) -> None:
         if a.article_id in ids:
             ds.movements.append(Movement(a.id, a.article_id, a.date, a.qty, a.movement_type, "APP", a.comment))
     for c in session.scalars(select(AppCell)):
-        if c.article_id in ids:
-            ds.cells.append(SimCell(c.article_id, c.date, c.kind, c.qty, c.source, c.note))
-    for a in session.scalars(select(AppOrderAction)):
-        if a.article_id in ids:
-            ds.actions.append(OrderAction(a.id, a.order_id, a.article_id, a.kind,
-                                          [(dt.date.fromisoformat(str(t["date"])[:10]), float(t["qty"])) for t in a.tranches],
-                                          a.note))
+        if c.article_id in ids and c.kind == "adjustment":
+            ds.cells.append(SimCell(c.article_id, c.date, "adjustment", c.qty, c.source, c.note))
+    for l in session.scalars(select(AppPlanLine)):
+        if l.article_id in ids:
+            ds.plan.append(PlanLine(l.id, l.article_id, l.date, l.qty, l.order_id or None, l.supplier_id, l.source, l.note))
     programs = {b.program_id for b in ds.bom}
     app_actuals = {(a.program_id, a.date): a.qty for a in session.scalars(select(AppProductionActual))
                    if a.program_id in programs}
@@ -162,9 +160,9 @@ def app_entries_into_dataset(ds: Dataset, session: Session) -> None:
             if l.program_id in programs:
                 by_program.setdefault(l.program_id, []).append(l)
         # an imported PDP replaces the ERP plan for the programs it contains
-        ds.plan = [p for p in ds.plan if p.program_id not in by_program]
+        ds.pdp = [p for p in ds.pdp if p.program_id not in by_program]
         for pid, ls in by_program.items():
-            ds.plan.extend(PlanLine(pid, l.week_start, l.qty, version=f"APP:{active.id}") for l in ls)
+            ds.pdp.extend(EnginePdpLine(pid, l.week_start, l.qty, version=f"APP:{active.id}") for l in ls)
         ds.meta["pdp_version"] = {"id": active.id, "name": active.name}
 
 
@@ -213,16 +211,17 @@ def compute(ctx: AppContext, session: Session, planner: str | None = None, artic
 
 
 # =============================================================================
-# Simulation cells and net requirement run (CBN)
+# Grid cells (adjustments) and delivery plan lines
 # =============================================================================
 def upsert_cell(ctx: AppContext, session: Session, user: str, article_id: str, date: dt.date, kind: str,
                 expression: str, source: str = "MANUAL", note: str = "") -> AppCell | None:
-    """Create / update / delete the cell (article, date, kind) from a quantity or an expression.
+    """Create / update / delete the adjustment cell (article, date) from a quantity or an expression.
 
-    A blank expression deletes the cell.  An explicit ``0`` is kept: for a simulated receipt it
-    means "nothing arrives that day" (it replaces the expected orders).  Returns the row, or None
-    when the cell was deleted.  Does not commit.
+    A blank expression (or 0) deletes the cell.  Any date is accepted (a past date corrects the
+    reference stock).  Returns the row, or None when the cell was deleted.  Does not commit.
     """
+    if kind != "adjustment":
+        raise ValueError("seuls les ajustements se saisissent en cellule ; le plan se saisit par ligne")
     blank = not expression.strip()
     qty = 0.0 if blank else evaluate(expression)
     rows = session.scalars(select(AppCell).where(AppCell.article_id == article_id, AppCell.date == date,
@@ -230,7 +229,7 @@ def upsert_cell(ctx: AppContext, session: Session, user: str, article_id: str, d
     row = rows[0] if rows else None
     for other in rows[1:]:
         session.delete(other)
-    if blank:
+    if blank or abs(qty) < 1e-9:
         if row is not None:
             audit(session, user, "delete", "cell", row.id, article_id, {"date": date.isoformat(), "kind": kind})
             session.delete(row)
@@ -244,32 +243,72 @@ def upsert_cell(ctx: AppContext, session: Session, user: str, article_id: str, d
     return row
 
 
-# =============================================================================
-# Order actions (simulated layer)
-# =============================================================================
-def upsert_action(session: Session, user: str, article_id: str, order_id: str, kind: str,
-                  tranches: list[tuple[dt.date, float]], note: str = "", supplier_id: str | None = None,
-                  erp: dict[str, Any] | None = None, source: str = "MANUAL") -> AppOrderAction:
-    """Create or replace the action of one order (one action per order).  Does not commit."""
-    if kind not in ("reschedule", "cancel", "close"):
-        raise ValueError(f"type d'action inconnu : {kind}")
-    clean = [(d, float(q)) for d, q in tranches if q is not None and float(q) > 0]
-    if kind == "reschedule" and not clean:
-        raise ValueError("une replanification demande au moins une tranche (date, quantité > 0)")
-    row = session.scalars(select(AppOrderAction).where(AppOrderAction.order_id == order_id)).first()
+def save_plan_line(session: Session, user: str, article_id: str, date: dt.date, qty: float, order_id: str | None = None,
+                   supplier_id: str | None = None, note: str = "", line_id: str | None = None, source: str = "MANUAL",
+                   erp: dict[str, Any] | None = None) -> AppPlanLine:
+    """Create or update one plan line.  Quantity 0 is allowed only for an order override (nothing
+    expected from that order) ; a free line with quantity 0 is deleted.  Does not commit."""
+    if qty < 0:
+        raise ValueError("la quantité d'une ligne du plan ne peut pas être négative")
+    row = session.get(AppPlanLine, line_id) if line_id else None
+    if line_id and row is None:
+        raise KeyError(line_id)
     if row is None:
-        row = AppOrderAction(order_id=order_id, article_id=article_id, created_by=user)
+        if not order_id and abs(qty) < 1e-9:
+            raise ValueError("une ligne libre doit avoir une quantité")
+        row = AppPlanLine(article_id=article_id, created_by=user)
         session.add(row)
-    row.article_id, row.kind, row.note, row.updated_by, row.source = article_id, kind, note, user, source
-    row.supplier_id = supplier_id if supplier_id is not None else row.supplier_id
-    row.tranches_json = json.dumps([{"date": d.isoformat(), "qty": q} for d, q in clean] if kind == "reschedule" else [])
+    row.article_id, row.date, row.qty, row.order_id = article_id, date, float(qty), (order_id or None)
+    row.supplier_id, row.note, row.updated_by, row.source = supplier_id, note, user, source
     if erp is not None:
         row.erp_json = json.dumps(erp, default=str)
-    audit(session, user, "upsert", "order_action", row.id, article_id,
-          {"order_id": order_id, "kind": kind, "tranches": row.tranches, "note": note, "source": source})
+    audit(session, user, "upsert", "plan_line", row.id, article_id,
+          {"date": date.isoformat(), "qty": float(qty), "order_id": order_id, "source": source, "note": note})
+    if not order_id and abs(qty) < 1e-9:
+        session.delete(row)
     return row
 
 
-def delete_action(session: Session, user: str, row: AppOrderAction) -> None:
-    audit(session, user, "delete", "order_action", row.id, row.article_id, {"order_id": row.order_id, "kind": row.kind})
+def delete_plan_line(session: Session, user: str, row: AppPlanLine) -> None:
+    audit(session, user, "delete", "plan_line", row.id, row.article_id, {"date": row.date.isoformat(), "qty": row.qty,
+                                                                          "order_id": row.order_id})
     session.delete(row)
+
+
+def set_plan_cell(ctx: AppContext, session: Session, user: str, article_id: str, date: dt.date, expression: str
+                  ) -> AppPlanLine | None:
+    """Set the planned quantity of one day from the grid cell.
+
+    * no line that day → a free line is created (blank / 0 → nothing) ;
+    * exactly one line (stored, or an ERP order taken as is) → its quantity is set (an ERP order
+      gets an override line ; blank restores the ERP quantity, 0 means nothing expected) ;
+    * several lines → refused: the list of the day must be used.
+    Does not commit.
+    """
+    result = compute(ctx, session, article_ids=[article_id])
+    ar = result.articles.get(article_id)
+    if ar is None:
+        raise KeyError(article_id)
+    lines = [l for l in ar.plan_lines if l.date == date and l.origin in ("erp", "override", "free")]
+    blank = not expression.strip()
+    qty = None if blank else float(evaluate(expression))
+    if len(lines) > 1:
+        raise ValueError("plusieurs lignes du plan ce jour-là : modifier la ligne voulue dans la liste")
+    if not lines:
+        if qty is None or abs(qty) < 1e-9:
+            return None
+        return save_plan_line(session, user, article_id, date, qty, None,
+                              next((l.supplier_id for l in ar.suppliers), None))
+    line = lines[0]
+    if line.origin == "erp":
+        if qty is None:
+            return None
+        erp = {"expected_date": line.erp_date.isoformat() if line.erp_date else None, "qty_open": line.erp_qty}
+        return save_plan_line(session, user, article_id, date, qty, line.order_id, line.supplier_id, erp=erp)
+    row = session.get(AppPlanLine, line.line_id)
+    if row is None:
+        raise KeyError(line.line_id)
+    if qty is None:
+        delete_plan_line(session, user, row)
+        return None
+    return save_plan_line(session, user, article_id, date, qty, row.order_id, row.supplier_id, row.note, row.id, row.source)

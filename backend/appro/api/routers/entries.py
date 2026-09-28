@@ -1,11 +1,13 @@
 """Planner entries: orders, receipts, stock adjustments, actual production (with audit log)."""
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...data.store import AppAdjustment, AppCell, AppOrder, AppOrderAction, AppProductionActual, AppReceipt, audit
+from ...data.store import AppAdjustment, AppCell, AppOrder, AppPlanLine, AppProductionActual, AppReceipt, audit
 from ...services import mrp_service
 from ...services.context import AppContext
 from .. import schemas as S
@@ -22,6 +24,14 @@ def _unit_of(ctx: AppContext, article_id: str) -> str:
     return row.iloc[0]["unit"] or "PCE"
 
 
+def _reference(ctx: AppContext, session: Session, article_id: str) -> tuple:
+    """(reference day, snapshot date) of the article."""
+    result = mrp_service.compute(ctx, session, article_ids=[article_id])
+    ar = result.articles.get(article_id)
+    snap = dt.date.fromisoformat(ar.kpis["snapshot_date"]) if ar else result.as_of - dt.timedelta(days=1)
+    return result.as_of, snap
+
+
 # ---------------------------------------------------------------- orders
 @router.get("/orders", response_model=list[S.OrderOut])
 def list_orders(article_id: str | None = None, status: str | None = Query(None), session: Session = Depends(session_dep)):
@@ -36,7 +46,12 @@ def list_orders(article_id: str | None = None, status: str | None = Query(None),
 @router.post("/orders", response_model=S.OrderOut, status_code=201)
 def create_order(body: S.OrderIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                  user: str = Depends(current_user)):
-    row = AppOrder(**body.model_dump(), unit=_unit_of(ctx, body.article_id), created_by=user, source="MANUAL")
+    unit = _unit_of(ctx, body.article_id)
+    as_of, _ = _reference(ctx, session, body.article_id)
+    if body.expected_date < as_of and not body.force:
+        raise HTTPException(422, f"Une commande se date au plus tôt à la date de référence ({as_of.isoformat()}) ; "
+                                 "cocher « commande ancienne encore due » pour enregistrer un retard")
+    row = AppOrder(**body.model_dump(exclude={"force"}), unit=unit, created_by=user, source="MANUAL")
     session.add(row)
     audit(session, user, "create", "order", row.id, body.article_id, body.model_dump(mode="json"))
     session.commit()
@@ -84,6 +99,11 @@ def list_receipts(article_id: str | None = None, session: Session = Depends(sess
 def create_receipt(body: S.ReceiptIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                    user: str = Depends(current_user)):
     _unit_of(ctx, body.article_id)
+    as_of, snap = _reference(ctx, session, body.article_id)
+    if body.receipt_date > as_of:
+        raise HTTPException(422, f"Une réception est un fait constaté : date au plus tard la date de référence ({as_of.isoformat()})")
+    if body.receipt_date <= snap:
+        raise HTTPException(422, f"Réception déjà comprise dans le stock du {snap.isoformat()} : saisir un ajustement si le stock est faux")
     row = AppReceipt(**body.model_dump(), created_by=user)
     session.add(row)
     if body.order_id:
@@ -200,9 +220,9 @@ def list_cells(article_id: str | None = None, kind: str | None = None, session: 
 @router.put("/cells", response_model=S.CellOut | None)
 def upsert_cell(body: S.CellIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                 user: str = Depends(current_user)):
-    """Set a simulated receipt or an adjustment for one day from a quantity or an arithmetic
-    expression (``1200``, ``2*600-50``, ``(800+400)/2``…).  Empty removes the cell; ``0`` is an
-    explicit value (a simulated receipt of 0 means nothing arrives that day)."""
+    """Set an adjustment for one day from a signed quantity or an arithmetic expression
+    (``-50``, ``2*600-50``…).  Any date is accepted: on/before the reference day it corrects the
+    reference stock.  Empty or 0 removes the cell."""
     _unit_of(ctx, body.article_id)
     try:
         row = mrp_service.upsert_cell(ctx, session, user, body.article_id, body.date, body.kind, body.expression)
@@ -225,54 +245,76 @@ def delete_cell(cell_id: str, ctx: AppContext = Depends(ctx_dep), session: Sessi
     ctx.bump()
 
 
-# ---------------------------------------------------------------- order actions (simulated layer)
-def _action_out(row: AppOrderAction) -> S.ActionOut:
-    return S.ActionOut(id=row.id, order_id=row.order_id, article_id=row.article_id, supplier_id=row.supplier_id,
-                       kind=row.kind, tranches=row.tranches, erp=row.erp, note=row.note, source=row.source,
-                       created_by=row.created_by, updated_by=row.updated_by, updated_at=row.updated_at)
+# ---------------------------------------------------------------- delivery plan lines
+def _plan_out(row: AppPlanLine) -> S.PlanLineOut:
+    return S.PlanLineOut(id=row.id, article_id=row.article_id, order_id=row.order_id, supplier_id=row.supplier_id,
+                         date=row.date, qty=row.qty, source=row.source, note=row.note, erp=row.erp,
+                         created_by=row.created_by, updated_by=row.updated_by, updated_at=row.updated_at)
 
 
-@router.get("/actions", response_model=list[S.ActionOut])
-def list_actions(article_id: str | None = None, order_id: str | None = None, session: Session = Depends(session_dep)):
-    q = select(AppOrderAction).order_by(AppOrderAction.article_id, AppOrderAction.order_id)
+@router.get("/plan", response_model=list[S.PlanLineOut])
+def list_plan_lines(article_id: str | None = None, session: Session = Depends(session_dep)):
+    """Stored lines of the delivery plan (overrides of ERP orders and free lines)."""
+    q = select(AppPlanLine).order_by(AppPlanLine.article_id, AppPlanLine.date)
     if article_id:
-        q = q.where(AppOrderAction.article_id == article_id)
-    if order_id:
-        q = q.where(AppOrderAction.order_id == order_id)
-    return [_action_out(r) for r in session.scalars(q)]
+        q = q.where(AppPlanLine.article_id == article_id)
+    return [_plan_out(r) for r in session.scalars(q)]
 
 
-@router.put("/actions", response_model=S.ActionOut)
-def upsert_action(body: S.ActionIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-                  user: str = Depends(current_user)):
-    """Set the planner action of one order (delivery slot): ``reschedule`` with tranches (date,
-    quantity), ``cancel`` (nothing will be delivered) or ``close`` (qualified as received / dead).
-    The action only changes the *simulated* stock; one action per order, replaced on each call."""
+@router.put("/plan", response_model=S.PlanLineOut | None)
+def save_plan_line(body: S.PlanLineIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+                   user: str = Depends(current_user)):
+    """Create (no ``line_id``) or update one plan line.  With ``order_id`` the line overrides the
+    ERP order of that id in the plan stock (0 = nothing expected from it) ; without it, it is a free
+    line.  Plan dates are today or later."""
     _unit_of(ctx, body.article_id)
-    erp = None
     result = mrp_service.compute(ctx, session, article_ids=[body.article_id])
-    ar = result.articles.get(body.article_id)
-    state = next((o for o in (ar.orders if ar else []) if o.order_id == body.order_id), None)
-    if state is None:
-        raise HTTPException(404, f"Commande inconnue pour cet article : {body.order_id}")
-    erp = {"expected_date": state.expected_date.isoformat(), "qty_open": state.qty_open, "qty_ordered": state.qty_ordered}
+    ar = result.articles[body.article_id]
+    if body.date < result.as_of:
+        raise HTTPException(422, f"Une ligne du plan se date au plus tôt à la date de référence ({result.as_of.isoformat()})")
+    erp = None
+    if body.order_id:
+        state = next((o for o in ar.orders if o.order_id == body.order_id), None)
+        if state is None:
+            raise HTTPException(404, f"Commande inconnue pour cet article : {body.order_id}")
+        erp = {"expected_date": state.expected_date.isoformat(), "qty_open": state.qty_open, "qty_ordered": state.qty_ordered}
     try:
-        row = mrp_service.upsert_action(session, user, body.article_id, body.order_id, body.kind,
-                                        [(t.date, t.qty) for t in body.tranches], body.note,
-                                        body.supplier_id or state.supplier_id, erp)
+        row = mrp_service.save_plan_line(session, user, body.article_id, body.date, body.qty, body.order_id,
+                                         body.supplier_id or (ar.suppliers[0].supplier_id if ar.suppliers else None),
+                                         body.note, body.line_id, erp=erp)
+    except KeyError:
+        raise HTTPException(404, "Ligne inconnue")
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     session.commit()
     ctx.bump()
-    return _action_out(row)
+    return _plan_out(row) if row.id and session.get(AppPlanLine, row.id) else None
 
 
-@router.delete("/actions/{action_id}", status_code=204)
-def delete_action(action_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+@router.put("/plan/cell", response_model=S.PlanLineOut | None)
+def set_plan_cell(body: S.PlanCellIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                   user: str = Depends(current_user)):
-    row = session.get(AppOrderAction, action_id)
+    """Set the planned quantity of one day from the grid cell (quantity or expression).  One line
+    that day: its quantity is set (an ERP order gets an override) ; none: a free line is created ;
+    blank: back to the ERP / nothing."""
+    _unit_of(ctx, body.article_id)
+    try:
+        row = mrp_service.set_plan_cell(ctx, session, user, body.article_id, body.date, body.expression)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except KeyError as exc:
+        raise HTTPException(404, f"Ligne inconnue : {exc}")
+    session.commit()
+    ctx.bump()
+    return _plan_out(row) if row is not None and session.get(AppPlanLine, row.id) else None
+
+
+@router.delete("/plan/{line_id}", status_code=204)
+def delete_plan_line(line_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+                     user: str = Depends(current_user)):
+    row = session.get(AppPlanLine, line_id)
     if row is None:
-        raise HTTPException(404, "Action inconnue")
-    mrp_service.delete_action(session, user, row)
+        raise HTTPException(404, "Ligne inconnue")
+    mrp_service.delete_plan_line(session, user, row)
     session.commit()
     ctx.bump()

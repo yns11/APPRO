@@ -5,101 +5,85 @@ import { api } from "@/lib/api";
 import { useWrite } from "@/lib/queries";
 import { useToast } from "@/components/ui";
 import type { EntryDraft } from "@/components/EntryDrawer";
-import type { OrderActionsTarget } from "@/components/OrderActionsDrawer";
-import { ACTION_KIND_LABELS, KIND_LABELS, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, fmtDate, fmtQty, isWeekKey, isWeekend, periodLabel } from "@/lib/format";
-import type { ArticleRef, CellKind, CellOut, LinkRef, OrderStateOut, SeriesOut, SupplyEventOut } from "@/lib/types";
+import type { PlanTarget } from "@/components/PlanDrawer";
+import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, ORIGIN_LABELS, fmtDate, fmtQty, isWeekKey, isWeekend, periodLabel } from "@/lib/format";
+import type { ArticleRef, CellOut, LinkRef, OrderStateOut, PlanLineState, SeriesOut, SupplyEventOut } from "@/lib/types";
 
-/** Rows of the grid whose cells are typed directly (quantity or arithmetic expression). */
-export const CELL_ROWS: Record<string, CellKind> = { sim_receipts: "sim_receipt", adjustments: "adjustment" };
-
-export const GRID_ROWS: { key: string; label: string; group: string; cls?: (v: number, a: ArticleRef) => string }[] = [
-  { key: "demand", label: "Besoin (composants)", group: "Besoins" },
-  { key: "demand_plan", label: "dont plan seul", group: "Besoins" },
-  { key: "supply_firm", label: "Commandes fermes (F, ERP)", group: "Approvisionnements" },
-  { key: "actions", label: "Actions sur commandes (F′ − F)", group: "Approvisionnements", cls: (v) => (v > 0 ? "action-pos" : v < 0 ? "action-neg" : "") },
-  { key: "supply_forecast", label: "Commandes prévisionnelles ERP (P)", group: "Approvisionnements" },
-  { key: "receipts", label: "Réceptions (R)", group: "Approvisionnements" },
-  { key: "sim_receipts", label: "Réceptions simulées (S) : saisies + complément CBN", group: "Approvisionnements" },
-  { key: "adjustments", label: "Ajustements (A)", group: "Approvisionnements" },
-  { key: "stock_firm", label: "Stock ferme", group: "Stocks", cls: () => "stock" },
-  { key: "stock_forecast", label: "Stock prévisionnel", group: "Stocks", cls: () => "stock" },
-  { key: "stock_sim", label: "Stock simulé", group: "Stocks", cls: () => "stock" },
-  { key: "shortage_firm", label: "Manque ferme (besoin non servi)", group: "Manques", cls: (v) => (v > 0 ? "neg" : "") },
-  { key: "shortage_forecast", label: "Manque prévisionnel", group: "Manques", cls: (v) => (v > 0 ? "neg" : "") },
-  { key: "shortage_sim", label: "Manque simulé", group: "Manques", cls: (v) => (v > 0 ? "neg" : "") },
-  { key: "coverage_firm", label: "Couverture ferme (j)", group: "Couverture", cls: (v, a) => (v <= a.alert_red_days ? "red" : v <= a.alert_yellow_days ? "yellow" : v >= a.overstock_days ? "green" : "") },
-  { key: "coverage_forecast", label: "Couverture prévisionnelle (j)", group: "Couverture", cls: (v, a) => (v <= a.alert_red_days ? "red" : v <= a.alert_yellow_days ? "yellow" : v >= a.overstock_days ? "green" : "") },
-  { key: "coverage_sim", label: "Couverture simulée (j)", group: "Couverture", cls: (v, a) => (v <= a.alert_red_days ? "red" : v <= a.alert_yellow_days ? "yellow" : v >= a.overstock_days ? "green" : "") },
+/** Rows of the simulation grid, in the blocks and order of the specification. */
+export const GRID_ROWS: { key: string; label: string; group: string }[] = [
+  { key: "consumed", label: "Consommé", group: "Conso et besoins" },
+  { key: "required", label: "Requis", group: "Conso et besoins" },
+  { key: "orders_firm", label: "Ferme", group: "Données ERP" },
+  { key: "orders_forecast", label: "Prévisionnel", group: "Données ERP" },
+  { key: "receipts", label: "Reçu", group: "Données ERP" },
+  { key: "plan", label: "Plan", group: "Approvisionnement" },
+  { key: "adjustments", label: "Ajustement", group: "Approvisionnement" },
+  { key: "stock_erp", label: "Scenario ERP", group: "Projection de stock" },
+  { key: "stock_plan", label: "Scenario Plan", group: "Projection de stock" },
 ];
 const GROUPS = Array.from(new Set(GRID_ROWS.map((r) => r.group)));
-const ORDER_ROWS = new Set(["supply_firm", "actions", "supply_forecast"]);
 
 export interface GridColumns { as_of: string; periods: string[]; period_start: string[]; period_end: string[]; }
-export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; events: SupplyEventOut[]; suppliers: LinkRef[]; orders: OrderStateOut[]; kpis?: { severity?: string | null; first_stockout_sim?: string | null }; }
+export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; events: SupplyEventOut[]; suppliers: LinkRef[]; orders: OrderStateOut[]; plan_lines: PlanLineState[]; kpis?: { severity?: string | null; first_stockout_plan?: string | null }; }
 
 /** index of the column containing a date */
 export function columnOf(cols: GridColumns, date: string): number {
   return cols.period_start.findIndex((p, k) => p <= date && date <= (cols.period_end[k] ?? "9999-12-31"));
 }
 
-/** Orders shown in a column: ERP date in the column, or a simulated tranche in the column. */
-export function ordersOfColumn(cols: GridColumns, orders: OrderStateOut[], i: number, row: "supply_firm" | "actions" | "supply_forecast"): OrderStateOut[] {
-  return orders.filter((o) => (row === "supply_firm" ? o.order_type === "FIRM" : row === "supply_forecast" ? o.order_type !== "FIRM" : !!o.action_id)
-    && (columnOf(cols, o.expected_date) === i || o.tranches.some((t) => columnOf(cols, t.date) === i)));
+/** Coverage colour of a stock cell: red / yellow thresholds, green = normal, no colour = overstock. */
+export function coverageClass(days: number, a: ArticleRef): string {
+  if (days <= a.alert_red_days) return "cov-red";
+  if (days <= a.alert_yellow_days) return "cov-yellow";
+  if (days >= a.overstock_days) return "cov-over";
+  return "cov-ok";
 }
 
 /**
  * The simulation grid: one column per day or ISO week, one block of rows per article.
- * Simulated receipts and adjustments are typed in the cell (quantity or expression); the order
- * rows open the order actions (delay, partial delivery, cancellation) or the new-order form.
- * Row groups can be collapsed.  Used by the article page and by the supply table.
+ * Plan and adjustment cells are typed directly (quantity or expression) ; the order rows and the
+ * plan row open the plan drawer ; stock cells carry the coverage (small, top-left) and the unserved
+ * demand (shortage) when any.  Row groups can be collapsed.  Used by the article page and by the
+ * supply table.
  */
-export function SimulationGrid({ cols, articles, cells, onEntry, onOrders, showArticleRows }: {
+export function SimulationGrid({ cols, articles, cells, onEntry, onPlan, showArticleRows }: {
   cols: GridColumns; articles: GridRowArticle[]; cells: CellOut[]; onEntry: (draft: EntryDraft) => void;
-  onOrders: (target: OrderActionsTarget) => void; showArticleRows?: boolean;
+  onPlan: (target: PlanTarget) => void; showArticleRows?: boolean;
 }) {
   const toast = useToast();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<{ aid: string; key: string; i: number; value: string } | null>(null);
-  const saveCell = useWrite((c: { article_id: string; date: string; kind: CellKind; expression: string }) => api.put<CellOut | null>("/api/entries/cells", c),
-    (out) => toast.push(out ? `${out.kind === "sim_receipt" ? "Réception simulée" : "Ajustement"} ${fmtDate(out.date)} = ${fmtQty(out.qty)}` : "Cellule effacée", "success"));
+  const saveCell = useWrite((c: { article_id: string; date: string; expression: string }) => api.put<CellOut | null>("/api/entries/cells", { ...c, kind: "adjustment" }),
+    (out) => toast.push(out ? `Ajustement ${fmtDate(out.date)} = ${fmtQty(out.qty)}` : "Ajustement effacé", "success"));
+  const savePlan = useWrite((c: { article_id: string; date: string; expression: string }) => api.put("/api/entries/plan/cell", c),
+    () => toast.push("Plan mis à jour", "success"));
 
   const asOfIdx = useMemo(() => columnOf(cols, cols.as_of), [cols]);
   const cellsBy = useMemo(() => {
     const m = new Map<string, CellOut[]>();
     cells.forEach((c) => {
       const i = columnOf(cols, c.date);
-      if (i >= 0) m.set(`${c.article_id}|${c.kind}|${i}`, [...(m.get(`${c.article_id}|${c.kind}|${i}`) ?? []), c]);
+      if (i >= 0) m.set(`${c.article_id}|${i}`, [...(m.get(`${c.article_id}|${i}`) ?? []), c]);
     });
     return m;
   }, [cells, cols]);
-  const eventsBy = useMemo(() => {
-    const m = new Map<string, SupplyEventOut[]>();
-    articles.forEach((a) => a.events.forEach((e) => {
-      const i = columnOf(cols, e.date);
-      if (i >= 0) m.set(`${a.article.article_id}|${i}`, [...(m.get(`${a.article.article_id}|${i}`) ?? []), e]);
-    }));
-    return m;
-  }, [articles, cols]);
 
-  const own = (aid: string, kind: CellKind, i: number) => cellsBy.get(`${aid}|${kind}|${i}`) ?? [];
-  const startEdit = (aid: string, key: string, i: number, current: number, cbn: number) => {
-    const mine = own(aid, CELL_ROWS[key], i);
-    // one cell: edit its expression ; several days of a week: edit the total ; a CBN value: accept it as the typed value
-    const value = mine.length === 1 ? (mine[0].expression || String(mine[0].qty)) : mine.length > 1 ? String(current) : cbn ? String(cbn) : "";
-    setEditing({ aid, key, i, value });
-  };
-  const commitEdit = (next?: { aid: string; key: string; i: number }) => {
+  const linesOf = (a: GridRowArticle, i: number) => a.plan_lines.filter((l) => columnOf(cols, l.date) === i);
+  const ordersOf = (a: GridRowArticle, i: number, type: "FIRM" | "FORECAST") => a.orders.filter((o) => (type === "FIRM" ? o.order_type === "FIRM" : o.order_type !== "FIRM") && columnOf(cols, o.expected_date) === i);
+  const openPlan = (a: GridRowArticle, i: number) => onPlan({ article_id: a.article.article_id, unit: a.article.unit, title: `${a.article.article_id} · plan ${periodLabel(cols.periods[i])}`, date: cols.period_start[i], lines: a.plan_lines, orders: a.orders, asOf: cols.as_of });
+  const startEdit = (aid: string, key: string, i: number, current: string) => setEditing({ aid, key, i, value: current });
+  const commitEdit = (next?: { aid: string; key: string; i: number; value: string }) => {
     if (!editing) return;
-    const kind = CELL_ROWS[editing.key];
-    const mine = own(editing.aid, kind, editing.i);
-    const previous = mine.length === 1 ? (mine[0].expression || String(mine[0].qty)) : "";
-    if (editing.value.trim() !== previous.trim() && !(mine.length === 0 && editing.value.trim() === "")) {
-      const date = mine.length === 1 ? mine[0].date : cols.period_start[editing.i];
-      saveCell.mutate({ article_id: editing.aid, date, kind, expression: editing.value });
+    const date = cols.period_start[editing.i];
+    if (editing.key === "adjustments") {
+      const mine = cellsBy.get(`${editing.aid}|${editing.i}`) ?? [];
+      const previous = mine.length === 1 ? (mine[0].expression || String(mine[0].qty)) : "";
+      if (editing.value.trim() !== previous.trim()) saveCell.mutate({ article_id: editing.aid, date: mine.length === 1 ? mine[0].date : date, expression: editing.value });
+    } else if (editing.key === "plan") {
+      savePlan.mutate({ article_id: editing.aid, date, expression: editing.value });
     }
     setEditing(null);
-    if (next) startEdit(next.aid, next.key, next.i, 0, 0);
+    if (next) setEditing(next);
   };
   const toggle = (g: string) => setCollapsed((c) => ({ ...c, [g]: !c[g] }));
 
@@ -116,7 +100,7 @@ export function SimulationGrid({ cols, articles, cells, onEntry, onOrders, showA
           {articles.map((a) => {
             const aid = a.article.article_id;
             const series = Object.fromEntries(a.series.map((s) => [s.key, s.values]));
-            const cbnRow = series["supply_proposed"] ?? [];
+            const get = (k: string, i: number) => series[k]?.[i] ?? 0;
             return (
               <Fragment key={aid}>
                 {showArticleRows && (
@@ -131,62 +115,91 @@ export function SimulationGrid({ cols, articles, cells, onEntry, onOrders, showA
                   return (
                     <Fragment key={`${aid}-${g}`}>
                       <tr className="group-head" onClick={() => toggle(g)} title={isCollapsed ? "Afficher le bloc" : "Masquer le bloc"}>
-                        <td>{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}{g}{isCollapsed && <span className="subtle" style={{ textTransform: "none", letterSpacing: 0 }}> ({rows.length} lignes)</span>}</td>
+                        <td>{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}{g}</td>
                         {cols.periods.map((p) => <td key={p} />)}
                       </tr>
-                      {!isCollapsed && rows.map((r) => {
-                        const raw = series[r.key] ?? [];
-                        const cellKind = CELL_ROWS[r.key];
-                        const isOrderRow = ORDER_ROWS.has(r.key);
-                        const editable = !!cellKind || isOrderRow || r.key === "receipts";
-                        return (
-                          <tr key={`${aid}-${r.key}`}>
-                            <td>{r.label}</td>
-                            {raw.map((v0, i) => {
-                              const cbn = r.key === "sim_receipts" ? (cbnRow[i] ?? 0) : 0;
-                              const v = v0 + cbn;
-                              const past = i < asOfIdx;
-                              const mine = cellKind ? own(aid, cellKind, i) : [];
-                              const typed = mine.length > 0;
-                              const isEditing = editing?.aid === aid && editing.key === r.key && editing.i === i;
-                              const evs = eventsBy.get(`${aid}|${i}`);
-                              const colOrders = isOrderRow ? ordersOfColumn(cols, a.orders, i, r.key as "supply_firm" | "actions" | "supply_forecast") : [];
-                              const acted = colOrders.some((o) => o.action_id);
-                              const cls = [past ? "past" : "", i === asOfIdx ? "today" : "", v === 0 && !typed ? "zero" : "", r.cls ? r.cls(v, a.article) : "",
-                                editable && !past ? "editable" : "", isEditing ? "editing" : "", typed ? "typed" : "", !typed && cbn ? "cbn sim" : "",
-                                isWeekKey(cols.periods[i]) ? "wkcol" : "",
-                                isOrderRow && colOrders.length ? "event" : "", isOrderRow && acted ? "orders" : "",
-                                r.key === "supply_firm" && colOrders.some((o) => o.days_late > 0) ? "late" : "",
-                                !isWeekKey(cols.periods[i]) && isWeekend(cols.period_start[i]) ? "past" : ""].filter(Boolean).join(" ");
-                              const title = cellKind
-                                ? [...mine.map((c) => `${fmtDate(c.date)} : ${c.expression || c.qty} = ${fmtQty(c.qty, a.article.unit)} (${c.source})${c.note ? ` – ${c.note}` : ""}`),
-                                  ...(cbn ? [`Complément CBN ${fmtQty(cbn, a.article.unit)} (recalculé automatiquement ; saisir une valeur pour le fixer, 0 pour l'interdire ce jour)`] : []),
-                                  ...(!mine.length && !cbn && !past ? [cellKind === "sim_receipt" ? "Cliquer pour saisir une réception simulée supplémentaire : quantité ou formule (ex. 2*600-50) ; 0 = aucun complément CBN ce jour ; vide = effacer" : "Cliquer pour saisir un ajustement (quantité signée ou formule)"] : [])].join("\n")
-                                : isOrderRow
-                                  ? colOrders.map((o) => `${o.order_id} · ${ORDER_TYPE_LABELS[o.order_type] ?? o.order_type} ${fmtQty(o.qty_open, a.article.unit)} le ${fmtDate(o.expected_date)} · ${ORDER_STATUS_LABELS[o.status]}${o.action_kind ? ` (${ACTION_KIND_LABELS[o.action_kind]}${o.tranches.length ? " " + o.tranches.map((t) => `${fmtQty(t.qty)} le ${fmtDate(t.date)}`).join(", ") : ""})` : ""}`).join("\n")
-                                    || (past ? "" : "Cliquer pour saisir une commande ferme passée hors ERP")
-                                  : evs?.map((e) => `${KIND_LABELS[e.kind] ?? e.kind} ${e.ref} : ${fmtQty(e.qty, a.article.unit)} (${ORDER_TYPE_LABELS[e.order_type] ?? e.order_type}, ${e.source})`).join("\n");
-                              const onClick = !editable || past || isEditing ? undefined
-                                : cellKind ? () => startEdit(aid, r.key, i, v0, cbn)
-                                : isOrderRow && colOrders.length ? () => onOrders({ title: `${aid} · commandes ${periodLabel(cols.periods[i])}`, orders: colOrders })
-                                : r.key === "supply_forecast" || r.key === "actions" ? undefined
-                                : () => onEntry({ kind: r.key === "receipts" ? "receipt" : "order", article_id: aid, date: cols.period_start[i], supplier_id: a.suppliers[0]?.supplier_id ?? null, order_type: "FIRM" });
-                              return <td key={i} className={cls} title={title} onClick={onClick}>
-                                {isEditing ? (
-                                  <input className="cell-input" autoFocus value={editing.value} aria-label={`${r.label} ${periodLabel(cols.periods[i])}`}
-                                    onChange={(e) => setEditing({ ...editing, value: e.target.value })}
-                                    onBlur={() => commitEdit()}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
-                                      else if (e.key === "Escape") { e.preventDefault(); setEditing(null); }
-                                      else if (e.key === "Tab") { e.preventDefault(); const ni = i + (e.shiftKey ? -1 : 1); if (ni >= asOfIdx && ni < raw.length) commitEdit({ aid, key: r.key, i: ni }); else commitEdit(); }
-                                    }} />
-                                ) : r.key.startsWith("coverage") ? v : typed && v === 0 ? "0" : v === 0 ? "·" : r.key === "actions" && v > 0 ? `+${fmtQty(v, a.article.unit)}` : fmtQty(v, a.article.unit)}
+                      {!isCollapsed && rows.map((r) => (
+                        <tr key={`${aid}-${r.key}`}>
+                          <td>{r.label}</td>
+                          {cols.periods.map((p, i) => {
+                            const past = i < asOfIdx;
+                            const weekend = !isWeekKey(p) && isWeekend(cols.period_start[i]);
+                            const base = [past || weekend ? "past" : "", i === asOfIdx ? "today" : "", isWeekKey(p) ? "wkcol" : ""];
+                            const isEditing = editing?.aid === aid && editing.key === r.key && editing.i === i;
+                            const input = (initial: string) => (
+                              <input className="cell-input" autoFocus value={editing!.value} aria-label={`${r.label} ${periodLabel(p)}`}
+                                onChange={(e) => setEditing({ ...editing!, value: e.target.value })} onBlur={() => commitEdit()}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
+                                  else if (e.key === "Escape") { e.preventDefault(); setEditing(null); }
+                                  else if (e.key === "Tab") { e.preventDefault(); const ni = i + (e.shiftKey ? -1 : 1); if (ni >= 0 && ni < cols.periods.length && (r.key === "adjustments" || ni >= asOfIdx)) commitEdit({ aid, key: r.key, i: ni, value: initial }); else commitEdit(); }
+                                }} />
+                            );
+                            // ---- stock cells: value + coverage + shortage
+                            if (r.key === "stock_erp" || r.key === "stock_plan") {
+                              const v = get(r.key, i);
+                              const cov = get(r.key === "stock_erp" ? "coverage_erp" : "coverage_plan", i);
+                              const short = get(r.key === "stock_erp" ? "shortage_erp" : "shortage_plan", i);
+                              const cls = [...base, "stock", past ? "" : coverageClass(cov, a.article), short > 0 ? "short" : ""].filter(Boolean).join(" ");
+                              const title = past ? `stock reconstitué ${fmtQty(v, a.article.unit)}` : `stock ${fmtQty(v, a.article.unit)} · couverture ${cov} j${short > 0 ? ` · manque ${fmtQty(short, a.article.unit)} (besoin non servi)` : ""}`;
+                              return <td key={i} className={cls} title={title}>
+                                {!past && <span className="cov">{cov} j</span>}
+                                <span className="val">{fmtQty(v, a.article.unit)}</span>
+                                {short > 0 && <span className="shortv">−{fmtQty(short, a.article.unit)}</span>}
                               </td>;
-                            })}
-                          </tr>
-                        );
-                      })}
+                            }
+                            // ---- plan: ERP as is + lines (typed) + CBN (italic) ; past: expired lines in grey
+                            if (r.key === "plan") {
+                              const lines = linesOf(a, i);
+                              const cbn = get("supply_proposed", i);
+                              const v = past ? get("plan_hist", i) : get("plan", i) + cbn;
+                              const stored = lines.some((l) => l.origin === "override" || l.origin === "free");
+                              const cls = [...base, "editable", isEditing ? "editing" : "", stored ? "typed" : "", !stored && cbn ? "cbn" : "", lines.length ? "event" : ""].filter(Boolean).join(" ");
+                              const title = lines.map((l) => `${ORIGIN_LABELS[l.origin]} ${l.order_id ?? ""} ${fmtQty(l.qty, a.article.unit)} le ${fmtDate(l.date)}${l.erp_date && (l.erp_date !== l.date || l.erp_qty !== l.qty) ? ` (ERP ${fmtDate(l.erp_date)} · ${fmtQty(l.erp_qty ?? 0, a.article.unit)})` : ""}`).join("\n")
+                                || (past ? "" : "Taper une quantité (ligne libre ou quantité de la ligne du jour) ; cliquer pour la liste du jour");
+                              const single = lines.filter((l) => l.origin === "erp" || l.origin === "override" || l.origin === "free");
+                              const initial = single.length === 1 ? String(single[0].qty) : single.length === 0 && cbn ? String(cbn) : "";
+                              return <td key={i} className={cls} title={title} onClick={past || isEditing ? undefined : (e) => {
+                                if ((e.target as HTMLElement).closest(".more") || lines.length > 1 || (lines.length === 1 && single.length === 0 && !cbn)) openPlan(a, i);
+                                else if (lines.length === 0 && !cbn) startEdit(aid, r.key, i, "");
+                                else if (single.length <= 1) startEdit(aid, r.key, i, initial);
+                                else openPlan(a, i);
+                              }} onDoubleClick={past ? undefined : () => openPlan(a, i)}>
+                                {isEditing ? input(initial) : v === 0 && !stored ? "·" : fmtQty(v, a.article.unit)}
+                                {!past && !isEditing && (lines.length > 0 || cbn > 0) && <span className="more" title="Liste du jour" onClick={(e) => { e.stopPropagation(); openPlan(a, i); }}>…</span>}
+                              </td>;
+                            }
+                            // ---- adjustments: typed, any column
+                            if (r.key === "adjustments") {
+                              const mine = cellsBy.get(`${aid}|${i}`) ?? [];
+                              const v = get("adjustments", i);
+                              const cls = [...base, "editable", isEditing ? "editing" : "", mine.length ? "typed" : "", v < 0 ? "neg-val" : ""].filter(Boolean).join(" ");
+                              const initial = mine.length === 1 ? (mine[0].expression || String(mine[0].qty)) : mine.length ? String(v) : "";
+                              const title = mine.map((c) => `${fmtDate(c.date)} : ${c.expression || c.qty} = ${fmtQty(c.qty, a.article.unit)}${c.note ? ` – ${c.note}` : ""}`).join("\n") || (past ? "Ajustement passé : corrige le stock de référence" : "Quantité signée ou formule (ex. -(30+20))");
+                              return <td key={i} className={cls} title={title} onClick={isEditing ? undefined : () => startEdit(aid, r.key, i, initial)}>
+                                {isEditing ? input(initial) : v === 0 ? "·" : `${v > 0 ? "+" : ""}${fmtQty(v, a.article.unit)}`}
+                              </td>;
+                            }
+                            // ---- ERP orders: firm (past = ordered qty, future = open) / forecast ; receipts
+                            if (r.key === "orders_firm" || r.key === "orders_forecast" || r.key === "receipts") {
+                              const v = r.key === "orders_firm" ? get("orders_firm", i) + get("orders_firm_hist", i) : get(r.key, i);
+                              const ords = r.key === "receipts" ? [] : ordersOf(a, i, r.key === "orders_firm" ? "FIRM" : "FORECAST");
+                              const late = ords.some((o) => o.status === "not_received");
+                              const cls = [...base, ords.length ? "event" : "", late ? "late" : "", r.key !== "receipts" || !past ? "editable" : ""].filter(Boolean).join(" ");
+                              const title = ords.map((o) => `${o.order_id} · ${ORDER_TYPE_LABELS[o.order_type]} ${fmtQty(o.qty_open, a.article.unit)} restant / ${fmtQty(o.qty_ordered, a.article.unit)} commandé · ${ORDER_STATUS_LABELS[o.status]}${o.plan_dates.length ? ` · plan : ${o.plan_dates.map((x) => fmtDate(x)).join(", ")}` : ""}`).join("\n")
+                                || (r.key === "receipts" ? (past || i === asOfIdx ? "Cliquer pour saisir une réception" : "") : past ? "" : r.key === "orders_firm" ? "Cliquer pour saisir une commande ferme hors ERP" : "");
+                              const onClick = ords.length ? () => onPlan({ article_id: aid, unit: a.article.unit, title: `${aid} · commandes ${periodLabel(p)}`, date: past ? undefined : cols.period_start[i], lines: a.plan_lines, orders: a.orders, asOf: cols.as_of })
+                                : r.key === "receipts" && (past || i === asOfIdx) ? () => onEntry({ kind: "receipt", article_id: aid, date: cols.period_start[i], supplier_id: a.suppliers[0]?.supplier_id ?? null })
+                                : r.key === "orders_firm" && !past ? () => onEntry({ kind: "order", article_id: aid, date: cols.period_start[i], supplier_id: a.suppliers[0]?.supplier_id ?? null, order_type: "FIRM" })
+                                : undefined;
+                              return <td key={i} className={cls} title={title} onClick={onClick}>{v === 0 ? "·" : fmtQty(v, a.article.unit)}</td>;
+                            }
+                            // ---- consumption / requirement
+                            const v = get(r.key, i);
+                            return <td key={i} className={base.filter(Boolean).join(" ")}>{v === 0 ? "·" : fmtQty(v, a.article.unit)}</td>;
+                          })}
+                        </tr>
+                      ))}
                     </Fragment>
                   );
                 })}
@@ -196,15 +209,5 @@ export function SimulationGrid({ cols, articles, cells, onEntry, onOrders, showA
         </tbody>
       </table>
     </div>
-  );
-}
-
-export function GridHelp() {
-  return (
-    <p className="small subtle" style={{ padding: "8px 12px" }}>
-      Stock ferme = R + F (ERP tel quel) · prévisionnel = R + F + P · simulé = R + F′ + S, F′ étant les commandes fermes après vos actions (ligne « Actions » = F′ − F) ; une commande passée non reçue ne compte dans aucun stock tant qu'elle n'est pas qualifiée.
-      Cliquer sur une cellule de commandes (point bleu) pour agir sur les commandes du jour : attendue le… (retard, tranches), annulée, clôturée ; ces actions ne touchent que le stock simulé.
-      Réceptions simulées S : quantités supplémentaires saisies dans la cellule (quantité ou formule + − × ÷) ; les valeurs en italique sont le complément CBN, recalculé automatiquement ; une valeur saisie (0 compris) fixe le jour et y interdit le CBN. Entrée valide, Tab passe à la période suivante, Échap annule ; en vue semaine la saisie se pose sur le premier jour. Cliquer sur un titre de bloc pour le plier.
-    </p>
   );
 }

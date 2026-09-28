@@ -88,6 +88,7 @@
 
   /* table highlight */
   --cell-neg: #fee4e2;
+  --cell-neg-strong: #f7b3ad;
   --cell-red: #fecdca;
   --cell-yellow: #fef0c7;
   --cell-green: #dcfae6;
@@ -136,6 +137,7 @@
   --s-adjust: #aab4c8;
   --s-plan-only: #34446a;
   --cell-neg: #3b1512;
+  --cell-neg-strong: #6b1f19;
   --cell-red: #4a1a16;
   --cell-yellow: #3d2504;
   --cell-green: #0b2e1e;

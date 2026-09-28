@@ -5,8 +5,8 @@ import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
 import { Card, Empty, ErrorBox, Segmented, SkeletonBlock } from "@/components/ui";
 import { EntryDrawer, type EntryDraft } from "@/components/EntryDrawer";
-import { GridHelp, SimulationGrid } from "@/components/SimulationGrid";
-import { OrderActionsDrawer, type OrderActionsTarget } from "@/components/OrderActionsDrawer";
+import { SimulationGrid } from "@/components/SimulationGrid";
+import { PlanDrawer, type PlanTarget } from "@/components/PlanDrawer";
 
 /** Supply table: the simulation grid of every article of the perimeter, one below the other, with filters. */
 export default function SupplyTablePage() {
@@ -15,7 +15,7 @@ export default function SupplyTablePage() {
   const [supplier, setSupplier] = useState("");
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState<EntryDraft | null>(null);
-  const [target, setTarget] = useState<OrderActionsTarget | null>(null);
+  const [target, setTarget] = useState<PlanTarget | null>(null);
   const programs = usePrograms();
   const suppliers = useSuppliers();
   const cockpit = useCockpit();
@@ -23,14 +23,17 @@ export default function SupplyTablePage() {
   const cells = useCells();
   const s = search.trim().toLowerCase();
   const articles = useMemo(() => (grid.data?.articles ?? []).filter((a) => !s || `${a.article.article_id} ${a.article.designation}`.toLowerCase().includes(s)), [grid.data, s]);
-  const allOrders = useMemo(() => (grid.data?.articles ?? []).flatMap((a) => a.orders), [grid.data]);
-  const liveTarget = target ? { ...target, orders: target.orders.map((o) => allOrders.find((x) => x.order_id === o.order_id && x.article_id === o.article_id) ?? o) } : null;
+  const liveTarget = useMemo(() => {
+    if (!target) return null;
+    const a = grid.data?.articles.find((x) => x.article.article_id === target.article_id);
+    return a ? { ...target, lines: a.plan_lines, orders: a.orders } : target;
+  }, [target, grid.data]);
   const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { planner: engineParams.planner, scenario_id: engineParams.scenario_id, granularity: perimeter.granularity === "default" ? "day" : perimeter.granularity, horizon_days: engineParams.horizon_days, article_ids: articles.map((a) => a.article.article_id) });
 
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Tableau d'approvisionnement</h1><p>Le tableau de simulation de tous les articles du périmètre, un au-dessous de l'autre : mêmes colonnes, mêmes saisies que sur la fiche article (actions sur commandes, réceptions simulées, ajustements, commandes fermes, réceptions). Filtrez par programme, fournisseur ou article.</p></div>
+        <div className="title"><h1>Tableau d'approvisionnement</h1></div>
         <div className="actions">
           <Segmented size="sm" value={perimeter.granularity} onChange={(g) => set({ granularity: g })} options={[{ id: "default", label: "Par défaut" }, { id: "day", label: "Jour" }, { id: "week", label: "Semaine" }]} />
           <a className="btn" href={exportUrl}><Download />Excel</a>
@@ -54,12 +57,11 @@ export default function SupplyTablePage() {
 
       {grid.isError ? <ErrorBox error={grid.error} retry={() => grid.refetch()} /> : grid.isLoading || !grid.data ? <Card><SkeletonBlock rows={12} /></Card> : articles.length === 0 ? <Empty title="Aucun article" hint="Modifiez les filtres." /> : (
         <Card flush tight>
-          <SimulationGrid cols={grid.data} articles={articles} cells={cells.data ?? []} onEntry={setDraft} onOrders={setTarget} showArticleRows />
-          <GridHelp />
+          <SimulationGrid cols={grid.data} articles={articles} cells={cells.data ?? []} onEntry={setDraft} onPlan={setTarget} showArticleRows />
         </Card>
       )}
       <EntryDrawer draft={draft} onClose={() => setDraft(null)} articles={(cockpit.data?.articles ?? []).map((a) => ({ article_id: a.article_id, designation: a.designation, unit: a.unit }))} />
-      <OrderActionsDrawer target={liveTarget} onClose={() => setTarget(null)} />
+      <PlanDrawer target={liveTarget} onClose={() => setTarget(null)} />
     </div>
   );
 }

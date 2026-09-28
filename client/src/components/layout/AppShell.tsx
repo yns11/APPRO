@@ -13,7 +13,7 @@ const NAV = [
   { to: "/articles", label: "Fiches articles", icon: Activity },
   { to: "/tableau", label: "Tableau d'approvisionnement", icon: Table },
   { to: "/propositions", label: "Complément CBN", icon: ShoppingCart },
-  { to: "/retards", label: "Retards à qualifier", icon: Clock },
+  { to: "/retards", label: "Commandes non reçues", icon: Clock },
   { to: "/programmes", label: "Impact programmes", icon: Factory },
   { to: "/simulation", label: "Scénarios & simulation", icon: FlaskConical },
   { to: "/saisies", label: "Saisies & journal", icon: PenLine },

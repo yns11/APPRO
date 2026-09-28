@@ -212,3 +212,27 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 .pivot td.orders { box-shadow: inset 0 -2px 0 var(--s-firm); }
 .order-editor { padding: 12px 0; border-bottom: 1px solid var(--border); }
 .order-editor:last-child { border-bottom: 0; }
+
+/* ---------- simulation grid: stock cells (coverage top-left, shortage), plan cells ---------- */
+.pivot td.stock { position: relative; padding: 9px 8px 5px; font-weight: var(--fw-semibold); color: var(--fg); min-width: 72px; }
+.pivot td.stock .cov { position: absolute; left: 4px; top: 1px; font-size: 0.58rem; font-weight: var(--fw-regular); letter-spacing: 0; color: inherit; opacity: 0.85; }
+.pivot td.stock .val { display: block; }
+.pivot td.stock .shortv { display: block; font-size: 0.62rem; font-weight: var(--fw-semibold); color: var(--critical-fg); }
+.pivot td.stock.cov-ok { background: var(--cell-green); color: var(--ok-fg); }
+.pivot td.stock.cov-yellow { background: var(--cell-yellow); color: var(--warning-fg); }
+.pivot td.stock.cov-red { background: var(--cell-red); color: var(--critical-fg); }
+.pivot td.stock.cov-over { background: transparent; color: var(--fg); }
+.pivot td.stock.short { background: var(--cell-neg-strong, rgb(217 45 32 / 0.28)); color: var(--critical-fg); }
+.pivot td.stock.past { background: var(--cell-past); color: var(--fg-subtle); font-weight: var(--fw-regular); }
+.pivot td.cbn { color: var(--warning-fg); font-style: italic; }
+.pivot td.neg-val { color: var(--critical-fg); }
+.pivot td .more { position: absolute; right: 2px; bottom: 0; font-size: 0.7rem; color: var(--fg-subtle); cursor: pointer; padding: 0 2px; }
+.pivot td.editable { position: relative; }
+.pivot td .more:hover { color: var(--brand); }
+.pivot { max-height: none; }
+.pivot th, .pivot td { padding: 4px 7px; }
+.pivot th:first-child, .pivot td:first-child { min-width: 150px; }
+/* ---------- filterable table ---------- */
+.dt .dt-filters th { top: 30px; padding: 3px 8px; background: var(--bg-elev); text-transform: none; letter-spacing: 0; }
+.input.xs, .select.xs { height: 24px; font-size: var(--fs--2); padding: 0 6px; width: 100%; min-width: 60px; }
+.dt tfoot td { background: var(--bg-subtle); font-size: var(--fs--2); }

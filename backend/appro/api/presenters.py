@@ -5,35 +5,34 @@ import datetime as dt
 from typing import Any
 
 from ..engine.calendar import iso_week_label, iso_week_monday
-from ..engine.models import Alert, ArticleResult, MrpResult, OrderState, Proposal, SupplierLink
+from ..engine.models import Alert, ArticleResult, MrpResult, OrderState, PlanLineState, Proposal, SupplierLink
 from . import schemas as S
 
 SERIES_LABELS = [
-    ("demand", "Besoin"),
-    ("demand_plan", "Besoin (plan seul)"),
-    ("supply_firm", "Commandes fermes"),
-    ("supply_firm_sim", "Commandes fermes simulées (F′)"),
-    ("actions", "Actions sur commandes (F′ − F)"),
-    ("supply_forecast", "Commandes prévisionnelles (ERP)"),
-    ("receipts", "Réceptions"),
-    ("sim_receipts", "Réceptions simulées"),
+    ("consumed", "Consommé"),
+    ("required", "Requis"),
+    ("demand", "Besoin (consommé + requis)"),
+    ("demand_plan", "Besoin (PDP seul)"),
+    ("orders_firm", "Ferme"),
+    ("orders_firm_hist", "Ferme (passé)"),
+    ("orders_forecast", "Prévisionnel"),
+    ("receipts", "Reçu"),
+    ("plan", "Plan"),
+    ("plan_hist", "Plan (expiré)"),
     ("supply_proposed", "Complément CBN"),
-    ("adjustments", "Ajustements"),
-    ("stock_firm", "Stock ferme"),
-    ("stock_forecast", "Stock prévisionnel"),
-    ("stock_sim", "Stock simulé"),
-    ("shortage_firm", "Manque ferme"),
-    ("shortage_forecast", "Manque prévisionnel"),
-    ("shortage_sim", "Manque simulé"),
+    ("adjustments", "Ajustement"),
+    ("stock_erp", "Scenario ERP"),
+    ("stock_plan", "Scenario Plan"),
+    ("shortage_erp", "Manque ERP"),
+    ("shortage_plan", "Manque Plan"),
     ("target_stock", "Stock cible"),
-    ("coverage_firm", "Couverture ferme (j)"),
-    ("coverage_forecast", "Couverture prévisionnelle (j)"),
-    ("coverage_sim", "Couverture simulée (j)"),
+    ("coverage_erp", "Couverture ERP (j)"),
+    ("coverage_plan", "Couverture Plan (j)"),
     ("demand_actual_share", "Part du réel dans le besoin"),
 ]
-FLOWS = {"demand", "demand_plan", "supply_firm", "supply_firm_sim", "actions", "supply_forecast", "sim_receipts",
-         "supply_proposed", "receipts", "adjustments"}
-SHORTAGES = {"shortage_firm", "shortage_forecast", "shortage_sim"}
+FLOWS = {"consumed", "required", "demand", "demand_plan", "orders_firm", "orders_firm_hist", "orders_forecast",
+         "receipts", "plan", "plan_hist", "supply_proposed", "adjustments"}
+SHORTAGES = {"shortage_erp", "shortage_plan"}
 
 
 def alert_out(a: Alert, designation: str = "") -> S.AlertOut:
@@ -56,9 +55,23 @@ def order_state_out(o: OrderState, ar: ArticleResult) -> S.OrderStateOut:
     return S.OrderStateOut(order_id=o.order_id, article_id=o.article_id, designation=ar.article.designation,
                            unit=ar.article.unit, supplier_id=o.supplier_id, order_type=o.order_type, source=o.source,
                            expected_date=o.expected_date, qty_ordered=o.qty_ordered, qty_open=o.qty_open,
-                           qty_expected=o.qty_expected, days_late=o.days_late, status=o.status,
-                           in_firm_layer=o.in_firm_layer, action_id=o.action_id, action_kind=o.action_kind,
-                           tranches=[S.TrancheOut(**t) for t in o.tranches], review=o.review, note=o.note)
+                           qty_expected=o.qty_expected, days_late=o.days_late, status=o.status, plan_qty=o.plan_qty,
+                           plan_dates=o.plan_dates, note=o.note)
+
+
+def plan_line_out(l: PlanLineState) -> S.PlanLineStateOut:
+    return S.PlanLineStateOut(line_id=l.line_id, order_id=l.order_id, article_id=l.article_id, date=l.date, qty=l.qty,
+                              supplier_id=l.supplier_id, origin=l.origin, counted=l.counted, erp_date=l.erp_date,
+                              erp_qty=l.erp_qty, note=l.note)
+
+
+def plan_lines_out(ar: ArticleResult) -> list[S.PlanLineStateOut]:
+    """Stored / ERP lines of the plan plus the CBN proposals as lines."""
+    out = [plan_line_out(l) for l in ar.plan_lines]
+    out.extend(S.PlanLineStateOut(line_id=None, order_id=None, article_id=ar.article.article_id, date=p.delivery_date,
+                                  qty=p.qty, supplier_id=p.supplier_id, origin="cbn", counted=True, note=p.reason)
+               for p in ar.proposals)
+    return sorted(out, key=lambda l: (l.date, l.origin, l.order_id or "", l.line_id or ""))
 
 
 def link_out(l: SupplierLink, supplier_names: dict[str, str]) -> S.LinkRef:
@@ -80,7 +93,7 @@ def sparkline(ar: ArticleResult, points: int = 18) -> list[float]:
     i0 = ar.dates.index(ar.as_of)
     n = len(ar.dates) - i0
     step = max(1, n // points)
-    return [round(ar.stock_sim[i], 1) for i in range(i0, len(ar.dates), step)][:points]
+    return [round(ar.stock_plan[i], 1) for i in range(i0, len(ar.dates), step)][:points]
 
 
 def article_summary(ar: ArticleResult) -> S.ArticleSummary:
@@ -95,26 +108,27 @@ def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
     arts = list(result.articles.values())
     alerts = [a for r in arts for a in r.alerts]
     props = [p for r in arts for p in r.proposals]
-    cov = [r.kpis["coverage_sim_days"] for r in arts if r.kpis["demand_horizon"] > 0]
+    cov = [r.kpis["coverage_plan_days"] for r in arts if r.kpis["demand_horizon"] > 0]
     stockouts_7d = 0
     for r in arts:
-        d = r.kpis.get("first_stockout_sim")
+        d = r.kpis.get("first_stockout_plan")
         if d and (dt.date.fromisoformat(d) - result.as_of).days <= 7:
             stockouts_7d += 1
     return S.CockpitKpis(
         articles=len(arts),
         critical=sum(1 for r in arts if r.kpis.get("severity") == "critical"),
         warning=sum(1 for r in arts if r.kpis.get("severity") == "warning"),
-        stockouts=sum(1 for r in arts if r.kpis.get("first_stockout_sim")),
+        stockouts=sum(1 for r in arts if r.kpis.get("first_stockout_plan")),
         stockouts_7d=stockouts_7d,
         low_coverage=sum(1 for a in alerts if a.alert_type.value == "LOW_COVERAGE"),
         overstock=sum(1 for a in alerts if a.alert_type.value == "OVERSTOCK"),
-        late_orders=sum(r.kpis["late_order_count"] for r in arts),
+        late_orders=sum(r.kpis["backlog_count"] for r in arts),
+        backlog_qty=float(sum(r.kpis["backlog_qty"] for r in arts)),
         proposals=len(props),
         urgent_proposals=sum(1 for p in props if p.urgent),
         proposals_qty=float(sum(p.qty for p in props)),
-        sim_receipt_articles=sum(1 for r in arts if r.kpis["sim_receipt_days"] > 0),
-        sim_receipts_qty=float(sum(r.kpis["sim_receipts_qty"] for r in arts)),
+        plan_articles=sum(1 for r in arts if r.kpis["plan_line_count"] > 0),
+        plan_qty=float(sum(r.kpis["plan_qty"] for r in arts)),
         open_firm_qty=float(sum(r.kpis["open_firm_qty"] for r in arts)),
         open_forecast_qty=float(sum(r.kpis["open_forecast_qty"] for r in arts)),
         avg_coverage_days=(round(sum(cov) / len(cov), 1) if cov else None),
@@ -141,9 +155,9 @@ def weekly_supply_demand(result: MrpResult, weeks: int = 12) -> list[dict[str, A
     for b in buckets.values():
         i = b["_last"]
         for r in arts:
-            if r.shortage_sim[i] > 0:
+            if r.shortage_plan[i] > 0:
                 b["stockout_articles"] += 1
-            elif r.stock_sim[i] < r.target_stock[i]:
+            elif r.stock_plan[i] < r.target_stock[i]:
                 b["below_target_articles"] += 1
     for r in arts:
         for p in r.proposals:
@@ -203,7 +217,7 @@ def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, suppl
         proposals=[proposal_out(p, ar, supplier_names) for p in ar.proposals],
         alerts=[alert_out(a, ar.article.designation) for a in ar.alerts],
         kpis=ar.kpis, suppliers=[link_out(l, supplier_names) for l in ar.suppliers], programs=programs,
-        orders=[order_state_out(o, ar) for o in ar.orders],
+        orders=[order_state_out(o, ar) for o in ar.orders], plan_lines=plan_lines_out(ar),
         diagnostics=ar.diagnostics + result.diagnostics)
 
 
@@ -225,7 +239,7 @@ def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str]
                                 events=[S.SupplyEventOut(**e.__dict__) for e in ar.events if e.date >= start],
                                 kpis=ar.kpis, suppliers=[link_out(l, supplier_names) for l in ar.suppliers],
                                 programs=programs_of.get(ar.article.article_id, []),
-                                orders=[order_state_out(o, ar) for o in ar.orders])
+                                orders=[order_state_out(o, ar) for o in ar.orders], plan_lines=plan_lines_out(ar))
                   for ar in sorted(arts, key=lambda r: r.article.article_id)],
         diagnostics=result.diagnostics)
 
@@ -236,13 +250,13 @@ def compare_articles(base: MrpResult, scen: MrpResult) -> list[S.CompareArticle]
         s = scen.articles.get(aid)
         if s is None:
             continue
-        keys = ("stock_as_of_sim", "coverage_sim_days", "first_stockout_sim", "min_stock_sim", "max_shortage_sim",
+        keys = ("stock_as_of_plan", "coverage_plan_days", "first_stockout_plan", "min_stock_plan", "max_shortage_plan",
                 "proposal_count", "proposed_qty", "urgent_proposal_count", "demand_next_30d", "severity")
         out.append(S.CompareArticle(
             article_id=aid, designation=b.article.designation, unit=b.article.unit,
             base={k: b.kpis.get(k) for k in keys}, scenario={k: s.kpis.get(k) for k in keys},
-            delta_min_stock=float(s.kpis["min_stock_sim"] - b.kpis["min_stock_sim"]),
-            delta_max_shortage=float(s.kpis["max_shortage_sim"] - b.kpis["max_shortage_sim"]),
-            delta_coverage=int(s.kpis["coverage_sim_days"] - b.kpis["coverage_sim_days"]),
-            stockout_changed=(b.kpis.get("first_stockout_sim") != s.kpis.get("first_stockout_sim"))))
+            delta_min_stock=float(s.kpis["min_stock_plan"] - b.kpis["min_stock_plan"]),
+            delta_max_shortage=float(s.kpis["max_shortage_plan"] - b.kpis["max_shortage_plan"]),
+            delta_coverage=int(s.kpis["coverage_plan_days"] - b.kpis["coverage_plan_days"]),
+            stockout_changed=(b.kpis.get("first_stockout_plan") != s.kpis.get("first_stockout_plan"))))
     return out

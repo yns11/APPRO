@@ -48,20 +48,19 @@ def test_workbook_formulas_match_engine(seed_source, tmp_path, policy):
         ar = res.articles[aid]
         top = SIM_HEADER_ROWS + 1 + bi * len(BLOCK)
         i0 = ar.dates.index(res.as_of)
-        for key, series in (("stock_firm", ar.stock_firm_net), ("stock_forecast", ar.stock_forecast_net),
-                            ("stock_sim", ar.stock_sim_net), ("shortage_sim", ar.shortage_sim),
-                            ("target", ar.target_stock), ("coverage", ar.coverage_sim)):
+        for key, series in (("stock_erp", ar.stock_erp_net), ("stock_plan", ar.stock_plan_net),
+                            ("shortage_plan", ar.shortage_plan), ("target", ar.target_stock), ("coverage", ar.coverage_plan)):
             for j in range(ncols):
                 got = ws.cell(top + ROW[key], SIM_FIRST_COL + j).value
                 assert got is not None, (aid, key, j)
                 assert abs(float(got) - float(series[i0 + j])) < 0.01, (aid, key, ar.dates[i0 + j], got, series[i0 + j])
                 checked += 1
-    assert checked == ncols * 6 * len(ids)
+    assert checked == ncols * 5 * len(ids)
 
 
 @pytest.mark.skipif(SOFFICE is None, reason="LibreOffice not installed")
 def test_workbook_reacts_to_entries(seed_source, tmp_path):
-    """Typing in SAISIES and in the *Réceptions simulées* row changes the simulated stock."""
+    """Typing in SAISIES and editing the PLAN sheet changes the stocks as the engine would."""
     ds = erp_dataset(seed_source, planner="QUENTIN")
     res = run_mrp(ds, EngineParams(as_of=dt.date(2026, 9, 19), horizon_days=30))
     aid = "P-00001046"
@@ -74,23 +73,20 @@ def test_workbook_reacts_to_entries(seed_source, tmp_path):
     ar = res.articles[aid]
     i0 = ar.dates.index(res.as_of)
     top = SIM_HEADER_ROWS + 1
-    grid = wb["SIMULATION"]
-    d_sim = dt.date(2026, 9, 30)   # a firm order of 1600 is expected that day: the typed receipt adds up to it
-    j_sim = ar.dates.index(d_sim) - i0
-    grid.cell(top + ROW["sim_receipts"], SIM_FIRST_COL + j_sim, "=2*300-100")   # Excel formula in the cell
-    # planner action in the order book: the 30/09 order (row 2) is delayed to 06/10 → simulated stock only
-    book = wb["CARNET_COMMANDES"]
-    assert str(book["F2"].value)[:10] == d_sim.isoformat() and book["G2"].value == 1600
-    book["J2"] = dt.date(2026, 10, 6)
+    d_order = dt.date(2026, 9, 30)   # a firm order of 1600 is expected that day
+    # plan edit: the 30/09 order is delayed to 06/10 in the PLAN sheet → plan scenario only
+    plan = wb["PLAN"]
+    row = next(r for r in range(2, plan.max_row + 1) if plan.cell(r, 4).value == "PO-000016")
+    assert str(plan.cell(row, 6).value)[:10] == d_order.isoformat() and plan.cell(row, 7).value == 1600
+    plan.cell(row, 8, dt.date(2026, 10, 6))
     buf = __import__("io").BytesIO()
     wb.save(buf)
     calc = _recalculate(buf.getvalue(), tmp_path)["SIMULATION"]
-    j = ar.dates.index(dt.date(2026, 9, 30)) - i0
-    got = calc.cell(top + ROW["stock_sim"], SIM_FIRST_COL + j).value
-    expected = ar.stock_sim_net[i0 + j] + 1000 - 50 + 500 - 1600
-    assert abs(float(got) - expected) < 0.01
-    assert abs(float(calc.cell(top + ROW["orders_firm_sim"], SIM_FIRST_COL + j).value)) < 0.01
-    assert abs(float(calc.cell(top + ROW["orders_firm_sim"], SIM_FIRST_COL + j + 6).value) - 1600) < 0.01
+    j = ar.dates.index(d_order) - i0
+    got_plan = calc.cell(top + ROW["stock_plan"], SIM_FIRST_COL + j).value
+    assert abs(float(got_plan) - (ar.stock_plan_net[i0 + j] + 1000 - 50 - 1600)) < 0.01
+    assert abs(float(calc.cell(top + ROW["plan"], SIM_FIRST_COL + j).value) - 0) < 0.01
+    assert abs(float(calc.cell(top + ROW["plan"], SIM_FIRST_COL + j + 6).value) - 1600) < 0.01
     j2 = ar.dates.index(dt.date(2026, 10, 6)) - i0
-    assert abs(float(calc.cell(top + ROW["stock_sim"], SIM_FIRST_COL + j2).value) - (ar.stock_sim_net[i0 + j2] + 1000 - 50 + 500)) < 0.01
-    assert abs(float(calc.cell(top + ROW["stock_firm"], SIM_FIRST_COL + j).value) - (ar.stock_firm_net[i0 + j] - 50)) < 0.01
+    assert abs(float(calc.cell(top + ROW["stock_plan"], SIM_FIRST_COL + j2).value) - (ar.stock_plan_net[i0 + j2] + 1000 - 50)) < 0.01
+    assert abs(float(calc.cell(top + ROW["stock_erp"], SIM_FIRST_COL + j).value) - (ar.stock_erp_net[i0 + j] + 1000 - 50)) < 0.01

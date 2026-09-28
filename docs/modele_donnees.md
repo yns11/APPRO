@@ -42,7 +42,8 @@ nettoyée `commandes_edi` (requête en amont, catalogue silver) agrège les lign
 | — | `line_no` = 1, `status` = OPEN, `order_date` = null | |
 
 Les lignes prévisionnelles ne sont extraites qu'à partir du lundi suivant ; les lignes fermes sont
-conservées depuis le début de l'année (retards à qualifier). La vue de correspondance est fournie dans
+conservées depuis le début de l'année (commandes non reçues = backlog). Le dictionnaire complet est dans
+`docs/dictionnaire_donnees.md`. La vue de correspondance est fournie dans
 `scripts/uc/create_tables.sql` (`v_fct_purchase_orders_from_commandes_edi`).
 
 ## 2. Tables applicatives (Lakebase PostgreSQL / SQLite en local)
@@ -51,9 +52,9 @@ Créées automatiquement au démarrage (`Base.metadata.create_all`).
 
 | Table | Rôle |
 |---|---|
-| `app_orders` | commandes fermes saisies hors ERP : article, fournisseur, date attendue, qté, `order_type` (FIRM ; PLANNED conservé pour les anciennes lignes), `status` (OPEN/SENT/RECEIVED/CANCELLED), `source` (MANUAL/IMPORT), note, auteur, dates |
-| `app_cells` | cellules du tableau de simulation : article, date, `kind` (sim_receipt / adjustment), expression saisie, quantité évaluée (0 explicite possible), `source` (MANUAL/IMPORT), note, auteur, date ; unique par (article, date, kind) |
-| `app_order_actions` | actions sur commandes (stock simulé) : `order_id` (identifiant synthétique ERP ou commande app), article, fournisseur, `kind` (reschedule / cancel / close), `tranches_json` `[{date, qty}]`, `erp_json` (état ERP vu à la saisie), note, `source` (MANUAL/IMPORT), auteur, dates ; **une action par commande** |
+| `app_orders` | commandes fermes saisies hors ERP (comptées dans les deux scenarios) : article, fournisseur, date attendue, qté, `status` (OPEN/SENT/RECEIVED/CANCELLED), `source` (MANUAL/IMPORT), note, auteur, dates |
+| `app_plan_lines` | lignes du **plan de livraison** : article, `order_id` (créneau ERP surchargé ; vide = ligne libre), fournisseur, date, quantité (0 = rien attendu de la commande), `source` (MANUAL / IMPORT / CBN), commentaire, `erp_json` (état ERP vu à la saisie), auteur, dates |
+| `app_cells` | ajustements saisis dans la grille : article, date (toute date ; ≤ référence = correction du stock de référence), expression, quantité, `source` (MANUAL/IMPORT), note, auteur ; unique par (article, date, kind) |
 | `app_receipts` | réceptions saisies (optionnellement rattachées à une commande app ou ERP) |
 | `app_adjustments` | ajustements de stock (±) |
 | `app_production_actual` | production réelle saisie par (programme, jour) – prime sur l'ERP |

@@ -110,15 +110,8 @@ class SupplyEventOut(BaseModel):
     late: bool = False
 
 
-class TrancheOut(BaseModel):
-    date: dt.date
-    qty: float
-    late: bool = False
-    expected: float = 0.0
-
-
 class OrderStateOut(BaseModel):
-    """One open order (delivery slot) of an article and its planner action, as computed for the run."""
+    """One open order (delivery slot) as seen by the run: ERP placement, plan quantity, status."""
 
     order_id: str
     article_id: str
@@ -132,12 +125,25 @@ class OrderStateOut(BaseModel):
     qty_open: float
     qty_expected: float
     days_late: int
-    status: Literal["expected", "simulated", "late", "late_sim", "cancelled", "closed"]
-    in_firm_layer: bool
-    action_id: str | None = None
-    action_kind: str | None = None
-    tranches: list[TrancheOut] = Field(default_factory=list)
-    review: str = ""
+    status: Literal["expected", "planned", "not_received", "info"]
+    plan_qty: float = 0.0
+    plan_dates: list[dt.date] = Field(default_factory=list)
+    note: str = ""
+
+
+class PlanLineStateOut(BaseModel):
+    """One line of the delivery plan as displayed (stored line, ERP order as is, CBN, expired)."""
+
+    line_id: str | None
+    order_id: str | None
+    article_id: str
+    date: dt.date
+    qty: float
+    supplier_id: str | None
+    origin: Literal["erp", "override", "free", "cbn", "expired"]
+    counted: bool
+    erp_date: dt.date | None = None
+    erp_qty: float | None = None
     note: str = ""
 
 
@@ -161,12 +167,13 @@ class CockpitKpis(BaseModel):
     stockouts_7d: int
     low_coverage: int
     overstock: int
-    late_orders: int
+    late_orders: int             # ERP orders past and not received (to qualify)
+    backlog_qty: float           # their remaining quantity
     proposals: int
     urgent_proposals: int
     proposals_qty: float
-    sim_receipt_articles: int    # articles with at least one simulated receipt typed
-    sim_receipts_qty: float      # total simulated receipts typed (signed)
+    plan_articles: int           # articles with at least one stored plan line
+    plan_qty: float              # delivery plan over the horizon
     open_firm_qty: float
     open_forecast_qty: float
     avg_coverage_days: float | None
@@ -209,6 +216,7 @@ class ProjectionResponse(BaseModel):
     suppliers: list[LinkRef]
     programs: list[dict[str, Any]]
     orders: list[OrderStateOut] = Field(default_factory=list)
+    plan_lines: list[PlanLineStateOut] = Field(default_factory=list)
     diagnostics: list[str]
 
 
@@ -222,6 +230,7 @@ class GridArticle(BaseModel):
     suppliers: list[LinkRef]
     programs: list[str]
     orders: list[OrderStateOut] = Field(default_factory=list)
+    plan_lines: list[PlanLineStateOut] = Field(default_factory=list)
 
 
 class GridResponse(BaseModel):
@@ -243,7 +252,8 @@ class ProgramImpactResponse(BaseModel):
 
 # ------------------------------------------------------------------ entries
 class OrderIn(BaseModel):
-    """A real order placed with the supplier (firm).  Simulated orders are grid cells (``CellIn``)."""
+    """A real order placed with the supplier outside the ERP (firm, counted in both scenarios).
+    The expected date is today or later, unless ``force`` records an old order still due."""
 
     article_id: str
     supplier_id: str | None = None
@@ -251,6 +261,7 @@ class OrderIn(BaseModel):
     qty: float = Field(gt=0)
     order_type: Literal["FIRM"] = "FIRM"
     note: str = ""
+    force: bool = False
 
 
 class OrderUpdate(BaseModel):
@@ -281,6 +292,8 @@ class OrderOut(ORM):
 
 
 class ReceiptIn(BaseModel):
+    """A receipt observed (a fact): dated after the stock snapshot and at most today."""
+
     article_id: str
     supplier_id: str | None = None
     order_id: str | None = None
@@ -337,10 +350,12 @@ class ProductionActualOut(ORM):
 
 # ------------------------------------------------------------------ simulation cells / CBN
 class CellIn(BaseModel):
+    """An adjustment typed in the grid (any date ; on/before the reference day it corrects the reference stock)."""
+
     article_id: str
     date: dt.date
-    kind: Literal["sim_receipt", "adjustment"] = "sim_receipt"
-    expression: str = Field("", max_length=200, description="quantité ou expression arithmétique ; vide = effacer ; 0 = rien n'arrive")
+    kind: Literal["adjustment"] = "adjustment"
+    expression: str = Field("", max_length=200, description="quantité signée ou expression arithmétique ; vide ou 0 = effacer")
 
 
 class CellOut(ORM):
@@ -356,32 +371,36 @@ class CellOut(ORM):
     updated_at: dt.datetime
 
 
-class TrancheIn(BaseModel):
+class PlanLineIn(BaseModel):
+    """Create or update one line of the delivery plan."""
+
+    article_id: str
     date: dt.date
-    qty: float = Field(gt=0)
-
-
-class ActionIn(BaseModel):
-    """Planner action on one order: replan in tranches, cancel, or close (qualified)."""
-
-    order_id: str = Field(min_length=1, max_length=120)
-    article_id: str
-    kind: Literal["reschedule", "cancel", "close"] = "reschedule"
-    tranches: list[TrancheIn] = Field(default_factory=list)
-    note: str = ""
+    qty: float = Field(ge=0)
+    order_id: str | None = None
     supplier_id: str | None = None
+    note: str = ""
+    line_id: str | None = None
 
 
-class ActionOut(ORM):
-    id: str
-    order_id: str
+class PlanCellIn(BaseModel):
+    """Set the planned quantity of one day from the grid cell (quantity or expression ; blank = ERP / nothing)."""
+
     article_id: str
+    date: dt.date
+    expression: str = Field("", max_length=200)
+
+
+class PlanLineOut(ORM):
+    id: str
+    article_id: str
+    order_id: str | None
     supplier_id: str | None
-    kind: str
-    tranches: list[dict[str, Any]]
-    erp: dict[str, Any]
-    note: str
+    date: dt.date
+    qty: float
     source: str
+    note: str
+    erp: dict[str, Any]
     created_by: str
     updated_by: str
     updated_at: dt.datetime

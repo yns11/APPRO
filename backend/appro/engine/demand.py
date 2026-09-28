@@ -10,10 +10,13 @@ Business rules (all configurable through :class:`~appro.engine.models.EnginePara
   - ``per_day`` : ``round(qty / n_open_days)`` on each day – the legacy Excel behaviour, whose
     weekly sum may differ from the plan.
 
-* **Effective production** – ``actual_then_plan`` uses the reported actual quantity for a
-  (program, day) when one exists – *including an explicit 0* – and the plan otherwise.
-  ``plan_only`` ignores actuals, ``actual_only`` ignores the plan.
-  ``missing_actual_policy`` decides what to do with past days that have no actual report.
+* **Effective production** – ``actual_then_remainder`` (default): past days use the reported
+  actual production (``missing_actual_policy`` for past days without report) ; the current ISO
+  week spreads the *remainder* of its PDP (PDP − actuals already reported this week, floored at
+  0) over its remaining open days, the reference day included ; later weeks use the PDP.
+  ``actual_then_plan`` uses the actual for a (program, day) when one exists – *including an
+  explicit 0* – and the plan otherwise ; ``plan_only`` ignores actuals, ``actual_only`` ignores
+  the plan.
 
 * **BOM explosion** – component demand = Σ effective production × qty_per × (1 + scrap%).
   ``consumption_offset_days`` shifts the consumption relative to the production day
@@ -27,8 +30,8 @@ from collections import defaultdict
 
 import numpy as np
 
-from .calendar import WorkCalendar
-from .models import ActualLine, BomLine, Dataset, EngineParams, PlanLine
+from .calendar import WorkCalendar, iso_week_monday
+from .models import ActualLine, BomLine, Dataset, EngineParams, PdpLine
 
 
 def spread_week(qty: float, n_days: int, rounding: str) -> list[float]:
@@ -64,7 +67,7 @@ class DayIndex:
 
 
 def build_program_daily(
-    plan: list[PlanLine],
+    plan: list[PdpLine],
     actuals: list[ActualLine],
     calendar: WorkCalendar,
     index: DayIndex,
@@ -75,7 +78,7 @@ def build_program_daily(
     diagnostics: list[str] = []
     planned: dict[str, np.ndarray] = defaultdict(lambda: np.zeros(index.n))
     # Newest version wins when several versions of the same week coexist.
-    best: dict[tuple[str, dt.date], PlanLine] = {}
+    best: dict[tuple[str, dt.date], PdpLine] = {}
     for line in plan:
         key = (line.program_id, line.week_start)
         if key not in best or line.version >= best[key].version:
@@ -102,6 +105,7 @@ def build_program_daily(
         if i is not None:
             reported[a.program_id][i] = a.qty
     as_of_idx = index.offset(as_of)
+    week_qty = {(pid, monday): line.qty for (pid, monday), line in best.items()}
     programs = set(planned) | set(reported)
     for pid in programs:
         p = planned[pid] if pid in planned else np.zeros(index.n)
@@ -113,6 +117,31 @@ def build_program_daily(
             for i, q in reported.get(pid, {}).items():
                 eff[i] = q
                 mask[i] = True
+        elif params.production_mode == "actual_then_remainder" and as_of_idx is not None:
+            eff = p.copy()
+            past = np.arange(index.n) < as_of_idx
+            for i, q in reported.get(pid, {}).items():
+                if i < as_of_idx:      # the reference day and later are always future
+                    eff[i] = q
+                    mask[i] = True
+            if params.missing_actual_policy == "zero":
+                eff[past & ~mask] = 0.0
+            # current ISO week: remainder of the PDP over the remaining open days
+            monday = iso_week_monday(as_of)
+            done = sum(reported[pid].get(index.offset(monday + dt.timedelta(days=k)), 0.0)
+                       for k in range(7) if monday + dt.timedelta(days=k) < as_of
+                       and index.offset(monday + dt.timedelta(days=k)) is not None) if pid in reported else 0.0
+            remaining_days = [d for d in calendar.open_days_in_week(monday) if d >= as_of]
+            if remaining_days:
+                rest = max(week_qty.get((pid, monday), 0.0) - done, 0.0)
+                for day, q in zip(remaining_days, spread_week(rest, len(remaining_days), params.spread_rounding)):
+                    i = index.offset(day)
+                    if i is not None:
+                        eff[i] = q
+            for d in calendar.open_days_in_week(monday):
+                i = index.offset(d)
+                if i is not None and d < as_of and not mask[i] and params.missing_actual_policy == "zero":
+                    eff[i] = 0.0
         else:  # actual_then_plan
             eff = p.copy()
             for i, q in reported.get(pid, {}).items():

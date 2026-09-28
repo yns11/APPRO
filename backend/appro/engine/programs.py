@@ -8,8 +8,8 @@ share of its components that can be served on that day, in a given stock layer:
     feasible(d)  = planned(d) × share_p(d)
 
 ``unserved_c(d)`` is the demand of day ``d`` that the layer cannot serve: the daily lost quantity
-(``lost`` policy) or the increase of the backlog on that day (``backlog`` policy).  Four layers are
-evaluated: on-hand stock only (nothing else arrives), firm, forecast and simulated.  Results are
+(``lost`` policy) or the increase of the backlog on that day (``backlog`` policy).  Three layers are
+evaluated: on-hand stock only (nothing else arrives), ERP and plan.  Results are
 aggregated per ISO week from the reference date, with the limiting components of each week.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from .calendar import iso_week_label
 from .demand import DayIndex
 from .models import ArticleResult, BomLine
 
-LAYERS = ("onhand", "firm", "forecast", "sim")
+LAYERS = ("onhand", "erp", "plan")
 
 
 def _unserved(shortage: np.ndarray, policy: str) -> np.ndarray:
@@ -44,8 +44,7 @@ def program_impact(results: dict[str, ArticleResult], bom: list[BomLine], progra
         demand = np.asarray(ar.demand)
         with np.errstate(divide="ignore", invalid="ignore"):
             shares[aid] = {}
-            for layer, short in (("onhand", ar.shortage_onhand), ("firm", ar.shortage_firm),
-                                 ("forecast", ar.shortage_forecast), ("sim", ar.shortage_sim)):
+            for layer, short in (("onhand", ar.shortage_onhand), ("erp", ar.shortage_erp), ("plan", ar.shortage_plan)):
                 un = _unserved(np.asarray(short), policy)
                 sh = np.where(demand > 1e-9, 1.0 - un / np.where(demand > 1e-9, demand, 1.0), 1.0)
                 shares[aid][layer] = np.clip(sh, 0.0, 1.0)

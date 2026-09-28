@@ -32,21 +32,21 @@
 * **Déterminisme et performance** : calculs vectorisés NumPy sur une fenêtre glissante (index jour) ;
   16 articles × 135 jours ≈ 20 ms ; complexité linéaire en articles × jours. Les résultats sont mis en cache
   par (version des données, périmètre, paramètres, scénario) et invalidés à chaque écriture.
-* **Deux sources de vérité** : les données ERP (lecture seule, Unity Catalog) et les saisies applicatives
-  (Lakebase). La fusion est explicite (`app_entries_into_dataset`) et paramétrable (`orders_source`).
+* **Deux sources de vérité** : les données ERP (lecture seule : Unity Catalog par SQL warehouse, ou tables
+  synchronisées dans Lakebase) et les saisies applicatives (Lakebase). La fusion est explicite (`app_entries_into_dataset`) et paramétrable (`orders_source`).
 * **Extensibilité** : nouvelles règles = nouveau champ d'`EngineParams` (documenté automatiquement dans
   l'écran Paramètres via `/api/params/schema`) ; nouvelle source = implémentation de `ErpSource` ;
   nouveaux événements de scénario = une branche dans `scenario.apply_scenario`.
 * **Conception UI** (voir `client/src/styles/tokens.css`) : jetons de design (couleurs sémantiques, échelle
   typographique ratio 1,25, espacements 4 px, rayons, ombres), mode clair / sombre, notation inspirée
-  IBCS : ferme = trait plein foncé, prévisionnel = tirets, simulé = pointillé, cible = référence grise, réceptions simulées = hachures, complément CBN = orange clair ;
+  IBCS : Scenario ERP = trait plein foncé, Scenario Plan = pointillé, cible = référence grise, plan = hachures, complément CBN = orange clair ; grille : couverture et manque portés par les cellules de stock (vert = normal, orange / rouge = seuils, neutre = surstock) ;
   états chargement / vide / erreur / partiel sur chaque vue ; chaque KPI porte unité, période et fraîcheur.
 
 ## Flux de calcul d'une page
 
 1. Le client appelle `/api/cockpit` ou `/api/articles/{id}/projection` avec le périmètre courant.
 2. `mrp_service.compute` construit les paramètres (défauts ← configuration ← surcharges globales ←
-   requête), assemble le `Dataset` (dont les cellules du tableau), applique le scénario, exécute `run_mrp` (dont l'impact programmes).
+   requête), assemble le `Dataset` (dont le plan de livraison et les ajustements), applique le scénario, exécute `run_mrp` (dont l'impact programmes).
 3. Les présentateurs agrègent (jour / semaine) et sérialisent ; le client affiche, avec états.
 4. Toute écriture (saisie, décision, import, paramètre) journalise dans `app_audit_log` et incrémente la
    version des données → invalidation du cache serveur et des requêtes client.

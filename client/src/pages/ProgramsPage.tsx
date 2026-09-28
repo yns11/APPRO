@@ -6,16 +6,15 @@ import { fmtInt, fmtPct, fmtQty } from "@/lib/format";
 import type { ImpactLayer } from "@/lib/types";
 
 const LAYERS: { id: ImpactLayer; label: string; hint: string }[] = [
-  { id: "onhand", label: "Stock à date", hint: "stock physique seul, rien n'arrive" },
-  { id: "firm", label: "Ferme", hint: "stock + commandes fermes" },
-  { id: "forecast", label: "Prévisionnel", hint: "+ commandes prévisionnelles ERP" },
-  { id: "sim", label: "Simulé", hint: "+ réceptions simulées et complément CBN" },
+  { id: "onhand", label: "Stock à date", hint: "stock de référence seul, rien n'arrive" },
+  { id: "erp", label: "Scenario ERP", hint: "stock + commandes fermes ERP" },
+  { id: "plan", label: "Scenario Plan", hint: "stock + plan de livraison + complément CBN" },
 ];
 
 /** Feasible production per programme and week, given the component stocks of each layer. */
 export default function ProgramsPage() {
   const q = useProgramImpact();
-  const [layer, setLayer] = useState<ImpactLayer>("firm");
+  const [layer, setLayer] = useState<ImpactLayer>("erp");
   const d = q.data;
   const stats = useMemo(() => {
     if (!d) return null;
@@ -30,13 +29,13 @@ export default function ProgramsPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Impact sur les programmes</h1><p>Production réalisable par programme et par semaine compte tenu des stocks de composants : à date (rien n'arrive), ferme, prévisionnel et simulé. Un programme est réalisable au prorata du composant le plus contraint ; les composants limitants sont indiqués.</p></div>
+        <div className="title"><h1>Impact sur les programmes</h1><p>Production réalisable par programme et par semaine selon les stocks de composants : à date, Scenario ERP, Scenario Plan. Réalisable au prorata du composant le plus contraint.</p></div>
         <div className="actions"><Segmented value={layer} onChange={setLayer} options={LAYERS.map((l) => ({ id: l.id, label: l.label }))} /></div>
       </div>
 
       <div className="grid kpis">
         {LAYERS.map((l) => (
-          <Kpi key={l.id} label={`Programmes impactés · ${l.label}`} value={stats ? fmtInt(stats[l.id].impacted) : "…"} tone={stats && stats[l.id].impacted ? (l.id === "sim" ? "critical" : "warning") : "ok"}
+          <Kpi key={l.id} label={`Programmes impactés · ${l.label}`} value={stats ? fmtInt(stats[l.id].impacted) : "…"} tone={stats && stats[l.id].impacted ? (l.id === "plan" ? "critical" : "warning") : "ok"}
             meta={stats ? `${fmtPct(stats[l.id].planned ? stats[l.id].feasible / stats[l.id].planned : 1)} du plan réalisable · ${l.hint}` : ""} onClick={() => setLayer(l.id)} active={layer === l.id} />
         ))}
       </div>
@@ -50,7 +49,7 @@ export default function ProgramsPage() {
                 {d.programs.map((p) => (
                   <tr key={p.program_id}>
                     <td><b>{p.name}</b><span className="sub mono">{p.program_id} · {p.components} composant(s)</span></td>
-                    <td>{p.first_impact[layer] ? <Badge tone={layer === "sim" ? "critical" : "warning"}>{p.first_impact[layer].replace("-W", " S")}</Badge> : <Badge tone="ok">aucun</Badge>}</td>
+                    <td>{p.first_impact[layer] ? <Badge tone={layer === "plan" ? "critical" : "warning"}>{p.first_impact[layer].replace("-W", " S")}</Badge> : <Badge tone="ok">aucun</Badge>}</td>
                     {d.weeks.map((w, i) => {
                       const planned = p.planned[i];
                       const feasible = p.feasible[layer][i];

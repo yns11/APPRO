@@ -24,10 +24,9 @@ def classify_alerts(
     article: Article,
     index: DayIndex,
     as_of: dt.date,
-    firm: Projection,
-    forecast: Projection,
-    sim: Projection,
-    coverage_sim: np.ndarray,
+    erp: Projection,
+    plan: Projection,
+    coverage_plan: np.ndarray,
     stock_start: float,
     demand: np.ndarray,
     orders: list[OrderState],
@@ -64,90 +63,62 @@ def classify_alerts(
 
     # Stockouts per layer.  A physical stock is never negative: a stockout is the first day
     # with an unserved demand (backlog or lost quantity, see ``shortage_policy``).
-    k_sim = first_shortage(sim.shortage, i0, last)
-    k_fc = first_shortage(forecast.shortage, i0, last)
-    k_firm = first_shortage(firm.shortage, i0, last)
-    if k_sim is not None:
-        worst = float(np.max(sim.shortage[k_sim:]))
+    k_plan = first_shortage(plan.shortage, i0, last)
+    k_erp = first_shortage(erp.shortage, i0, last)
+    if k_plan is not None:
+        worst = float(np.max(plan.shortage[k_plan:]))
         alerts.append(Alert(aid, AlertType.STOCKOUT, Severity.CRITICAL,
-                            f"Rupture simulée le {index.dates[k_sim].isoformat()} (J+{k_sim - i0}) malgré les saisies "
-                            f"et propositions, manque max {worst:,.0f}", date=index.dates[k_sim], value=worst,
-                            scope="simulated", details={"days_ahead": k_sim - i0, "lead_time_days": lead}))
-    if k_fc is not None and k_fc != k_firm:
-        worst = float(np.max(forecast.shortage[k_fc:]))
-        alerts.append(Alert(aid, AlertType.STOCKOUT, _severity_by_horizon(k_fc - i0, lead, params),
-                            f"Rupture sur flux ERP (fermes + prévisionnels) le {index.dates[k_fc].isoformat()} "
-                            f"(J+{k_fc - i0}) : commande à passer / proposition à valider", date=index.dates[k_fc],
-                            value=worst, scope="forecast", details={"days_ahead": k_fc - i0, "lead_time_days": lead}))
-    if k_firm is not None:
-        worst = float(np.max(firm.shortage[k_firm:]))
-        if k_fc is not None and k_fc > k_firm:
-            hint = (f"commandes prévisionnelles à confirmer (elles couvrent jusqu'au "
-                    f"{index.dates[k_fc - 1].isoformat()})")
-        else:
-            hint = "aucune commande prévisionnelle ne couvre cette date : commande à passer"
-        alerts.append(Alert(aid, AlertType.STOCKOUT, _severity_by_horizon(k_firm - i0, lead, params),
-                            f"Rupture sur flux fermes le {index.dates[k_firm].isoformat()} (J+{k_firm - i0}) : {hint}",
-                            date=index.dates[k_firm], value=worst, scope="firm",
-                            details={"days_ahead": k_firm - i0, "lead_time_days": lead}))
+                            f"Rupture du plan le {index.dates[k_plan].isoformat()} (J+{k_plan - i0}) malgré le plan de "
+                            f"livraison et le complément CBN, manque max {worst:,.0f}", date=index.dates[k_plan], value=worst,
+                            scope="plan", details={"days_ahead": k_plan - i0, "lead_time_days": lead}))
+    if k_erp is not None:
+        worst = float(np.max(erp.shortage[k_erp:]))
+        alerts.append(Alert(aid, AlertType.STOCKOUT, _severity_by_horizon(k_erp - i0, lead, params),
+                            f"Rupture sur les commandes ERP le {index.dates[k_erp].isoformat()} (J+{k_erp - i0}) : "
+                            f"livraison à planifier ou commande à passer", date=index.dates[k_erp], value=worst, scope="erp",
+                            details={"days_ahead": k_erp - i0, "lead_time_days": lead}))
 
-    # Coverage alerts are based on the *run-out* of the firm flows (on-hand stock + committed
-    # supply): the number of days before the firm stock cannot serve the demand.  The pure
-    # on-hand coverage (``coverage_sim[i0]``) is a KPI but would flag most JIT articles every week.
-    cov = int(coverage_sim[i0])
-    runout_firm = (k_firm - i0) if k_firm is not None else None
+    # Coverage alerts are based on the *run-out* of the ERP flows (on-hand stock + firm orders):
+    # the number of days before the ERP stock cannot serve the demand.  The pure on-hand
+    # coverage (``coverage_plan[i0]``) is a KPI but would flag most JIT articles every week.
+    cov = int(coverage_plan[i0])
+    runout_firm = (k_erp - i0) if k_erp is not None else None
     red = article.param_at("alert_red_days", as_of)
     yellow = article.param_at("alert_yellow_days", as_of)
     overstock = article.param_at("overstock_days", as_of)
-    if sim.shortage[i0] <= 1e-9 and demand[i0:].sum() > 0:
+    if plan.shortage[i0] <= 1e-9 and demand[i0:].sum() > 0:
         if runout_firm is not None and runout_firm <= red:
             alerts.append(Alert(aid, AlertType.LOW_COVERAGE, Severity.CRITICAL,
-                                f"Flux fermes épuisés dans {runout_firm} j (≤ seuil rouge {red:g} j) ; "
+                                f"Commandes ERP épuisées dans {runout_firm} j (≤ seuil rouge {red:g} j) ; "
                                 f"stock à date : {cov} j de besoin",
-                                date=index.dates[k_firm], value=runout_firm, scope="firm"))
+                                date=index.dates[k_erp], value=runout_firm, scope="erp"))
         elif runout_firm is not None and runout_firm <= yellow:
             alerts.append(Alert(aid, AlertType.LOW_COVERAGE, Severity.WARNING,
-                                f"Flux fermes épuisés dans {runout_firm} j (≤ seuil orange {yellow:g} j) ; "
+                                f"Commandes ERP épuisées dans {runout_firm} j (≤ seuil orange {yellow:g} j) ; "
                                 f"stock à date : {cov} j de besoin",
-                                date=index.dates[k_firm], value=runout_firm, scope="firm"))
+                                date=index.dates[k_erp], value=runout_firm, scope="erp"))
         elif overstock and cov >= overstock:
             alerts.append(Alert(aid, AlertType.OVERSTOCK, Severity.INFO,
                                 f"Surstock : le stock à date couvre {cov} j de besoin (≥ {overstock:g} j)",
                                 date=as_of, value=cov))
-    if demand[i0:].sum() <= 1e-9 and sim.stock[i0] > 0:
+    if demand[i0:].sum() <= 1e-9 and plan.stock[i0] > 0:
         alerts.append(Alert(aid, AlertType.NO_DEMAND, Severity.INFO,
                             "Aucun besoin sur l'horizon alors que du stock existe (article dormant ?)",
-                            date=as_of, value=float(sim.stock[i0])))
+                            date=as_of, value=float(plan.stock[i0])))
 
     # --- supply --------------------------------------------------------------------
-    # Past orders still open in the ERP: excluded from the layers and to be qualified by the planner
-    # (received by hand, really late → action "attendue le", or dead → "clôturer").  One alert per
-    # article: the ERP keeps months of such lines.
-    to_qualify = [o for o in orders if o.status in ("late", "late_sim")]
-    if to_qualify:
-        qty = float(sum(o.qty_open for o in to_qualify))
-        oldest = min(to_qualify, key=lambda o: o.expected_date)
-        sim = sum(1 for o in to_qualify if o.status == "late_sim")
+    # Past ERP orders still open: excluded from the stocks, to be qualified by the planner (received
+    # by hand, really late → plan line with a date, or dead).  One alert per article.
+    late = [o for o in orders if o.status == "not_received"]
+    if late:
+        qty = float(sum(o.qty_open for o in late))
+        oldest = min(late, key=lambda o: o.expected_date)
         alerts.append(Alert(aid, AlertType.LATE_ORDER, Severity.WARNING,
-                            f"{len(to_qualify)} commande(s) passée(s) non reçue(s) ({qty:,.0f}) à qualifier : "
-                            f"reçue par ailleurs, en retard (action « attendue le… ») ou à clôturer"
-                            + (f" ; {sim} date(s) simulée(s) dépassée(s)" if sim else ""),
+                            f"{len(late)} commande(s) ERP passée(s) non reçue(s) ({qty:,.0f}) hors stocks : à dater "
+                            f"dans le plan si elles arrivent encore, sinon à clôturer",
                             date=oldest.expected_date, value=qty,
-                            details={"count": len(to_qualify), "order_ids": [o.order_id for o in to_qualify],
+                            details={"count": len(late), "order_ids": [o.order_id for o in late],
                                      "days_late": oldest.days_late}))
-    rescheduled = [o for o in orders if o.days_late > 0 and o.in_firm_layer]
-    for o in rescheduled:
-        alerts.append(Alert(aid, AlertType.LATE_ORDER, Severity.INFO,
-                            f"Commande {o.order_id} attendue le {o.expected_date.isoformat()} ({o.days_late} j de retard) "
-                            f"replanifiée au prochain jour ouvré, reste {o.qty_open:,.0f}", date=o.expected_date,
-                            value=o.qty_open, details={"order_id": o.order_id, "supplier_id": o.supplier_id,
-                                                        "days_late": o.days_late}))
-    reviews = [o for o in orders if o.review]
-    if reviews:
-        alerts.append(Alert(aid, AlertType.LATE_ORDER, Severity.INFO,
-                            f"{len(reviews)} action(s) sur commande à revoir : " + " ; ".join(f"{o.order_id} – {o.review}" for o in reviews[:3]),
-                            date=as_of, value=float(len(reviews)), scope="simulated",
-                            details={"order_ids": [o.order_id for o in reviews]}))
     urgent = [p for p in proposals if p.urgent]
     if urgent:
         p = urgent[0]
