@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...data.store import AppAdjustment, AppOrder, AppProductionActual, AppReceipt, audit
+from ...data.store import AppAdjustment, AppOrder, AppOrderAction, AppProductionActual, AppReceipt, audit
 from ...services import excel_service, mrp_service
 from ...services.context import AppContext
 from .. import schemas as S
@@ -55,8 +55,9 @@ def export_orders(planner: str | None = None, scenario_id: str | None = None,
 @router.post("/imports/entries", response_model=S.ImportReport, status_code=201)
 async def import_entries(file: UploadFile = File(...), ctx: AppContext = Depends(ctx_dep),
                          session: Session = Depends(session_dep), user: str = Depends(current_user)):
-    """Import the planner inputs of an exported workbook: ``SAISIES`` sheet, receipts typed in the
-    ``CARNET_COMMANDES`` sheet and the *Réceptions simulées* row of the ``SIMULATION`` grid."""
+    """Import the planner inputs of an exported workbook: ``SAISIES`` sheet, simulated columns
+    (→ order actions) and receipts typed in the ``CARNET_COMMANDES`` sheet, and the *Réceptions
+    simulées* row of the ``SIMULATION`` grid."""
     content = await file.read()
     try:
         entries, notes = excel_service.parse_entries_workbook(content)
@@ -76,7 +77,20 @@ async def import_entries(file: UploadFile = File(...), ctx: AppContext = Depends
             if e.key not in units:
                 notes.append(f"article inconnu : {e.key}")
                 continue
-            if e.kind == "RECEPTION_SIMULEE":
+            if e.kind == "ACTION":
+                existing = session.scalars(select(AppOrderAction).where(AppOrderAction.order_id == e.order_id)).first()
+                if not e.action_kind:
+                    if existing is None:
+                        continue  # nothing typed, no action: nothing to do
+                    mrp_service.delete_action(session, user, existing)
+                else:
+                    try:
+                        mrp_service.upsert_action(session, user, e.key, e.order_id or "", e.action_kind, e.tranches,
+                                                  e.comment, e.supplier_id, source="IMPORT")
+                    except ValueError as exc:
+                        notes.append(f"{e.key} {e.order_id} : {exc}")
+                        continue
+            elif e.kind == "RECEPTION_SIMULEE":
                 try:
                     row = mrp_service.upsert_cell(ctx, session, user, e.key, e.date, "sim_receipt", e.expression,
                                                   source="IMPORT", note=e.comment)

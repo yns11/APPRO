@@ -7,9 +7,20 @@ from collections import defaultdict
 import numpy as np
 
 from .alerts import classify_alerts, worst_severity
-from .calendar import WorkCalendar, iso_week_monday
+from .calendar import WorkCalendar
 from .demand import DayIndex, actual_share, build_program_daily, explode_demand
-from .models import Alert, ArticleResult, Dataset, EngineParams, MrpResult, OrderLine, OrderType, SupplyEvent
+from .models import (
+    Alert,
+    ArticleResult,
+    Dataset,
+    EngineParams,
+    MrpResult,
+    OrderAction,
+    OrderLine,
+    OrderType,
+    SupplyEvent,
+)
+from .orders import build_order_flows
 from .programs import program_impact
 from .projection import Projection, coverage_days, first_shortage, project_stock, target_stock
 from .proposals import generate_proposals
@@ -21,16 +32,6 @@ def resolve_as_of(dataset: Dataset, params: EngineParams) -> dt.date:
     if dataset.stock:
         return max(s.snapshot_date for s in dataset.stock) + dt.timedelta(days=1)
     return dt.date.today()
-
-
-def _order_is_selected(o: OrderLine, params: EngineParams) -> bool:
-    if o.qty_open <= 0:
-        return False
-    if params.orders_source == "erp" and o.source == "APP":
-        return False
-    if params.orders_source == "app" and o.source == "ERP":
-        return False
-    return True
 
 
 def run_mrp(dataset: Dataset, params: EngineParams | None = None,
@@ -72,6 +73,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     cells_by_article = defaultdict(list)
     for c in dataset.cells:
         cells_by_article[c.article_id].append(c)
+    actions_by_article: dict[str, dict[str, OrderAction]] = defaultdict(dict)
+    for act in dataset.actions:
+        actions_by_article[act.article_id][act.order_id] = act
     # App receipts posted against an order reduce its open quantity (unless the ERP already did).
     app_received: dict[str, float] = defaultdict(float)
     for r in dataset.receipts:
@@ -102,51 +106,18 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             i_snap, stock_start = 0, 0.0
         snap_date = index.dates[i_snap]
 
-        supply_firm = np.zeros(n)        # F
-        supply_forecast = np.zeros(n)    # P
         receipts = np.zeros(n)           # R
         adjustments = np.zeros(n)        # A
         sim_receipts = np.zeros(n)       # S
         sim_mask = np.zeros(n, dtype=bool)
         events: list[SupplyEvent] = []
-        late_orders: list[OrderLine] = []
-        open_orders: list[OrderLine] = []
 
-        for o in orders_by_article.get(aid, []):
-            if not _order_is_selected(o, params):
-                continue
-            qty = o.qty_open - app_received.get(o.order_id, 0.0)
-            if qty <= 1e-9:
-                continue
-            typ = o.order_type.value
-            layer_type = typ
-            if o.source != "ERP" and params.app_firm_orders == "simulated":
-                layer_type = "PLANNED"  # planner entries never feed the firm layer
-            day = o.expected_date
-            if typ == "FORECAST" and params.forecast_date_policy == "week_monday":
-                day = iso_week_monday(day)
-            late = False
-            if day < as_of:
-                late = True
-                if params.late_order_policy == "ignore":
-                    late_orders.append(o)
-                    continue
-                if params.late_order_policy == "reschedule":
-                    day = calendar.next_working_day(as_of, inclusive=True)
-                elif day <= snap_date:
-                    day = calendar.next_working_day(snap_date, inclusive=False)
-                late_orders.append(o)
-            i = index.offset(day)
-            if i is None:
-                continue
-            if layer_type in params.firm_sources:
-                supply_firm[i] += qty
-            elif layer_type in params.forecast_sources:
-                supply_forecast[i] += qty
-            else:
-                continue
-            open_orders.append(o)
-            events.append(SupplyEvent(day, "order", o.order_id, qty, o.supplier_id, typ, o.source, late))
+        # Orders: ERP placement (F, P), planner actions (F′, P′), late policy, same-day matching
+        flows = build_order_flows(orders_by_article.get(aid, []), actions_by_article.get(aid, {}),
+                                  receipts_by_article.get(aid, []), app_received, index, calendar, as_of, params)
+        supply_firm, supply_forecast = flows.supply_firm, flows.supply_forecast
+        supply_firm_sim, supply_forecast_sim = flows.supply_firm_sim, flows.supply_forecast_sim
+        events.extend(flows.events)
 
         for r in receipts_by_article.get(aid, []):
             if r.receipt_date <= snap_date:
@@ -182,21 +153,25 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
 
         # zero everything before the snapshot day (unknown history)
         if i_snap > 0:
-            for arr in (supply_firm, supply_forecast, receipts, adjustments, sim_receipts):
+            for arr in (supply_firm, supply_forecast, supply_firm_sim, supply_forecast_sim, receipts, adjustments,
+                        sim_receipts):
                 arr[:i_snap] = 0.0
             sim_mask[:i_snap] = False
         demand_proj = demand.copy()
         demand_proj[:i_snap + 1] = 0.0  # snapshot day already consumed
 
         # Layer inflows (docs/regles_metier.md § 3):
-        #   firm      R + F            forecast  R + F + P
-        #   simulated S typed ? (reference day: max(R, S) ; later: S) : R + F + P
-        # A typed simulated receipt replaces the expected orders of that day; an explicit 0 means
-        # nothing arrives.  Adjustments apply to every layer.
+        #   firm       R + F                      (ERP as is, late orders per policy)
+        #   forecast   R + F + P
+        #   simulated  R + F′ + S [+ P′ if sim_includes_forecast] + CBN
+        # F′ = firm orders after the planner actions ; S is additive ; a typed S blocks the CBN
+        # that day ; on the reference day the orders are matched against the receipts of the day.
         inflow_firm = receipts + supply_firm
         inflow_forecast = inflow_firm + supply_forecast
-        sim_typed = np.where(np.arange(n) == i_as_of, np.maximum(receipts, sim_receipts), sim_receipts)
-        inflow_sim = np.where(sim_mask, sim_typed, inflow_forecast)
+        inflow_sim = receipts + supply_firm_sim + sim_receipts
+        if params.sim_includes_forecast:
+            inflow_sim = inflow_sim + supply_forecast_sim
+        actions_row = supply_firm_sim - supply_firm
 
         def project(supply: np.ndarray) -> Projection:
             return project_stock(stock_start, supply, adjustments, demand_proj, params.shortage_policy, i_snap)
@@ -212,7 +187,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             proposals, supply_proposed, _ = generate_proposals(
                 article, links_by_article.get(aid, []), suppliers, sim.net, demand, target,
                 index, calendar, as_of, params, supply_planned=supply_forecast,
-                reproject=lambda extra: project(inflow_sim + extra))
+                reproject=lambda extra: project(inflow_sim + extra), blocked=sim_mask)
             if params.include_proposals_in_simulation:
                 sim = project(inflow_sim + supply_proposed)
                 for p in proposals:
@@ -221,8 +196,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         cov = {name: coverage_days(layer.net, demand, index, calendar, params.coverage_unit, params.coverage_tie_rule)
                for name, layer in (("firm", firm), ("forecast", forecast), ("sim", sim))}
 
+        to_qualify = flows.to_qualify
         alerts = classify_alerts(article, index, as_of, firm, forecast, sim, cov["sim"], stock_start, demand,
-                                 open_orders, late_orders, proposals, links_by_article.get(aid, []),
+                                 flows.states, proposals, links_by_article.get(aid, []),
                                  aid in bom_articles, snap is not None, params)
         last = None if params.stockout_lookahead_days is None else i_as_of + params.stockout_lookahead_days
         k = {name: first_shortage(layer.shortage, i_as_of, last)
@@ -254,14 +230,17 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "demand_horizon": float(demand[horizon_slice].sum()),
             "avg_daily_demand_30d": float(demand[i_as_of + 1:i_as_of + 31].sum() / max(1, min(30, n - i_as_of - 1))),
             "open_firm_qty": float(supply_firm[horizon_slice].sum()),
+            "open_firm_sim_qty": float(supply_firm_sim[horizon_slice].sum()),
             "open_forecast_qty": float(supply_forecast[horizon_slice].sum()),
+            "action_count": sum(1 for st in flows.states if st.action_id),
+            "review_count": sum(1 for st in flows.states if st.review),
             "sim_receipts_qty": float(sim_receipts[horizon_slice].sum()),
             "sim_receipt_days": int(sim_mask[horizon_slice].sum()),
             "proposed_qty": float(supply_proposed.sum()),
             "proposal_count": len(proposals),
             "urgent_proposal_count": sum(1 for p in proposals if p.urgent),
-            "late_order_count": len(late_orders),
-            "late_order_qty": float(sum(o.qty_open for o in late_orders)),
+            "late_order_count": len(to_qualify),
+            "late_order_qty": float(sum(st.qty_open for st in to_qualify)),
             "alert_count": len(alerts),
             "severity": (worst_severity(alerts).value if alerts else None),
             "actual_share_30d": float(share[i_as_of - 30 if i_as_of >= 30 else 0:i_as_of + 1].mean()) if i_as_of > 0 else 0.0,
@@ -269,7 +248,8 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         results[aid] = ArticleResult(
             article=article, start_date=start, as_of=as_of, dates=index.dates,
             demand=demand.tolist(), demand_plan=dplan.tolist(), demand_actual_share=share.tolist(),
-            supply_firm=supply_firm.tolist(), supply_forecast=supply_forecast.tolist(),
+            supply_firm=supply_firm.tolist(), supply_firm_sim=supply_firm_sim.tolist(), actions=actions_row.tolist(),
+            supply_forecast=supply_forecast.tolist(),
             sim_receipts=sim_receipts.tolist(), sim_receipt_mask=sim_mask.tolist(),
             supply_proposed=supply_proposed.tolist(), receipts=receipts.tolist(), adjustments=adjustments.tolist(),
             stock_firm=firm.stock.tolist(), stock_forecast=forecast.stock.tolist(), stock_sim=sim.stock.tolist(),
@@ -279,7 +259,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             coverage_firm=cov["firm"].tolist(), coverage_forecast=cov["forecast"].tolist(),
             coverage_sim=cov["sim"].tolist(), target_stock=target.tolist(),
             events=sorted(events, key=lambda e: (e.date, e.kind, e.ref)), alerts=alerts, proposals=proposals,
-            kpis=kpis, suppliers=links_by_article.get(aid, []), diagnostics=notes,
+            kpis=kpis, suppliers=links_by_article.get(aid, []), orders=flows.states, diagnostics=notes,
         )
 
     program_daily = {pid: {index.dates[i]: float(v) for i, v in enumerate(arr) if v}

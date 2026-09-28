@@ -5,13 +5,15 @@ import datetime as dt
 from typing import Any
 
 from ..engine.calendar import iso_week_label, iso_week_monday
-from ..engine.models import Alert, ArticleResult, MrpResult, Proposal, SupplierLink
+from ..engine.models import Alert, ArticleResult, MrpResult, OrderState, Proposal, SupplierLink
 from . import schemas as S
 
 SERIES_LABELS = [
     ("demand", "Besoin"),
     ("demand_plan", "Besoin (plan seul)"),
     ("supply_firm", "Commandes fermes"),
+    ("supply_firm_sim", "Commandes fermes simulées (F′)"),
+    ("actions", "Actions sur commandes (F′ − F)"),
     ("supply_forecast", "Commandes prévisionnelles (ERP)"),
     ("receipts", "Réceptions"),
     ("sim_receipts", "Réceptions simulées"),
@@ -29,8 +31,8 @@ SERIES_LABELS = [
     ("coverage_sim", "Couverture simulée (j)"),
     ("demand_actual_share", "Part du réel dans le besoin"),
 ]
-FLOWS = {"demand", "demand_plan", "supply_firm", "supply_forecast", "sim_receipts", "supply_proposed", "receipts",
-         "adjustments"}
+FLOWS = {"demand", "demand_plan", "supply_firm", "supply_firm_sim", "actions", "supply_forecast", "sim_receipts",
+         "supply_proposed", "receipts", "adjustments"}
 SHORTAGES = {"shortage_firm", "shortage_forecast", "shortage_sim"}
 
 
@@ -48,6 +50,15 @@ def proposal_out(p: Proposal, ar: ArticleResult, supplier_names: dict[str, str])
         reason=p.reason, urgent=p.urgent, lead_time_days=p.lead_time_days, moq=p.moq,
         pack_qty=p.pack_qty, projected_stock_before=p.projected_stock_before,
         projected_stock_after=p.projected_stock_after)
+
+
+def order_state_out(o: OrderState, ar: ArticleResult) -> S.OrderStateOut:
+    return S.OrderStateOut(order_id=o.order_id, article_id=o.article_id, designation=ar.article.designation,
+                           unit=ar.article.unit, supplier_id=o.supplier_id, order_type=o.order_type, source=o.source,
+                           expected_date=o.expected_date, qty_ordered=o.qty_ordered, qty_open=o.qty_open,
+                           qty_expected=o.qty_expected, days_late=o.days_late, status=o.status,
+                           in_firm_layer=o.in_firm_layer, action_id=o.action_id, action_kind=o.action_kind,
+                           tranches=[S.TrancheOut(**t) for t in o.tranches], review=o.review, note=o.note)
 
 
 def link_out(l: SupplierLink, supplier_names: dict[str, str]) -> S.LinkRef:
@@ -192,6 +203,7 @@ def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, suppl
         proposals=[proposal_out(p, ar, supplier_names) for p in ar.proposals],
         alerts=[alert_out(a, ar.article.designation) for a in ar.alerts],
         kpis=ar.kpis, suppliers=[link_out(l, supplier_names) for l in ar.suppliers], programs=programs,
+        orders=[order_state_out(o, ar) for o in ar.orders],
         diagnostics=ar.diagnostics + result.diagnostics)
 
 
@@ -212,7 +224,8 @@ def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str]
         articles=[S.GridArticle(article=article_ref(ar), series=series_out(ar, groups, lost),
                                 events=[S.SupplyEventOut(**e.__dict__) for e in ar.events if e.date >= start],
                                 kpis=ar.kpis, suppliers=[link_out(l, supplier_names) for l in ar.suppliers],
-                                programs=programs_of.get(ar.article.article_id, []))
+                                programs=programs_of.get(ar.article.article_id, []),
+                                orders=[order_state_out(o, ar) for o in ar.orders])
                   for ar in sorted(arts, key=lambda r: r.article.article_id)],
         diagnostics=result.diagnostics)
 

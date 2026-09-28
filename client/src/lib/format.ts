@@ -38,9 +38,12 @@ export const ALERT_LABELS: Record<string, string> = {
   URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock de départ négatif",
 };
 export const SEVERITY_LABELS: Record<string, string> = { critical: "Critique", warning: "À surveiller", info: "Info" };
-export const KIND_LABELS: Record<string, string> = { order: "Commande", receipt: "Réception", movement: "Ajustement", sim_receipt: "Réception simulée", proposal: "Complément CBN" };
+export const KIND_LABELS: Record<string, string> = { order: "Commande", order_sim: "Commande (action, date simulée)", receipt: "Réception", movement: "Ajustement", sim_receipt: "Réception simulée", proposal: "Complément CBN" };
+export const ORDER_STATUS_LABELS: Record<string, string> = { expected: "Attendue (ERP)", simulated: "Simulée (action)", late: "Passée, à qualifier", late_sim: "Date simulée dépassée", cancelled: "Annulée (simulé)", closed: "Clôturée" };
+export const ACTION_KIND_LABELS: Record<string, string> = { reschedule: "Attendue le…", cancel: "Annulée", close: "Clôturée" };
 export const SCOPE_LABELS: Record<string, string> = { firm: "ferme", forecast: "prévisionnel", simulated: "simulé", data: "données" };
 export const ORDER_TYPE_LABELS: Record<string, string> = { FIRM: "Ferme", FORECAST: "Prévisionnelle", PLANNED: "Planifiée", SIMULATED: "Réception simulée", ADJUSTMENT: "Ajustement", PROPOSAL: "Complément CBN", RECEIPT: "Réception" };
+export const SOURCE_LABELS: Record<string, string> = { ERP: "ERP", APP: "saisie", ACTION: "action", SCENARIO: "scénario", MANUAL: "saisie", IMPORT: "import", ENGINE: "moteur" };
 export const EVENT_KIND_LABELS: Record<string, string> = {
   add_order: "Ajouter une commande", move_order: "Décaler une commande", change_order_qty: "Modifier une quantité", cancel_order: "Annuler une commande",
   plan_factor: "PDP × facteur", set_plan: "Fixer une semaine de PDP", set_actual: "Production réelle", add_movement: "Ajustement de stock",

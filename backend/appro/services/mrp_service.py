@@ -17,6 +17,7 @@ from ..data.store import (
     AppAdjustment,
     AppCell,
     AppOrder,
+    AppOrderAction,
     AppProductionActual,
     AppReceipt,
     ParamOverride,
@@ -32,6 +33,7 @@ from ..engine.models import (
     EngineParams,
     Movement,
     MrpResult,
+    OrderAction,
     OrderLine,
     OrderStatus,
     OrderType,
@@ -82,8 +84,13 @@ def global_param_overrides(session: Session) -> dict[str, Any]:
     return out
 
 
+LEGACY_VALUES = {"late_order_policy": {"ignore": "exclude", "keep": "reschedule"}}
+
+
 def _coerce_param(field: str, value: Any) -> Any:
     default = getattr(EngineParams(), field)
+    if field in LEGACY_VALUES and isinstance(value, str):
+        value = LEGACY_VALUES[field].get(value, value)
     if isinstance(default, bool):
         return str(value).lower() in ("true", "1", "oui", "yes")
     if isinstance(default, int):
@@ -136,6 +143,11 @@ def app_entries_into_dataset(ds: Dataset, session: Session) -> None:
     for c in session.scalars(select(AppCell)):
         if c.article_id in ids:
             ds.cells.append(SimCell(c.article_id, c.date, c.kind, c.qty, c.source, c.note))
+    for a in session.scalars(select(AppOrderAction)):
+        if a.article_id in ids:
+            ds.actions.append(OrderAction(a.id, a.order_id, a.article_id, a.kind,
+                                          [(dt.date.fromisoformat(str(t["date"])[:10]), float(t["qty"])) for t in a.tranches],
+                                          a.note))
     programs = {b.program_id for b in ds.bom}
     app_actuals = {(a.program_id, a.date): a.qty for a in session.scalars(select(AppProductionActual))
                    if a.program_id in programs}
@@ -230,3 +242,34 @@ def upsert_cell(ctx: AppContext, session: Session, user: str, article_id: str, d
     audit(session, user, "upsert", "cell", row.id, article_id,
           {"date": date.isoformat(), "kind": kind, "expression": row.expression, "qty": row.qty, "source": source})
     return row
+
+
+# =============================================================================
+# Order actions (simulated layer)
+# =============================================================================
+def upsert_action(session: Session, user: str, article_id: str, order_id: str, kind: str,
+                  tranches: list[tuple[dt.date, float]], note: str = "", supplier_id: str | None = None,
+                  erp: dict[str, Any] | None = None, source: str = "MANUAL") -> AppOrderAction:
+    """Create or replace the action of one order (one action per order).  Does not commit."""
+    if kind not in ("reschedule", "cancel", "close"):
+        raise ValueError(f"type d'action inconnu : {kind}")
+    clean = [(d, float(q)) for d, q in tranches if q is not None and float(q) > 0]
+    if kind == "reschedule" and not clean:
+        raise ValueError("une replanification demande au moins une tranche (date, quantité > 0)")
+    row = session.scalars(select(AppOrderAction).where(AppOrderAction.order_id == order_id)).first()
+    if row is None:
+        row = AppOrderAction(order_id=order_id, article_id=article_id, created_by=user)
+        session.add(row)
+    row.article_id, row.kind, row.note, row.updated_by, row.source = article_id, kind, note, user, source
+    row.supplier_id = supplier_id if supplier_id is not None else row.supplier_id
+    row.tranches_json = json.dumps([{"date": d.isoformat(), "qty": q} for d, q in clean] if kind == "reschedule" else [])
+    if erp is not None:
+        row.erp_json = json.dumps(erp, default=str)
+    audit(session, user, "upsert", "order_action", row.id, article_id,
+          {"order_id": order_id, "kind": kind, "tranches": row.tranches, "note": note, "source": source})
+    return row
+
+
+def delete_action(session: Session, user: str, row: AppOrderAction) -> None:
+    audit(session, user, "delete", "order_action", row.id, row.article_id, {"order_id": row.order_id, "kind": row.kind})
+    session.delete(row)

@@ -206,3 +206,9 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 .timeline { display: flex; flex-direction: column; gap: 6px; }
 .timeline .ev { display: grid; grid-template-columns: 90px 1fr; gap: var(--sp-3); font-size: var(--fs--2); }
 .timeline .ev .d { color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
+.pivot td.cbn { color: var(--warning-fg); font-style: italic; }
+.pivot td.action-pos { color: var(--ok-fg, var(--ok)); }
+.pivot td.action-neg { color: var(--critical-fg, var(--critical)); }
+.pivot td.orders { box-shadow: inset 0 -2px 0 var(--s-firm); }
+.order-editor { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.order-editor:last-child { border-bottom: 0; }

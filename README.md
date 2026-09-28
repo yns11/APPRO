@@ -9,9 +9,10 @@ scénarios *what-if*, saisies tracées et exports / imports Excel.
 | Fonction | Où |
 |---|---|
 | Cockpit du jour (KPI, alertes, perspective 12 semaines, portefeuille) | `/` |
-| Fiche article : courbes stock ferme / prévisionnel / simulé (jamais négatifs) + manque + cible, tableau (calendrier par défaut / jour / semaine, blocs pliables) avec **saisie directe des réceptions simulées et ajustements** (quantité ou formule), complément CBN automatique, commandes & mouvements, alertes, données de base | `/articles/<ref>` |
+| Fiche article : courbes stock ferme (ERP tel quel) / prévisionnel / simulé (jamais négatifs) + manque + cible, tableau (calendrier par défaut / jour / semaine, blocs pliables) avec **actions sur les commandes** (attendue le…, tranches, annulée, clôturée ; ligne « Actions F′ − F »), **saisie directe des réceptions simulées et ajustements** (quantité ou formule), complément CBN automatique dans la ligne S (bloqué sur les jours saisis), commandes & actions, mouvements, alertes, données de base | `/articles/<ref>` |
 | Tableau d'approvisionnement : le même tableau pour tous les articles du périmètre (filtres programme / fournisseur / article) | `/tableau` |
 | Complément CBN du périmètre (par fournisseur, urgences), export carnet | `/propositions` |
+| Retards à qualifier : commandes passées non reçues (exclues des stocks : l'ERP ne bouge jamais une commande et son restant n'est pas fiable) à clôturer ou à dater ; actions en place, actions à revoir | `/retards` |
 | Impact programmes : production réalisable par programme et semaine selon le stock à date / ferme / prévisionnel / simulé, composants limitants | `/programmes` |
 | Scénarios : événements (commande, retard, PDP ×, réel, paramètres…), comparaison base ↔ scénario, activation globale | `/simulation` |
 | Saisies : commandes, réceptions, ajustements, production réelle ; journal des actions | `/saisies` |
@@ -34,7 +35,7 @@ exporté via LibreOffice). La CI GitHub Actions est en lancement manuel (`workfl
 ## Documentation
 
 * [`docs/analyse_excel.md`](docs/analyse_excel.md) — fonctionnement et faiblesses de l'outil actuel
-* [`docs/regles_metier.md`](docs/regles_metier.md) — règles de calcul (besoin, couches de stock R / F / P / S / A, couverture, alertes, complément CBN, paramètres hebdomadaires, impact programmes, scénarios) et leurs variantes
+* [`docs/regles_metier.md`](docs/regles_metier.md) — règles de calcul (besoin, couches de stock R / F / F′ / P / S / A, commandes = créneaux de livraison, retards à qualifier, actions sur commandes, lettrage du jour de référence, couverture, alertes, complément CBN et ses contraintes, paramètres hebdomadaires, impact programmes, scénarios) et leurs variantes
 * [`docs/architecture.md`](docs/architecture.md) — architecture logicielle, principes, extensibilité
 * [`docs/modele_donnees.md`](docs/modele_donnees.md) — tables Unity Catalog (ERP) et tables applicatives (Lakebase)
 * [`docs/deploiement.md`](docs/deploiement.md) — développement local, préparation Databricks, déploiement (CLI / bundle), exploitation

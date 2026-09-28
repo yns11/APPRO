@@ -16,6 +16,7 @@ from appro.engine.models import (
     Dataset,
     EngineParams,
     Movement,
+    OrderAction,
     OrderLine,
     OrderStatus,
     OrderType,
@@ -107,26 +108,52 @@ def test_projection_firm_vs_simulated_and_receipts():
     res = run_mrp(ds, EngineParams(as_of=MON, horizon_days=10, generate_proposals=False))
     r = res.articles["A1"]
     i = r.dates.index(MON)
-    # day0 (Monday): 1000 - 200 = 800 ; day1: +50 -20 -200 = 630 ; day2: +300 -200 = 730 ; day3 firm: 530, sim: 930
+    # day0 (Monday): 1000 - 200 = 800 ; day1: +50 -20 -200 = 630 ; day2: +300 -200 = 730 ; day3 firm: 530
     assert r.stock_firm[i] == 800
     assert r.stock_firm[i + 1] == 630
     assert r.stock_firm[i + 2] == 730
     assert r.stock_firm[i + 3] == 530
-    assert r.stock_sim[i + 3] == 930
+    # the forecast order is in the forecast layer, not in the simulated one (default) unless asked
+    assert r.stock_forecast[i + 3] == 930 and r.stock_sim[i + 3] == 530
+    r_fc = run_mrp(ds, EngineParams(as_of=MON, horizon_days=10, generate_proposals=False, sim_includes_forecast=True)).articles["A1"]
+    assert r_fc.stock_sim[i + 3] == 930
     assert r.kpis["open_firm_qty"] == 300
     assert r.kpis["open_forecast_qty"] == 400
 
 
 def test_late_order_policies():
+    """A past order still open in the ERP is excluded from every layer and listed "à qualifier" by
+    default (the ERP remaining quantity is unreliable) ; ``reschedule`` restores the old behaviour,
+    optionally limited to recent delays (``late_grace_days``)."""
     late = OrderLine("L1", "A1", "S1", MON - dt.timedelta(days=5), 200, order_type=OrderType.FIRM)
-    ds = make_dataset(orders=[late])
+    old = OrderLine("L0", "A1", "S1", MON - dt.timedelta(days=60), 300, order_type=OrderType.FIRM)
+    ds = make_dataset(orders=[late, old])
     r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=5, generate_proposals=False)).articles["A1"]
     i = r.dates.index(MON)
-    assert r.supply_firm[i] == 200  # rescheduled on the as-of day (Monday)
-    assert any(a.alert_type == AlertType.LATE_ORDER for a in r.alerts)
-    r2 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=5, late_order_policy="ignore",
+    assert sum(r.supply_firm) == 0 and sum(r.supply_firm_sim) == 0
+    states = {o.order_id: o for o in r.orders}
+    assert states["L1"].status == "late" and states["L1"].days_late == 5 and not states["L1"].in_firm_layer
+    assert states["L0"].status == "late" and states["L0"].days_late == 60
+    assert r.kpis["late_order_count"] == 2 and r.kpis["late_order_qty"] == 500
+    late_alerts = [a for a in r.alerts if a.alert_type == AlertType.LATE_ORDER]
+    assert len(late_alerts) == 1 and "2 commande(s)" in late_alerts[0].message and "à qualifier" in late_alerts[0].message
+    # reschedule: both land on the reference day (Monday)
+    r2 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=5, late_order_policy="reschedule",
                                   generate_proposals=False)).articles["A1"]
-    assert sum(r2.supply_firm) == 0
+    assert r2.supply_firm[i] == 500 and r2.kpis["late_order_count"] == 0
+    assert all(o.status == "expected" and o.in_firm_layer for o in r2.orders)
+    # reschedule with a grace period: only the recent delay is rescheduled
+    r3 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=5, late_order_policy="reschedule", late_grace_days=10,
+                                  generate_proposals=False)).articles["A1"]
+    assert r3.supply_firm[i] == 200 and r3.kpis["late_order_count"] == 1
+    # the planner qualifies the late order: expected on Wednesday → simulated layer only
+    ds.actions = [OrderAction("ACT1", "L1", "A1", "reschedule", [(MON + dt.timedelta(days=2), 200.0)]),
+                  OrderAction("ACT0", "L0", "A1", "close")]
+    r4 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=5, generate_proposals=False)).articles["A1"]
+    assert sum(r4.supply_firm) == 0 and r4.supply_firm_sim[i + 2] == 200 and r4.actions[i + 2] == 200
+    st = {o.order_id: o for o in r4.orders}
+    assert st["L1"].status == "simulated" and st["L0"].status == "closed" and r4.kpis["late_order_count"] == 0
+    assert r4.stock_sim[i + 2] - r4.stock_firm[i + 2] == 200
 
 
 def test_coverage_days_calendar_and_working():
@@ -249,28 +276,34 @@ def test_three_stock_layers_are_cumulative():
     ], cells=[SimCell("A1", MON + dt.timedelta(days=3), "sim_receipt", 500.0)])
     r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=10, generate_proposals=False)).articles["A1"]
     i = r.dates.index(MON)
-    # day0: 1000-200 = 800 ; +300 firm ; +400 forecast ; +500 simulated receipt (no order that day) ; +600 app firm
+    # day0: 1000-200 = 800 ; +300 firm ; +400 forecast (forecast layer only) ; +500 simulated receipt ; +600 app firm
     assert r.stock_firm[i + 1] == 900 and r.stock_forecast[i + 1] == 900 and r.stock_sim[i + 1] == 900
-    assert r.stock_firm[i + 2] == 700 and r.stock_forecast[i + 2] == 1100 and r.stock_sim[i + 2] == 1100
-    assert r.stock_firm[i + 3] == 500 and r.stock_forecast[i + 3] == 900 and r.stock_sim[i + 3] == 1400
-    assert r.stock_firm[i + 4] == 900 and r.stock_forecast[i + 4] == 1300 and r.stock_sim[i + 4] == 1800
+    assert r.stock_firm[i + 2] == 700 and r.stock_forecast[i + 2] == 1100 and r.stock_sim[i + 2] == 700
+    assert r.stock_firm[i + 3] == 500 and r.stock_forecast[i + 3] == 900 and r.stock_sim[i + 3] == 1000
+    assert r.stock_firm[i + 4] == 900 and r.stock_forecast[i + 4] == 1300 and r.stock_sim[i + 4] == 1400
     assert (r.kpis["open_firm_qty"], r.kpis["open_forecast_qty"], r.kpis["sim_receipts_qty"]) == (900, 400, 500)
-    # app orders can be confined to the forecast layer
+    # app orders can be confined to the forecast layer (then out of the simulated stock by default)
     r2 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=10, generate_proposals=False,
                                   app_firm_orders="simulated")).articles["A1"]
-    assert r2.stock_firm[i + 4] == 300 and r2.stock_forecast[i + 4] == 1300 and r2.stock_sim[i + 4] == 1800
+    assert r2.stock_firm[i + 4] == 300 and r2.stock_forecast[i + 4] == 1300 and r2.stock_sim[i + 4] == 800
+    r3 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=10, generate_proposals=False, sim_includes_forecast=True)).articles["A1"]
+    assert r3.stock_sim[i + 4] == 1800
 
 
 def test_forecast_layer_stockout_alert():
     # 700 on hand = 3.5 days ; a forecast order on Thursday postpones the ERP run-out, nothing else
     ds = make_dataset(stock=[StockSnapshot("A1", MON - dt.timedelta(days=1), 700.0)],
                       orders=[OrderLine("D1", "A1", "S1", MON + dt.timedelta(days=3), 2000, order_type=OrderType.FORECAST)])
-    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, generate_proposals=False)).articles["A1"]
+    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, generate_proposals=False, sim_includes_forecast=True)).articles["A1"]
     scopes = {a.scope: a for a in r.alerts if a.alert_type == AlertType.STOCKOUT}
     assert set(scopes) == {"firm", "forecast", "simulated"}
     assert scopes["firm"].date < scopes["forecast"].date == scopes["simulated"].date
     assert "couvrent jusqu'au" in scopes["firm"].message
     assert r.kpis["first_stockout_firm"] < r.kpis["first_stockout_forecast"] == r.kpis["first_stockout_sim"]
+    # forecast orders inside the firm horizon may be ignored (they should already be firm)
+    r2 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=40, generate_proposals=False, firm_horizon_days=14,
+                                  forecast_horizon_policy="beyond_firm_horizon")).articles["A1"]
+    assert sum(r2.supply_forecast) == 0 and r2.kpis["first_stockout_forecast"] == r2.kpis["first_stockout_firm"]
 
 
 def test_shortage_policy_backlog_vs_lost():
@@ -300,35 +333,97 @@ def test_shortage_policy_backlog_vs_lost():
 
 
 # ------------------------------------------------------------------ simulation cells / expressions
-def test_simulated_receipts_replace_expected_orders():
-    """Rules of the simulated layer: before the reference R + A ; at the reference R + F (+P) + A, or
-    MAX(R, S) + A when S is typed ; afterwards F (+P) + A, or S + A when typed (0 = nothing arrives)."""
+def test_simulated_receipts_are_additive_and_block_cbn():
+    """S is an additional receipt of the simulated layer (0 included) and a typed day never gets a
+    CBN proposal ; on the reference day the orders are matched against the receipts of the day."""
     sat = MON - dt.timedelta(days=2)   # reference day = Saturday, snapshot Friday
     ds = make_dataset(
         stock=[StockSnapshot("A1", sat - dt.timedelta(days=1), 1000.0)],
         orders=[OrderLine("F0", "A1", "S1", sat, 300, order_type=OrderType.FIRM),                 # on the reference day
                 OrderLine("F1", "A1", "S1", MON, 400, order_type=OrderType.FIRM),
                 OrderLine("D1", "A1", "S1", MON, 100, order_type=OrderType.FORECAST),
-                OrderLine("F2", "A1", "S1", MON + dt.timedelta(days=1), 500, order_type=OrderType.FIRM),
-                OrderLine("F3", "A1", "S1", MON + dt.timedelta(days=2), 250, order_type=OrderType.FIRM)],
-        receipts=[Receipt("R0", "A1", sat, 120)],
-        cells=[SimCell("A1", sat, "sim_receipt", 200.0),                       # reference day: MAX(R=120, S=200)
-               SimCell("A1", MON, "sim_receipt", 0.0),                         # explicit 0: F + P of Monday vanish
-               SimCell("A1", MON + dt.timedelta(days=1), "sim_receipt", 900.0),  # replaces the 500 firm order
+                OrderLine("F2", "A1", "S1", MON + dt.timedelta(days=1), 500, order_type=OrderType.FIRM)],
+        receipts=[Receipt("R0", "A1", sat, 120, supplier_id="S1")],
+        cells=[SimCell("A1", sat, "sim_receipt", 200.0),
+               SimCell("A1", MON, "sim_receipt", 0.0),
+               SimCell("A1", MON + dt.timedelta(days=1), "sim_receipt", 900.0),
                SimCell("A1", MON + dt.timedelta(days=1), "adjustment", -10.0)])
     r = run_mrp(ds, EngineParams(as_of=sat, horizon_days=6, generate_proposals=False)).articles["A1"]
     i = r.dates.index(sat)
-    # Saturday (no demand): firm 1000+120+300 = 1420 ; sim 1000 + max(120, 200) = 1200
-    assert r.stock_firm[i] == 1420 and r.stock_forecast[i] == 1420 and r.stock_sim[i] == 1200
-    # Monday: firm +400 -200 = 1620 ; forecast +500 -200 = 1720 ; sim: S = 0 → 1200 - 200 = 1000
-    assert r.stock_firm[i + 2] == 1620 and r.stock_forecast[i + 2] == 1720 and r.stock_sim[i + 2] == 1000
-    # Tuesday: firm +500 -10 -200 = 1910 ; sim +900 -10 -200 = 1690
-    assert r.stock_firm[i + 3] == 1910 and r.stock_sim[i + 3] == 1690
-    # Wednesday: no cell → orders kept in every layer: firm 1910+250-200 = 1960 ; sim 1690+250-200 = 1740
-    assert r.stock_firm[i + 4] == 1960 and r.stock_sim[i + 4] == 1740
+    # Saturday: receipt 120 matched against F0 (300 ordered) → 180 still expected ; S 200 adds up in the simulated layer
+    assert r.supply_firm[i] == 180 and r.stock_firm[i] == 1300 and r.stock_forecast[i] == 1300 and r.stock_sim[i] == 1500
+    assert next(o for o in r.orders if o.order_id == "F0").qty_expected == 180
+    # Monday: firm +400 -200 = 1500 ; forecast +100 → 1600 ; sim: S = 0 adds nothing, F kept → 1700
+    assert r.stock_firm[i + 2] == 1500 and r.stock_forecast[i + 2] == 1600 and r.stock_sim[i + 2] == 1700
+    # Tuesday: firm +500 -10 -200 = 1790 ; sim +500 +900 -10 -200 = 2890
+    assert r.stock_firm[i + 3] == 1790 and r.stock_sim[i + 3] == 2890
     assert r.sim_receipt_mask[i + 2] is True and r.sim_receipts[i + 2] == 0 and r.sim_receipt_mask[i + 4] is False
     assert r.kpis["sim_receipt_days"] == 3 and r.kpis["sim_receipts_qty"] == 1100
-    assert not r.proposals
+    # CBN constraint: a typed 0 blocks the proposal on that day, the delivery moves to the nearest allowed day
+    ds2 = make_dataset(stock=[StockSnapshot("A1", MON - dt.timedelta(days=1), 900.0)])
+    base = run_mrp(ds2, EngineParams(as_of=MON, horizon_days=20)).articles["A1"]
+    first = base.proposals[0].delivery_date
+    assert first == MON + dt.timedelta(days=1)   # the earliest proposable day
+    ds2.cells = [SimCell("A1", first, "sim_receipt", 0.0)]
+    blocked = run_mrp(ds2, EngineParams(as_of=MON, horizon_days=20)).articles["A1"]
+    assert blocked.proposals and all(p.delivery_date != first for p in blocked.proposals)
+    assert blocked.proposals[0].delivery_date == first + dt.timedelta(days=1)
+    # a typed quantity is a decision too: no proposal that day, the shortfall is filled elsewhere
+    ds2.cells = [SimCell("A1", first + dt.timedelta(days=1), "sim_receipt", 100.0)]
+    typed = run_mrp(ds2, EngineParams(as_of=MON, horizon_days=20)).articles["A1"]
+    assert all(p.delivery_date != first + dt.timedelta(days=1) for p in typed.proposals)
+
+
+def test_same_day_matching_of_receipts_and_orders():
+    """Reference day: nothing links a receipt to an order, so the quantity still expected from an
+    order dated that day is min(open, max(0, ordered − receipts of the day)), firm orders first,
+    same supplier first."""
+    ds = make_dataset(orders=[OrderLine("F1", "A1", "S1", MON, 600, order_type=OrderType.FIRM),
+                              OrderLine("F2", "A1", "S2", MON, 1000, order_type=OrderType.FIRM),
+                              OrderLine("F3", "A1", "S1", MON, 500, 200, order_type=OrderType.FIRM)],   # 200 booked in the ERP
+                      receipts=[Receipt("R1", "A1", MON, 400, supplier_id="S1"), Receipt("R2", "A1", MON, 150)])
+    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=3, generate_proposals=False)).articles["A1"]
+    i = r.dates.index(MON)
+    st = {o.order_id: o for o in r.orders}
+    # F1 (S1, ordered 600): takes 400 of S1 then 150 of the pool → 50 expected ; F2 (S2): nothing to match → 1000
+    # F3 (S1, ordered 500, open 300): pools empty → min(300, 500) = 300
+    assert st["F1"].qty_expected == 50 and st["F2"].qty_expected == 1000 and st["F3"].qty_expected == 300
+    assert r.supply_firm[i] == 1350 and r.receipts[i] == 550
+    assert r.stock_firm[i] == 1000 + 550 + 1350 - 200
+
+
+def test_order_actions_reschedule_partial_cancel_and_review():
+    thu = MON + dt.timedelta(days=3)
+    ds = make_dataset(orders=[OrderLine("F1", "A1", "S1", thu, 1000, order_type=OrderType.FIRM),
+                              OrderLine("F2", "A1", "S1", thu + dt.timedelta(days=7), 1000, order_type=OrderType.FIRM),
+                              OrderLine("F3", "A1", "S1", thu + dt.timedelta(days=14), 800, order_type=OrderType.FIRM)])
+    mon2 = MON + dt.timedelta(days=7)
+    ds.actions = [
+        OrderAction("A1", "F1", "A1", "reschedule", [(thu, 500.0), (mon2 + dt.timedelta(days=1), 500.0)]),   # partial
+        OrderAction("A2", "F2", "A1", "cancel"),
+        OrderAction("A3", "F3", "A1", "reschedule", [(thu + dt.timedelta(days=15), 1200.0)]),               # more than open
+    ]
+    r = run_mrp(ds, EngineParams(as_of=MON, horizon_days=25, generate_proposals=False)).articles["A1"]
+    i = r.dates.index(MON)
+    # firm layer = ERP as is
+    assert r.supply_firm[i + 3] == 1000 and r.supply_firm[i + 10] == 1000 and r.supply_firm[i + 17] == 800
+    # simulated layer = after actions
+    assert r.supply_firm_sim[i + 3] == 500 and r.supply_firm_sim[i + 8] == 500
+    assert r.supply_firm_sim[i + 10] == 0 and r.supply_firm_sim[i + 17] == 0 and r.supply_firm_sim[i + 18] == 800
+    assert r.actions[i + 3] == -500 and r.actions[i + 8] == 500 and r.actions[i + 10] == -1000 and r.actions[i + 18] == 800
+    st = {o.order_id: o for o in r.orders}
+    assert st["F1"].status == "simulated" and [t["qty"] for t in st["F1"].tranches] == [500, 500]
+    assert st["F2"].status == "cancelled" and st["F3"].status == "simulated"
+    assert "ramenées" in st["F3"].review and st["F3"].tranches[0]["qty"] == 800
+    assert r.kpis["action_count"] == 3 and r.kpis["review_count"] == 1
+    # an uncovered remainder stays at the ERP date ; a simulated date already past goes back "à qualifier"
+    ds.actions = [OrderAction("A1", "F1", "A1", "reschedule", [(mon2, 300.0)]),
+                  OrderAction("A2", "F2", "A1", "reschedule", [(MON - dt.timedelta(days=2), 1000.0)])]
+    r2 = run_mrp(ds, EngineParams(as_of=MON, horizon_days=25, generate_proposals=False)).articles["A1"]
+    assert r2.supply_firm_sim[i + 7] == 300 and r2.supply_firm_sim[i + 3] == 700
+    st2 = {o.order_id: o for o in r2.orders}
+    assert st2["F2"].status == "late_sim" and r2.kpis["late_order_count"] == 1 and sum(r2.actions) == -1000
+    assert "non couvert" in st2["F1"].review
 
 
 def test_forecast_monday_policy_and_proposal_placement():

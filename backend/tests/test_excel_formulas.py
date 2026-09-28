@@ -75,15 +75,22 @@ def test_workbook_reacts_to_entries(seed_source, tmp_path):
     i0 = ar.dates.index(res.as_of)
     top = SIM_HEADER_ROWS + 1
     grid = wb["SIMULATION"]
-    d_sim = dt.date(2026, 9, 30)   # a firm order of 1600 is expected that day: the typed receipt replaces it
+    d_sim = dt.date(2026, 9, 30)   # a firm order of 1600 is expected that day: the typed receipt adds up to it
     j_sim = ar.dates.index(d_sim) - i0
     grid.cell(top + ROW["sim_receipts"], SIM_FIRST_COL + j_sim, "=2*300-100")   # Excel formula in the cell
+    # planner action in the order book: the 30/09 order (row 2) is delayed to 06/10 → simulated stock only
+    book = wb["CARNET_COMMANDES"]
+    assert str(book["F2"].value)[:10] == d_sim.isoformat() and book["G2"].value == 1600
+    book["J2"] = dt.date(2026, 10, 6)
     buf = __import__("io").BytesIO()
     wb.save(buf)
     calc = _recalculate(buf.getvalue(), tmp_path)["SIMULATION"]
     j = ar.dates.index(dt.date(2026, 9, 30)) - i0
     got = calc.cell(top + ROW["stock_sim"], SIM_FIRST_COL + j).value
-    replaced = ar.supply_firm[i0 + j_sim] + ar.supply_forecast[i0 + j_sim]
-    expected = ar.stock_sim_net[i0 + j] + 1000 - 50 + 500 - replaced
+    expected = ar.stock_sim_net[i0 + j] + 1000 - 50 + 500 - 1600
     assert abs(float(got) - expected) < 0.01
+    assert abs(float(calc.cell(top + ROW["orders_firm_sim"], SIM_FIRST_COL + j).value)) < 0.01
+    assert abs(float(calc.cell(top + ROW["orders_firm_sim"], SIM_FIRST_COL + j + 6).value) - 1600) < 0.01
+    j2 = ar.dates.index(dt.date(2026, 10, 6)) - i0
+    assert abs(float(calc.cell(top + ROW["stock_sim"], SIM_FIRST_COL + j2).value) - (ar.stock_sim_net[i0 + j2] + 1000 - 50 + 500)) < 0.01
     assert abs(float(calc.cell(top + ROW["stock_firm"], SIM_FIRST_COL + j).value) - (ar.stock_firm_net[i0 + j] - 50)) < 0.01

@@ -6,7 +6,7 @@ import datetime as dt
 import numpy as np
 
 from .demand import DayIndex
-from .models import Alert, AlertType, Article, EngineParams, OrderLine, Proposal, Severity, SupplierLink
+from .models import Alert, AlertType, Article, EngineParams, OrderState, Proposal, Severity, SupplierLink
 from .projection import Projection, first_shortage
 
 
@@ -30,8 +30,7 @@ def classify_alerts(
     coverage_sim: np.ndarray,
     stock_start: float,
     demand: np.ndarray,
-    open_orders: list[OrderLine],
-    late_orders: list[OrderLine],
+    orders: list[OrderState],
     proposals: list[Proposal],
     links: list[SupplierLink],
     has_bom: bool,
@@ -121,12 +120,34 @@ def classify_alerts(
                             date=as_of, value=float(sim.stock[i0])))
 
     # --- supply --------------------------------------------------------------------
-    for o in late_orders:
-        days = (as_of - o.expected_date).days
+    # Past orders still open in the ERP: excluded from the layers and to be qualified by the planner
+    # (received by hand, really late → action "attendue le", or dead → "clôturer").  One alert per
+    # article: the ERP keeps months of such lines.
+    to_qualify = [o for o in orders if o.status in ("late", "late_sim")]
+    if to_qualify:
+        qty = float(sum(o.qty_open for o in to_qualify))
+        oldest = min(to_qualify, key=lambda o: o.expected_date)
+        sim = sum(1 for o in to_qualify if o.status == "late_sim")
         alerts.append(Alert(aid, AlertType.LATE_ORDER, Severity.WARNING,
-                            f"Commande {o.order_id} attendue le {o.expected_date.isoformat()} ({days} j de retard), "
-                            f"reste {o.qty_open:,.0f}", date=o.expected_date, value=o.qty_open,
-                            details={"order_id": o.order_id, "supplier_id": o.supplier_id, "days_late": days}))
+                            f"{len(to_qualify)} commande(s) passée(s) non reçue(s) ({qty:,.0f}) à qualifier : "
+                            f"reçue par ailleurs, en retard (action « attendue le… ») ou à clôturer"
+                            + (f" ; {sim} date(s) simulée(s) dépassée(s)" if sim else ""),
+                            date=oldest.expected_date, value=qty,
+                            details={"count": len(to_qualify), "order_ids": [o.order_id for o in to_qualify],
+                                     "days_late": oldest.days_late}))
+    rescheduled = [o for o in orders if o.days_late > 0 and o.in_firm_layer]
+    for o in rescheduled:
+        alerts.append(Alert(aid, AlertType.LATE_ORDER, Severity.INFO,
+                            f"Commande {o.order_id} attendue le {o.expected_date.isoformat()} ({o.days_late} j de retard) "
+                            f"replanifiée au prochain jour ouvré, reste {o.qty_open:,.0f}", date=o.expected_date,
+                            value=o.qty_open, details={"order_id": o.order_id, "supplier_id": o.supplier_id,
+                                                        "days_late": o.days_late}))
+    reviews = [o for o in orders if o.review]
+    if reviews:
+        alerts.append(Alert(aid, AlertType.LATE_ORDER, Severity.INFO,
+                            f"{len(reviews)} action(s) sur commande à revoir : " + " ; ".join(f"{o.order_id} – {o.review}" for o in reviews[:3]),
+                            date=as_of, value=float(len(reviews)), scope="simulated",
+                            details={"order_ids": [o.order_id for o in reviews]}))
     urgent = [p for p in proposals if p.urgent]
     if urgent:
         p = urgent[0]

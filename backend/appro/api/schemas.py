@@ -110,6 +110,37 @@ class SupplyEventOut(BaseModel):
     late: bool = False
 
 
+class TrancheOut(BaseModel):
+    date: dt.date
+    qty: float
+    late: bool = False
+    expected: float = 0.0
+
+
+class OrderStateOut(BaseModel):
+    """One open order (delivery slot) of an article and its planner action, as computed for the run."""
+
+    order_id: str
+    article_id: str
+    designation: str = ""
+    unit: str = ""
+    supplier_id: str | None
+    order_type: str
+    source: str
+    expected_date: dt.date
+    qty_ordered: float
+    qty_open: float
+    qty_expected: float
+    days_late: int
+    status: Literal["expected", "simulated", "late", "late_sim", "cancelled", "closed"]
+    in_firm_layer: bool
+    action_id: str | None = None
+    action_kind: str | None = None
+    tranches: list[TrancheOut] = Field(default_factory=list)
+    review: str = ""
+    note: str = ""
+
+
 class ArticleSummary(BaseModel):
     article_id: str
     designation: str
@@ -177,6 +208,7 @@ class ProjectionResponse(BaseModel):
     kpis: dict[str, Any]
     suppliers: list[LinkRef]
     programs: list[dict[str, Any]]
+    orders: list[OrderStateOut] = Field(default_factory=list)
     diagnostics: list[str]
 
 
@@ -189,6 +221,7 @@ class GridArticle(BaseModel):
     kpis: dict[str, Any]
     suppliers: list[LinkRef]
     programs: list[str]
+    orders: list[OrderStateOut] = Field(default_factory=list)
 
 
 class GridResponse(BaseModel):
@@ -319,6 +352,37 @@ class CellOut(ORM):
     qty: float
     source: str
     note: str
+    updated_by: str
+    updated_at: dt.datetime
+
+
+class TrancheIn(BaseModel):
+    date: dt.date
+    qty: float = Field(gt=0)
+
+
+class ActionIn(BaseModel):
+    """Planner action on one order: replan in tranches, cancel, or close (qualified)."""
+
+    order_id: str = Field(min_length=1, max_length=120)
+    article_id: str
+    kind: Literal["reschedule", "cancel", "close"] = "reschedule"
+    tranches: list[TrancheIn] = Field(default_factory=list)
+    note: str = ""
+    supplier_id: str | None = None
+
+
+class ActionOut(ORM):
+    id: str
+    order_id: str
+    article_id: str
+    supplier_id: str | None
+    kind: str
+    tranches: list[dict[str, Any]]
+    erp: dict[str, Any]
+    note: str
+    source: str
+    created_by: str
     updated_by: str
     updated_at: dt.datetime
 

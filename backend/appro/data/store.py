@@ -182,6 +182,41 @@ class AppCell(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class AppOrderAction(Base):
+    """Planner action on one order (delivery slot), applied to the simulated stock only.
+
+    ``order_id`` is the ERP synthetic identifier (``supplier|article|date|firm``) or an app order
+    id.  ``kind``: ``reschedule`` (``tranches_json`` = ``[{"date": "2026-10-13", "qty": 1000}, …]``,
+    the uncovered remainder stays at the ERP date), ``cancel`` (nothing will be delivered) or
+    ``close`` (qualified as received / dead).  ``erp_json`` keeps the ERP state seen when the
+    action was saved (date, open quantity) for information.  One action per order.
+    """
+
+    __tablename__ = "app_order_actions"
+    __table_args__ = (Index("ix_app_order_actions_order", "order_id", unique=True),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("OA"))
+    order_id: Mapped[str] = mapped_column(String(120))
+    article_id: Mapped[str] = mapped_column(String(40), index=True)
+    supplier_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    kind: Mapped[str] = mapped_column(String(12), default="reschedule")   # reschedule | cancel | close
+    tranches_json: Mapped[str] = mapped_column(Text, default="[]")
+    erp_json: Mapped[str] = mapped_column(Text, default="{}")
+    note: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(12), default="MANUAL")   # MANUAL | IMPORT
+    created_by: Mapped[str] = mapped_column(String(120), default="")
+    updated_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    @property
+    def tranches(self) -> list[dict[str, Any]]:
+        return json.loads(self.tranches_json or "[]")
+
+    @property
+    def erp(self) -> dict[str, Any]:
+        return json.loads(self.erp_json or "{}")
+
+
 class AuditLog(Base):
     __tablename__ = "app_audit_log"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

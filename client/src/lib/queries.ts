@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Params } from "./api";
 import type {
-  AdjustmentOut, ArticleRef, AuditOut, BomRef, CellOut, CockpitResponse, CompareResponse, GridResponse, LinkRef, OrderOut, ParamDoc, ParamOverrideOut,
+  ActionOut, AdjustmentOut, ArticleRef, AuditOut, BomRef, CellOut, OrderStateOut, CockpitResponse, CompareResponse, GridResponse, LinkRef, OrderOut, ParamDoc, ParamOverrideOut,
   PdpVersionOut, PlanLine, ProductionOut, ProgramImpactResponse, ProgramRef, ProjectionResponse, ProposalOut, ReceiptOut, ScenarioOut, SupplierRef,
   WeeklyParamsResponse,
 } from "./types";
@@ -53,6 +53,15 @@ export function useProgramImpact() {
   const params = { planner: engineParams.planner, scenario_id: engineParams.scenario_id, horizon_days: engineParams.horizon_days };
   return useQuery({ queryKey: ["program-impact", params], queryFn: () => api.get<ProgramImpactResponse>("/api/programs/impact", params), staleTime: 30_000 });
 }
+
+/** Open orders (delivery slots) of the perimeter with their status and planner action ; ``to_qualify`` = past orders still open. */
+export function useOrderStates(extra?: Params) {
+  const { engineParams } = usePerimeter();
+  const params = { planner: engineParams.planner, scenario_id: engineParams.scenario_id, ...extra };
+  return useQuery({ queryKey: ["order-states", params], queryFn: () => api.get<OrderStateOut[]>("/api/orders", params), staleTime: 30_000 });
+}
+/** Planner actions on orders (stored). */
+export const useActions = (params?: Params) => useQuery({ queryKey: ["actions", params], queryFn: () => api.get<ActionOut[]>("/api/entries/actions", params) });
 
 /** Simulation grid cells (simulated receipts / adjustments typed by the planner). */
 export const useCells = (params?: Params) => useQuery({ queryKey: ["cells", params], queryFn: () => api.get<CellOut[]>("/api/entries/cells", params) });

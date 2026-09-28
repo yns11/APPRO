@@ -14,7 +14,7 @@ et les frames internes (`appro.data.schemas.TABLES`). Clé primaire logique en g
 | `ref_bom` | **program_id, article_id**, qty_per, unit, scrap_pct, valid_from, valid_to | nomenclature 1 niveau |
 | `fct_production_plan` | **program_id, week_start, version**, iso_week, qty, published_at | PDP hebdo ; la version la plus récente gagne |
 | `fct_production_actual` | **program_id, date**, qty | production réelle |
-| `fct_purchase_orders` | **order_id, line_no**, article_id, supplier_id, order_type (FIRM/FORECAST), message_type (DELJIT/DELFOR), order_date, expected_date, qty_ordered, qty_received, status (OPEN/PARTIAL/RECEIVED/CLOSED/CANCELLED), unit | quantité ouverte = commandée − reçue |
+| `fct_purchase_orders` | **order_id, line_no**, article_id, supplier_id, order_type (FIRM/FORECAST), message_type (DELJIT/DELFOR), order_date, expected_date, qty_ordered, qty_received, status (OPEN/PARTIAL/RECEIVED/CLOSED/CANCELLED), unit | quantité ouverte = commandée − reçue ; `order_id` = identifiant **synthétique** du créneau `fournisseur|article|date|ferme` (voir § 1.1) |
 | `fct_receipts` | **receipt_id**, order_id, article_id, supplier_id, receipt_date, qty, unit | |
 | `fct_stock_movements` | **movement_id**, article_id, date, movement_type, qty, comment | inventaires, casse… |
 | `fct_stock` | **article_id, snapshot_date, location**, qty_on_hand, qty_blocked, unit | stock fin de journée ; plusieurs emplacements sommés |
@@ -22,6 +22,28 @@ et les frames internes (`appro.data.schemas.TABLES`). Clé primaire logique en g
 Sources ERP typiques : tables de commandes (OA, DELFOR/DELJIT EDI), réceptions (MIGO / entrées
 marchandises), stocks (MARD…), mouvements, plan de production (S&OP / PDP), déclarations de production.
 Les jobs Lakeflow alimentent ces tables ; l'application ne les modifie jamais.
+
+### 1.1 Commandes : de l'extraction `commandes_edi` au canonique
+
+L'ERP (D365, lignes d'achat `purch_line`) n'offre pas d'identifiant stable et unique de commande. La table
+nettoyée `commandes_edi` (requête en amont, catalogue silver) agrège les lignes d'achat par
+**fournisseur | article | date de livraison | drapeau ferme** et produit :
+
+| `commandes_edi` | `fct_purchase_orders` | Remarque |
+|---|---|---|
+| `ID` = `vendaccount|itemid|yyyyMMdd|silfirmorder` | `order_id` | identifiant synthétique du **créneau de livraison**, stable car l'ERP ne déplace ni n'annule jamais une ligne ; unique après retrait de `purchid` du `GROUP BY` |
+| `Commande` (collect des `purchid`) | `message_type` (information) | numéro(s) de commande d'achat, à titre indicatif |
+| `Code_fournisseur` | `supplier_id` | |
+| `Article` | `article_id` | |
+| `Date_de_debut` | `expected_date` | |
+| `Ordre_ferme` = Oui / Non | `order_type` = FIRM / FORECAST | seul critère de classement F / P ; `Niveau_engagement` reste informatif |
+| `Quantite` | `qty_ordered` | |
+| `Quantite` − `Quantite_restante` | `qty_received` | restant ERP non fiable pour les lignes passées : voir la politique des retards (`docs/regles_metier.md` § 3.2) |
+| — | `line_no` = 1, `status` = OPEN, `order_date` = null | |
+
+Les lignes prévisionnelles ne sont extraites qu'à partir du lundi suivant ; les lignes fermes sont
+conservées depuis le début de l'année (retards à qualifier). La vue de correspondance est fournie dans
+`scripts/uc/create_tables.sql` (`v_fct_purchase_orders_from_commandes_edi`).
 
 ## 2. Tables applicatives (Lakebase PostgreSQL / SQLite en local)
 
@@ -31,6 +53,7 @@ Créées automatiquement au démarrage (`Base.metadata.create_all`).
 |---|---|
 | `app_orders` | commandes fermes saisies hors ERP : article, fournisseur, date attendue, qté, `order_type` (FIRM ; PLANNED conservé pour les anciennes lignes), `status` (OPEN/SENT/RECEIVED/CANCELLED), `source` (MANUAL/IMPORT), note, auteur, dates |
 | `app_cells` | cellules du tableau de simulation : article, date, `kind` (sim_receipt / adjustment), expression saisie, quantité évaluée (0 explicite possible), `source` (MANUAL/IMPORT), note, auteur, date ; unique par (article, date, kind) |
+| `app_order_actions` | actions sur commandes (stock simulé) : `order_id` (identifiant synthétique ERP ou commande app), article, fournisseur, `kind` (reschedule / cancel / close), `tranches_json` `[{date, qty}]`, `erp_json` (état ERP vu à la saisie), note, `source` (MANUAL/IMPORT), auteur, dates ; **une action par commande** |
 | `app_receipts` | réceptions saisies (optionnellement rattachées à une commande app ou ERP) |
 | `app_adjustments` | ajustements de stock (±) |
 | `app_production_actual` | production réelle saisie par (programme, jour) – prime sur l'ERP |

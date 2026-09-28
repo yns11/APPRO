@@ -71,20 +71,27 @@ def fill_level(target: np.ndarray, demand_cum: np.ndarray, i: int, article: Arti
 
 
 def _delivery_day(candidate: dt.date, earliest: dt.date, latest: dt.date, calendar: WorkCalendar,
-                  weekdays: frozenset[int] | None, shift: str) -> dt.date | None:
-    """Nearest allowed delivery day for ``candidate`` inside ``[earliest, latest]`` (None if none)."""
+                  weekdays: frozenset[int] | None, shift: str, blocked: frozenset[dt.date] = frozenset()
+                  ) -> dt.date | None:
+    """Nearest allowed delivery day for ``candidate`` inside ``[earliest, latest]`` (None if none).
+
+    ``blocked`` days (a simulated receipt typed by the planner, 0 included) never receive a
+    proposal: the planner has decided what arrives that day."""
+    def allowed(d: dt.date) -> bool:
+        return calendar.is_open_weekday(d, weekdays) and d not in blocked
+
     if shift == "earlier":
-        try:
-            d = calendar.previous_working_day(candidate, inclusive=True, allowed_weekdays=weekdays)
-            if d >= earliest:
+        d = candidate
+        while d >= earliest:
+            if allowed(d):
                 return d
-        except ValueError:
-            pass
-    try:
-        d = calendar.next_working_day(max(candidate, earliest), inclusive=True, allowed_weekdays=weekdays)
-    except ValueError:
-        return None
-    return d if d <= latest else None
+            d -= dt.timedelta(days=1)
+    d = max(candidate, earliest)
+    while d <= latest:
+        if allowed(d):
+            return d
+        d += dt.timedelta(days=1)
+    return None
 
 
 def generate_proposals(
@@ -101,6 +108,7 @@ def generate_proposals(
     seq_start: int = 1,
     supply_planned: np.ndarray | None = None,
     reproject: Callable[[np.ndarray], Projection] | None = None,
+    blocked: np.ndarray | None = None,
 ) -> tuple[list[Proposal], np.ndarray, np.ndarray]:
     """Return proposals, the proposed-supply series and the resulting simulated net stock.
 
@@ -108,6 +116,9 @@ def generate_proposals(
     recomputes the projection with the proposed supply added: it keeps the ``lost`` shortage
     policy exact (a receipt that arrives after a lost day does not serve that day).  Without it
     the proposal is simply added to the balance from its delivery day on (``backlog`` policy).
+
+    ``blocked`` marks the days where the planner typed a simulated receipt: no proposal is placed
+    there (CBN constraint), the delivery moves to the nearest allowed day.
 
     ``supply_planned`` (forecast / planned, non-firm supply per day) is only used to enrich the
     reason of urgent proposals: when a later non-firm order exists, advancing it is usually the
@@ -128,6 +139,7 @@ def generate_proposals(
     if params.proposal_lookahead_days is not None:
         last_idx = min(last_idx, as_of_idx + int(params.proposal_lookahead_days))
     proposed_by_supplier: dict[str, float] = {}
+    blocked_days = frozenset(index.dates[k] for k in np.where(blocked)[0]) if blocked is not None else frozenset()
     seq = seq_start
     i = earliest_idx
     while i <= last_idx:
@@ -142,7 +154,7 @@ def generate_proposals(
             if params.respect_lead_time and link:
                 earliest_date = max(earliest_date, calendar.add_working_days(as_of, lead))
             delivery = _delivery_day(index.dates[i], earliest_date, index.dates[last_idx], calendar,
-                                     weekdays, params.delivery_shift)
+                                     weekdays, params.delivery_shift, blocked_days)
             if delivery is None:
                 break  # no feasible delivery day inside the horizon
             j = index.offset(delivery)

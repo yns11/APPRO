@@ -179,6 +179,27 @@ def weekly_params(article_id: str, weeks: int = Query(26, ge=1, le=104), ctx: Ap
                                   defaults={f: float(getattr(a, f)) for f in WEEKLY_FIELDS}, weeks=rows)
 
 
+@router.get("/orders", response_model=list[S.OrderStateOut])
+def orders(planner: str | None = None, scenario_id: str | None = None, article_id: str | None = None,
+           status: list[str] | None = Query(None), to_qualify: bool = False,
+           ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Open orders (delivery slots) of the perimeter with their planner action and status.
+
+    ``to_qualify=true`` keeps the past orders still open in the ERP (excluded from the stocks):
+    to be qualified as received elsewhere, really late (action « attendue le… ») or closed."""
+    try:
+        result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id,
+                                     article_ids=[article_id] if article_id else None)
+    except KeyError as exc:
+        raise HTTPException(404, f"Scénario inconnu : {exc}")
+    out = [P.order_state_out(o, r) for r in result.articles.values() for o in r.orders]
+    if to_qualify:
+        out = [o for o in out if o.status in ("late", "late_sim")]
+    if status:
+        out = [o for o in out if o.status in status]
+    return sorted(out, key=lambda o: (o.expected_date, o.article_id, o.order_id))
+
+
 @router.get("/alerts", response_model=list[S.AlertOut])
 def alerts(planner: str | None = None, scenario_id: str | None = None, severity: str | None = None,
            alert_type: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):

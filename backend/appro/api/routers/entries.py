@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...data.store import AppAdjustment, AppCell, AppOrder, AppProductionActual, AppReceipt, audit
+from ...data.store import AppAdjustment, AppCell, AppOrder, AppOrderAction, AppProductionActual, AppReceipt, audit
 from ...services import mrp_service
 from ...services.context import AppContext
 from .. import schemas as S
@@ -221,5 +221,58 @@ def delete_cell(cell_id: str, ctx: AppContext = Depends(ctx_dep), session: Sessi
         raise HTTPException(404, "Cellule inconnue")
     audit(session, user, "delete", "cell", row.id, row.article_id, {"date": str(row.date), "kind": row.kind, "qty": row.qty})
     session.delete(row)
+    session.commit()
+    ctx.bump()
+
+
+# ---------------------------------------------------------------- order actions (simulated layer)
+def _action_out(row: AppOrderAction) -> S.ActionOut:
+    return S.ActionOut(id=row.id, order_id=row.order_id, article_id=row.article_id, supplier_id=row.supplier_id,
+                       kind=row.kind, tranches=row.tranches, erp=row.erp, note=row.note, source=row.source,
+                       created_by=row.created_by, updated_by=row.updated_by, updated_at=row.updated_at)
+
+
+@router.get("/actions", response_model=list[S.ActionOut])
+def list_actions(article_id: str | None = None, order_id: str | None = None, session: Session = Depends(session_dep)):
+    q = select(AppOrderAction).order_by(AppOrderAction.article_id, AppOrderAction.order_id)
+    if article_id:
+        q = q.where(AppOrderAction.article_id == article_id)
+    if order_id:
+        q = q.where(AppOrderAction.order_id == order_id)
+    return [_action_out(r) for r in session.scalars(q)]
+
+
+@router.put("/actions", response_model=S.ActionOut)
+def upsert_action(body: S.ActionIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+                  user: str = Depends(current_user)):
+    """Set the planner action of one order (delivery slot): ``reschedule`` with tranches (date,
+    quantity), ``cancel`` (nothing will be delivered) or ``close`` (qualified as received / dead).
+    The action only changes the *simulated* stock; one action per order, replaced on each call."""
+    _unit_of(ctx, body.article_id)
+    erp = None
+    result = mrp_service.compute(ctx, session, article_ids=[body.article_id])
+    ar = result.articles.get(body.article_id)
+    state = next((o for o in (ar.orders if ar else []) if o.order_id == body.order_id), None)
+    if state is None:
+        raise HTTPException(404, f"Commande inconnue pour cet article : {body.order_id}")
+    erp = {"expected_date": state.expected_date.isoformat(), "qty_open": state.qty_open, "qty_ordered": state.qty_ordered}
+    try:
+        row = mrp_service.upsert_action(session, user, body.article_id, body.order_id, body.kind,
+                                        [(t.date, t.qty) for t in body.tranches], body.note,
+                                        body.supplier_id or state.supplier_id, erp)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    session.commit()
+    ctx.bump()
+    return _action_out(row)
+
+
+@router.delete("/actions/{action_id}", status_code=204)
+def delete_action(action_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+                  user: str = Depends(current_user)):
+    row = session.get(AppOrderAction, action_id)
+    if row is None:
+        raise HTTPException(404, "Action inconnue")
+    mrp_service.delete_action(session, user, row)
     session.commit()
     ctx.bump()

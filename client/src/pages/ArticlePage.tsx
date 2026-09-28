@@ -8,14 +8,16 @@ import { Badge, Button, Card, Empty, ErrorBox, Kpi, Segmented, SeverityBadge, Sk
 import { StockChart, CoverageChart } from "@/components/charts/StockChart";
 import { EntryDrawer, type EntryDraft } from "@/components/EntryDrawer";
 import { GridHelp, SimulationGrid } from "@/components/SimulationGrid";
+import { OrderActionsDrawer, statusTone, type OrderActionsTarget } from "@/components/OrderActionsDrawer";
 import { AlertList } from "./CockpitPage";
-import { KIND_LABELS, ORDER_TYPE_LABELS, fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
+import { ACTION_KIND_LABELS, KIND_LABELS, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, SOURCE_LABELS, fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
 
 export default function ArticlePage() {
   const { articleId } = useParams();
   const { perimeter, set, engineParams } = usePerimeter();
-  const [tab, setTab] = useState<"table" | "events" | "proposals" | "cells" | "alerts" | "master">("table");
+  const [tab, setTab] = useState<"table" | "orders" | "events" | "proposals" | "cells" | "alerts" | "master">("table");
   const [draft, setDraft] = useState<EntryDraft | null>(null);
+  const [target, setTarget] = useState<OrderActionsTarget | null>(null);
   const q = useProjection(articleId);
   const cells = useCells(articleId ? { article_id: articleId } : undefined);
   const toast = useToast();
@@ -26,6 +28,9 @@ export default function ArticlePage() {
   if (q.isError) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   const a = d?.article;
   const k = d?.kpis;
+  const toQualify = (d?.orders ?? []).filter((o) => o.status === "late" || o.status === "late_sim");
+  // keep the drawer in sync with the recomputed states after a save
+  const liveTarget = target ? { ...target, orders: target.orders.map((o) => (d?.orders ?? []).find((x) => x.order_id === o.order_id) ?? o) } : null;
   const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { article_ids: [articleId], scenario_id: engineParams.scenario_id, granularity: perimeter.granularity === "default" ? "day" : perimeter.granularity, horizon_days: engineParams.horizon_days });
 
   return (
@@ -50,18 +55,25 @@ export default function ArticlePage() {
         <Kpi label="Rupture prévisionnelle" value={k ? (k.first_stockout_forecast ? fmtDate(k.first_stockout_forecast) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_forecast ? "warning" : "ok"} meta={k ? (k.first_stockout_forecast ? `manque max ${fmtQty(k.max_shortage_forecast, a?.unit)}` : `flux ERP fermes + prévisionnels`) : ""} />
         <Kpi label="Rupture simulée" value={k ? (k.first_stockout_sim ? fmtDate(k.first_stockout_sim) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_sim ? "critical" : "ok"} meta={k ? (k.first_stockout_sim ? `manque max ${fmtQty(k.max_shortage_sim, a?.unit)}` : `stock mini ${fmtQty(k.min_stock_sim, a?.unit)}`) : ""} />
         <Kpi label="Besoin 30 j" value={k ? fmtQty(k.demand_next_30d, a?.unit) : <Skeleton w={60} h={28} />} meta={k ? `${fmtQty(k.avg_daily_demand_30d, a?.unit)} / jour · réel ${Math.round(100 * k.actual_share_30d)} % (30 j passés)` : ""} />
-        <Kpi label="En-cours" value={k ? fmtQty(k.open_firm_qty, a?.unit) : <Skeleton w={60} h={28} />} meta={k ? `ferme · + ${fmtQty(k.open_forecast_qty, a?.unit)} prév. ERP${k.late_order_count ? ` · ${k.late_order_count} en retard` : ""}` : ""} tone={k && k.late_order_count ? "warning" : undefined} />
+        <Kpi label="En-cours ferme" value={k ? fmtQty(k.open_firm_qty, a?.unit) : <Skeleton w={60} h={28} />} meta={k ? `simulé ${fmtQty(k.open_firm_sim_qty, a?.unit)} · + ${fmtQty(k.open_forecast_qty, a?.unit)} prév. ERP · ${k.action_count} action(s)${k.late_order_count ? ` · ${k.late_order_count} à qualifier` : ""}` : ""} tone={k && k.late_order_count ? "warning" : undefined} onClick={() => setTab("orders")} />
         <Kpi label="Réceptions simulées" value={k ? fmtQty(k.sim_receipts_qty, a?.unit) : <Skeleton w={40} h={28} />} tone="brand" meta={k ? `${k.sim_receipt_days} jour(s) saisi(s)` : ""} onClick={() => setTab("cells")} />
         <Kpi label="Complément CBN" value={k ? k.proposal_count : <Skeleton w={40} h={28} />} tone={k && k.urgent_proposal_count ? "critical" : "brand"} meta={k ? `${fmtQty(k.proposed_qty, a?.unit)} · ${k.urgent_proposal_count} urgente(s)` : ""} onClick={() => setTab("proposals")} />
       </div>
 
-      <Card title="Projection du stock" hint={`Stock ferme = R + F · prévisionnel = R + F + P · simulé = réceptions simulées S (à défaut R + F + P) + complément CBN · ajustements A partout · stocks physiques (jamais négatifs), besoin non servi en « manque » (${k?.shortage_policy === "lost" ? "perdu" : "reporté"}) · barres : besoin (bas), approvisionnements et ajustements (haut)`}>
+      {toQualify.length > 0 && (
+        <Card title={`${toQualify.length} commande(s) passée(s) non reçue(s) à qualifier`} hint="exclues de tous les stocks tant qu'elles ne sont pas qualifiées" actions={<Button size="sm" variant="primary" onClick={() => setTarget({ title: `${articleId} · commandes à qualifier`, orders: toQualify })}>Qualifier</Button>}>
+          <p className="small subtle" style={{ margin: 0 }}>{toQualify.map((o) => `${o.order_id} : ${fmtQty(o.qty_open, a?.unit)} attendu(s) le ${fmtDate(o.expected_date)} (${o.days_late} j)`).join(" · ")}. Pour chacune : reçue par ailleurs ou morte → clôturer ; arrive encore → « attendue le… » (elle entre alors dans le stock simulé).</p>
+        </Card>
+      )}
+
+      <Card title="Projection du stock" hint={`Stock ferme = R + F (ERP tel quel) · prévisionnel = R + F + P · simulé = R + F′ (commandes après actions) + réceptions simulées S + complément CBN · ajustements A partout · stocks physiques (jamais négatifs), besoin non servi en « manque » (${k?.shortage_policy === "lost" ? "perdu" : "reporté"}) · barres : besoin (bas), approvisionnements et ajustements (haut)`}>
         {q.isLoading || !d ? <Skeleton h={300} /> : <><StockChart data={d} /><div style={{ marginTop: 8 }}><CoverageChart data={d} /></div></>}
       </Card>
 
       <Tabs value={tab} onChange={setTab} tabs={[
         { id: "table", label: "Tableau de simulation" },
-        { id: "events", label: "Commandes & mouvements", count: d?.events.length },
+        { id: "orders", label: "Commandes & actions", count: d?.orders.length },
+        { id: "events", label: "Mouvements", count: d?.events.length },
         { id: "proposals", label: "Complément CBN", count: d?.proposals.length },
         { id: "cells", label: "Réceptions simulées & ajustements saisis", count: cells.data?.length },
         { id: "alerts", label: "Alertes", count: d?.alerts.length },
@@ -70,8 +82,31 @@ export default function ArticlePage() {
 
       {tab === "table" && (q.isLoading || !d ? <SkeletonBlock rows={10} /> : (
         <Card flush tight>
-          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, events: d.events, suppliers: d.suppliers, kpis: d.kpis }]} cells={cells.data ?? []} onEntry={setDraft} />
+          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, events: d.events, suppliers: d.suppliers, orders: d.orders, kpis: d.kpis }]} cells={cells.data ?? []} onEntry={setDraft} onOrders={setTarget} />
           <GridHelp />
+        </Card>
+      ))}
+
+      {tab === "orders" && (q.isLoading || !d ? <SkeletonBlock /> : d.orders.length === 0 ? <Empty title="Aucune commande ouverte" hint="Saisir une commande ferme passée hors ERP avec le bouton Saisir." /> : (
+        <Card flush title="Commandes ouvertes (créneaux fournisseur · article · date)" hint="cliquer sur une ligne pour agir sur la commande : attendue le… (retard, tranches), annulée, clôturée ; l'action ne touche que le stock simulé">
+          <table className="tbl">
+            <thead><tr><th>Référence</th><th>Type</th><th>Fournisseur</th><th>Date ERP</th><th className="num">Restant</th><th className="num">Compté (ferme)</th><th>Statut</th><th>Action (simulé)</th><th>Note</th></tr></thead>
+            <tbody>
+              {d.orders.map((o) => (
+                <tr key={o.order_id} className="clickable" onClick={() => setTarget({ title: `${articleId} · ${o.order_id}`, orders: [o] })}>
+                  <td className="mono">{o.order_id}<span className="sub">{SOURCE_LABELS[o.source] ?? o.source}</span></td>
+                  <td><Badge tone={o.order_type === "FIRM" ? "brand" : "neutral"}>{ORDER_TYPE_LABELS[o.order_type] ?? o.order_type}</Badge></td>
+                  <td className="subtle">{o.supplier_id ?? "–"}</td>
+                  <td>{fmtDate(o.expected_date)}{o.days_late > 0 && <span className="sub" style={{ color: "var(--critical)" }}>{o.days_late} j de retard</span>}</td>
+                  <td className="num">{fmtQty(o.qty_open, d.article.unit)}<span className="sub">/ {fmtQty(o.qty_ordered, d.article.unit)}</span></td>
+                  <td className="num">{o.in_firm_layer ? fmtQty(o.qty_expected, d.article.unit) : <span className="subtle">exclue</span>}</td>
+                  <td><Badge tone={statusTone(o.status)}>{ORDER_STATUS_LABELS[o.status]}</Badge>{o.review && <span className="sub" style={{ color: "var(--warning-fg)" }}>à revoir</span>}</td>
+                  <td className="small">{o.action_kind ? <>{ACTION_KIND_LABELS[o.action_kind]}{o.tranches.length > 0 && <span className="sub">{o.tranches.map((t) => `${fmtQty(t.qty, d.article.unit)} le ${fmtDate(t.date)}${t.late ? " (dépassée)" : ""}`).join(" · ")}</span>}</> : <span className="subtle">–</span>}</td>
+                  <td className="small subtle" style={{ whiteSpace: "normal", maxWidth: 260 }}>{o.review || o.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Card>
       ))}
 
@@ -169,6 +204,7 @@ export default function ArticlePage() {
       )}
 
       <EntryDrawer draft={draft} onClose={() => setDraft(null)} articles={a ? [{ article_id: a.article_id, designation: a.designation, unit: a.unit }] : []} />
+      <OrderActionsDrawer target={liveTarget} onClose={() => setTarget(null)} />
     </div>
   );
 }

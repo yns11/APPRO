@@ -179,9 +179,9 @@ class Movement:
 class SimCell:
     """One editable cell of the simulation grid.
 
-    ``kind`` = ``sim_receipt`` (simulated receipt: on that day it *replaces* the expected firm
-    and forecast orders in the *simulated* stock – an explicit 0 means nothing arrives) or
-    ``adjustment`` (signed stock adjustment counted in every layer).
+    ``kind`` = ``sim_receipt`` (simulated receipt S: an *additional* receipt counted in the
+    simulated stock only; a typed cell – 0 included – also blocks the CBN complement that day)
+    or ``adjustment`` (signed stock adjustment counted in every layer).
     """
 
     article_id: str
@@ -189,6 +189,28 @@ class SimCell:
     kind: Literal["sim_receipt", "adjustment"]
     qty: float
     source: str = "MANUAL"   # MANUAL | IMPORT
+    note: str = ""
+
+
+ActionKind = Literal["reschedule", "cancel", "close"]
+
+
+@dataclass
+class OrderAction:
+    """Planner action on one order (delivery slot), applied to the *simulated* layer only.
+
+    * ``reschedule`` – the open quantity is expected in ``tranches`` [(date, qty), …]; the part of
+      the open quantity not covered by the tranches stays at the ERP date;
+    * ``cancel`` – the supplier will not deliver: nothing is expected (the ERP still shows the order);
+    * ``close`` – qualified as received / dead: nothing is expected and the order leaves the
+      "à qualifier" list.
+    """
+
+    action_id: str
+    order_id: str
+    article_id: str
+    kind: ActionKind = "reschedule"
+    tranches: list[tuple[dt.date, float]] = field(default_factory=list)
     note: str = ""
 
 
@@ -217,6 +239,7 @@ class Dataset:
     stock: list[StockSnapshot]
     holidays: list[dt.date] = field(default_factory=list)
     cells: list[SimCell] = field(default_factory=list)
+    actions: list[OrderAction] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -238,13 +261,19 @@ class EngineParams:
     missing_actual_policy: Literal["plan", "zero"] = "plan"
     consumption_offset_days: int = 0              # <0: components consumed before the production day
 
-    # Supply – three cumulative stock layers: firm ⊂ forecast ⊂ simulated (see runner.py)
+    # Supply – three stock layers: firm (ERP as is), forecast (+ P), simulated (see runner.py)
     firm_sources: tuple[str, ...] = ("FIRM",)                    # order types in the *firm* stock (F)
     forecast_sources: tuple[str, ...] = ("FORECAST", "PLANNED")  # added to the firm flows → *forecast* stock (P)
     app_firm_orders: Literal["firm", "simulated"] = "firm"  # app orders marked sent: firm layer, or forecast layer only
     forecast_date_policy: Literal["actual", "week_monday"] = "actual"  # forecast orders on their date or on the Monday
+    forecast_horizon_policy: Literal["all", "beyond_firm_horizon"] = "all"  # P inside the firm horizon: kept or dropped
+    sim_includes_forecast: bool = False           # simulated stock: add the ERP forecast orders (P) or not
     include_proposals_in_simulation: bool = True
-    late_order_policy: Literal["reschedule", "ignore", "keep"] = "reschedule"
+    # Orders whose date is past and still open (ERP remaining quantity unreliable): excluded from
+    # every layer and listed "à qualifier" [default], or rescheduled to the next working day
+    # (``late_grace_days`` > 0 limits the rescheduling to orders late by at most N days).
+    late_order_policy: Literal["exclude", "reschedule"] = "exclude"
+    late_grace_days: int = 0
     orders_source: Literal["merged", "erp", "app"] = "merged"
 
     # Coverage / stock policy
@@ -253,7 +282,8 @@ class EngineParams:
     coverage_tie_rule: Literal["covered", "not_covered"] = "covered"
     target_policy: Literal["coverage_days", "safety_qty", "max"] = "max"
 
-    # Proposals (net requirements, "Complément CBN"): computed on every run on the simulated stock
+    # Proposals (net requirements, "Complément CBN"): computed on every run on the simulated stock ;
+    # never placed on a day with a typed simulated receipt (S typed = planner decision for that day)
     generate_proposals: bool = True
     proposal_placement: Literal["working_days", "monday"] = "working_days"  # delivery on any working day or Mondays only
     frozen_days: int = 0
@@ -330,13 +360,45 @@ class SupplyEvent:
     """One dated supply element shown in the article table / tooltips."""
 
     date: dt.date
-    kind: str               # order | sim_receipt | receipt | movement | proposal
+    kind: str               # order | order_sim | sim_receipt | receipt | movement | proposal
     ref: str
     qty: float
     supplier_id: str | None
     order_type: str
     source: str
     late: bool = False
+
+
+OrderStateStatus = Literal["expected", "simulated", "late", "late_sim", "cancelled", "closed"]
+
+
+@dataclass
+class OrderState:
+    """One open order (delivery slot) of an article with its planner action, as computed for the run.
+
+    ``status``: ``expected`` (ERP date ≥ reference, no action), ``simulated`` (action with
+    tranches), ``late`` (ERP date past, no action → à qualifier), ``late_sim`` (every simulated
+    tranche is past → à qualifier), ``cancelled`` / ``closed`` (action).  ``review`` carries a
+    message when the ERP order no longer matches the action (quantity reduced…).
+    """
+
+    order_id: str
+    article_id: str
+    supplier_id: str | None
+    order_type: str
+    source: str
+    expected_date: dt.date
+    qty_ordered: float
+    qty_open: float
+    qty_expected: float             # counted in the firm layer (after the same-day matching / late policy)
+    days_late: int
+    status: OrderStateStatus
+    in_firm_layer: bool
+    action_id: str | None = None
+    action_kind: str | None = None
+    tranches: list[dict[str, Any]] = field(default_factory=list)   # {date, qty, late, expected}
+    review: str = ""
+    note: str = ""
 
 
 @dataclass
@@ -349,10 +411,12 @@ class ArticleResult:
     demand: list[float]
     demand_plan: list[float]
     demand_actual_share: list[float]
-    supply_firm: list[float]          # F – committed orders still expected
+    supply_firm: list[float]          # F – committed orders still expected (ERP as is, late policy applied)
+    supply_firm_sim: list[float]      # F′ – F after the planner actions (simulated layer)
+    actions: list[float]              # F′ − F
     supply_forecast: list[float]      # P – ERP forecast schedule lines (+ legacy planned app orders)
     sim_receipts: list[float]         # S – simulated receipts typed by the planner (0 where not typed)
-    sim_receipt_mask: list[bool]      # True where S is typed (an explicit 0 replaces F + P)
+    sim_receipt_mask: list[bool]      # True where S is typed (blocks the CBN complement that day)
     supply_proposed: list[float]      # engine proposals ("Complément CBN")
     receipts: list[float]             # R – receipts posted after the snapshot
     adjustments: list[float]          # A – adjustments (ERP, app, grid cells)
@@ -376,6 +440,7 @@ class ArticleResult:
     proposals: list[Proposal]
     kpis: dict[str, Any]
     suppliers: list[SupplierLink]
+    orders: list[OrderState] = field(default_factory=list)
     diagnostics: list[str] = field(default_factory=list)
 
 

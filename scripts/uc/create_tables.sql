@@ -59,3 +59,26 @@ CREATE TABLE IF NOT EXISTS ${catalog}.${schema}.fct_stock (
   article_id STRING NOT NULL, snapshot_date DATE NOT NULL COMMENT 'stock known at end of day', qty_on_hand DOUBLE,
   qty_blocked DOUBLE, unit STRING, location STRING
 ) COMMENT 'Daily stock snapshots';
+
+
+-- ---------------------------------------------------------------------------------------------
+-- Mapping of the cleaned ERP extract ``commandes_edi`` (silver) to the canonical purchase orders.
+-- ``ID`` is the synthetic identifier of a delivery slot: vendor | item | delivery date | firm flag.
+-- The application classifies firm / forecast on ``Ordre_ferme`` only; ``Niveau_engagement`` is kept
+-- as information.  Replace ${silver_schema} by the schema holding ``commandes_edi``.
+-- ---------------------------------------------------------------------------------------------
+CREATE OR REPLACE VIEW ${catalog}.${schema}.v_fct_purchase_orders_from_commandes_edi AS
+SELECT
+  c.ID                                                    AS order_id,
+  1                                                       AS line_no,
+  c.Article                                               AS article_id,
+  c.Code_fournisseur                                      AS supplier_id,
+  CASE WHEN c.Ordre_ferme = 'Oui' THEN 'FIRM' ELSE 'FORECAST' END AS order_type,
+  CONCAT_WS(' ', c.Niveau_engagement, c.Commande)         AS message_type,
+  CAST(NULL AS DATE)                                      AS order_date,
+  CAST(c.Date_de_debut AS DATE)                           AS expected_date,
+  CAST(c.Quantite AS DOUBLE)                              AS qty_ordered,
+  CAST(c.Quantite - c.Quantite_restante AS DOUBLE)        AS qty_received,
+  'OPEN'                                                  AS status,
+  CAST(NULL AS STRING)                                    AS unit
+FROM ${catalog}.${silver_schema}.commandes_edi c;
