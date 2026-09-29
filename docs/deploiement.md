@@ -160,8 +160,17 @@ Attendu dans `/api/health` : `"status": "ok"`, `"database_status": "ok"`, `"data
 `lakebase_env.present` contenant `PGHOST`, `PGDATABASE`, `PGUSER` **et** `LAKEBASE_ENDPOINT`,
 `"frontend_built": true`, `"reference_rows": 0` (référentiel encore vide).
 
-Le premier démarrage crée toutes les tables dans le schéma `public` de la base (référentiel, `app_*`,
-`erp_*`, `erp_sync_log`) et exécute le `GRANT` d'écriture sur `erp_*` au profit de `sync_role`.
+Le premier démarrage crée le schéma **`appro`** (variable `app_schema`) puis toutes les tables dedans
+(référentiel, `app_*`, `erp_*`, `erp_sync_log`) et exécute le `GRANT` d'écriture sur `erp_*` au profit de
+`sync_role`. Le rôle d'une App n'a **pas** le droit `CREATE` sur le schéma `public` d'un projet Lakebase
+(`permission denied for schema public`) ; `CAN_CONNECT_AND_CREATE` lui permet en revanche de créer son
+propre schéma. Dans l'éditeur SQL Lakebase, préfixer les tables (`appro.ref_articles`) ou exécuter
+`SET search_path TO appro;` en tête de requête.
+
+Si `/api/health` répond `ne peut pas créer le schéma « appro »`, le rôle de l'App n'a même pas `CREATE` sur
+la base : avec votre rôle (propriétaire du projet), dans l'éditeur SQL, `GRANT CREATE ON DATABASE
+databricks_postgres TO "<client_id de l'App>";` (le `client_id` figure dans le message et dans
+*Compute → Apps → appro-dev → Authorization*), puis redémarrer l'App.
 
 **Interface** : *Compute → Apps → appro-dev* montre l'état, l'URL, les journaux (*Logs*), les ressources
 (*Resources* : `postgres` attaché) et l'environnement (*Environment* : les variables ci-dessus).
@@ -182,8 +191,10 @@ a déjà accordé l'écriture sur ses tables `erp_*` (et rien d'autre).
 ```sql
 SELECT table_name, string_agg(privilege_type, ', ' ORDER BY privilege_type) AS droits
 FROM information_schema.role_table_grants
-WHERE grantee = 'prenom.nom@exemple.com' GROUP BY table_name ORDER BY table_name;
+WHERE grantee = 'prenom.nom@exemple.com' AND table_schema = 'appro' GROUP BY table_name ORDER BY table_name;
 -- attendu : erp_production_actual, erp_production_plan, erp_purchase_orders, erp_receipts, erp_sync_log : DELETE, INSERT, SELECT, TRUNCATE, UPDATE
+-- vide ? vérifier d'abord que les tables existent : SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'appro';
+-- puis que le rôle existe :                     SELECT rolname FROM pg_roles WHERE rolname = 'prenom.nom@exemple.com';
 ```
 
 Si le `GRANT` a été oublié (App démarrée avant que `sync_role` ne soit renseigné) : renseigner la variable,
@@ -285,7 +296,8 @@ groupe). Leur identité arrive à l'application par l'en-tête `x-forwarded-emai
 | Variable vide refusée au démarrage | toute variable vide vaut « absente » (`config.py`) |
 | Job : `SystemExit` fait échouer une tâche réussie ; `sys.path` sans la racine | `main()` retourne ; amorce de `sys.path` en tête du script |
 | Job : le SDK du runtime serverless ne connaît pas `w.postgres` | appels REST directs (`/api/2.0/postgres/…`) via `api_client.do` |
-| Job : `permission denied` sur les tables de l'App | l'App accorde elle-même l'écriture sur `erp_*` au `sync_role` ; le job vérifie la présence des tables et nomme la cause |
+| Job : `permission denied` sur les tables de l'App | l'App accorde elle-même l'écriture sur `erp_*` (et `USAGE` sur son schéma) au `sync_role` ; le job vérifie la présence des tables et nomme la cause |
+| `permission denied for schema public` au premier `CREATE TABLE` (rôle de l'App sans `CREATE` sur `public`) | l'App crée et possède son propre schéma `appro` (`APPRO_DB_SCHEMA`), placé en tête du `search_path` de chaque connexion ; le job écrit dans ce schéma (`--pg-schema`) |
 | `Scheduled — Paused` sans qu'aucune commande n'échoue | `pause_status` posé sur la ressource, déclaré par chaque cible, avec `timezone_id` |
 
 ---
@@ -349,6 +361,8 @@ référentiel et les saisies.
 | `App Not Available`, `ModuleNotFoundError: No module named 'appro'` | `main.py` absent de la racine déployée, ou commande différente de `python main.py` | vérifier `app.yaml` ; `bundle sync --dry-run` |
 | `/api/health` : `database_status` en erreur, `lakebase_env.absent` contient `LAKEBASE_ENDPOINT` et `PGHOST` | ressource `postgres` non attachée, ou déploiement antérieur à l'attachement | `apps get … -o json \| jq .resources` ; redéployer (`bundle run appro`) : les variables sont injectées à la création du déploiement |
 | `absent` contient seulement `LAKEBASE_ENDPOINT` | `valueFrom: postgres` manquant dans le manifeste | rétablir (le test `test_bundle.py` l'impose), redéployer |
+| `/api/health` : `permission denied for schema public` | version antérieure au schéma `appro`, ou `APPRO_DB_SCHEMA` forcé à `public` | laisser `app_schema` = `appro` ; redéployer |
+| `/api/health` : `ne peut pas créer le schéma « appro »` | le rôle de l'App n'a pas `CREATE` sur la base | `GRANT CREATE ON DATABASE databricks_postgres TO "<client_id>"` avec un rôle propriétaire, redémarrer (§ 2) |
 | `permission denied for table erp_purchase_orders` dans le job | `sync_role` non renseigné au démarrage de l'App, ou rôle absent du projet | § 3, redéployer l'App, relancer le job |
 | `FATAL: role "…" does not exist` dans le job | l'identité du job n'a pas de rôle dans le projet Lakebase | § 3 |
 | `Tables cibles absentes de Lakebase` dans le job | l'App n'a jamais démarré sur cette base | § 2 |

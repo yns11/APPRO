@@ -32,6 +32,10 @@ env:
   # les droits d'écriture sur les tables erp_* au démarrage de l'application.
   - name: APPRO_SYNC_ROLE
     value: "prenom.nom@exemple.com"
+  # Schéma Postgres créé et possédé par l'application : son rôle n'a pas le
+  # droit CREATE sur « public » (« permission denied for schema public »).
+  - name: APPRO_DB_SCHEMA
+    value: "appro"
 
   # --- Source des faits ERP -------------------------------------------------
   # lakebase : tables erp_* de la base applicative, alimentées par le job

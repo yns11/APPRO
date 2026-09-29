@@ -30,7 +30,7 @@
 dbutils.widgets.text("lakebase_endpoint", "projects/appro/branches/production/endpoints/primary", "1. Endpoint Lakebase")
 dbutils.widgets.text("pg_host", "", "2. Hôte Lakebase (vide = découverte)")
 dbutils.widgets.text("pg_database", "databricks_postgres", "3. Base Postgres")
-dbutils.widgets.text("pg_schema", "public", "4. Schéma de l'application")
+dbutils.widgets.text("pg_schema", "appro", "4. Schéma de l'application")
 dbutils.widgets.text("erp_catalog", "emotors_data_champions", "5. Catalogue ERP")
 dbutils.widgets.text("erp_schema", "silver_erp_ye", "6. Schéma ERP")
 dbutils.widgets.text("orders_table", "commandes_edi", "7. Table commandes")

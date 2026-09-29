@@ -55,5 +55,6 @@ resources:
               - --branch=projects/${var.lakebase_project}/branches/${var.lakebase_branch}
               - --endpoint=projects/${var.lakebase_project}/branches/${var.lakebase_branch}/endpoints/${var.lakebase_endpoint}
               - --pg-database=databricks_postgres
+              - --pg-schema=${var.app_schema}
           max_retries: 1
           min_retry_interval_millis: 60000

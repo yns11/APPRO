@@ -26,6 +26,7 @@ def create_app() -> FastAPI:
         from ..services.context import get_context
         out = {"status": "ok", "version": __version__, "data_source": settings.data_source,
                "database": "lakebase" if settings.uses_lakebase else ("url" if settings.db_url else "sqlite"),
+               "schema": settings.db_schema,
                "lakebase_env": lakebase_env_status(), "frontend_built": (Path(settings.static_dir) / "index.html").exists()}
         try:
             ctx = get_context()

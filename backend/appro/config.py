@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # --- application database ----------------------------------------------------------
     db_url: str | None = Field(None, description="SQLAlchemy URL; default SQLite file, or Lakebase when PGHOST is set")
+    db_schema: str = Field("appro", description="PostgreSQL schema owned by the app (created at start-up) ; ignored by SQLite")
     lakebase_branch: str | None = Field(None, description="projects/<p>/branches/<b> : lets the app find its endpoint when LAKEBASE_ENDPOINT is absent")
     sync_role: str | None = Field(None, description="Postgres role of the synchronisation job, granted write access on the ERP mirror")
 

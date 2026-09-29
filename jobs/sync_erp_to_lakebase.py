@@ -82,7 +82,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--pg-host", default="", help="hôte Lakebase si la découverte est impossible")
     p.add_argument("--pg-user", default="")
     p.add_argument("--pg-database", default="databricks_postgres")
-    p.add_argument("--pg-schema", default="public")
+    p.add_argument("--pg-schema", default="appro", help="schéma Postgres de l'application (APPRO_DB_SCHEMA)")
     p.add_argument("--tables", default="", help="sous-ensemble (fct_purchase_orders,fct_receipts…) ; vide = toutes")
     p.add_argument("--run-id", default="")
     return p

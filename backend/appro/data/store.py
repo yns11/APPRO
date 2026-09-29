@@ -284,9 +284,17 @@ class LakebaseCredentials:
             self._token = None
 
 
-def make_engine(url: str, credentials: LakebaseCredentials | None = None):
+def _search_path(schema: str | None) -> dict[str, Any]:
+    """psycopg ``connect_args`` placing the app schema first (``public`` stays visible)."""
+    if not schema or schema == "public":
+        return {}
+    return {"options": f"-c search_path={schema},public"}
+
+
+def make_engine(url: str, credentials: LakebaseCredentials | None = None, schema: str | None = None):
     """SQLAlchemy engine. ``url == "lakebase"`` builds the PostgreSQL engine from the injected
-    ``PG*`` variables ; the password is provided per connection by ``credentials`` (or ``PGPASSWORD``)."""
+    ``PG*`` variables ; the password is provided per connection by ``credentials`` (or ``PGPASSWORD``).
+    On PostgreSQL every connection works in ``schema`` (see ``init_store``)."""
     if url == "lakebase":
         host = os.environ["PGHOST"]
         db = os.environ.get("PGDATABASE", "databricks_postgres")
@@ -295,7 +303,8 @@ def make_engine(url: str, credentials: LakebaseCredentials | None = None):
         sslmode = os.environ.get("PGSSLMODE", "require")
         from urllib.parse import quote_plus
         engine = create_engine(f"postgresql+psycopg://{quote_plus(user)}@{host}:{port}/{db}?sslmode={sslmode}",
-                               pool_pre_ping=True, pool_size=4, max_overflow=4, pool_recycle=1500, future=True)
+                               pool_pre_ping=True, pool_size=4, max_overflow=4, pool_recycle=1500, future=True,
+                               connect_args=_search_path(schema))
         static = os.environ.get("PGPASSWORD")
 
         @event.listens_for(engine, "do_connect")
@@ -318,22 +327,47 @@ def make_engine(url: str, credentials: LakebaseCredentials | None = None):
             cur.execute("PRAGMA foreign_keys=ON")
             cur.close()
         return engine
-    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5, future=True)
+    extra = _search_path(schema) if url.startswith("postgresql") else {}
+    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5, future=True, connect_args=extra)
 
 
-def init_store(engine) -> sessionmaker[Session]:
+SCHEMA_HELP = (
+    "Le rôle de l'application ({user}) ne peut pas créer le schéma « {schema} » dans la base {db}. Avec un rôle "
+    "propriétaire du projet Lakebase (éditeur SQL), exécuter une fois : "
+    'GRANT CREATE ON DATABASE "{db}" TO "{user}"; puis redémarrer l\'application. '
+    "Cause d'origine : {exc}"
+)
+
+
+def ensure_schema(engine, schema: str | None) -> None:
+    """PostgreSQL : the app owns its schema (a Databricks App's role has no CREATE on ``public`` ;
+    ``CAN_CONNECT_AND_CREATE`` lets it create schemas in the database). Idempotent."""
+    if engine.dialect.name != "postgresql" or not schema or schema == "public":
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+    except Exception as exc:  # pragma: no cover - needs PostgreSQL
+        raise RuntimeError(SCHEMA_HELP.format(user=engine.url.username or "?", schema=schema,
+                                              db=engine.url.database or "?", exc=exc)) from exc
+
+
+def init_store(engine, schema: str | None = None) -> sessionmaker[Session]:
+    ensure_schema(engine, schema)
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 
-def grant_sync_role(engine, role: str) -> None:
+def grant_sync_role(engine, role: str, schema: str | None = None) -> None:
     """Let the synchronisation identity (a user or a service principal) write the ERP mirror tables
-    the app owns.  PostgreSQL only ; a failure is logged, never fatal."""
+    the app owns (and use the app schema).  PostgreSQL only ; a failure is logged, never fatal."""
     if not role or engine.dialect.name != "postgresql":
         return
     tables = [m.__tablename__ for m in ERP_MODELS.values()] + [ErpSyncLog.__tablename__]
     try:
         with engine.begin() as conn:
+            if schema and schema != "public":
+                conn.execute(text(f'GRANT USAGE ON SCHEMA "{schema}" TO "{role}"'))
             for t in tables:
                 conn.execute(text(f'GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON TABLE "{t}" TO "{role}"'))
         log.info("Droits d'écriture du miroir ERP accordés à %s", role)

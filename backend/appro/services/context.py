@@ -115,9 +115,9 @@ def get_context() -> AppContext:
                 creds = None
                 if settings.resolved_db_url == "lakebase":
                     creds = LakebaseCredentials(settings.lakebase_endpoint, settings.lakebase_branch)
-                engine = make_engine(settings.resolved_db_url, creds)
-                factory = init_store(engine)
-                grant_sync_role(engine, settings.sync_role or "")
+                engine = make_engine(settings.resolved_db_url, creds, settings.db_schema)
+                factory = init_store(engine, settings.db_schema)
+                grant_sync_role(engine, settings.sync_role or "", settings.db_schema)
                 source = build_source(settings, engine)
                 if settings.seed_reference_enabled:
                     n = bootstrap_reference(factory, settings.seed_dir)

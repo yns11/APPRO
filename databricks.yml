@@ -50,6 +50,12 @@ variables:
       Sert au job, qui ne reçoit aucune variable PG* de la plateforme.
     default: primary
 
+  app_schema:
+    description: >-
+      Schéma Postgres que l'application crée et possède (son rôle n'a pas CREATE sur « public »).
+      Le job écrit dans ce même schéma.
+    default: appro
+
   # --- Source ERP --------------------------------------------------------------
   uc_catalog:
     default: emotors_data_champions

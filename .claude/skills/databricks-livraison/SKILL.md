@@ -277,6 +277,17 @@ except Exception as exc:
 
 ### 4.1 Les droits Postgres du principal de service
 
+**`permission denied for schema public` au premier `CREATE TABLE`** (observé sur
+APPRO, App démarrée sans erreur, `/api/health` dégradé). Dans un projet Lakebase le
+schéma `public` appartient au rôle qui a créé la base ; depuis PostgreSQL 15 les
+autres rôles n'y ont que `USAGE`. `CAN_CONNECT_AND_CREATE` donne au principal de
+service `CONNECT` et `CREATE` **sur la base**, c'est-à-dire le droit de créer des
+**schémas**, pas des tables dans `public`. Parade sans geste manuel : l'application
+crée et possède son propre schéma (`CREATE SCHEMA IF NOT EXISTS appro`) et place
+`search_path=appro,public` dans les `connect_args` de chaque connexion ; le job
+écrit dans ce schéma. Si même `CREATE SCHEMA` est refusé, un seul ordre du
+propriétaire : `GRANT CREATE ON DATABASE <base> TO "<client_id>"`.
+
 La ressource attachée donne `CAN_CONNECT_AND_CREATE` : le droit de créer, pas
 celui de lire l'existant. Trois ordres, trois portées :
 

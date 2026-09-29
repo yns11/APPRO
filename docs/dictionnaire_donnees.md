@@ -167,7 +167,8 @@ vendredi) ; une version importée et active remplace cette table pour ses progra
 
 ## 3. Base applicative (écrite par l'application)
 
-Tables créées automatiquement au premier démarrage (`create_all`) dans Lakebase (schéma `public`) ; SQLite
+Tables créées automatiquement au premier démarrage (`create_all`) dans Lakebase, dans le schéma `appro`
+que l'application crée et possède (`APPRO_DB_SCHEMA` ; son rôle n'a pas `CREATE` sur `public`) ; SQLite
 en local. Chaque écriture est journalisée avec l'utilisateur.
 
 | Table | Contenu | Clé |
