@@ -4,12 +4,11 @@ Core recurrence (per day ``d`` after the snapshot day)::
 
     stock[d] = stock[d-1] + supply[d] + adjustments[d] - demand[d]
 
-Three cumulative stock layers are projected (see ``runner.py``):
+Two stock scenarios are projected (see ``runner.py``), from the reference stock (ERP snapshot
+corrected by the planner adjustments dated on or before it) :
 
-* **firm stock** – on-hand stock + *committed* supply (ERP firm orders / schedule lines, app
-  orders sent to the supplier, receipts and adjustments posted after the snapshot);
-* **forecast stock** – firm + ERP forecast schedule lines (DELFOR);
-* **simulated stock** – forecast + planned (app) orders + scenario orders + engine proposals.
+* **ERP scenario** – receipts + firm ERP orders as they are ;
+* **plan scenario** – receipts + plan cells (else the firm ERP orders) + CBN proposals.
 
 A physical stock can never be negative.  ``shortage_policy`` decides what happens to the
 demand that cannot be served:

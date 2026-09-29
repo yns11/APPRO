@@ -30,8 +30,8 @@ export default function ProposalsPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Complément CBN</h1><p>Besoins nets calculés sur le Scenario Plan : MOQ, conditionnement, délai, jours de livraison, quotas. Accepter une proposition dans la fiche article la transforme en ligne du plan.</p></div>
-        <div className="actions"><a className="btn" href={api.downloadUrl("/api/exports/orders.xlsx", { planner: engineParams.planner, scenario_id: engineParams.scenario_id })}><Download />Plan (xlsx)</a></div>
+        <div className="title"><h1>Propositions CBN</h1><p>Besoins nets calculés sur le Scenario Plan (MOQ, conditionnement, délai, jours de livraison, quotas), une proposition par fournisseur et par jour de livraison. Pour en reprendre une : taper la quantité dans la ligne Plan du tableau, la cellule grisée la prérempli.</p></div>
+        <div className="actions"><a className="btn" href={api.downloadUrl("/api/exports/plan.xlsx", { planner: engineParams.planner })}><Download />Plan (xlsx)</a></div>
       </div>
       <div className="grid kpis">
         <Kpi label="Propositions" value={q.data ? fmtInt(q.data.length) : "…"} tone="brand" meta={q.data ? `${fmtQty(q.data.reduce((s, p) => s + p.qty, 0))} unités` : ""} />

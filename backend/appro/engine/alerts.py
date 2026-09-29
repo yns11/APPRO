@@ -6,7 +6,7 @@ import datetime as dt
 import numpy as np
 
 from .demand import DayIndex
-from .models import Alert, AlertType, Article, EngineParams, OrderState, Proposal, Severity, SupplierLink
+from .models import Alert, AlertType, Article, EngineParams, Lane, Proposal, Severity, SupplierLink
 from .projection import Projection, first_shortage
 
 
@@ -29,7 +29,7 @@ def classify_alerts(
     coverage_plan: np.ndarray,
     stock_start: float,
     demand: np.ndarray,
-    orders: list[OrderState],
+    lanes: list[Lane],
     proposals: list[Proposal],
     links: list[SupplierLink],
     has_bom: bool,
@@ -107,18 +107,16 @@ def classify_alerts(
                             date=as_of, value=float(plan.stock[i0])))
 
     # --- supply --------------------------------------------------------------------
-    # Past ERP orders still open: excluded from the stocks, to be qualified by the planner (received
-    # by hand, really late → plan line with a date, or dead).  One alert per article.
-    late = [o for o in orders if o.status == "not_received"]
-    if late:
-        qty = float(sum(o.qty_open for o in late))
-        oldest = min(late, key=lambda o: o.expected_date)
-        alerts.append(Alert(aid, AlertType.LATE_ORDER, Severity.WARNING,
-                            f"{len(late)} commande(s) ERP passée(s) non reçue(s) ({qty:,.0f}) hors stocks : à dater "
-                            f"dans le plan si elles arrivent encore, sinon à clôturer",
-                            date=oldest.expected_date, value=qty,
-                            details={"count": len(late), "order_ids": [o.order_id for o in late],
-                                     "days_late": oldest.days_late}))
+    # Backlog: past firm ERP orders not covered by receipts over the backlog window.  Nothing to
+    # qualify: the planner types the quantity in the plan if it still arrives ; it ages out otherwise.
+    backlog = float(sum(l.backlog_qty for l in lanes))
+    if backlog > 1e-6:
+        who = ", ".join(f"{l.supplier_id or 'sans fournisseur'} {l.backlog_qty:,.0f}" for l in lanes if l.backlog_qty > 1e-6)
+        alerts.append(Alert(aid, AlertType.BACKLOG, Severity.WARNING,
+                            f"Backlog fournisseur {backlog:,.0f} : commandes fermes passées non reçues sur "
+                            f"{params.backlog_days} j ({who}) ; hors stocks, à reprendre dans le plan si elles arrivent encore",
+                            date=as_of, value=backlog, scope="erp",
+                            details={"lanes": {l.supplier_id or "": l.backlog_qty for l in lanes if l.backlog_qty > 1e-6}}))
     urgent = [p for p in proposals if p.urgent]
     if urgent:
         p = urgent[0]

@@ -1,76 +1,78 @@
 # Architecture
 
 ```
-┌────────────────────────────── Databricks App « appro » ──────────────────────────────┐
-│  client/  (React 18 + TypeScript + Vite)      ──── build ───►  client/dist (statique)  │
-│     pages : cockpit, fiche article, tableau d'appro, complément CBN, impact programmes, scénarios, saisies, imports, référentiel, paramètres │
-│     state : PerimeterContext (appro, scénario, horizon, granularité, thème)             │
-│     lib   : api.ts (fetch typé), queries.ts (TanStack Query), format.ts                 │
-│                                       │ /api (JSON, xlsx)                               │
-│  backend/appro/api  (FastAPI, uvicorn) ▼                                                │
-│     routers : mrp, entries, proposals, scenarios, pdp, files, reference(+params, audit)  │
-│     presenters : résultats moteur → schémas Pydantic                                    │
-│  backend/appro/services                                                                 │
-│     mrp_service : assemblage (ERP + saisies + surcharges + PDP actif + scénario) → moteur, cache │
-│     excel_service : export xlsx à formules / import (openpyxl)                            │
-│  backend/appro/engine  (pur Python + NumPy, sans I/O)                                   │
-│     calendar · demand · projection · proposals · alerts · scenario · runner             │
-│  backend/appro/data                                                                     │
-│     sources  : LocalCsvSource (data/seed) │ UnityCatalogSource (SQL warehouse)          │
-│     store    : SQLAlchemy (SQLite en local │ Lakebase PostgreSQL sur Databricks)         │
-│     assembler: frames canoniques → records moteur                                        │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-          ▲ lecture (service principal, CAN_USE)               ▲ lecture / écriture
-   Unity Catalog  <catalog>.<schema>.ref_* / fct_*      Lakebase  app_* (saisies, scénarios, PDP, audit)
+┌────────────────────────────── Databricks App « appro-<cible> » ──────────────────────────────┐
+│  main.py (racine) : backend/ sur sys.path, uvicorn sur DATABRICKS_APP_PORT                    │
+│  client/  (React 18 + TypeScript + Vite)      ──── build ───►  client/dist (statique)          │
+│     pages : cockpit, tableau d'appro, fiche article, propositions, saisies & journal,          │
+│             référentiel (CRUD + Excel), impact programmes, imports / exports, paramètres        │
+│     SimulationGrid : une voie par fournisseur, deux lignes saisies (Plan, Ajustement)           │
+│                                       │ /api (JSON, xlsx)                                       │
+│  backend/appro/api  (FastAPI)          ▼                                                        │
+│     routers : mrp (cockpit, projection, grille, backlog, propositions), entries (cellules,       │
+│               journal), reference (CRUD, modèles, paramètres, config), pdp, files (exports)      │
+│  backend/appro/services : context (sources + cache), mrp_service (assemblage → moteur,          │
+│               cellules), excel_service (classeur à formules, modèles, réimport)                  │
+│  backend/appro/engine  (pur Python + NumPy, sans I/O)                                           │
+│     calendar · demand · supply (voies, backlog) · projection · proposals · alerts · programs     │
+│  backend/appro/data                                                                             │
+│     schemas (canonique + libellés) · erp_sql (correspondance ERP) · sources (csv | uc | lakebase)│
+│     store (référentiel, cellules, miroir erp_*, jeton Lakebase) · reference (CRUD, Excel)        │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+          ▲ lecture / écriture (ressource postgres, CAN_CONNECT_AND_CREATE)
+   Lakebase  ref_* / fct_stock · app_* · erp_*  ◄──── job appro_sync_erp ◄──── Unity Catalog (commandes_edi, recep_edi)
 ```
 
 ## Principes
 
-* **Séparation stricte logique / UI** : le moteur (`appro.engine`) ne connaît ni pandas, ni la base,
-  ni HTTP. Il reçoit un `Dataset` (records) + `EngineParams` et renvoie un `MrpResult`. Il est testé
-  unitairement et contre les valeurs du classeur legacy.
-* **Déterminisme et performance** : calculs vectorisés NumPy sur une fenêtre glissante (index jour) ;
-  16 articles × 135 jours ≈ 20 ms ; complexité linéaire en articles × jours. Les résultats sont mis en cache
-  par (version des données, périmètre, paramètres, scénario) et invalidés à chaque écriture.
-* **Deux sources de vérité** : les données ERP (lecture seule : Unity Catalog par SQL warehouse, ou tables
-  synchronisées dans Lakebase) et les saisies applicatives (Lakebase). La fusion est explicite (`app_entries_into_dataset`) et paramétrable (`orders_source`).
-* **Extensibilité** : nouvelles règles = nouveau champ d'`EngineParams` (documenté automatiquement dans
-  l'écran Paramètres via `/api/params/schema`) ; nouvelle source = implémentation de `ErpSource` ;
-  nouveaux événements de scénario = une branche dans `scenario.apply_scenario`.
-* **Conception UI** (voir `client/src/styles/tokens.css`) : jetons de design (couleurs sémantiques, échelle
-  typographique ratio 1,25, espacements 4 px, rayons, ombres), mode clair / sombre, notation inspirée
-  IBCS : Scenario ERP = trait plein foncé, Scenario Plan = pointillé, cible = référence grise, plan = hachures, complément CBN = orange clair ; grille : couverture et manque portés par les cellules de stock (vert = normal, orange / rouge = seuils, neutre = surstock) ;
-  états chargement / vide / erreur / partiel sur chaque vue ; chaque KPI porte unité, période et fraîcheur.
+* **Deux lignes saisies, rien d'autre.** Le modèle applicatif se réduit à deux tables de cellules (plan par
+  fournisseur et jour, ajustement par jour). Aucun objet « commande », « ligne », « statut » n'est stocké :
+  l'ERP reste la référence par défaut de chaque cellule vide.
+* **Séparation stricte logique / UI** : le moteur (`appro.engine`) ne connaît ni pandas, ni la base, ni
+  HTTP. Il reçoit un `Dataset` (records) + `EngineParams` et renvoie un `MrpResult` ; testé unitairement et
+  contre les valeurs du classeur historique.
+* **Un seul schéma canonique** (`data/schemas.py`) pilote le seed CSV, les modèles ORM du référentiel et du
+  miroir, les modèles Excel, les imports et le dictionnaire. **Une seule correspondance ERP**
+  (`data/erp_sql.py`) sert au job et à la lecture directe.
+* **Le référentiel vit dans l'application** : les tables `ref_*` et le stock de référence sont dans la base
+  applicative, éditées à l'écran ou par fichier ; aucune dépendance à une table Unity Catalog de référentiel.
+* **Déterminisme et performance** : NumPy sur une fenêtre glissante ; 16 articles × 150 jours ≈ 90 ms ;
+  résultats en cache par (version des données, périmètre, paramètres), invalidés à chaque écriture.
+* **Livraison sans aller-retour** : `main.py` racine, `app.yaml` = `config` du bundle (testé), jeton Lakebase
+  par connexion, `sync.include` du frontend, vérificateur statique dans la suite de tests.
 
-## Flux de calcul d'une page
+## Flux d'une page
 
-1. Le client appelle `/api/cockpit` ou `/api/articles/{id}/projection` avec le périmètre courant.
-2. `mrp_service.compute` construit les paramètres (défauts ← configuration ← surcharges globales ←
-   requête), assemble le `Dataset` (dont le plan de livraison et les ajustements), applique le scénario, exécute `run_mrp` (dont l'impact programmes).
-3. Les présentateurs agrègent (jour / semaine) et sérialisent ; le client affiche, avec états.
-4. Toute écriture (saisie, décision, import, paramètre) journalise dans `app_audit_log` et incrémente la
-   version des données → invalidation du cache serveur et des requêtes client.
+1. Le client appelle `/api/cockpit`, `/api/grid` ou `/api/articles/{id}/projection` avec le périmètre.
+2. `mrp_service.compute` construit les paramètres (défauts ← configuration ← règles globales ← requête),
+   assemble le `Dataset` (référentiel depuis la base, faits depuis la source, cellules, PDP actif), exécute
+   `run_mrp`.
+3. Les présentateurs agrègent (jour / semaine), par voie fournisseur, et sérialisent.
+4. Toute écriture journalise dans `app_audit_log` et incrémente la version des données → invalidation du
+   cache serveur et des requêtes client.
 
 ## Arborescence
 
 ```
-backend/appro/engine/      moteur MRP (voir docs/regles_metier.md)
-backend/appro/data/        schémas canoniques, sources ERP, store SQLAlchemy, assembleur
-backend/appro/services/    contexte applicatif, service MRP, service Excel
-backend/appro/api/         FastAPI : routers, schémas, présentateurs, dépendances
-backend/tests/             pytest : unités moteur, non-régression Excel, API bout en bout
-client/src/                React : pages, composants UI, graphiques, état, styles (tokens)
-data/seed/                 jeu de données canonique extrait du classeur (démo / tests)
-scripts/                   extraction Excel, DDL Unity Catalog, chargeur de seed, build / deploy
-docs/                      analyse, règles métier, architecture, modèle de données, déploiement
-app.yaml · databricks.yml · start.sh · requirements.txt   packaging Databricks Apps
+main.py                    point d'entrée Databricks Apps (et python main.py)
+app.yaml · databricks.yml · resources/   manifeste et bundle (App + job)
+jobs/                      synchronisation ERP → Lakebase (spark_python_task et notebook), connexion Lakebase
+backend/appro/engine/      moteur MRP (docs/regles_metier.md)
+backend/appro/data/        schémas canoniques, correspondance ERP, sources, store, référentiel
+backend/appro/services/    contexte, service MRP, service Excel
+backend/appro/api/         FastAPI : routers, schémas, présentateurs
+backend/tests/             pytest : moteur, non-régression classeur, API, formules (LibreOffice), bundle
+client/src/                React : pages, composants, graphiques, état, styles (tokens)
+data/seed/                 jeu de démonstration (référentiel + faits)
+scripts/                   build.sh, deploy.sh / .ps1 / .cmd, extraction du classeur historique
+.claude/skills/databricks-livraison/   vérificateur statique du bundle et catalogue des pannes
+docs/                      règles métier, dictionnaire, modèle, architecture, déploiement, analyse du classeur
 ```
 
 ## Sécurité et identité
 
-* Sur Databricks Apps, l'accès aux données ERP se fait avec le **service principal** de l'app
-  (ressource SQL warehouse `CAN_USE`, Lakebase `CAN_CONNECT_AND_CREATE`). L'identité de l'utilisateur est
-  lue dans les en-têtes `x-forwarded-email` / `x-forwarded-preferred-username` pour la traçabilité.
-* Aucun identifiant n'est codé en dur : `DATABRICKS_WAREHOUSE_ID` et `PGHOST` sont injectés (`valueFrom`).
-* Le passage en OBO (token utilisateur, `sql` scope) est possible en remplaçant le `credentials_provider`
-  de `UnityCatalogSource` par le token de la requête si un contrôle d'accès par ligne est requis.
+* L'App accède à Lakebase avec son **principal de service** (ressource `postgres`) ; il est propriétaire des
+  tables et n'accorde au rôle de synchronisation que l'écriture des tables `erp_*`.
+* L'identité de l'utilisateur est lue dans `x-forwarded-email` pour la traçabilité.
+* Aucun identifiant n'est codé en dur : `PGHOST`… et `LAKEBASE_ENDPOINT` sont injectés par la plateforme ; le
+  jeton est régénéré par l'application.

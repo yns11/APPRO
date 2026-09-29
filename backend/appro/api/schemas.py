@@ -23,17 +23,7 @@ class ArticleRef(ORM):
     alert_yellow_days: int
     overstock_days: int
     safety_stock_qty: float = 0
-    lot_policy: str = "coverage"
     order_cycle_days: int = 7
-    active: bool = True
-
-
-class SupplierRef(ORM):
-    supplier_id: str
-    name: str
-    country: str = ""
-    contact: str = ""
-    delivery_weekdays: list[int]
     active: bool = True
 
 
@@ -57,13 +47,30 @@ class ProgramRef(ORM):
     components: int = 0
 
 
-class BomRef(ORM):
-    program_id: str
-    program_name: str = ""
-    article_id: str
-    qty_per: float
-    unit: str
-    scrap_pct: float = 0
+class RefColumn(BaseModel):
+    name: str
+    label: str
+    type: str
+    key: bool
+    required: bool
+    description: str = ""
+
+
+class RefTableInfo(BaseModel):
+    name: str
+    label: str
+    description: str
+    key: list[str]
+    columns: list[RefColumn]
+    rows: int
+
+
+class RefRowIn(BaseModel):
+    values: dict[str, Any]
+
+
+class RefKeyIn(BaseModel):
+    key: dict[str, Any]
 
 
 # ------------------------------------------------------------------ engine outputs
@@ -99,52 +106,33 @@ class ProposalOut(BaseModel):
     projected_stock_after: float
 
 
-class SupplyEventOut(BaseModel):
-    date: dt.date
-    kind: str
-    ref: str
-    qty: float
-    supplier_id: str | None
-    order_type: str
-    source: str
-    late: bool = False
-
-
-class OrderStateOut(BaseModel):
-    """One open order (delivery slot) as seen by the run: ERP placement, plan quantity, status."""
-
+class OrderInfoOut(BaseModel):
     order_id: str
-    article_id: str
-    designation: str = ""
-    unit: str = ""
     supplier_id: str | None
     order_type: str
-    source: str
     expected_date: dt.date
     qty_ordered: float
     qty_open: float
-    qty_expected: float
-    days_late: int
-    status: Literal["expected", "planned", "not_received", "info"]
-    plan_qty: float = 0.0
-    plan_dates: list[dt.date] = Field(default_factory=list)
-    note: str = ""
+    ref: str = ""
 
 
-class PlanLineStateOut(BaseModel):
-    """One line of the delivery plan as displayed (stored line, ERP order as is, CBN, expired)."""
+class SeriesOut(BaseModel):
+    key: str
+    label: str
+    values: list[float]
 
-    line_id: str | None
-    order_id: str | None
-    article_id: str
-    date: dt.date
-    qty: float
+
+class LaneOut(BaseModel):
+    """One supplier of the article: its own Ferme / Prévisionnel / Reçu / Plan rows."""
+
     supplier_id: str | None
-    origin: Literal["erp", "override", "free", "cbn", "expired"]
-    counted: bool
-    erp_date: dt.date | None = None
-    erp_qty: float | None = None
-    note: str = ""
+    name: str
+    series: list[SeriesOut]
+    plan_typed: list[bool]
+    backlog_ordered: float
+    backlog_received: float
+    backlog_qty: float
+    orders: list[OrderInfoOut] = Field(default_factory=list)
 
 
 class ArticleSummary(BaseModel):
@@ -156,7 +144,18 @@ class ArticleSummary(BaseModel):
     severity: str | None
     kpis: dict[str, Any]
     alert_types: list[str]
-    sparkline: list[float]  # simulated stock, weekly samples over the horizon
+    sparkline: list[float]  # plan stock, weekly samples over the horizon
+
+
+class BacklogRow(BaseModel):
+    article_id: str
+    designation: str
+    unit: str
+    supplier_id: str | None
+    supplier_name: str
+    ordered: float
+    received: float
+    backlog: float
 
 
 class CockpitKpis(BaseModel):
@@ -167,13 +166,13 @@ class CockpitKpis(BaseModel):
     stockouts_7d: int
     low_coverage: int
     overstock: int
-    late_orders: int             # ERP orders past and not received (to qualify)
-    backlog_qty: float           # their remaining quantity
+    backlog_articles: int        # articles with a supplier backlog
+    backlog_qty: float
     proposals: int
     urgent_proposals: int
     proposals_qty: float
-    plan_articles: int           # articles with at least one stored plan line
-    plan_qty: float              # delivery plan over the horizon
+    plan_articles: int           # articles with at least one typed plan cell
+    plan_qty: float
     open_firm_qty: float
     open_forecast_qty: float
     avg_coverage_days: float | None
@@ -184,21 +183,15 @@ class CockpitResponse(BaseModel):
     as_of: dt.date
     horizon_days: int
     planner: str | None
-    scenario_id: str | None
     data_source: str
     pdp_version: dict[str, Any] | None
     kpis: CockpitKpis
     articles: list[ArticleSummary]
     alerts: list[AlertOut]
     proposals: list[ProposalOut]
+    backlog: list[BacklogRow]
     diagnostics: list[str]
     weekly_supply_demand: list[dict[str, Any]]
-
-
-class SeriesOut(BaseModel):
-    key: str
-    label: str
-    values: list[float]
 
 
 class ProjectionResponse(BaseModel):
@@ -209,14 +202,12 @@ class ProjectionResponse(BaseModel):
     period_start: list[dt.date]
     period_end: list[dt.date]
     series: list[SeriesOut]
-    events: list[SupplyEventOut]
+    lanes: list[LaneOut]
     proposals: list[ProposalOut]
     alerts: list[AlertOut]
     kpis: dict[str, Any]
     suppliers: list[LinkRef]
     programs: list[dict[str, Any]]
-    orders: list[OrderStateOut] = Field(default_factory=list)
-    plan_lines: list[PlanLineStateOut] = Field(default_factory=list)
     diagnostics: list[str]
 
 
@@ -225,12 +216,10 @@ class GridArticle(BaseModel):
 
     article: ArticleRef
     series: list[SeriesOut]
-    events: list[SupplyEventOut]
+    lanes: list[LaneOut]
     kpis: dict[str, Any]
     suppliers: list[LinkRef]
     programs: list[str]
-    orders: list[OrderStateOut] = Field(default_factory=list)
-    plan_lines: list[PlanLineStateOut] = Field(default_factory=list)
 
 
 class GridResponse(BaseModel):
@@ -250,158 +239,47 @@ class ProgramImpactResponse(BaseModel):
     diagnostics: list[str]
 
 
-# ------------------------------------------------------------------ entries
-class OrderIn(BaseModel):
-    """A real order placed with the supplier outside the ERP (firm, counted in both scenarios).
-    The expected date is today or later, unless ``force`` records an old order still due."""
-
-    article_id: str
-    supplier_id: str | None = None
-    expected_date: dt.date
-    qty: float = Field(gt=0)
-    order_type: Literal["FIRM"] = "FIRM"
-    note: str = ""
-    force: bool = False
-
-
-class OrderUpdate(BaseModel):
-    supplier_id: str | None = None
-    expected_date: dt.date | None = None
-    qty: float | None = Field(None, gt=0)
-    order_type: Literal["PLANNED", "FIRM"] | None = None
-    status: Literal["OPEN", "SENT", "RECEIVED", "CANCELLED"] | None = None
-    note: str | None = None
-
-
-class OrderOut(ORM):
-    id: str
-    article_id: str
-    supplier_id: str | None
-    expected_date: dt.date
-    qty: float
-    unit: str
-    order_type: str
-    status: str
-    source: str
-    erp_order_id: str | None
-    proposal_id: str | None
-    note: str
-    created_by: str
-    created_at: dt.datetime
-    updated_at: dt.datetime
-
-
-class ReceiptIn(BaseModel):
-    """A receipt observed (a fact): dated after the stock snapshot and at most today."""
-
-    article_id: str
-    supplier_id: str | None = None
-    order_id: str | None = None
-    receipt_date: dt.date
-    qty: float = Field(gt=0)
-    note: str = ""
-
-
-class ReceiptOut(ORM):
-    id: str
-    article_id: str
-    supplier_id: str | None
-    order_id: str | None
-    receipt_date: dt.date
-    qty: float
-    note: str
-    created_by: str
-    created_at: dt.datetime
-
-
+# ------------------------------------------------------------------ the two editable rows
 class AdjustmentIn(BaseModel):
+    """An adjustment cell: signed quantity or arithmetic expression (blank or 0 = clear) ; any date
+    (on/before the reference day it corrects the reference stock).  ``expression`` omitted = note only."""
+
     article_id: str
     date: dt.date
-    qty: float
-    movement_type: str = "INVENTORY_ADJUSTMENT"
-    comment: str = ""
+    expression: str | None = Field(None, max_length=200)
+    note: str | None = Field(None, max_length=500)
 
 
 class AdjustmentOut(ORM):
     id: str
     article_id: str
     date: dt.date
-    qty: float
-    movement_type: str
-    comment: str
-    created_by: str
-    created_at: dt.datetime
-
-
-class ProductionActualIn(BaseModel):
-    program_id: str
-    date: dt.date
-    qty: float = Field(ge=0)
-
-
-class ProductionActualOut(ORM):
-    id: str
-    program_id: str
-    date: dt.date
-    qty: float
-    created_by: str
-    created_at: dt.datetime
-
-
-# ------------------------------------------------------------------ simulation cells / CBN
-class CellIn(BaseModel):
-    """An adjustment typed in the grid (any date ; on/before the reference day it corrects the reference stock)."""
-
-    article_id: str
-    date: dt.date
-    kind: Literal["adjustment"] = "adjustment"
-    expression: str = Field("", max_length=200, description="quantité signée ou expression arithmétique ; vide ou 0 = effacer")
-
-
-class CellOut(ORM):
-    id: str
-    article_id: str
-    date: dt.date
-    kind: str
     expression: str
     qty: float
-    source: str
     note: str
     updated_by: str
     updated_at: dt.datetime
 
 
-class PlanLineIn(BaseModel):
-    """Create or update one line of the delivery plan."""
-
-    article_id: str
-    date: dt.date
-    qty: float = Field(ge=0)
-    order_id: str | None = None
-    supplier_id: str | None = None
-    note: str = ""
-    line_id: str | None = None
-
-
 class PlanCellIn(BaseModel):
-    """Set the planned quantity of one day from the grid cell (quantity or expression ; blank = ERP / nothing)."""
+    """A plan cell: the quantity expected from ``supplier_id`` that day (0 = nothing) ; blank = back
+    to the ERP.  ``expression`` omitted = note only."""
 
     article_id: str
+    supplier_id: str | None = None
     date: dt.date
-    expression: str = Field("", max_length=200)
+    expression: str | None = Field(None, max_length=200)
+    note: str | None = Field(None, max_length=500)
 
 
-class PlanLineOut(ORM):
+class PlanCellOut(ORM):
     id: str
     article_id: str
-    order_id: str | None
-    supplier_id: str | None
+    supplier_id: str
     date: dt.date
+    expression: str
     qty: float
-    source: str
     note: str
-    erp: dict[str, Any]
-    created_by: str
     updated_by: str
     updated_at: dt.datetime
 
@@ -420,74 +298,9 @@ class WeeklyParamsResponse(BaseModel):
     weeks: list[WeeklyParamRow]
 
 
-# ------------------------------------------------------------------ scenarios
-EVENT_KINDS = ("add_order", "move_order", "change_order_qty", "cancel_order", "plan_factor", "set_plan",
-               "set_actual", "add_movement", "set_article_param", "set_link_param")
-
-
-class ScenarioEventIn(BaseModel):
-    kind: str
-    payload: dict[str, Any] = Field(default_factory=dict)
-    label: str = ""
-
-
-class ScenarioEventOut(ScenarioEventIn):
-    id: str
-    seq: int
-
-
-class ScenarioIn(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    description: str = ""
-    params: dict[str, Any] = Field(default_factory=dict)
-    events: list[ScenarioEventIn] = Field(default_factory=list)
-
-
-class ScenarioOut(BaseModel):
-    id: str
-    name: str
-    description: str
-    status: str
-    params: dict[str, Any]
-    events: list[ScenarioEventOut]
-    created_by: str
-    created_at: dt.datetime
-    updated_at: dt.datetime
-
-
-class SimulateRequest(BaseModel):
-    """Ad-hoc simulation (not saved)."""
-
-    article_ids: list[str] | None = None
-    planner: str | None = None
-    scenario_id: str | None = None
-    events: list[ScenarioEventIn] = Field(default_factory=list)
-    params: dict[str, Any] = Field(default_factory=dict)
-
-
-class CompareArticle(BaseModel):
-    article_id: str
-    designation: str
-    unit: str
-    base: dict[str, Any]
-    scenario: dict[str, Any]
-    delta_min_stock: float
-    delta_max_shortage: float = 0.0
-    delta_coverage: int
-    stockout_changed: bool
-
-
-class CompareResponse(BaseModel):
-    as_of: dt.date
-    base_kpis: CockpitKpis
-    scenario_kpis: CockpitKpis
-    articles: list[CompareArticle]
-    diagnostics: list[str]
-
-
 # ------------------------------------------------------------------ params / pdp / audit
 class ParamOverrideIn(BaseModel):
-    scope: Literal["global", "article", "article_week", "link"]
+    scope: Literal["global", "article_week"]
     key1: str = ""
     key2: str = ""
     field: str
@@ -554,3 +367,4 @@ class ConfigOut(BaseModel):
     default_planner: str | None
     user: str
     version: str
+    reference_empty: bool

@@ -1,12 +1,10 @@
 import { useMemo, useState } from "react";
 import { Download, Search } from "lucide-react";
-import { useCells, useCockpit, useGrid, usePrograms, useSuppliers } from "@/lib/queries";
+import { useAdjustments, useGrid, usePlanCells, usePrograms, useRefRows } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
 import { Card, Empty, ErrorBox, Segmented, SkeletonBlock } from "@/components/ui";
-import { EntryDrawer, type EntryDraft } from "@/components/EntryDrawer";
 import { SimulationGrid } from "@/components/SimulationGrid";
-import { PlanDrawer, type PlanTarget } from "@/components/PlanDrawer";
 
 /** Supply table: the simulation grid of every article of the perimeter, one below the other, with filters. */
 export default function SupplyTablePage() {
@@ -14,21 +12,14 @@ export default function SupplyTablePage() {
   const [program, setProgram] = useState("");
   const [supplier, setSupplier] = useState("");
   const [search, setSearch] = useState("");
-  const [draft, setDraft] = useState<EntryDraft | null>(null);
-  const [target, setTarget] = useState<PlanTarget | null>(null);
   const programs = usePrograms();
-  const suppliers = useSuppliers();
-  const cockpit = useCockpit();
+  const suppliers = useRefRows("ref_suppliers");
   const grid = useGrid({ program_id: program || undefined, supplier_id: supplier || undefined });
-  const cells = useCells();
+  const planCells = usePlanCells();
+  const adjustments = useAdjustments();
   const s = search.trim().toLowerCase();
   const articles = useMemo(() => (grid.data?.articles ?? []).filter((a) => !s || `${a.article.article_id} ${a.article.designation}`.toLowerCase().includes(s)), [grid.data, s]);
-  const liveTarget = useMemo(() => {
-    if (!target) return null;
-    const a = grid.data?.articles.find((x) => x.article.article_id === target.article_id);
-    return a ? { ...target, lines: a.plan_lines, orders: a.orders } : target;
-  }, [target, grid.data]);
-  const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { planner: engineParams.planner, scenario_id: engineParams.scenario_id, granularity: perimeter.granularity === "default" ? "day" : perimeter.granularity, horizon_days: engineParams.horizon_days, article_ids: articles.map((a) => a.article.article_id) });
+  const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { planner: engineParams.planner, granularity: perimeter.granularity === "week" ? "week" : "day", horizon_days: engineParams.horizon_days, article_ids: articles.map((a) => a.article.article_id) });
 
   return (
     <div className="page">
@@ -48,20 +39,18 @@ export default function SupplyTablePage() {
           </select>
           <select className="select sm" value={supplier} onChange={(e) => setSupplier(e.target.value)} style={{ width: 240 }} aria-label="Fournisseur">
             <option value="">Tous les fournisseurs</option>
-            {(suppliers.data ?? []).map((x) => <option key={x.supplier_id} value={x.supplier_id}>{x.supplier_id} · {x.name}</option>)}
+            {(suppliers.data ?? []).map((x) => <option key={String(x.supplier_id)} value={String(x.supplier_id)}>{String(x.supplier_id)} · {String(x.name)}</option>)}
           </select>
           <div className="search"><Search /><input className="input sm" placeholder="Article, désignation…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240 }} aria-label="Article" /></div>
           <span className="small subtle">{grid.data ? `${articles.length} article(s) · ${grid.data.periods.length} colonnes` : ""}</span>
         </div>
       </Card>
 
-      {grid.isError ? <ErrorBox error={grid.error} retry={() => grid.refetch()} /> : grid.isLoading || !grid.data ? <Card><SkeletonBlock rows={12} /></Card> : articles.length === 0 ? <Empty title="Aucun article" hint="Modifiez les filtres." /> : (
+      {grid.isError ? <ErrorBox error={grid.error} retry={() => grid.refetch()} /> : grid.isLoading || !grid.data ? <Card><SkeletonBlock rows={12} /></Card> : articles.length === 0 ? <Empty title="Aucun article" hint="Modifiez les filtres, ou chargez le référentiel (page Référentiel)." /> : (
         <Card flush tight>
-          <SimulationGrid cols={grid.data} articles={articles} cells={cells.data ?? []} onEntry={setDraft} onPlan={setTarget} showArticleRows />
+          <SimulationGrid cols={grid.data} articles={articles} planCells={planCells.data ?? []} adjustments={adjustments.data ?? []} showArticleRows onSwitchDay={() => set({ granularity: "day" })} />
         </Card>
       )}
-      <EntryDrawer draft={draft} onClose={() => setDraft(null)} articles={(cockpit.data?.articles ?? []).map((a) => ({ article_id: a.article_id, designation: a.designation, unit: a.unit }))} />
-      <PlanDrawer target={liveTarget} onClose={() => setTarget(null)} />
     </div>
   );
 }

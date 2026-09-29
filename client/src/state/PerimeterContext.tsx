@@ -3,13 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { ConfigOut } from "@/lib/types";
 
-/** Global "perimeter" of the analysis: planner, scenario, horizon, granularity, theme. */
+/** Global "perimeter" of the analysis: planner, horizon, granularity, theme, hidden grid rows. */
 export interface Perimeter {
   planner: string | null;
-  scenarioId: string | null;
   horizonDays: number;
   granularity: "default" | "day" | "week";
   theme: "light" | "dark" | "system";
+  /** keys of the simulation grid rows hidden for every article (e.g. "orders_forecast", "stock_erp") */
+  hiddenRows: string[];
 }
 
 interface Ctx {
@@ -18,11 +19,11 @@ interface Ctx {
   config: ConfigOut | undefined;
   configError: Error | null;
   /** query params shared by every engine call */
-  engineParams: Record<string, string | number | boolean | null>;
+  engineParams: { planner: string | null; horizon_days: number };
 }
 
-const KEY = "appro.perimeter.v1";
-const defaults: Perimeter = { planner: null, scenarioId: null, horizonDays: 120, granularity: "default", theme: "system" };
+const KEY = "appro.perimeter.v2";
+const defaults: Perimeter = { planner: null, horizonDays: 120, granularity: "default", theme: "system", hiddenRows: [] };
 
 function load(): Perimeter {
   try {
@@ -43,12 +44,10 @@ export function PerimeterProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(KEY, JSON.stringify(perimeter)); } catch { /* private mode */ }
   }, [perimeter]);
 
-  // default planner from the config on first load
   useEffect(() => {
     if (config && perimeter.planner === null && config.default_planner) setPerimeter((p) => ({ ...p, planner: config.default_planner }));
   }, [config, perimeter.planner]);
 
-  // theme
   useEffect(() => {
     const root = document.documentElement;
     const apply = () => {
@@ -62,10 +61,7 @@ export function PerimeterProvider({ children }: { children: ReactNode }) {
   }, [perimeter.theme]);
 
   const set = useCallback((patch: Partial<Perimeter>) => setPerimeter((p) => ({ ...p, ...patch })), []);
-  const engineParams = useMemo(() => ({
-    planner: perimeter.planner, scenario_id: perimeter.scenarioId, horizon_days: perimeter.horizonDays,
-  }), [perimeter.planner, perimeter.scenarioId, perimeter.horizonDays]);
-
+  const engineParams = useMemo(() => ({ planner: perimeter.planner, horizon_days: perimeter.horizonDays }), [perimeter.planner, perimeter.horizonDays]);
   const value = useMemo(() => ({ perimeter, set, config, configError: error as Error | null, engineParams }), [perimeter, set, config, error, engineParams]);
   return <PerimeterCtx.Provider value={value}>{children}</PerimeterCtx.Provider>;
 }

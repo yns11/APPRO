@@ -1,14 +1,18 @@
-"""Cockpit, article projection, multi-article grid, programme impact, alerts, proposals and ad-hoc simulation."""
+"""Cockpit, article projection, multi-article grid, backlog, programme impact, alerts, proposals."""
 from __future__ import annotations
 
 import datetime as dt
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ...data.assembler import erp_dataset
+from ...data.store import ParamOverride
+from ...engine.calendar import iso_week_label, iso_week_monday
 from ...engine.models import WEEKLY_FIELDS
-from ...engine.scenario import ScenarioEvent
+from ...engine.runner import resolve_as_of
 from ...services import mrp_service
 from ...services.context import AppContext
 from .. import presenters as P
@@ -17,26 +21,22 @@ from ..deps import ctx_dep, session_dep
 
 router = APIRouter(prefix="/api", tags=["mrp"])
 
-ENGINE_QUERY = dict(
-    horizon_days=Query(None, ge=7, le=730), as_of=Query(None), production_mode=Query(None),
-    orders_source=Query(None), coverage_unit=Query(None), generate_proposals=Query(None),
-    include_proposals_in_simulation=Query(None), respect_lead_time=Query(None), frozen_days=Query(None, ge=0),
-    late_order_policy=Query(None), sourcing_policy=Query(None), spread_rounding=Query(None),
-)
+HORIZON = Query(None, ge=7, le=730)
+HISTORY = Query(None, ge=0, le=365)
 
 
-def _param_kwargs(**kw):
+def _kw(**kw):
     return {k: v for k, v in kw.items() if v is not None}
 
 
 def _supplier_names(ctx: AppContext) -> dict[str, str]:
-    df = ctx.source.table("ref_suppliers")
+    df = ctx.table("ref_suppliers")
     return dict(zip(df["supplier_id"], df["name"]))
 
 
 def _programs_for(ctx: AppContext, article_id: str, result) -> list[dict]:
-    bom = ctx.source.table("ref_bom")
-    prg = ctx.source.table("ref_programs")
+    bom = ctx.table("ref_bom")
+    prg = ctx.table("ref_programs")
     names = dict(zip(prg["program_id"], prg["name"]))
     rows = bom[bom["article_id"] == article_id]
     out = []
@@ -49,52 +49,27 @@ def _programs_for(ctx: AppContext, article_id: str, result) -> list[dict]:
 
 
 @router.get("/cockpit", response_model=S.CockpitResponse)
-def cockpit(planner: str | None = None, scenario_id: str | None = None, article_ids: list[str] | None = Query(None),
-            horizon_days: int | None = ENGINE_QUERY["horizon_days"], as_of: dt.date | None = None,
-            production_mode: str | None = None, orders_source: str | None = None, coverage_unit: str | None = None,
-            generate_proposals: bool | None = None, respect_lead_time: bool | None = None,
-            frozen_days: int | None = None, late_order_policy: str | None = None,
-            ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    try:
-        result = mrp_service.compute(ctx, session, planner=planner, article_ids=article_ids, scenario_id=scenario_id,
-                                     **_param_kwargs(horizon_days=horizon_days, as_of=as_of,
-                                                     production_mode=production_mode, orders_source=orders_source,
-                                                     coverage_unit=coverage_unit, generate_proposals=generate_proposals,
-                                                     respect_lead_time=respect_lead_time, frozen_days=frozen_days,
-                                                     late_order_policy=late_order_policy))
-    except KeyError as exc:
-        raise HTTPException(404, f"Scénario inconnu : {exc}")
+def cockpit(planner: str | None = None, article_ids: list[str] | None = Query(None), horizon_days: int | None = HORIZON,
+            generate_proposals: bool | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    result = mrp_service.compute(ctx, session, planner=planner, article_ids=article_ids,
+                                 **_kw(horizon_days=horizon_days, generate_proposals=generate_proposals))
     names = _supplier_names(ctx)
     arts = sorted(result.articles.values(), key=lambda r: ({"critical": 0, "warning": 1, "info": 2}.get(r.kpis.get("severity") or "", 3),
                                                             r.kpis["coverage_plan_days"], r.article.article_id))
-    meta = result.articles and next(iter(result.articles.values()))
     return S.CockpitResponse(
-        as_of=result.as_of, horizon_days=result.params.horizon_days, planner=planner, scenario_id=scenario_id,
-        data_source=ctx.source.name, pdp_version=None if not meta else getattr(meta, "pdp_version", None),
-        kpis=P.cockpit_kpis(result), articles=[P.article_summary(r) for r in arts],
+        as_of=result.as_of, horizon_days=result.params.horizon_days, planner=planner, data_source=ctx.source.name,
+        pdp_version=None, kpis=P.cockpit_kpis(result), articles=[P.article_summary(r) for r in arts],
         alerts=[P.alert_out(a, r.article.designation) for r in arts for a in r.alerts],
-        proposals=[P.proposal_out(p, r, names) for r in arts for p in r.proposals],
+        proposals=[P.proposal_out(p, r, names) for r in arts for p in r.proposals], backlog=P.backlog_rows(result),
         diagnostics=result.diagnostics, weekly_supply_demand=P.weekly_supply_demand(result))
 
 
 @router.get("/articles/{article_id}/projection", response_model=S.ProjectionResponse)
-def projection(article_id: str, granularity: Literal["default", "day", "week"] = "default", scenario_id: str | None = None,
-               horizon_days: int | None = ENGINE_QUERY["horizon_days"], as_of: dt.date | None = None,
-               production_mode: str | None = None, orders_source: str | None = None, coverage_unit: str | None = None,
-               generate_proposals: bool | None = None, include_proposals_in_simulation: bool | None = None,
-               respect_lead_time: bool | None = None, frozen_days: int | None = None,
-               late_order_policy: str | None = None, history_days: int | None = Query(None, ge=0, le=365),
+def projection(article_id: str, granularity: Literal["default", "day", "week"] = "default",
+               horizon_days: int | None = HORIZON, history_days: int | None = HISTORY, generate_proposals: bool | None = None,
                ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    try:
-        result = mrp_service.compute(ctx, session, article_ids=[article_id], scenario_id=scenario_id,
-                                     **_param_kwargs(horizon_days=horizon_days, as_of=as_of, production_mode=production_mode,
-                                                     orders_source=orders_source, coverage_unit=coverage_unit,
-                                                     generate_proposals=generate_proposals,
-                                                     include_proposals_in_simulation=include_proposals_in_simulation,
-                                                     respect_lead_time=respect_lead_time, frozen_days=frozen_days,
-                                                     late_order_policy=late_order_policy, history_days=history_days))
-    except KeyError as exc:
-        raise HTTPException(404, f"Scénario inconnu : {exc}")
+    result = mrp_service.compute(ctx, session, article_ids=[article_id],
+                                 **_kw(horizon_days=horizon_days, history_days=history_days, generate_proposals=generate_proposals))
     ar = result.articles.get(article_id)
     if ar is None:
         raise HTTPException(404, f"Article inconnu : {article_id}")
@@ -102,52 +77,43 @@ def projection(article_id: str, granularity: Literal["default", "day", "week"] =
 
 
 def _programs_of(ctx: AppContext) -> dict[str, list[str]]:
-    bom = ctx.source.table("ref_bom")
     out: dict[str, list[str]] = {}
-    for r in bom.to_dict("records"):
+    for r in ctx.table("ref_bom").to_dict("records"):
         out.setdefault(r["article_id"], []).append(r["program_id"])
     return out
 
 
 @router.get("/grid", response_model=S.GridResponse)
-def grid(planner: str | None = None, scenario_id: str | None = None, article_ids: list[str] | None = Query(None),
-         program_id: str | None = None, supplier_id: str | None = None,
-         granularity: Literal["default", "day", "week"] = "default",
-         horizon_days: int | None = ENGINE_QUERY["horizon_days"], history_days: int | None = Query(None, ge=0, le=365),
+def grid(planner: str | None = None, article_ids: list[str] | None = Query(None), program_id: str | None = None,
+         supplier_id: str | None = None, granularity: Literal["default", "day", "week"] = "default",
+         horizon_days: int | None = HORIZON, history_days: int | None = HISTORY,
          ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """Supply table of several articles on the same columns (filters: articles, programme, supplier)."""
     ids = set(article_ids or [])
     if program_id:
-        bom = ctx.source.table("ref_bom")
+        bom = ctx.table("ref_bom")
         prog_ids = set(bom[bom["program_id"] == program_id]["article_id"])
-        ids = ids & prog_ids if ids else prog_ids
-        if not ids:
-            ids = {"__none__"}
+        ids = (ids & prog_ids if ids else prog_ids) or {"__none__"}
     if supplier_id:
-        lk = ctx.source.table("ref_article_suppliers")
+        lk = ctx.table("ref_article_suppliers")
         sup_ids = set(lk[lk["supplier_id"] == supplier_id]["article_id"])
-        ids = ids & sup_ids if ids else sup_ids
-        if not ids:
-            ids = {"__none__"}
-    try:
-        result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
-                                     scenario_id=scenario_id,
-                                     **_param_kwargs(horizon_days=horizon_days, history_days=history_days))
-    except KeyError as exc:
-        raise HTTPException(404, f"Scénario inconnu : {exc}")
+        ids = (ids & sup_ids if ids else sup_ids) or {"__none__"}
+    result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
+                                 **_kw(horizon_days=horizon_days, history_days=history_days))
     return P.grid_out(result, granularity, _supplier_names(ctx), _programs_of(ctx))
 
 
+@router.get("/backlog", response_model=list[S.BacklogRow])
+def backlog(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Supplier backlog: past firm ERP orders of the backlog window not covered by receipts."""
+    return P.backlog_rows(mrp_service.compute(ctx, session, planner=planner))
+
+
 @router.get("/programs/impact", response_model=S.ProgramImpactResponse)
-def programs_impact(planner: str | None = None, scenario_id: str | None = None,
-                    horizon_days: int | None = ENGINE_QUERY["horizon_days"],
+def programs_impact(planner: str | None = None, horizon_days: int | None = HORIZON,
                     ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """Feasible production per programme and week, for the on-hand / ERP / plan stocks."""
-    try:
-        result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id,
-                                     **_param_kwargs(horizon_days=horizon_days))
-    except KeyError as exc:
-        raise HTTPException(404, f"Scénario inconnu : {exc}")
+    result = mrp_service.compute(ctx, session, planner=planner, **_kw(horizon_days=horizon_days))
     return S.ProgramImpactResponse(as_of=result.as_of, weeks=result.program_impact.get("weeks", []),
                                    programs=result.program_impact.get("programs", []), diagnostics=result.diagnostics)
 
@@ -156,16 +122,10 @@ def programs_impact(planner: str | None = None, scenario_id: str | None = None,
 def weekly_params(article_id: str, weeks: int = Query(26, ge=1, le=104), ctx: AppContext = Depends(ctx_dep),
                   session: Session = Depends(session_dep)):
     """Stock-policy parameters per ISO week from the reference week (article values, weekly overrides)."""
-    from sqlalchemy import select
-
-    from ...data.assembler import erp_dataset
-    from ...data.store import ParamOverride
-    from ...engine.calendar import iso_week_label, iso_week_monday
-    from ...engine.runner import resolve_as_of
-    ds = erp_dataset(ctx.source, article_ids=[article_id])
+    ds = erp_dataset(ctx.table, article_ids=[article_id])
     if not ds.articles:
         raise HTTPException(404, f"Article inconnu : {article_id}")
-    mrp_service.apply_overrides(ds, session.scalars(select(ParamOverride).where(ParamOverride.scope != "global")).all())
+    mrp_service.apply_weekly_overrides(ds, session.scalars(select(ParamOverride).where(ParamOverride.scope == "article_week")).all())
     a = ds.articles[0]
     params = mrp_service.build_params(ctx, session)
     monday = iso_week_monday(resolve_as_of(ds, params))
@@ -179,31 +139,10 @@ def weekly_params(article_id: str, weeks: int = Query(26, ge=1, le=104), ctx: Ap
                                   defaults={f: float(getattr(a, f)) for f in WEEKLY_FIELDS}, weeks=rows)
 
 
-@router.get("/orders", response_model=list[S.OrderStateOut])
-def orders(planner: str | None = None, scenario_id: str | None = None, article_id: str | None = None,
-           status: list[str] | None = Query(None), not_received: bool = False,
-           ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Open orders (delivery slots) of the perimeter with their plan quantity and status.
-
-    ``not_received=true`` keeps the past ERP orders still open (excluded from the stocks): to be
-    dated in the plan if they still arrive, or closed."""
-    try:
-        result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id,
-                                     article_ids=[article_id] if article_id else None)
-    except KeyError as exc:
-        raise HTTPException(404, f"Scénario inconnu : {exc}")
-    out = [P.order_state_out(o, r) for r in result.articles.values() for o in r.orders]
-    if not_received:
-        out = [o for o in out if o.status == "not_received"]
-    if status:
-        out = [o for o in out if o.status in status]
-    return sorted(out, key=lambda o: (o.expected_date, o.article_id, o.order_id))
-
-
 @router.get("/alerts", response_model=list[S.AlertOut])
-def alerts(planner: str | None = None, scenario_id: str | None = None, severity: str | None = None,
-           alert_type: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id)
+def alerts(planner: str | None = None, severity: str | None = None, alert_type: str | None = None,
+           ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    result = mrp_service.compute(ctx, session, planner=planner)
     out = [P.alert_out(a, r.article.designation) for r in result.articles.values() for a in r.alerts]
     if severity:
         out = [a for a in out if a.severity == severity]
@@ -213,26 +152,10 @@ def alerts(planner: str | None = None, scenario_id: str | None = None, severity:
 
 
 @router.get("/proposals", response_model=list[S.ProposalOut])
-def proposals(planner: str | None = None, scenario_id: str | None = None,
-              ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Net requirements ("Complément CBN") computed on the plan stock of the perimeter."""
-    result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id)
+def proposals(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Net requirements ("Proposition CBN") computed on the plan stock of the perimeter, one per
+    supplier and delivery day."""
+    result = mrp_service.compute(ctx, session, planner=planner)
     names = _supplier_names(ctx)
     out = [P.proposal_out(p, r, names) for r in result.articles.values() for p in r.proposals]
     return sorted(out, key=lambda p: (not p.urgent, p.order_date, p.article_id))
-
-
-@router.post("/simulate", response_model=S.CompareResponse)
-def simulate(req: S.SimulateRequest, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Compare the baseline with an ad-hoc scenario (saved scenario events + extra events + params)."""
-    events = [ScenarioEvent(e.kind, e.payload) for e in req.events]
-    try:
-        base = mrp_service.compute(ctx, session, planner=req.planner, article_ids=req.article_ids)
-        scen = mrp_service.compute(ctx, session, planner=req.planner, article_ids=req.article_ids,
-                                   scenario_id=req.scenario_id, extra_events=events, **req.params)
-    except KeyError as exc:
-        raise HTTPException(404, f"Scénario inconnu : {exc}")
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(422, f"Paramètres invalides : {exc}")
-    return S.CompareResponse(as_of=base.as_of, base_kpis=P.cockpit_kpis(base), scenario_kpis=P.cockpit_kpis(scen),
-                             articles=P.compare_articles(base, scen), diagnostics=scen.diagnostics)

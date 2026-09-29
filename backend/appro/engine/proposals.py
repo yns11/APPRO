@@ -221,4 +221,28 @@ def generate_proposals(
             i = k + 1
             continue
         i += 1
-    return proposals, proposed, stock
+    return merge_same_day(proposals), proposed, stock
+
+
+def merge_same_day(proposals: list[Proposal]) -> list[Proposal]:
+    """One proposal per (supplier, delivery day): several needs of the same week land on the same
+    delivery day (Monday placement, supplier delivery days) and would otherwise be listed as many
+    small lines everywhere (grid, lists, tooltips, exports)."""
+    merged: dict[tuple[str | None, dt.date], Proposal] = {}
+    for p in proposals:
+        key = (p.supplier_id, p.delivery_date)
+        cur = merged.get(key)
+        if cur is None:
+            merged[key] = Proposal(**p.__dict__)
+            continue
+        cur.qty += p.qty
+        cur.net_requirement += p.net_requirement
+        cur.order_date = min(cur.order_date, p.order_date)
+        cur.urgent = cur.urgent or p.urgent
+        cur.projected_stock_after = p.projected_stock_after
+        if p.reason not in cur.reason:
+            cur.reason = f"{cur.reason} ; {p.reason}"
+    out = sorted(merged.values(), key=lambda p: (p.delivery_date, p.supplier_id or ""))
+    for k, p in enumerate(out, start=1):
+        p.proposal_id = f"PR-{p.article_id}-{k:03d}"
+    return out

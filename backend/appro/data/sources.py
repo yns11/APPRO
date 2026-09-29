@@ -1,13 +1,14 @@
-"""ERP / reference data sources.
+"""ERP fact sources.
 
-Two implementations of the same :class:`ErpSource` protocol:
+Three implementations of the same :class:`FactSource` protocol return the canonical fact frames
+(:data:`appro.data.schemas.FACT_TABLES`):
 
-* :class:`LocalCsvSource` – reads the seed CSV files (``data/seed``) – used for local
-  development, tests and demos;
-* :class:`UnityCatalogSource` – runs SQL on a Databricks SQL warehouse against the
-  ``<catalog>.<schema>`` tables created by ``scripts/uc/create_tables.sql``.
+* :class:`LocalCsvSource` – the seed CSV files (``data/seed``), for development, tests and demos ;
+* :class:`UnityCatalogSource` – runs the mapping SQL of :mod:`appro.data.erp_sql` on a Databricks
+  SQL warehouse against the ERP extractions (``commandes_edi``, ``recep_edi``…) ;
+* :class:`LakebaseSource` – reads the ``erp_*`` mirror tables of the application database, filled
+  by the synchronisation job (``jobs/sync_erp_to_lakebase.py``).
 
-Both return pandas frames coerced to the canonical schemas of :mod:`appro.data.schemas`.
 Frames are cached in memory for ``cache_ttl_seconds`` (the ERP data changes a few times a day).
 """
 from __future__ import annotations
@@ -17,16 +18,17 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import pandas as pd
 
-from .schemas import TABLES, coerce
+from .erp_sql import ErpTables, fact_queries
+from .schemas import FACT_TABLES, TABLES, coerce
 
 log = logging.getLogger(__name__)
 
 
-class ErpSource(Protocol):
+class FactSource(Protocol):
     name: str
 
     def table(self, name: str) -> pd.DataFrame: ...
@@ -43,6 +45,7 @@ class _CachedSource:
         self._ttl = cache_ttl_seconds
         self._cache: dict[str, tuple[float, pd.DataFrame]] = {}
         self._lock = threading.Lock()
+        self.last_error: str | None = None
 
     def _load(self, name: str) -> pd.DataFrame:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -55,7 +58,12 @@ class _CachedSource:
             hit = self._cache.get(name)
             if hit and now - hit[0] < self._ttl:
                 return hit[1]
-        df = coerce(self._load(name), TABLES[name])
+        try:
+            df = coerce(self._load(name), TABLES[name])
+            self.last_error = None
+        except Exception as exc:
+            self.last_error = f"{name}: {type(exc).__name__}: {exc}"
+            raise
         with self._lock:
             self._cache[name] = (now, df)
         return df
@@ -65,11 +73,11 @@ class _CachedSource:
             self._cache.clear()
 
     def describe(self) -> dict:
-        return {"name": self.name, "cached_tables": sorted(self._cache)}
+        return {"name": self.name, "cached_tables": sorted(self._cache), "last_error": self.last_error}
 
 
 class LocalCsvSource(_CachedSource):
-    """Seed CSV files (one file per canonical table)."""
+    """Seed CSV files (one file per canonical table, facts and reference alike)."""
 
     name = "local-csv"
 
@@ -82,7 +90,7 @@ class LocalCsvSource(_CachedSource):
     def _load(self, name: str) -> pd.DataFrame:
         path = self.folder / f"{name}.csv"
         if not path.exists():
-            return pd.DataFrame(columns=list(TABLES[name].columns))
+            return pd.DataFrame(columns=list(TABLES[name].column_names))
         return pd.read_csv(path, dtype=str, keep_default_na=False)
 
     def describe(self) -> dict:
@@ -96,10 +104,10 @@ class UnityCatalogSource(_CachedSource):
 
     name = "unity-catalog"
 
-    def __init__(self, catalog: str, schema: str, warehouse_id: str, cache_ttl_seconds: float = 300.0,
-                 table_prefix: str = "") -> None:
+    def __init__(self, tables: ErpTables, warehouse_id: str, cache_ttl_seconds: float = 300.0) -> None:
         super().__init__(cache_ttl_seconds)
-        self.catalog, self.schema, self.warehouse_id, self.prefix = catalog, schema, warehouse_id, table_prefix
+        self.tables, self.warehouse_id = tables, warehouse_id
+        self.queries = fact_queries(tables)
         self._conn = None
         self._conn_lock = threading.Lock()
 
@@ -117,25 +125,55 @@ class UnityCatalogSource(_CachedSource):
                     )
         return self._conn
 
-    def fqn(self, name: str) -> str:
-        return f"`{self.catalog}`.`{self.schema}`.`{self.prefix}{name}`"
-
     def _load(self, name: str) -> pd.DataFrame:
-        cols = ", ".join(f"`{c}`" for c in TABLES[name].columns)
-        query = f"SELECT {cols} FROM {self.fqn(name)}"
-        log.info("UC query: %s", query)
+        query = self.queries.get(name)
+        if query is None:
+            return pd.DataFrame(columns=list(TABLES[name].column_names))
+        log.info("UC query for %s", name)
         try:
             with self._connection().cursor() as cur:
                 cur.execute(query)
-                rows = cur.fetchall_arrow().to_pandas()
+                return cur.fetchall_arrow().to_pandas()
         except Exception:
-            # drop the connection so that the next call reconnects
             with self._conn_lock:
-                self._conn = None
+                self._conn = None   # reconnect on the next call
             raise
-        return rows
 
     def describe(self) -> dict:
         d = super().describe()
-        d.update({"catalog": self.catalog, "schema": self.schema, "warehouse_id": self.warehouse_id})
+        d.update({"catalog": self.tables.catalog, "schema": self.tables.schema, "warehouse_id": self.warehouse_id,
+                  "tables": {k: v for k, v in self.tables.__dict__.items() if k not in ("catalog", "schema")}})
+        return d
+
+
+class LakebaseSource(_CachedSource):
+    """The ``erp_*`` mirror tables of the application database (same engine as the store)."""
+
+    name = "lakebase"
+
+    def __init__(self, engine: Any, cache_ttl_seconds: float = 300.0) -> None:
+        super().__init__(cache_ttl_seconds)
+        self.engine = engine
+
+    def _load(self, name: str) -> pd.DataFrame:
+        if name not in FACT_TABLES:
+            return pd.DataFrame(columns=list(TABLES[name].column_names))
+        from sqlalchemy import text
+        cols = ", ".join(TABLES[name].column_names)
+        with self.engine.connect() as conn:
+            return pd.read_sql(text(f"SELECT {cols} FROM erp_{name[4:]}"), conn)
+
+    def sync_status(self) -> list[dict]:
+        from sqlalchemy import text
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(text("SELECT table_name, row_count, synced_at, source, run_id FROM erp_sync_log "
+                                         "ORDER BY table_name")).mappings().all()
+            return [dict(r) for r in rows]
+        except Exception as exc:  # table missing before the first sync
+            return [{"error": str(exc)}]
+
+    def describe(self) -> dict:
+        d = super().describe()
+        d.update({"sync": self.sync_status()})
         return d

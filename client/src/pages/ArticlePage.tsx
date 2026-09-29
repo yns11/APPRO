@@ -1,68 +1,62 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Download, Plus, Trash2 } from "lucide-react";
-import { useCells, useProjection, useWrite } from "@/lib/queries";
+import { ArrowLeft, Download, Trash2 } from "lucide-react";
+import { useAdjustments, usePlanCells, useProjection, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
 import { Badge, Button, Card, Empty, ErrorBox, Kpi, Segmented, SeverityBadge, Skeleton, SkeletonBlock, Tabs, useToast } from "@/components/ui";
 import { StockChart, CoverageChart } from "@/components/charts/StockChart";
-import { EntryDrawer, type EntryDraft } from "@/components/EntryDrawer";
 import { SimulationGrid } from "@/components/SimulationGrid";
-import { PlanDrawer, type PlanTarget } from "@/components/PlanDrawer";
 import { DataTable, type Column } from "@/components/DataTable";
 import { AlertList } from "./CockpitPage";
-import { KIND_LABELS, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, ORIGIN_LABELS, SOURCE_LABELS, fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
-import type { OrderStateOut, PlanLineState, SupplyEventOut } from "@/lib/types";
+import { ORDER_TYPE_LABELS, fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
+import type { OrderInfo, PlanCellOut, AdjustmentOut } from "@/lib/types";
 
-type Tab = "table" | "plan" | "orders" | "events" | "proposals" | "cells" | "alerts" | "master";
+type Tab = "chart" | "plan" | "orders" | "proposals" | "adjustments" | "alerts" | "master";
 
 export default function ArticlePage() {
   const { articleId } = useParams();
   const { perimeter, set, engineParams } = usePerimeter();
-  const [tab, setTab] = useState<Tab>("table");
-  const [draft, setDraft] = useState<EntryDraft | null>(null);
-  const [target, setTarget] = useState<PlanTarget | null>(null);
+  const [tab, setTab] = useState<Tab>("chart");
   const q = useProjection(articleId);
-  const cells = useCells(articleId ? { article_id: articleId } : undefined);
+  const planCells = usePlanCells(articleId ? { article_id: articleId } : undefined);
+  const adjustments = useAdjustments(articleId ? { article_id: articleId } : undefined);
   const toast = useToast();
-  const delCell = useWrite((id: string) => api.del(`/api/entries/cells/${id}`), () => toast.push("Ajustement supprimé"));
+  const delPlan = useWrite((id: string) => api.del(`/api/entries/plan/${id}`), () => toast.push("Retour à l'ERP"));
+  const delAdj = useWrite((id: string) => api.del(`/api/entries/adjustments/${id}`), () => toast.push("Ajustement supprimé"));
   const d = q.data;
   const a = d?.article;
   const k = d?.kpis;
-  const liveTarget = target && d ? { ...target, lines: d.plan_lines, orders: d.orders } : target;
-  const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { article_ids: [articleId ?? ""], scenario_id: engineParams.scenario_id, granularity: perimeter.granularity === "default" ? "day" : perimeter.granularity, horizon_days: engineParams.horizon_days });
   const unit = a?.unit ?? "";
+  const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { article_ids: [articleId ?? ""], granularity: perimeter.granularity === "week" ? "week" : "day", horizon_days: engineParams.horizon_days });
 
-  const orderCols = useMemo<Column<OrderStateOut>[]>(() => [
-    { key: "order_id", label: "Commande", get: (o) => o.order_id, render: (o) => <span className="mono">{o.order_id}<span className="sub">{SOURCE_LABELS[o.source] ?? o.source}</span></span> },
-    { key: "type", label: "Type", get: (o) => ORDER_TYPE_LABELS[o.order_type] ?? o.order_type, filter: "select", render: (o) => <Badge tone={o.order_type === "FIRM" ? "brand" : "neutral"}>{ORDER_TYPE_LABELS[o.order_type] ?? o.order_type}</Badge> },
+  const orders = useMemo(() => (d?.lanes ?? []).flatMap((l) => l.orders), [d]);
+  const orderCols = useMemo<Column<OrderInfo>[]>(() => [
     { key: "supplier", label: "Fournisseur", get: (o) => o.supplier_id ?? "", filter: "select" },
-    { key: "date", label: "Date ERP", get: (o) => o.expected_date, render: (o) => <>{fmtDate(o.expected_date)}{o.days_late > 0 && <span className="sub" style={{ color: "var(--critical)" }}>{o.days_late} j de retard</span>}</> },
-    { key: "open", label: "Restant", get: (o) => o.qty_open, num: true, render: (o) => <>{fmtQty(o.qty_open, unit)}<span className="sub">/ {fmtQty(o.qty_ordered, unit)}</span></> },
-    { key: "erp", label: "Scenario ERP", get: (o) => o.status === "not_received" ? 0 : o.qty_expected, num: true, render: (o) => o.status === "not_received" ? <span className="subtle">exclue</span> : o.status === "info" ? <span className="subtle">info</span> : fmtQty(o.qty_expected, unit) },
-    { key: "plan", label: "Scenario Plan", get: (o) => o.plan_qty, num: true, render: (o) => o.plan_qty > 0 || o.status === "planned" ? <>{fmtQty(o.plan_qty, unit)}<span className="sub">{o.plan_dates.map((x) => fmtDate(x)).join(", ")}</span></> : <span className="subtle">–</span> },
-    { key: "status", label: "Statut", get: (o) => ORDER_STATUS_LABELS[o.status], filter: "select", render: (o) => <Badge tone={o.status === "not_received" ? "critical" : o.status === "planned" ? "warning" : o.status === "info" ? "neutral" : "ok"}>{ORDER_STATUS_LABELS[o.status]}</Badge> },
-    { key: "note", label: "Note", get: (o) => o.note },
-  ], [unit]);
-  const lineCols = useMemo<Column<PlanLineState>[]>(() => [
-    { key: "origin", label: "Origine", get: (l) => ORIGIN_LABELS[l.origin], filter: "select", render: (l) => <Badge tone={l.origin === "override" ? "warning" : l.origin === "free" ? "brand" : l.origin === "erp" ? "outline" : "neutral"}>{ORIGIN_LABELS[l.origin]}</Badge> },
-    { key: "order", label: "Commande", get: (l) => l.order_id ?? "", render: (l) => <span className="mono">{l.order_id ?? "—"}</span> },
-    { key: "erp_date", label: "Date ERP", get: (l) => l.erp_date ?? "", render: (l) => l.erp_date ? fmtDate(l.erp_date) : "" },
-    { key: "erp_qty", label: "Qté ERP", get: (l) => l.erp_qty, num: true, render: (l) => l.erp_qty != null ? fmtQty(l.erp_qty, unit) : "" },
-    { key: "date", label: "Date plan", get: (l) => l.date, render: (l) => <b>{fmtDate(l.date)}</b> },
-    { key: "qty", label: "Qté plan", get: (l) => l.qty, num: true, render: (l) => <b>{fmtQty(l.qty, unit)}</b> },
-    { key: "counted", label: "Comptée", get: (l) => l.counted ? "oui" : "non", filter: "select" },
-    { key: "note", label: "Commentaire", get: (l) => l.note },
-  ], [unit]);
-  const eventCols = useMemo<Column<SupplyEventOut>[]>(() => [
-    { key: "date", label: "Date", get: (e) => e.date, render: (e) => fmtDate(e.date) },
-    { key: "kind", label: "Type", get: (e) => KIND_LABELS[e.kind] ?? e.kind, filter: "select" },
-    { key: "ref", label: "Référence", get: (e) => e.ref, render: (e) => <span className="mono">{e.ref}</span> },
-    { key: "supplier", label: "Fournisseur", get: (e) => e.supplier_id ?? "", filter: "select" },
-    { key: "nature", label: "Nature", get: (e) => ORDER_TYPE_LABELS[e.order_type] ?? e.order_type, filter: "select" },
-    { key: "source", label: "Origine", get: (e) => SOURCE_LABELS[e.source] ?? e.source, filter: "select" },
-    { key: "qty", label: "Quantité", get: (e) => e.qty, num: true, render: (e) => fmtQty(e.qty, unit) },
-  ], [unit]);
+    { key: "type", label: "Type", get: (o) => ORDER_TYPE_LABELS[o.order_type] ?? o.order_type, filter: "select", render: (o) => <Badge tone={o.order_type === "FIRM" ? "brand" : "neutral"}>{ORDER_TYPE_LABELS[o.order_type] ?? o.order_type}</Badge> },
+    { key: "date", label: "Date de livraison", get: (o) => o.expected_date, render: (o) => <>{fmtDate(o.expected_date)}{d && o.expected_date < d.as_of && <span className="sub subtle">passée</span>}</> },
+    { key: "ordered", label: "Commandé", get: (o) => o.qty_ordered, num: true, render: (o) => fmtQty(o.qty_ordered, unit) },
+    { key: "open", label: "Restant ERP", get: (o) => o.qty_open, num: true, render: (o) => fmtQty(o.qty_open, unit) },
+    { key: "ref", label: "N° commande", get: (o) => o.ref, render: (o) => <span className="mono small">{o.ref}</span> },
+  ], [unit, d]);
+  const planCols = useMemo<Column<PlanCellOut>[]>(() => [
+    { key: "supplier", label: "Fournisseur", get: (c) => c.supplier_id, filter: "select" },
+    { key: "date", label: "Date", get: (c) => c.date, render: (c) => fmtDate(c.date) },
+    { key: "qty", label: "Quantité", get: (c) => c.qty, num: true, render: (c) => <b>{fmtQty(c.qty, unit)}</b> },
+    { key: "expr", label: "Saisie", get: (c) => c.expression, render: (c) => <span className="mono small">{c.expression}</span> },
+    { key: "note", label: "Commentaire", get: (c) => c.note },
+    { key: "who", label: "Modifié", get: (c) => `${c.updated_by} ${c.updated_at}`, render: (c) => <span className="subtle small">{c.updated_by}<br />{fmtDateTime(c.updated_at)}</span> },
+    { key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (c) => <Button size="sm" variant="ghost" title="Supprimer : la cellule revient à l'ERP" onClick={() => delPlan.mutate(c.id)}><Trash2 /></Button> },
+  ], [unit, delPlan]);
+  const adjCols = useMemo<Column<AdjustmentOut>[]>(() => [
+    { key: "date", label: "Date", get: (c) => c.date, render: (c) => fmtDate(c.date) },
+    { key: "qty", label: "Quantité", get: (c) => c.qty, num: true, render: (c) => <b className={c.qty < 0 ? "delta down" : "delta up"}>{c.qty > 0 ? "+" : ""}{fmtQty(c.qty, unit)}</b> },
+    { key: "effect", label: "Effet", get: (c) => (d && c.date <= d.as_of ? "stock de référence" : "mouvement prévu"), filter: "select", render: (c) => d && c.date <= d.as_of ? <Badge tone="warning">stock de référence</Badge> : <Badge tone="neutral">mouvement prévu</Badge> },
+    { key: "expr", label: "Saisie", get: (c) => c.expression, render: (c) => <span className="mono small">{c.expression}</span> },
+    { key: "note", label: "Commentaire", get: (c) => c.note },
+    { key: "who", label: "Modifié", get: (c) => `${c.updated_by} ${c.updated_at}`, render: (c) => <span className="subtle small">{c.updated_by}<br />{fmtDateTime(c.updated_at)}</span> },
+    { key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (c) => <Button size="sm" variant="ghost" title="Supprimer" onClick={() => delAdj.mutate(c.id)}><Trash2 /></Button> },
+  ], [unit, d, delAdj]);
 
   if (!articleId) return <Empty title="Article non précisé" />;
   if (q.isError) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
@@ -77,65 +71,54 @@ export default function ArticlePage() {
         </div>
         <div className="actions">
           <Segmented size="sm" value={perimeter.granularity} onChange={(g) => set({ granularity: g })} options={[{ id: "default", label: "Par défaut" }, { id: "day", label: "Jour" }, { id: "week", label: "Semaine" }]} />
-          <Button onClick={() => d && setTarget({ article_id: articleId, unit, title: `${articleId} · plan de livraison`, lines: d.plan_lines, orders: d.orders, asOf: d.as_of })}>Plan</Button>
-          <Button onClick={() => setDraft({ kind: "order", article_id: articleId, supplier_id: d?.suppliers[0]?.supplier_id ?? null })}><Plus />Saisir</Button>
           <a className="btn" href={exportUrl}><Download />Excel</a>
         </div>
       </div>
 
       <div className="grid kpis">
-        <Kpi label="Stock de référence" value={k ? fmtQty(k.stock_reference, unit) : <Skeleton w={60} h={28} />} unit={unit} meta={k ? `ERP ${fmtQty(k.stock_on_hand, unit)} au ${fmtDate(k.snapshot_date)}${k.reference_correction ? ` · corrigé de ${k.reference_correction > 0 ? "+" : ""}${fmtQty(k.reference_correction, unit)}` : ""}` : ""} tone={k?.reference_correction ? "warning" : undefined} onClick={() => setTab("cells")} />
+        <Kpi label="Stock de référence" value={k ? fmtQty(k.stock_reference, unit) : <Skeleton w={60} h={28} />} unit={unit} meta={k ? `ERP ${fmtQty(k.stock_on_hand, unit)} au ${fmtDate(k.snapshot_date)}${k.reference_correction ? ` · corrigé de ${k.reference_correction > 0 ? "+" : ""}${fmtQty(k.reference_correction, unit)}` : ""}` : ""} tone={k?.reference_correction ? "warning" : undefined} onClick={() => setTab("adjustments")} />
         <Kpi label="Couverture plan" value={k ? k.coverage_plan_days : <Skeleton w={40} h={28} />} unit="j" tone={k ? (k.coverage_plan_days <= (a?.alert_red_days ?? 3) ? "critical" : k.coverage_plan_days <= (a?.alert_yellow_days ?? 7) ? "warning" : "ok") : undefined} meta={k ? `ERP : ${k.coverage_erp_days} j · cible ${k.coverage_target_days} j` : ""} />
         <Kpi label="Rupture ERP" value={k ? (k.first_stockout_erp ? fmtDate(k.first_stockout_erp) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_erp ? "critical" : "ok"} meta={k ? (k.first_stockout_erp ? `manque max ${fmtQty(k.max_shortage_erp, unit)}` : `stock mini ${fmtQty(k.min_stock_erp, unit)}`) : ""} />
         <Kpi label="Rupture plan" value={k ? (k.first_stockout_plan ? fmtDate(k.first_stockout_plan) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_plan ? "critical" : "ok"} meta={k ? (k.first_stockout_plan ? `manque max ${fmtQty(k.max_shortage_plan, unit)}` : `stock mini ${fmtQty(k.min_stock_plan, unit)}`) : ""} />
-        <Kpi label="Backlog" value={k ? fmtQty(k.backlog_qty, unit) : <Skeleton w={60} h={28} />} unit={unit} tone={k && k.backlog_count ? "warning" : "ok"} meta={k ? `${k.backlog_count} commande(s) ERP passée(s) non reçue(s), hors stocks` : ""} onClick={() => setTab("orders")} />
+        <Kpi label="Backlog" value={k ? fmtQty(k.backlog_qty, unit) : <Skeleton w={60} h={28} />} unit={unit} tone={k && k.backlog_qty > 0 ? "warning" : "ok"} meta={k ? `commandé ${fmtQty(k.backlog_ordered, unit)} − reçu ${fmtQty(k.backlog_received, unit)} (fermes passées, hors stocks)` : ""} onClick={() => setTab("orders")} />
         <Kpi label="En-cours ERP" value={k ? fmtQty(k.open_firm_qty, unit) : <Skeleton w={60} h={28} />} meta={k ? `ferme · + ${fmtQty(k.open_forecast_qty, unit)} prévisionnel` : ""} onClick={() => setTab("orders")} />
-        <Kpi label="Plan de livraison" value={k ? fmtQty(k.plan_qty, unit) : <Skeleton w={60} h={28} />} tone="brand" meta={k ? `${k.plan_line_count} ligne(s) saisie(s) · CBN ${fmtQty(k.proposed_qty, unit)}${k.urgent_proposal_count ? ` (${k.urgent_proposal_count} urgent)` : ""}` : ""} onClick={() => setTab("plan")} />
+        <Kpi label="Plan" value={k ? fmtQty(k.plan_qty, unit) : <Skeleton w={60} h={28} />} tone="brand" meta={k ? `${k.plan_cell_count} cellule(s) saisie(s) · CBN ${fmtQty(k.proposed_qty, unit)}${k.urgent_proposal_count ? ` (${k.urgent_proposal_count} urgent)` : ""}` : ""} onClick={() => setTab("plan")} />
         <Kpi label="Besoin 30 j" value={k ? fmtQty(k.demand_next_30d, unit) : <Skeleton w={60} h={28} />} meta={k ? `${fmtQty(k.avg_daily_demand_30d, unit)} / jour` : ""} />
       </div>
 
       {q.isLoading || !d ? <SkeletonBlock rows={10} /> : (
         <Card flush tight>
-          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, events: d.events, suppliers: d.suppliers, orders: d.orders, plan_lines: d.plan_lines, kpis: d.kpis }]} cells={cells.data ?? []} onEntry={setDraft} onPlan={setTarget} />
+          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, lanes: d.lanes, kpis: d.kpis }]} planCells={planCells.data ?? []} adjustments={adjustments.data ?? []}
+            onSwitchDay={() => set({ granularity: "day" })} />
         </Card>
       )}
 
       <Tabs value={tab} onChange={setTab} tabs={[
-        { id: "table", label: "Courbes" },
-        { id: "plan", label: "Plan de livraison", count: d?.plan_lines.length },
-        { id: "orders", label: "Commandes ERP", count: d?.orders.length },
-        { id: "events", label: "Mouvements", count: d?.events.length },
-        { id: "proposals", label: "Complément CBN", count: d?.proposals.length },
-        { id: "cells", label: "Ajustements", count: cells.data?.length },
+        { id: "chart", label: "Courbes" },
+        { id: "plan", label: "Cellules du plan", count: planCells.data?.length },
+        { id: "orders", label: "Commandes ERP", count: orders.length },
+        { id: "proposals", label: "Propositions CBN", count: d?.proposals.length },
+        { id: "adjustments", label: "Ajustements", count: adjustments.data?.length },
         { id: "alerts", label: "Alertes", count: d?.alerts.length },
         { id: "master", label: "Données de base" },
       ]} />
 
-      {tab === "table" && (q.isLoading || !d ? <Skeleton h={300} /> : (
-        <Card><StockChart data={d} /><div style={{ marginTop: 8 }}><CoverageChart data={d} /></div></Card>
-      ))}
+      {tab === "chart" && (q.isLoading || !d ? <Skeleton h={300} /> : <Card><StockChart data={d} /><div style={{ marginTop: 8 }}><CoverageChart data={d} /></div></Card>)}
 
-      {tab === "plan" && d && (
-        <Card flush title="Plan de livraison" hint="ERP repris tel quel, lignes modifiées / libres, complément CBN et lignes expirées"
-          actions={<Button size="sm" variant="primary" onClick={() => setTarget({ article_id: articleId, unit, title: `${articleId} · plan de livraison`, lines: d.plan_lines, orders: d.orders, asOf: d.as_of })}>Modifier</Button>}>
-          <DataTable rows={d.plan_lines} columns={lineCols} rowKey={(l) => `${l.line_id ?? "x"}|${l.order_id ?? ""}|${l.date}|${l.origin}`} compact
-            onRowClick={(l) => setTarget({ article_id: articleId, unit, title: `${articleId} · plan ${fmtDate(l.date)}`, date: l.date, lines: d.plan_lines, orders: d.orders, asOf: d.as_of })} emptyTitle="Aucune ligne" />
+      {tab === "plan" && (
+        <Card flush title="Cellules saisies dans la ligne Plan" hint="tout ce qui n'est pas ici vient de l'ERP ; supprimer une cellule rend la journée à l'ERP">
+          <DataTable rows={planCells.data ?? []} columns={planCols} rowKey={(c) => c.id} compact emptyTitle="Aucune cellule saisie : le plan suit l'ERP" emptyHint="Taper une quantité dans la ligne Plan du tableau." />
         </Card>
       )}
 
       {tab === "orders" && d && (
-        <Card flush title="Commandes ERP (créneaux fournisseur · article · date)" hint="une commande passée non reçue ne compte dans aucun scenario : la dater dans le plan si elle arrive encore">
-          <DataTable rows={d.orders} columns={orderCols} rowKey={(o) => o.order_id} compact emptyTitle="Aucune commande ouverte"
-            onRowClick={(o) => setTarget({ article_id: articleId, unit, title: `${articleId} · ${o.order_id}`, date: o.status === "not_received" ? undefined : o.expected_date, lines: d.plan_lines, orders: d.orders, asOf: d.as_of })} />
+        <Card flush title="Commandes ERP (créneaux fournisseur · date)" hint={`lecture seule ; backlog = commandes fermes passées − réceptions sur la fenêtre (${d.lanes.map((l) => `${l.supplier_id ?? "–"} : ${fmtQty(l.backlog_qty, unit)}`).join(", ")})`}>
+          <DataTable rows={orders} columns={orderCols} rowKey={(o) => o.order_id} compact emptyTitle="Aucune commande" />
         </Card>
       )}
 
-      {tab === "events" && d && (
-        <Card flush><DataTable rows={d.events} columns={eventCols} rowKey={(e) => `${e.date}|${e.kind}|${e.ref}|${e.qty}`} compact emptyTitle="Aucun mouvement sur l'horizon" /></Card>
-      )}
-
-      {tab === "proposals" && (q.isLoading || !d ? <SkeletonBlock /> : d.proposals.length === 0 ? <Empty title="Aucun complément CBN" hint="Le Scenario Plan reste au-dessus de la cible sur tout l'horizon." /> : (
-        <Card flush>
+      {tab === "proposals" && (q.isLoading || !d ? <SkeletonBlock /> : d.proposals.length === 0 ? <Empty title="Aucune proposition CBN" hint="Le Scenario Plan reste au-dessus de la cible sur tout l'horizon." /> : (
+        <Card flush title="Propositions CBN" hint="une par fournisseur et par jour de livraison ; pour la reprendre, taper la quantité dans la ligne Plan (la cellule grisée la prérempli)">
           <table className="tbl compact">
             <thead><tr><th>Commander le</th><th>Livraison</th><th>Fournisseur</th><th className="num">Quantité</th><th className="num">Besoin net</th><th className="num">Stock avant → après</th><th>Motif</th></tr></thead>
             <tbody>
@@ -155,26 +138,11 @@ export default function ArticlePage() {
         </Card>
       ))}
 
-      {tab === "cells" && (cells.isLoading ? <SkeletonBlock /> : !cells.data?.length ? <Empty title="Aucun ajustement saisi" hint="Saisir directement dans la ligne Ajustement du tableau ; une date passée corrige le stock de référence." /> : (
+      {tab === "adjustments" && (
         <Card flush title="Ajustements" hint="datés jusqu'à la référence : correction du stock de référence, persistante jusqu'à suppression ; datés après : mouvement prévu">
-          <table className="tbl compact">
-            <thead><tr><th>Date</th><th className="num">Quantité</th><th>Saisie</th><th>Effet</th><th>Note</th><th>Modifié</th><th></th></tr></thead>
-            <tbody>
-              {cells.data.map((c) => (
-                <tr key={c.id}>
-                  <td>{fmtDate(c.date)}</td>
-                  <td className={`num ${c.qty < 0 ? "delta down" : "delta up"}`}><b>{c.qty > 0 ? "+" : ""}{fmtQty(c.qty, unit)}</b></td>
-                  <td className="mono small">{c.expression}</td>
-                  <td className="small">{d && c.date <= d.as_of ? <Badge tone="warning">stock de référence</Badge> : <Badge tone="neutral">mouvement prévu</Badge>}</td>
-                  <td className="small subtle">{c.note}</td>
-                  <td className="subtle small">{c.updated_by}<br />{fmtDateTime(c.updated_at)}</td>
-                  <td><Button size="sm" variant="ghost" title="Supprimer" onClick={() => delCell.mutate(c.id)}><Trash2 /></Button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable rows={adjustments.data ?? []} columns={adjCols} rowKey={(c) => c.id} compact emptyTitle="Aucun ajustement" emptyHint="Saisir directement dans la ligne Ajustement du tableau." />
         </Card>
-      ))}
+      )}
 
       {tab === "alerts" && <Card>{q.isLoading || !d ? <SkeletonBlock /> : <AlertList alerts={d.alerts} asOf={d.as_of} />}</Card>}
 
@@ -195,9 +163,6 @@ export default function ArticlePage() {
           {d.diagnostics.length > 0 && <Card title="Diagnostics du calcul" className="cols-2"><ul className="small subtle">{d.diagnostics.map((x, i) => <li key={i}>{x}</li>)}</ul></Card>}
         </div>
       )}
-
-      <EntryDrawer draft={draft} onClose={() => setDraft(null)} articles={a ? [{ article_id: a.article_id, designation: a.designation, unit: a.unit }] : []} />
-      <PlanDrawer target={liveTarget} onClose={() => setTarget(null)} />
     </div>
   );
 }

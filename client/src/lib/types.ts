@@ -4,13 +4,17 @@ export type Severity = "critical" | "warning" | "info";
 export interface ArticleRef {
   article_id: string; designation: string; unit: string; family: string; planner: string;
   coverage_target_days: number; alert_red_days: number; alert_yellow_days: number; overstock_days: number;
-  safety_stock_qty: number; lot_policy: string; order_cycle_days: number; active: boolean;
+  safety_stock_qty: number; order_cycle_days: number; active: boolean;
 }
-export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: number[]; active: boolean; }
 export interface LinkRef { article_id: string; supplier_id: string; supplier_name: string; moq: number; pack_qty: number; lead_time_days: number; quota_pct: number; priority: number; active: boolean; }
 export interface ProgramRef { program_id: string; name: string; family: string; active: boolean; components: number; }
-export interface BomRef { program_id: string; program_name: string; article_id: string; qty_per: number; unit: string; scrap_pct: number; }
-export interface PlanLine { program_id: string; week_start: string | null; iso_week: string; qty: number; version: string; }
+export interface PdpErpLine { program_id: string; week_start: string | null; qty: number; version: string; }
+
+/** Reference tables managed in the application (generic CRUD). */
+export type RefValue = string | number | boolean | null;
+export interface RefColumn { name: string; label: string; type: "str" | "float" | "int" | "bool" | "date"; key: boolean; required: boolean; description: string; }
+export interface RefTableInfo { name: string; label: string; description: string; key: string[]; columns: RefColumn[]; rows: number; }
+export type RefRow = Record<string, RefValue> & { updated_by?: string; updated_at?: string };
 
 export interface AlertOut {
   article_id: string; designation: string; alert_type: string; severity: Severity; scope: string; message: string;
@@ -21,54 +25,43 @@ export interface ProposalOut {
   delivery_date: string; order_date: string; qty: number; net_requirement: number; reason: string; urgent: boolean;
   lead_time_days: number; moq: number; pack_qty: number; projected_stock_before: number; projected_stock_after: number;
 }
-export interface SupplyEventOut { date: string; kind: string; ref: string; qty: number; supplier_id: string | null; order_type: string; source: string; late: boolean; }
-export type OrderStatus = "expected" | "planned" | "not_received" | "info";
-/** One open order (delivery slot) as seen by the engine: ERP placement, plan quantity, status. */
-export interface OrderStateOut {
-  order_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; order_type: string; source: string;
-  expected_date: string; qty_ordered: number; qty_open: number; qty_expected: number; days_late: number; status: OrderStatus;
-  plan_qty: number; plan_dates: string[]; note: string;
-}
-export type PlanOrigin = "erp" | "override" | "free" | "cbn" | "expired";
-/** One line of the delivery plan as displayed (stored line, ERP order as is, CBN proposal, expired line). */
-export interface PlanLineState {
-  line_id: string | null; order_id: string | null; article_id: string; date: string; qty: number; supplier_id: string | null;
-  origin: PlanOrigin; counted: boolean; erp_date: string | null; erp_qty: number | null; note: string;
-}
-export interface PlanLineIn { article_id: string; date: string; qty: number; order_id?: string | null; supplier_id?: string | null; note?: string; line_id?: string | null; }
-export interface PlanLineOut { id: string; article_id: string; order_id: string | null; supplier_id: string | null; date: string; qty: number; source: string; note: string; erp: Record<string, unknown>; created_by: string; updated_by: string; updated_at: string; }
+export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; }
+export interface SeriesOut { key: string; label: string; values: number[]; }
+/** One supplier of the article: its own Ferme / Prévisionnel / Reçu / Plan rows. */
+export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; }
 
 export interface ArticleKpis {
   stock_on_hand: number; reference_correction: number; stock_reference: number; snapshot_date: string; shortage_policy: "backlog" | "lost";
   stock_as_of_erp: number; stock_as_of_plan: number; coverage_erp_days: number; coverage_plan_days: number; coverage_target_days: number; target_stock: number;
   first_stockout_erp: string | null; first_stockout_plan: string | null; min_stock_erp: number; min_stock_plan: number; max_shortage_erp: number; max_shortage_plan: number;
   demand_next_7d: number; demand_next_30d: number; demand_horizon: number; avg_daily_demand_30d: number;
-  open_firm_qty: number; open_forecast_qty: number; plan_qty: number; plan_line_count: number; backlog_qty: number; backlog_count: number;
-  proposed_qty: number; proposal_count: number; urgent_proposal_count: number; alert_count: number; severity: Severity | null; actual_share_30d: number;
+  open_firm_qty: number; open_forecast_qty: number; plan_qty: number; plan_cell_count: number;
+  backlog_qty: number; backlog_ordered: number; backlog_received: number;
+  proposed_qty: number; proposal_count: number; urgent_proposal_count: number; alert_count: number; severity: Severity | null; actual_share_30d: number; lanes: number;
 }
 export interface ArticleSummary {
   article_id: string; designation: string; unit: string; planner: string; suppliers: string[]; severity: Severity | null;
   kpis: ArticleKpis; alert_types: string[]; sparkline: number[];
 }
+export interface BacklogRow { article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string; ordered: number; received: number; backlog: number; }
 export interface CockpitKpis {
   articles: number; critical: number; warning: number; stockouts: number; stockouts_7d: number; low_coverage: number; overstock: number;
-  late_orders: number; backlog_qty: number; proposals: number; urgent_proposals: number; proposals_qty: number; plan_articles: number; plan_qty: number;
+  backlog_articles: number; backlog_qty: number; proposals: number; urgent_proposals: number; proposals_qty: number; plan_articles: number; plan_qty: number;
   open_firm_qty: number; open_forecast_qty: number; avg_coverage_days: number | null; demand_next_30d: number;
 }
 export interface WeeklyOutlook { week: string; week_start: string; stockout_articles: number; below_target_articles: number; proposals: number; proposed_qty: number; }
 export interface CockpitResponse {
-  as_of: string; horizon_days: number; planner: string | null; scenario_id: string | null; data_source: string;
+  as_of: string; horizon_days: number; planner: string | null; data_source: string;
   pdp_version: { id: string; name: string } | null; kpis: CockpitKpis; articles: ArticleSummary[]; alerts: AlertOut[];
-  proposals: ProposalOut[]; diagnostics: string[]; weekly_supply_demand: WeeklyOutlook[];
+  proposals: ProposalOut[]; backlog: BacklogRow[]; diagnostics: string[]; weekly_supply_demand: WeeklyOutlook[];
 }
-export interface SeriesOut { key: string; label: string; values: number[]; }
 export type Granularity = "default" | "day" | "week";
 export interface ProjectionResponse {
   article: ArticleRef; as_of: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; series: SeriesOut[];
-  events: SupplyEventOut[]; proposals: ProposalOut[]; alerts: AlertOut[]; kpis: ArticleKpis; suppliers: LinkRef[];
-  programs: { program_id: string; name: string; qty_per: number; unit: string; production_next_30d: number }[]; orders: OrderStateOut[]; plan_lines: PlanLineState[]; diagnostics: string[];
+  lanes: LaneOut[]; proposals: ProposalOut[]; alerts: AlertOut[]; kpis: ArticleKpis; suppliers: LinkRef[];
+  programs: { program_id: string; name: string; qty_per: number; unit: string; production_next_30d: number }[]; diagnostics: string[];
 }
-export interface GridArticle { article: ArticleRef; series: SeriesOut[]; events: SupplyEventOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; programs: string[]; orders: OrderStateOut[]; plan_lines: PlanLineState[]; }
+export interface GridArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; programs: string[]; }
 export interface GridResponse { as_of: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; articles: GridArticle[]; diagnostics: string[]; }
 export type ImpactLayer = "onhand" | "erp" | "plan";
 export interface ProgramImpact {
@@ -79,21 +72,13 @@ export interface ProgramImpactResponse { as_of: string; weeks: string[]; program
 export interface WeeklyParamRow { week: string; week_start: string; values: Record<string, number>; overridden: string[]; }
 export interface WeeklyParamsResponse { article_id: string; fields: string[]; defaults: Record<string, number>; weeks: WeeklyParamRow[]; }
 
-export interface OrderOut { id: string; article_id: string; supplier_id: string | null; expected_date: string; qty: number; unit: string; order_type: string; status: string; source: string; erp_order_id: string | null; proposal_id: string | null; note: string; created_by: string; created_at: string; updated_at: string; }
-export interface ReceiptOut { id: string; article_id: string; supplier_id: string | null; order_id: string | null; receipt_date: string; qty: number; note: string; created_by: string; created_at: string; }
-export interface AdjustmentOut { id: string; article_id: string; date: string; qty: number; movement_type: string; comment: string; created_by: string; created_at: string; }
-export type CellKind = "adjustment";
-export interface CellOut { id: string; article_id: string; date: string; kind: CellKind; expression: string; qty: number; source: string; note: string; updated_by: string; updated_at: string; }
-export interface ProductionOut { id: string; program_id: string; date: string; qty: number; created_by: string; created_at: string; }
-
-export interface ScenarioEvent { id?: string; seq?: number; kind: string; payload: Record<string, unknown>; label: string; }
-export interface ScenarioOut { id: string; name: string; description: string; status: string; params: Record<string, unknown>; events: ScenarioEvent[]; created_by: string; created_at: string; updated_at: string; }
-export interface CompareArticle { article_id: string; designation: string; unit: string; base: Record<string, unknown>; scenario: Record<string, unknown>; delta_min_stock: number; delta_max_shortage: number; delta_coverage: number; stockout_changed: boolean; }
-export interface CompareResponse { as_of: string; base_kpis: CockpitKpis; scenario_kpis: CockpitKpis; articles: CompareArticle[]; diagnostics: string[]; }
+/** The two editable rows. */
+export interface AdjustmentOut { id: string; article_id: string; date: string; expression: string; qty: number; note: string; updated_by: string; updated_at: string; }
+export interface PlanCellOut { id: string; article_id: string; supplier_id: string; date: string; expression: string; qty: number; note: string; updated_by: string; updated_at: string; }
 
 export interface ParamDoc { field: string; default: unknown; type: string; description: string; options: string[] | null; }
 export interface ParamOverrideOut { id: string; scope: string; key1: string; key2: string; field: string; value: string; updated_by: string; updated_at: string; }
 export interface PdpVersionOut { id: string; name: string; source_file: string; note: string; active: boolean; imported_by: string; imported_at: string; line_count: number; programs: number; first_week: string | null; last_week: string | null; }
 export interface ImportReport { created: number; ignored: number; notes: string[]; version: PdpVersionOut | null; }
 export interface AuditOut { id: number; ts: string; user: string; action: string; entity_type: string; entity_id: string; article_id: string | null; payload: Record<string, unknown>; }
-export interface ConfigOut { title: string; data_source: Record<string, unknown>; as_of: string; horizon_days: number; planners: string[]; default_planner: string | null; user: string; version: string; }
+export interface ConfigOut { title: string; data_source: Record<string, unknown>; as_of: string; horizon_days: number; planners: string[]; default_planner: string | null; user: string; version: string; reference_empty: boolean; }

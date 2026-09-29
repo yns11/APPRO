@@ -1,0 +1,59 @@
+# =============================================================================
+# Job : synchronisation des faits ERP (Unity Catalog) vers Lakebase
+# -----------------------------------------------------------------------------
+# Lit les extractions (commandes_edi, recep_edi, production…) avec le SQL de
+# correspondance de backend/appro/data/erp_sql.py et remplace, dans une seule
+# transaction par table, les tables erp_* de la base applicative.
+#
+# Un job n'est pas une App : il ne reçoit AUCUNE variable PG*. Il déduit l'hôte
+# et un identifiant OAuth de la branche / de l'endpoint Lakebase, construits
+# depuis les mêmes variables que la ressource `postgres` de l'App.
+#
+# Planification : toutes les heures, décalée après le job amont qui reconstruit
+# commandes_edi / recep_edi (toutes les heures à H:00 → ici H:20).
+# =============================================================================
+resources:
+  jobs:
+    appro_sync_erp:
+      name: "[${bundle.target}] APPRO — synchronisation ERP → Lakebase"
+      description: >-
+        Copie les commandes, réceptions (et production) de l'ERP dans les tables
+        erp_* de l'application APPRO.
+
+      schedule:
+        quartz_cron_expression: "0 20 5-20 ? * MON-FRI"
+        timezone_id: Europe/Paris
+        pause_status: ${var.schedule_pause_status}
+
+      max_concurrent_runs: 1
+      timeout_seconds: 1800
+
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+        no_alert_for_skipped_runs: true
+
+      environments:
+        - environment_key: appro_sync
+          spec:
+            client: "3"
+            dependencies:
+              - psycopg[binary]>=3.2,<4.0
+
+      tasks:
+        - task_key: synchroniser
+          environment_key: appro_sync
+          spark_python_task:
+            python_file: ../jobs/sync_erp_to_lakebase.py
+            parameters:
+              - --catalog=${var.uc_catalog}
+              - --schema=${var.uc_schema}
+              - --orders-table=${var.erp_orders_table}
+              - --receipts-table=${var.erp_receipts_table}
+              - --production-table=${var.erp_production_table}
+              - --pdp-table=${var.erp_pdp_table}
+              - --branch=projects/${var.lakebase_project}/branches/${var.lakebase_branch}
+              - --endpoint=projects/${var.lakebase_project}/branches/${var.lakebase_branch}/endpoints/${var.lakebase_endpoint}
+              - --pg-database=databricks_postgres
+          max_retries: 1
+          min_retry_interval_millis: 60000

@@ -1,4 +1,4 @@
-"""Excel exports (simulation, alerts, order book) and re-import of entries."""
+"""Excel exports (simulation, alerts, plan) and re-import of the simulation workbook."""
 from __future__ import annotations
 
 import datetime as dt
@@ -6,10 +6,9 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...data.store import AppAdjustment, AppOrder, AppPlanLine, AppProductionActual, AppReceipt, audit
+from ...data.store import audit
 from ...services import excel_service, mrp_service
 from ...services.context import AppContext
 from .. import schemas as S
@@ -25,83 +24,59 @@ def _xlsx(content: bytes, filename: str) -> Response:
 
 @router.get("/exports/simulation.xlsx")
 def export_simulation(planner: str | None = None, article_ids: list[str] | None = Query(None),
-                      scenario_id: str | None = None, granularity: Literal["day", "week"] = "day",
-                      horizon_days: int | None = Query(None, ge=7, le=730), from_date: dt.date | None = None,
-                      ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    try:
-        result = mrp_service.compute(ctx, session, planner=planner, article_ids=article_ids, scenario_id=scenario_id,
-                                     **({"horizon_days": horizon_days} if horizon_days else {}))
-    except KeyError as exc:
-        raise HTTPException(404, f"Scénario inconnu : {exc}")
-    meta = {"Périmètre": planner or "tous", "Scénario": scenario_id or "base", "Source": ctx.source.name}
+                      granularity: Literal["day", "week"] = "day", horizon_days: int | None = Query(None, ge=7, le=730),
+                      from_date: dt.date | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    result = mrp_service.compute(ctx, session, planner=planner, article_ids=article_ids,
+                                 **({"horizon_days": horizon_days} if horizon_days else {}))
+    meta = {"Périmètre": planner or "tous", "Source": ctx.source.name}
     content = excel_service.simulation_workbook(result, article_ids, granularity, from_date, meta)
     return _xlsx(content, f"simulation_{result.as_of.isoformat()}_{granularity}.xlsx")
 
 
 @router.get("/exports/alerts.xlsx")
-def export_alerts(planner: str | None = None, scenario_id: str | None = None,
-                  ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id)
+def export_alerts(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    result = mrp_service.compute(ctx, session, planner=planner)
     return _xlsx(excel_service.alerts_workbook(result), f"alertes_{result.as_of.isoformat()}.xlsx")
 
 
-@router.get("/exports/orders.xlsx")
-def export_orders(planner: str | None = None, scenario_id: str | None = None,
-                  ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    result = mrp_service.compute(ctx, session, planner=planner, scenario_id=scenario_id)
-    return _xlsx(excel_service.orders_workbook(result), f"carnet_commandes_{result.as_of.isoformat()}.xlsx")
+@router.get("/exports/plan.xlsx")
+def export_plan(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    result = mrp_service.compute(ctx, session, planner=planner)
+    return _xlsx(excel_service.plan_workbook(result), f"plan_{result.as_of.isoformat()}.xlsx")
 
 
-@router.post("/imports/entries", response_model=S.ImportReport, status_code=201)
-async def import_entries(file: UploadFile = File(...), ctx: AppContext = Depends(ctx_dep),
-                         session: Session = Depends(session_dep), user: str = Depends(current_user)):
-    """Import the planner inputs of an exported workbook: the ``SAISIES`` sheet and the ``PLAN``
-    sheet (the delivery plan of every article present in the sheet replaces the stored one)."""
+@router.post("/imports/simulation", response_model=S.ImportReport, status_code=201)
+async def import_simulation(file: UploadFile = File(...), ctx: AppContext = Depends(ctx_dep),
+                            session: Session = Depends(session_dep), user: str = Depends(current_user)):
+    """Re-import the *Plan* and *Ajustement* rows of an exported ``SIMULATION`` sheet (day
+    granularity): the plan cells and adjustments of every article present in the workbook replace
+    the stored ones for the days of the sheet."""
     content = await file.read()
     try:
-        entries, notes = excel_service.parse_entries_workbook(content)
+        cells, notes = excel_service.parse_simulation_workbook(content)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     except Exception as exc:
         raise HTTPException(422, f"Classeur illisible : {exc}")
-    articles = ctx.source.table("ref_articles")
-    units = dict(zip(articles["article_id"], articles["unit"]))
-    programs = set(ctx.source.table("ref_programs")["program_id"])
+    known = set(ctx.table("ref_articles")["article_id"])
+    as_of = mrp_service.compute(ctx, session).as_of
     created = 0
-    for e in entries:
-        if e.kind == "PRODUCTION":
-            if e.key not in programs:
-                notes.append(f"programme inconnu : {e.key}")
-                continue
-            session.add(AppProductionActual(program_id=e.key, date=e.date, qty=e.qty, created_by=user))
-        else:
-            if e.key not in units:
-                notes.append(f"article inconnu : {e.key}")
-                continue
-            if e.kind == "PLAN_ARTICLE":
-                for row in session.scalars(select(AppPlanLine).where(AppPlanLine.article_id == e.key)):
-                    mrp_service.delete_plan_line(session, user, row)
-                continue
-            elif e.kind == "PLAN_LINE":
-                try:
-                    mrp_service.save_plan_line(session, user, e.key, e.date, e.qty, e.order_id, e.supplier_id, e.comment,
-                                               source="IMPORT")
-                except ValueError as exc:
-                    notes.append(f"{e.key} {e.date} : {exc}")
+    for aid, items in cells.items():
+        if aid not in known:
+            notes.append(f"article inconnu : {aid}")
+            continue
+        for c in items:
+            if c.kind == "PLAN":
+                if c.date < as_of:
                     continue
-            elif e.kind == "COMMANDE":
-                session.add(AppOrder(article_id=e.key, supplier_id=e.supplier_id, expected_date=e.date, qty=e.qty,
-                                     unit=units[e.key] or "PCE", note=e.comment, created_by=user, source="IMPORT"))
-            elif e.kind == "RECEPTION":
-                session.add(AppReceipt(article_id=e.key, supplier_id=e.supplier_id, order_id=e.order_id,
-                                       receipt_date=e.date, qty=e.qty, note=e.comment, created_by=user))
-                app_order = session.get(AppOrder, e.order_id) if e.order_id else None
-                if app_order is not None:
-                    received = sum(r.qty for r in session.scalars(select(AppReceipt).where(AppReceipt.order_id == app_order.id))) + e.qty
-                    if received >= app_order.qty - 1e-9:
-                        app_order.status = "RECEIVED"
+                row = mrp_service.set_plan_cell(session, user, aid, c.supplier_id, c.date,
+                                                "" if c.qty is None else str(c.qty))
             else:
-                session.add(AppAdjustment(article_id=e.key, date=e.date, qty=e.qty, comment=e.comment, created_by=user))
-        created += 1
-    audit(session, user, "import", "entries", file.filename or "", None, {"created": created, "ignored": len(notes)})
+                row = mrp_service.set_adjustment(session, user, aid, c.date, "" if c.qty is None else str(c.qty))
+            if row is not None:
+                created += 1
+    audit(session, user, "import", "simulation", file.filename or "", None, {"cells": created, "articles": len(cells)})
     session.commit()
     ctx.bump()
     return S.ImportReport(created=created, ignored=len(notes), notes=notes)
+

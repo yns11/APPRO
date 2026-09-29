@@ -1,213 +1,197 @@
 # Dictionnaire de données APPRO
 
-Ce document liste **toutes** les données lues et écrites par l'application, pour préparer les tables Unity
-Catalog, les tables synchronisées Lakebase, les jobs d'alimentation et la base applicative. Les noms sont
-ceux du schéma canonique (`backend/appro/data/schemas.py`), identiques dans le seed CSV, dans Unity
-Catalog et dans Lakebase.
+Toutes les données lues et écrites par l'application. Les noms sont ceux du schéma canonique
+(`backend/appro/data/schemas.py`), identiques dans le seed CSV, les modèles Excel, la base applicative et
+le SQL de correspondance ERP. Dates au format jour, quantités en nombre décimal dans l'unité de l'article,
+identifiants en texte. Les colonnes **clé** identifient une ligne.
 
-Conventions : dates au format `DATE` (jour), quantités en `DOUBLE` dans l'unité de l'article, identifiants
-en `STRING`. Les colonnes marquées **clé** forment la clé logique (unicité attendue). Les colonnes absentes
-d'une source sont ajoutées vides ; les types sont normalisés à la lecture.
+Deux familles :
 
-## 1. Données lues (référentiel et faits ERP)
+| Famille | Tables | Source | Où elles vivent |
+|---|---|---|---|
+| **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_programs`, `ref_bom`, `fct_stock` | **gérées dans l'application** (page Référentiel : ligne par ligne, ou modèle Excel par table) | base applicative (Lakebase ; SQLite en local) |
+| **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_production_actual` (facultatif), `fct_production_plan` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
 
-Alimentées par des jobs Databricks (Lakeflow / SQL) à partir des tables bronze / silver de l'ERP. L'application
-ne les modifie jamais. Cadence : quotidienne au minimum, plusieurs fois par jour pour commandes, réceptions et
-stock.
+## 1. Référentiel (géré dans l'application)
 
-### 1.1 `ref_articles` – articles approvisionnés
+Le modèle Excel de chaque table (`GET /api/reference/<table>/template.xlsx`, bouton *Modèle*) porte les
+libellés ci-dessous en en-tête, une ligne d'exemple et un onglet NOTICE. L'import accepte les libellés ou les
+noms techniques, en mode *remplacer* ou *fusionner* (par clé).
 
-| Colonne | Type | Obligatoire | Description | Source ERP suggérée |
+### 1.1 `ref_articles` — Articles
+
+| Colonne | Libellé | Type | Obligatoire | Description |
 |---|---|---|---|---|
-| article_id | STRING **clé** | oui | référence article (`P-00…`) | `InventTable.ItemId` |
-| designation | STRING | oui | désignation | `EcoResProduct` / `InventTable.NameAlias` |
-| unit | STRING | oui | unité de stock (PCE, KG, M) | unité d'inventaire |
-| family | STRING | non | famille / groupe | groupe d'articles |
-| planner | STRING | oui | code approvisionneur = **périmètre** de l'application | groupe acheteur / planificateur |
-| coverage_target_days | INT | oui | couverture cible (jours calendaires) | paramétrage appro (défaut 7) |
-| alert_red_days | INT | oui | seuil rouge (jours) | défaut 3 |
-| alert_yellow_days | INT | oui | seuil orange (jours) | défaut = couverture cible |
-| overstock_days | INT | oui | seuil de surstock (jours) | défaut max(30, 3 × cible) |
-| safety_stock_qty | DOUBLE | non | stock de sécurité fixe | `ReqItemTable.MinInventOnhand` |
-| service_rate_tracked | BOOLEAN | non | article suivi en taux de service | |
-| dhrq | STRING | non | information libre (DHRQ) | |
-| active | BOOLEAN | oui | article actif dans l'application | statut article |
+| article_id | Article | texte **clé** | oui | référence (`P-00…`), identique à `Article` de `commandes_edi` |
+| designation | Désignation | texte | oui | |
+| unit | Unité | texte | oui | PCE, KG, M |
+| family | Famille | texte | non | |
+| planner | Approvisionneur | texte | oui | code approvisionneur = **périmètre** de l'application |
+| coverage_target_days | Couverture cible (j) | entier | oui | jours calendaires de besoin à couvrir |
+| alert_red_days | Seuil rouge (j) | entier | oui | couverture ≤ seuil : critique |
+| alert_yellow_days | Seuil orange (j) | entier | oui | couverture ≤ seuil : à surveiller |
+| overstock_days | Surstock (j) | entier | oui | couverture ≥ seuil : surstock |
+| safety_stock_qty | Stock de sécurité | nombre | non | quantité fixe |
+| order_cycle_days | Cycle de commande (j) | entier | non | besoin ajouté au niveau de recomplètement (défaut 7) |
+| active | Actif | oui / non | oui | |
 
-Les seuils peuvent être surchargés dans l'application (par article et par semaine ISO) sans modifier la table.
+Les paramètres de politique de stock peuvent être personnalisés par semaine ISO (bouton *Semaines*),
+sans modifier la table.
 
-### 1.2 `ref_suppliers` – fournisseurs
+### 1.2 `ref_suppliers` — Fournisseurs
 
-| Colonne | Type | Obligatoire | Description |
-|---|---|---|---|
-| supplier_id | STRING **clé** | oui | code fournisseur (COFOR, `S-000…`) |
-| name | STRING | oui | raison sociale |
-| country | STRING | non | pays |
-| contact | STRING | non | contact |
-| delivery_weekdays | STRING | oui | jours de livraison autorisés, ISO, ex. `1,2,3,4,5` |
-| calendar_id | STRING | non | calendrier (réservé, `DEFAULT`) |
-| active | BOOLEAN | oui | |
-
-### 1.3 `ref_article_suppliers` – règles d'approvisionnement article ↔ fournisseur
-
-| Colonne | Type | Obligatoire | Description |
-|---|---|---|---|
-| article_id | STRING **clé** | oui | |
-| supplier_id | STRING **clé** | oui | |
-| moq | DOUBLE | oui | quantité minimale de commande |
-| pack_qty | DOUBLE | oui | conditionnement (PLA) : les propositions sont arrondies au multiple supérieur |
-| lead_time_days | INT | oui | délai fournisseur en **jours ouvrés** |
-| quota_pct | DOUBLE | oui | quota de répartition (multi-sourcing), 100 si mono-source |
-| priority | INT | oui | priorité (1 = principal) |
-| active | BOOLEAN | oui | |
-
-### 1.4 `ref_programs` – programmes de production (PF / SF)
-
-| Colonne | Type | Obligatoire | Description |
-|---|---|---|---|
-| program_id | STRING **clé** | oui | identifiant du programme (`mass-000…`) |
-| name | STRING | oui | nom tel qu'utilisé dans le fichier PDP (colonne A du modèle) |
-| family | STRING | non | famille |
-| has_bom | BOOLEAN | non | possède une nomenclature |
-| active | BOOLEAN | oui | |
-
-### 1.5 `ref_bom` – nomenclature (1 niveau)
-
-| Colonne | Type | Obligatoire | Description |
-|---|---|---|---|
-| program_id | STRING **clé** | oui | |
-| article_id | STRING **clé** | oui | composant approvisionné |
-| qty_per | DOUBLE | oui | quantité de composant par unité produite |
-| unit | STRING | oui | unité du composant |
-| scrap_pct | DOUBLE | non | rebut en % (majore le besoin) |
-| valid_from / valid_to | DATE | non | validité de la ligne |
-
-### 1.6 `fct_production_plan` – PDP hebdomadaire (ERP)
-
-Peut rester vide : le PDP est le plus souvent **importé depuis le fichier Excel** (modèle téléchargeable dans
-l'application, page *Imports / exports*, généralement le jeudi ou le vendredi). Un PDP importé et actif
-remplace cette table pour les programmes qu'il contient.
-
-| Colonne | Type | Obligatoire | Description |
-|---|---|---|---|
-| program_id | STRING **clé** | oui | |
-| week_start | DATE **clé** | oui | lundi de la semaine ISO |
-| iso_week | STRING | non | libellé `2026-W40` |
-| qty | DOUBLE | oui | quantité à produire dans la semaine |
-| version | STRING **clé** | oui | version (la plus récente gagne) |
-| published_at | DATE | non | |
-
-### 1.7 `fct_production_actual` – production réelle journalière
-
-Utilisée pour le **consommé** (passé) et pour le reliquat de la semaine en cours. Un jour déclaré à 0 est
-respecté ; un jour passé sans déclaration vaut 0.
-
-| Colonne | Type | Obligatoire | Description |
-|---|---|---|---|
-| program_id | STRING **clé** | oui | |
-| date | DATE **clé** | oui | jour de production |
-| qty | DOUBLE | oui | quantité produite |
-
-### 1.8 `fct_purchase_orders` – commandes (créneaux de livraison)
-
-Issue de l'extraction `commandes_edi` (voir la vue `v_fct_purchase_orders_from_commandes_edi` dans
-`scripts/uc/create_tables.sql`). Une ligne = un **créneau** fournisseur | article | date | ferme.
-
-| Colonne | Type | Obligatoire | Description | `commandes_edi` |
+| Colonne | Libellé | Type | Obligatoire | Description |
 |---|---|---|---|---|
-| order_id | STRING **clé** | oui | identifiant synthétique `vendaccount|itemid|yyyyMMdd|silfirmorder` | `ID` |
-| line_no | INT **clé** | oui | toujours 1 | — |
-| article_id | STRING | oui | | `Article` |
-| supplier_id | STRING | oui | | `Code_fournisseur` |
-| order_type | STRING | oui | `FIRM` (Ordre_ferme = Oui) ou `FORECAST` | `Ordre_ferme` |
-| message_type | STRING | non | information : niveau d'engagement, numéros de commande | `Niveau_engagement`, `Commande` |
-| order_date | DATE | non | non fourni | — |
-| expected_date | DATE | oui | date de livraison | `Date_de_debut` |
-| qty_ordered | DOUBLE | oui | quantité commandée | `Quantite` |
-| qty_received | DOUBLE | oui | commandée − restante | `Quantite − Quantite_restante` |
-| status | STRING | oui | `OPEN` (le restant fait foi ; restant 0 = reçue) | — |
-| unit | STRING | non | | — |
+| supplier_id | Fournisseur | texte **clé** | oui | code (`S-000…`), identique à `Code_fournisseur` |
+| name | Nom | texte | oui | |
+| country | Pays | texte | non | |
+| contact | Contact | texte | non | |
+| delivery_weekdays | Jours de livraison | texte | oui | jours ISO autorisés, `1,2,3,4,5` (1 = lundi) |
+| active | Actif | oui / non | oui | |
 
-Règles d'exploitation : les lignes fermes sont conservées depuis le début de l'année (commandes passées non
-reçues = **backlog**, hors stocks, à qualifier) ; les prévisionnelles à partir du lundi suivant.
+### 1.3 `ref_article_suppliers` — Article ↔ fournisseur
 
-### 1.9 `fct_receipts` – réceptions
+| Colonne | Libellé | Type | Obligatoire | Description |
+|---|---|---|---|---|
+| article_id | Article | texte **clé** | oui | |
+| supplier_id | Fournisseur | texte **clé** | oui | |
+| moq | MOQ | nombre | oui | quantité minimale de commande |
+| pack_qty | PLA | nombre | oui | conditionnement : arrondi au multiple supérieur |
+| lead_time_days | Délai (j ouvrés) | entier | oui | |
+| quota_pct | Quota % | nombre | oui | répartition multi-sourcing (100 si mono-source) |
+| priority | Priorité | entier | oui | 1 = principal |
+| active | Actif | oui / non | oui | |
 
-| Colonne | Type | Obligatoire | Description |
+Un article avec plusieurs liens actifs a **une voie par fournisseur** dans le tableau (Ferme, Prévisionnel,
+Reçu, Plan) ; les stocks sont sommés.
+
+### 1.4 `ref_programs` — Programmes
+
+| Colonne | Libellé | Type | Obligatoire | Description |
+|---|---|---|---|---|
+| program_id | Programme | texte **clé** | oui | `mass-000…` |
+| name | Nom | texte | oui | nom utilisé dans le fichier PDP |
+| family | Famille | texte | non | |
+| active | Actif | oui / non | oui | |
+
+### 1.5 `ref_bom` — Nomenclatures (1 niveau)
+
+| Colonne | Libellé | Type | Obligatoire | Description |
+|---|---|---|---|---|
+| program_id | Programme | texte **clé** | oui | |
+| article_id | Composant | texte **clé** | oui | |
+| qty_per | Qté / unité | nombre | oui | composant par unité produite |
+| unit | Unité | texte | oui | |
+| scrap_pct | Rebut % | nombre | non | majore le besoin |
+| valid_from / valid_to | Valide du / au | date | non | |
+
+### 1.6 `fct_stock` — Stock de référence
+
+| Colonne | Libellé | Type | Obligatoire | Description |
+|---|---|---|---|---|
+| article_id | Article | texte **clé** | oui | |
+| snapshot_date | Date du stock | date **clé** | oui | stock connu **en fin de journée** (veille au soir de la date de référence) |
+| qty_on_hand | Stock physique | nombre | oui | |
+| qty_blocked | Stock bloqué | nombre | non | déduit |
+| unit | Unité | texte | non | |
+
+Seule la ligne la plus récente de chaque article est utilisée. Le stock ERP étant souvent faux, les
+**ajustements** saisis dans le tableau (ligne *Ajustement*, toute date) corrigent le stock de référence
+sans toucher à cette table.
+
+## 2. Faits ERP
+
+Correspondance appliquée par `backend/appro/data/erp_sql.py` (Databricks SQL), exécutée soit par le job
+`appro_sync_erp` (vers `erp_*`), soit par l'application sur un SQL warehouse. Une seule source de vérité
+pour la correspondance.
+
+### 2.1 `fct_purchase_orders` ← `silver_erp_ye.commandes_edi`
+
+Une ligne par **créneau de livraison** `ID` = `vendaccount|itemid|yyyyMMdd|silfirmorder` (plusieurs numéros
+de commande d'achat peuvent partager un créneau : sommés).
+
+| Colonne | Type | `commandes_edi` | Règle |
 |---|---|---|---|
-| receipt_id | STRING **clé** | oui | identifiant du mouvement de réception |
-| order_id | STRING | non | référence de commande si connue (souvent absente) |
-| article_id | STRING | oui | |
-| supplier_id | STRING | non | fournisseur (améliore le lettrage du jour de référence) |
-| receipt_date | DATE | oui | jour de réception |
-| qty | DOUBLE | oui | quantité reçue |
-| unit | STRING | non | |
+| order_id | texte **clé** | `ID` | |
+| article_id | texte | `Article` | |
+| supplier_id | texte | `Code_fournisseur` | |
+| supplier_name | texte | `Nom_fournisseur` | |
+| order_type | texte | `Ordre_ferme` | `Oui` → `FIRM`, sinon `FORECAST` (seul critère de classement ; `Niveau_engagement` reste informatif) |
+| expected_date | date | `Date_de_debut` | |
+| qty_ordered | nombre | Σ `Quantite` | |
+| qty_open | nombre | Σ `Quantite_restante` (≥ 0) | restant ERP ; non fiable une fois la date passée |
+| purch_id | texte | `Commande` (liste) | information |
+| commitment | texte | `Niveau_engagement` | information |
 
-Historique souhaité : au moins la fenêtre d'historique affichée (14 jours par défaut, `history_days`).
+Exploitation : les commandes fermes sont conservées depuis le début de l'année, les prévisionnelles à
+partir du lundi suivant (règles du job amont). Une commande ferme **passée** ne compte dans aucun stock :
+elle entre dans le **backlog** du fournisseur (§ 3.3 des règles métier).
 
-### 1.10 `fct_stock` – stock de référence
+### 2.2 `fct_receipts` ← `silver_erp_ye.recep_edi`
 
-| Colonne | Type | Obligatoire | Description |
+| Colonne | Type | `recep_edi` | Règle |
 |---|---|---|---|
-| article_id | STRING **clé** | oui | |
-| snapshot_date | DATE **clé** | oui | jour du stock, connu **en fin de journée** (veille au soir de la date de référence) |
-| qty_on_hand | DOUBLE | oui | stock physique |
-| qty_blocked | DOUBLE | non | stock bloqué (déduit) |
-| unit | STRING | non | |
-| location | STRING **clé** | non | emplacement ; plusieurs emplacements sont sommés |
+| receipt_id | texte **clé** | `Code_fournisseur|Commande|BL|Article|yyyyMMdd` | construit |
+| article_id | texte | `Article` | |
+| supplier_id | texte | `Code_fournisseur` | affecte la réception à la voie du fournisseur |
+| receipt_date | date | `Date_reception` | |
+| qty | nombre | `Quantite_recue` | lignes à quantité nulle ignorées |
+| purch_id | texte | `Commande` | information |
+| packing_slip | texte | `BL` | information |
 
-Seul le dernier snapshot par article est utilisé. Un historique journalier permettrait, plus tard, de comparer le
-stock reconstitué au stock ERP.
+Historique souhaité : au moins la fenêtre de backlog (28 jours par défaut, `backlog_days`).
 
-### 1.11 `fct_stock_movements` – mouvements de stock ERP (facultatif)
+### 2.3 `fct_production_actual` — production réelle journalière (facultatif)
 
-Non alimentée dans le périmètre actuel (les ajustements sont des saisies de l'application). Si elle l'est, les
-mouvements antérieurs au snapshot ne servent qu'à l'historique reconstitué.
+Table à fournir avec les colonnes canoniques (`APPRO_ERP_PRODUCTION_TABLE`, variable `erp_production_table`).
+Vide = aucune production réelle : le besoin passé est nul et le reliquat de la semaine en cours est le PDP
+entier.
 
 | Colonne | Type | Description |
 |---|---|---|
-| movement_id | STRING **clé** | |
-| article_id | STRING | |
-| date | DATE | |
-| movement_type | STRING | inventaire, casse, transfert… |
-| qty | DOUBLE | signée |
-| comment | STRING | |
+| program_id | texte **clé** | |
+| date | date **clé** | jour de production |
+| qty | nombre | quantité produite (un 0 déclaré est respecté) |
 
-## 2. Données écrites (base applicative)
+### 2.4 `fct_production_plan` — PDP hebdomadaire ERP (facultatif)
 
-Tables créées automatiquement par l'application (`Base.metadata.create_all`) dans **Lakebase** (PostgreSQL) ;
-SQLite en local. Chaque écriture est journalisée.
+Le PDP est le plus souvent **importé par fichier** (modèle dans *Imports / exports*, le jeudi ou le
+vendredi) ; une version importée et active remplace cette table pour ses programmes.
+
+| Colonne | Type | Description |
+|---|---|---|
+| program_id | texte **clé** | |
+| week_start | date **clé** | lundi de la semaine ISO |
+| qty | nombre | |
+| version | texte **clé** | la plus récente gagne |
+
+## 3. Base applicative (écrite par l'application)
+
+Tables créées automatiquement au premier démarrage (`create_all`) dans Lakebase (schéma `public`) ; SQLite
+en local. Chaque écriture est journalisée avec l'utilisateur.
 
 | Table | Contenu | Clé |
 |---|---|---|
-| `app_plan_lines` | lignes du **plan de livraison** : article, `order_id` (créneau ERP surchargé, ou vide = ligne libre), fournisseur, date, quantité, origine (MANUAL / IMPORT / CBN), commentaire, état ERP vu à la saisie (`erp_json`), auteur, dates | id |
-| `app_cells` | **ajustements** saisis dans la grille : article, date (toute date ; ≤ référence = correction du stock de référence), expression, quantité, origine, note | (article, date, kind) |
-| `app_adjustments` | ajustements saisis par formulaire (même sémantique) | id |
-| `app_orders` | commandes fermes passées hors ERP (comptées dans les deux scenarios) | id |
-| `app_receipts` | réceptions saisies (fait constaté, ≤ date de référence) | id |
-| `app_production_actual` | production réelle saisie par (programme, jour), prioritaire sur l'ERP | (programme, date) |
+| `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_programs`, `ref_bom`, `fct_stock` | le référentiel (§ 1) + `updated_by`, `updated_at` | clé de la table |
+| `app_plan_cells` | **cellules du plan** : article, fournisseur (`""` si aucun), date, expression saisie, quantité, commentaire, auteur | (article, fournisseur, date) |
+| `app_adjustments` | **cellules d'ajustement** : article, date (toute date), expression, quantité signée, commentaire, auteur | (article, date) |
 | `app_pdp_versions`, `app_pdp_lines` | versions de PDP importées (une active au plus) | id |
-| `app_scenarios`, `app_scenario_events` | scénarios what-if | id |
-| `app_param_overrides` | surcharges de paramètres : `global`, `article`, `article_week`, `link` | (scope, key1, key2, field) |
+| `app_param_overrides` | règles globales du moteur (`global`) et paramètres d'article par semaine ISO (`article_week`) | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
+| `erp_purchase_orders`, `erp_receipts`, `erp_production_actual`, `erp_production_plan` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
+| `erp_sync_log` | par table miroir : nombre de lignes, horodatage, source, identifiant d'exécution (affiché dans `/api/health`) | table_name |
 
-Volumétrie : quelques milliers de lignes par table, croissance lente (journal : une ligne par écriture).
+Volumétrie : quelques milliers de lignes par table ; le miroir des commandes suit la source (dizaines de
+milliers de lignes au plus), remplacé à chaque exécution.
 
-## 3. Lakebase ou Unity Catalog seul ?
+## 4. Lakebase ou Unity Catalog seul ?
 
-Deux besoins distincts :
+* **Écrire** les saisies (une cellule par clic, concurrence, unicité, journal) exige une base
+  transactionnelle : Lakebase. Un SQL warehouse n'est pas fait pour cela.
+* **Lire** les faits ERP peut se faire depuis Lakebase (miroir, millisecondes, aucun droit Unity Catalog
+  pour l'App) ou depuis un SQL warehouse (secondes, warehouse démarré, `USE CATALOG` à accorder au principal
+  de service de l'App par un propriétaire du catalogue).
 
-1. **Lire** le référentiel et les faits ERP : lecture de tables entières (quelques milliers de lignes) toutes
-   les 5 minutes au plus (cache). Possible depuis un SQL warehouse (latence de 1 à 5 s par table, warehouse à
-   maintenir démarré) ou depuis Lakebase (millisecondes) via des **tables synchronisées** depuis Unity Catalog.
-2. **Écrire** les saisies des approvisionneurs : transactions courtes, concurrentes, à chaque clic, avec
-   unicité et journal. Un SQL warehouse n'est pas fait pour cela (pas de transaction fine, latence, coût par
-   écriture, pas de clé unique) ; Unity Catalog seul imposerait de réécrire des fichiers Delta à chaque saisie.
-
-Recommandation : **Lakebase** pour la base applicative, et de préférence **aussi pour la lecture** via des
-tables synchronisées (`APPRO_DATA_SOURCE=lakebase`) : une seule ressource attachée à l'app, aucune dépendance au
-warehouse à l'exécution, un seul mécanisme d'authentification. La lecture directe Unity Catalog par SQL
-warehouse (`APPRO_DATA_SOURCE=uc`) reste disponible si les tables synchronisées ne sont pas possibles. Une
-variante sans Lakebase (saisies dans des tables Delta via le warehouse) n'est pas fournie : elle serait lente
-et fragile pour un usage quotidien multi-utilisateurs. Les contraintes rencontrées sur les applications
-Backflush et Campagnes inventaire n'étant pas accessibles depuis ce dépôt, elles sont à confronter à ce
-choix (en particulier : disponibilité de Lakebase dans l'espace de travail, droits du principal de service).
+Retenu : **Lakebase pour tout**, avec un job de synchronisation qui tourne sous une identité ayant déjà accès
+à l'ERP, comme sur Campagnes inventaire (miroir) et Backflush (publication dans Lakebase). La lecture directe
+par warehouse reste disponible (`APPRO_DATA_SOURCE=uc`, guide § 9).

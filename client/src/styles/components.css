@@ -207,11 +207,6 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 .timeline .ev { display: grid; grid-template-columns: 90px 1fr; gap: var(--sp-3); font-size: var(--fs--2); }
 .timeline .ev .d { color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
 .pivot td.cbn { color: var(--warning-fg); font-style: italic; }
-.pivot td.action-pos { color: var(--ok-fg, var(--ok)); }
-.pivot td.action-neg { color: var(--critical-fg, var(--critical)); }
-.pivot td.orders { box-shadow: inset 0 -2px 0 var(--s-firm); }
-.order-editor { padding: 12px 0; border-bottom: 1px solid var(--border); }
-.order-editor:last-child { border-bottom: 0; }
 
 /* ---------- simulation grid: stock cells (coverage top-left, shortage), plan cells ---------- */
 .pivot td.stock { position: relative; padding: 9px 8px 5px; font-weight: var(--fw-semibold); color: var(--fg); min-width: 72px; }
@@ -226,12 +221,23 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 .pivot td.stock.past { background: var(--cell-past); color: var(--fg-subtle); font-weight: var(--fw-regular); }
 .pivot td.cbn { color: var(--warning-fg); font-style: italic; }
 .pivot td.neg-val { color: var(--critical-fg); }
-.pivot td .more { position: absolute; right: 2px; bottom: 0; font-size: 0.7rem; color: var(--fg-subtle); cursor: pointer; padding: 0 2px; }
 .pivot td.editable { position: relative; }
-.pivot td .more:hover { color: var(--brand); }
 .pivot { max-height: none; }
 .pivot th, .pivot td { padding: 4px 7px; }
 .pivot th:first-child, .pivot td:first-child { min-width: 150px; }
+/* ---------- simulation grid: plan cells (ERP / typed / ghost CBN / noted), tools ---------- */
+.pivot-wrap { display: flex; flex-direction: column; }
+.pivot-tools { display: flex; align-items: center; gap: 8px; padding: 4px 8px; position: relative; }
+.row-menu { position: absolute; top: 28px; left: 8px; z-index: 30; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.pivot td.erp { color: var(--fg-muted); }
+.pivot td.typed { color: var(--brand-fg); font-weight: var(--fw-semibold); background: var(--brand-soft); box-shadow: inset 0 -2px 0 var(--brand); }
+.pivot td.typed.past { background: var(--cell-past); }
+.pivot td.ghost { color: var(--warning-fg); }
+.pivot td .ghostv { color: var(--warning-fg); font-style: italic; opacity: 0.8; }
+.pivot td.noted::before { content: ""; position: absolute; left: 2px; top: 2px; width: 0; height: 0; border-top: 6px solid var(--info); border-right: 6px solid transparent; }
+.pivot td.noted { position: relative; }
+.sidebar .nav-group { margin-top: var(--sp-3); padding: 4px var(--sp-3) 0; text-transform: uppercase; letter-spacing: var(--tracking-caps); font-size: 0.6rem; }
+
 /* ---------- filterable table ---------- */
 .dt .dt-filters th { top: 30px; padding: 3px 8px; background: var(--bg-elev); text-transform: none; letter-spacing: 0; }
 .input.xs, .select.xs { height: 24px; font-size: var(--fs--2); padding: 0 6px; width: 100%; min-width: 60px; }

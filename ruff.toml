@@ -2,6 +2,8 @@
 # result does not depend on the ruff version installed in CI.
 line-length = 120
 target-version = "py311"
+# Notebook Databricks : dbutils / spark / display sont des globales fournies par le runtime.
+extend-exclude = ["jobs/*_notebook.py"]
 
 [lint]
 select = ["E4", "E7", "E9", "F", "I", "W"]

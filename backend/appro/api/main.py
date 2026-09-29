@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
 from ..config import get_settings
-from .routers import entries, files, mrp, pdp, reference, scenarios
+from .routers import entries, files, mrp, pdp, reference
 
 
 def create_app() -> FastAPI:
@@ -21,9 +21,26 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health", tags=["health"])
     def health():
-        return {"status": "ok", "version": __version__}
+        """Always 200 : names what is configured and what is missing (never any value)."""
+        from ..data.store import lakebase_env_status
+        from ..services.context import get_context
+        out = {"status": "ok", "version": __version__, "data_source": settings.data_source,
+               "database": "lakebase" if settings.uses_lakebase else ("url" if settings.db_url else "sqlite"),
+               "lakebase_env": lakebase_env_status(), "frontend_built": (Path(settings.static_dir) / "index.html").exists()}
+        try:
+            ctx = get_context()
+            with ctx.session() as session:
+                from sqlalchemy import text
+                session.execute(text("SELECT 1"))
+            out["database_status"] = "ok"
+            out["source"] = ctx.source.describe()
+            out["reference_rows"] = int(len(ctx.table("ref_articles")))
+        except Exception as exc:  # the diagnostic must answer even when the database is down
+            out["status"] = "degraded"
+            out["database_status"] = f"{type(exc).__name__}: {exc}"
+        return out
 
-    for r in (reference.router, mrp.router, entries.router, scenarios.router, pdp.router, files.router):
+    for r in (reference.router, mrp.router, entries.router, pdp.router, files.router):
         app.include_router(r)
 
     @app.exception_handler(Exception)

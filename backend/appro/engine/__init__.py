@@ -12,7 +12,7 @@ demand      weekly plan -> daily production -> component demand (BOM explosion)
 projection  stock projection, coverage and target stock per article
 alerts      alert classification
 proposals   net requirement + lot sizing + supplier selection
-scenario    what-if events applied on a dataset copy
+supply      supplier lanes: ERP orders, receipts, plan cells, backlog
 runner      orchestration for a whole portfolio
 """
 

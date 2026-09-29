@@ -20,7 +20,6 @@ export function fmtDate(iso: string | null | undefined, pattern = "dd/MM/yyyy"):
   if (!iso) return "–";
   try { return format(parseISO(iso), pattern, { locale: fr }); } catch { return iso; }
 }
-export function fmtDateShort(iso: string): string { return fmtDate(iso, "EEE dd/MM"); }
 export function fmtDateTime(iso: string): string { return fmtDate(iso, "dd/MM/yyyy HH:mm"); }
 export function daysFrom(iso: string | null | undefined, from: string): number | null {
   if (!iso) return null;
@@ -29,23 +28,14 @@ export function daysFrom(iso: string | null | undefined, from: string): number |
 export function isWeekend(iso: string): boolean { const d = parseISO(iso).getDay(); return d === 0 || d === 6; }
 /** A column key is either an ISO week label ("2026-W38") or an ISO date. */
 export const isWeekKey = (p: string) => p.includes("-W");
-export function periodLabel(p: string, _granularity?: string): string {
+export function periodLabel(p: string): string {
   if (isWeekKey(p)) return p.replace("-W", " S");
   return fmtDate(p, "EEE dd/MM");
 }
 export const ALERT_LABELS: Record<string, string> = {
-  STOCKOUT: "Rupture", LOW_COVERAGE: "Couverture insuffisante", OVERSTOCK: "Surstock", LATE_ORDER: "Retard fournisseur",
+  STOCKOUT: "Rupture", LOW_COVERAGE: "Couverture insuffisante", OVERSTOCK: "Surstock", BACKLOG: "Backlog fournisseur",
   URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock de départ négatif",
 };
 export const SEVERITY_LABELS: Record<string, string> = { critical: "Critique", warning: "À surveiller", info: "Info" };
-export const KIND_LABELS: Record<string, string> = { order: "Commande", plan: "Ligne du plan", receipt: "Réception", movement: "Ajustement", proposal: "Complément CBN" };
-export const ORDER_STATUS_LABELS: Record<string, string> = { expected: "Attendue (ERP)", planned: "Planifiée (plan)", not_received: "Non reçue", info: "Prévisionnel" };
-export const ORIGIN_LABELS: Record<string, string> = { erp: "ERP", override: "modifiée", free: "libre", cbn: "CBN", expired: "expirée" };
 export const SCOPE_LABELS: Record<string, string> = { erp: "ERP", plan: "plan", data: "données" };
-export const ORDER_TYPE_LABELS: Record<string, string> = { FIRM: "Ferme", FORECAST: "Prévisionnelle", PLANNED: "Planifiée", PLAN: "Plan", ADJUSTMENT: "Ajustement", PROPOSAL: "Complément CBN", RECEIPT: "Réception" };
-export const SOURCE_LABELS: Record<string, string> = { ERP: "ERP", APP: "saisie", SCENARIO: "scénario", MANUAL: "saisie", IMPORT: "import", ENGINE: "moteur", CBN: "CBN" };
-export const EVENT_KIND_LABELS: Record<string, string> = {
-  add_order: "Ajouter une commande", move_order: "Décaler une commande", change_order_qty: "Modifier une quantité", cancel_order: "Annuler une commande",
-  plan_factor: "PDP × facteur", set_plan: "Fixer une semaine de PDP", set_actual: "Production réelle", add_movement: "Ajustement de stock",
-  set_article_param: "Paramètre article", set_link_param: "Paramètre fournisseur",
-};
+export const ORDER_TYPE_LABELS: Record<string, string> = { FIRM: "Ferme", FORECAST: "Prévisionnelle" };

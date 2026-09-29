@@ -34,7 +34,7 @@ def template(weeks: int = Query(26, ge=4, le=104), ctx: AppContext = Depends(ctx
     from ...engine.calendar import iso_week_monday
     from ...engine.runner import resolve_as_of
     from ...services import mrp_service
-    ds = erp_dataset(ctx.source)
+    ds = erp_dataset(ctx.table)
     with_bom = {b.program_id for b in ds.bom}
     programs = [(p.program_id, p.name) for p in ds.programs if p.program_id in with_bom and p.active]
     monday = iso_week_monday(resolve_as_of(ds, mrp_service.build_params(ctx, session)))
@@ -56,7 +56,7 @@ async def import_pdp(file: UploadFile = File(...), name: str = Form(""), note: s
     content = await file.read()
     if not content:
         raise HTTPException(422, "Fichier vide")
-    prg = ctx.source.table("ref_programs")
+    prg = ctx.table("ref_programs")
     names = {}
     for r in prg.to_dict("records"):
         names[str(r["program_id"]).upper()] = r["program_id"]

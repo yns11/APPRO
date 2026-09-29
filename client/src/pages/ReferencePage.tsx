@@ -1,111 +1,131 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Download, Plus, Trash2, Upload } from "lucide-react";
 import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { DataTable, type Column } from "@/components/DataTable";
-import { useArticles, useBom, useLinks, useOverrides, usePlan, usePrograms, useSuppliers, useWrite } from "@/lib/queries";
-import { usePerimeter } from "@/state/PerimeterContext";
+import { usePdpErp, usePrograms, useRefRows, useRefTables, useWrite } from "@/lib/queries";
 import { api } from "@/lib/api";
-import { Badge, Button, Card, Empty, ErrorBox, SkeletonBlock, Tabs, useToast } from "@/components/ui";
-import { fmtQty } from "@/lib/format";
-import type { ArticleRef, BomRef, LinkRef, ProgramRef, SupplierRef } from "@/lib/types";
+import { Badge, Button, Card, Drawer, Empty, ErrorBox, Field, SkeletonBlock, Tabs, useToast } from "@/components/ui";
+import { fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
+import type { ImportReport, RefColumn, RefRow, RefTableInfo, RefValue } from "@/lib/types";
 
-type Tab = "articles" | "suppliers" | "links" | "programs" | "bom";
-const WD = ["", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+const fmtCell = (c: RefColumn, v: RefValue) => v === null || v === undefined || v === "" ? "" : c.type === "bool" ? (v ? "oui" : "non") : c.type === "date" ? fmtDate(String(v)) : c.type === "float" ? fmtQty(Number(v)) : String(v);
 
-/** Reference data browser with inline parameter overrides (article thresholds, supplier link rules). */
+/** Reference data managed in the application: one CRUD table per reference table, Excel template / import / export. */
 export default function ReferencePage() {
-  const { perimeter } = usePerimeter();
-  const [tab, setTab] = useState<Tab>("articles");
-  const [program, setProgram] = useState<string>("");
+  const tables = useRefTables();
+  const [tab, setTab] = useState<string>("ref_articles");
+  const [editing, setEditing] = useState<RefRow | null>(null);
   const [weeklyOf, setWeeklyOf] = useState<string | null>(null);
+  const [report, setReport] = useState<ImportReport | null>(null);
+  const [program, setProgram] = useState("");
   const toast = useToast();
-  const articles = useArticles(perimeter.planner);
-  const suppliers = useSuppliers();
-  const links = useLinks();
-  const programs = usePrograms();
-  const bom = useBom();
-  const plan = usePlan(program || undefined);
-  const overrides = useOverrides();
-  const setParam = useWrite((b: { scope: string; key1: string; key2?: string; field: string; value: string | number }) => api.put("/api/params/overrides", b), () => toast.push("Paramètre enregistré", "success"));
-  const ovKeys = useMemo(() => new Set((overrides.data ?? []).map((o) => `${o.scope}|${o.key1}|${o.key2}|${o.field}`)), [overrides.data]);
-  const isOv = (scope: string, k1: string, field: string, k2 = "") => ovKeys.has(`${scope}|${k1}|${k2}|${field}`);
+  const table = tables.data?.find((t) => t.name === tab);
+  const rows = useRefRows(tab);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState<"replace" | "merge">("merge");
+  const del = useWrite(({ name, key }: { name: string; key: Record<string, RefValue> }) => api.post(`/api/reference/${name}/delete`, { key }), () => toast.push("Ligne supprimée"));
+  const importFile = useWrite(async (file: File) => { const fd = new FormData(); fd.append("file", file); fd.append("mode", mode); return api.upload<ImportReport>(`/api/reference/${tab}/import`, fd); },
+    (r) => { setReport(r as ImportReport); toast.push(`${(r as ImportReport).created} ligne(s) importée(s)`, "success"); });
 
-  const Editable = ({ scope, key1, key2, field, value }: { scope: "article" | "link"; key1: string; key2?: string; field: string; value: number }) => (
-    <input className="input sm num" style={{ width: 84, textAlign: "right", borderColor: isOv(scope, key1, field, key2) ? "var(--brand)" : undefined }} type="number" step="any" defaultValue={value} title={isOv(scope, key1, field, key2) ? "Valeur surchargée dans l'application" : "Valeur ERP – modifier crée une surcharge"}
-      onClick={(e) => e.stopPropagation()} onBlur={(e) => { const v = Number(e.target.value); if (!Number.isNaN(v) && v !== value) setParam.mutate({ scope, key1, key2, field, value: v }); }} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} aria-label={`${field} ${key1}`} />
-  );
-  const num = (field: string, label: string, scope: "article" | "link" = "article", get: (r: ArticleRef) => number = (r) => (r as unknown as Record<string, number>)[field]): Column<ArticleRef> => ({
-    key: field, label, get, num: true, render: (r) => <Editable scope={scope} key1={r.article_id} field={field} value={get(r)} />,
-  });
-  const articleCols = useMemo<Column<ArticleRef>[]>(() => [
-    { key: "article", label: "Article", get: (a) => `${a.article_id} ${a.designation}`, render: (a) => <><Link to={`/articles/${encodeURIComponent(a.article_id)}`}><b>{a.article_id}</b></Link><span className="sub">{a.designation}</span></> },
-    { key: "unit", label: "Unité", get: (a) => a.unit, filter: "select" },
-    { key: "planner", label: "Appro", get: (a) => a.planner, filter: "select" },
-    num("coverage_target_days", "Couverture cible (j)"), num("alert_red_days", "Seuil rouge (j)"), num("alert_yellow_days", "Seuil orange (j)"),
-    num("overstock_days", "Surstock (j)"), num("safety_stock_qty", "Stock sécurité"), num("order_cycle_days", "Cycle cde (j)"),
-    { key: "active", label: "Actif", get: (a) => a.active ? "oui" : "non", filter: "select", render: (a) => a.active ? <Badge tone="ok">oui</Badge> : <Badge tone="neutral">non</Badge> },
-    { key: "weeks", label: "Semaines", get: () => "", filter: "none", sortable: false, render: (a) => <Button size="sm" variant="ghost" title="Personnaliser ces paramètres semaine par semaine" aria-label={`Paramètres hebdomadaires ${a.article_id}`} onClick={() => setWeeklyOf(a.article_id)}><CalendarDays /></Button> },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [ovKeys]);
-  const linkCols = useMemo<Column<LinkRef>[]>(() => [
-    { key: "article", label: "Article", get: (l) => l.article_id, render: (l) => <Link to={`/articles/${encodeURIComponent(l.article_id)}`}><b>{l.article_id}</b></Link> },
-    { key: "supplier", label: "Fournisseur", get: (l) => `${l.supplier_id} ${l.supplier_name}`, render: (l) => <>{l.supplier_id}<span className="sub">{l.supplier_name}</span></> },
-    ...(["moq", "pack_qty", "lead_time_days", "quota_pct", "priority"] as const).map((f) => ({
-      key: f, label: { moq: "MOQ", pack_qty: "PLA", lead_time_days: "Délai (j ouvrés)", quota_pct: "Quota %", priority: "Priorité" }[f], get: (l: LinkRef) => l[f], num: true,
-      render: (l: LinkRef) => <Editable scope="link" key1={l.article_id} key2={l.supplier_id} field={f} value={l[f]} />,
-    })),
-    { key: "active", label: "Actif", get: (l) => l.active ? "oui" : "non", filter: "select", render: (l) => l.active ? <Badge tone="ok">oui</Badge> : <Badge tone="neutral">non</Badge> },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [ovKeys]);
-  const supplierCols = useMemo<Column<SupplierRef>[]>(() => [
-    { key: "id", label: "COFOR", get: (x) => x.supplier_id, render: (x) => <b>{x.supplier_id}</b> },
-    { key: "name", label: "Nom", get: (x) => x.name },
-    { key: "country", label: "Pays", get: (x) => x.country, filter: "select" },
-    { key: "days", label: "Jours de livraison", get: (x) => x.delivery_weekdays.map((d) => WD[d]).join(" ") },
-    { key: "contact", label: "Contact", get: (x) => x.contact },
-    { key: "active", label: "Actif", get: (x) => x.active ? "oui" : "non", filter: "select", render: (x) => x.active ? <Badge tone="ok">oui</Badge> : <Badge tone="neutral">non</Badge> },
-  ], []);
-  const bomCols = useMemo<Column<BomRef>[]>(() => [
-    { key: "program", label: "Programme", get: (b) => `${b.program_name} ${b.program_id}`, render: (b) => <>{b.program_name}<span className="sub mono">{b.program_id}</span></> },
-    { key: "article", label: "Composant", get: (b) => b.article_id, render: (b) => <Link to={`/articles/${encodeURIComponent(b.article_id)}`}>{b.article_id}</Link> },
-    { key: "qty", label: "Qté / unité", get: (b) => b.qty_per, num: true },
-    { key: "unit", label: "Unité", get: (b) => b.unit, filter: "select" },
-    { key: "scrap", label: "Rebut %", get: (b) => b.scrap_pct, num: true },
-  ], []);
-  const programCols = useMemo<Column<ProgramRef>[]>(() => [
-    { key: "name", label: "Programme", get: (p) => `${p.name} ${p.program_id}`, render: (p) => <><b>{p.name}</b><span className="sub mono">{p.program_id}</span></> },
-    { key: "family", label: "Famille", get: (p) => p.family, filter: "select" },
-    { key: "components", label: "Composants", get: (p) => p.components, num: true },
-  ], []);
+  const cols = useMemo<Column<RefRow>[]>(() => {
+    if (!table) return [];
+    const out: Column<RefRow>[] = table.columns.map((c) => ({
+      key: c.name, label: c.label, num: c.type === "float" || c.type === "int",
+      filter: c.type === "bool" || (c.type === "str" && ["unit", "planner", "family", "country", "supplier_id", "program_id", "active"].includes(c.name) && !c.key) ? "select" : undefined,
+      get: (r) => (c.type === "bool" ? (r[c.name] ? "oui" : "non") : (r[c.name] as string | number | null)),
+      render: (r) => c.key && c.name === "article_id" ? <Link to={`/articles/${encodeURIComponent(String(r[c.name]))}`} onClick={(e) => e.stopPropagation()}><b>{String(r[c.name])}</b></Link>
+        : c.type === "bool" ? <Badge tone={r[c.name] ? "ok" : "neutral"}>{r[c.name] ? "oui" : "non"}</Badge> : <>{fmtCell(c, r[c.name])}</>,
+    }));
+    if (table.name === "ref_articles") out.push({ key: "weeks", label: "Semaines", get: () => "", filter: "none", sortable: false, render: (r) => <Button size="sm" variant="ghost" title="Personnaliser la politique de stock semaine par semaine" onClick={(e) => { e.stopPropagation(); setWeeklyOf(String(r.article_id)); }}><CalendarDays /></Button> });
+    out.push({ key: "who", label: "Modifié", get: (r) => `${r.updated_by ?? ""} ${r.updated_at ?? ""}`, render: (r) => <span className="subtle small">{r.updated_by}{r.updated_at ? <><br />{fmtDateTime(r.updated_at)}</> : null}</span> });
+    out.push({ key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (r) => <Button size="sm" variant="ghost" title="Supprimer" onClick={(e) => { e.stopPropagation(); if (window.confirm("Supprimer cette ligne ?")) del.mutate({ name: table.name, key: Object.fromEntries(table.key.map((k) => [k, r[k]])) }); }}><Trash2 /></Button> });
+    return out;
+  }, [table, del]);
+
+  const programs = usePrograms();
+  const pdp = usePdpErp(program || undefined);
 
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Référentiel</h1><p>Données ERP ; les champs modifiables créent une surcharge applicative (bordure bleue), tracée et réversible.</p></div>
+        <div className="title"><h1>Référentiel</h1><p>Articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures et stock de référence sont gérés ici : ligne par ligne, ou par fichier Excel (modèle à télécharger, puis importer).</p></div>
       </div>
-      <Tabs value={tab} onChange={setTab} tabs={[{ id: "articles", label: "Articles", count: articles.data?.length }, { id: "links", label: "Article ↔ fournisseur", count: links.data?.length }, { id: "suppliers", label: "Fournisseurs", count: suppliers.data?.length }, { id: "programs", label: "Programmes & PDP", count: programs.data?.length }, { id: "bom", label: "Nomenclatures", count: bom.data?.length }]} />
-
-      {tab === "articles" && <Card flush>{articles.isError ? <ErrorBox error={articles.error} /> : articles.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={articles.data ?? []} columns={articleCols} rowKey={(a) => a.article_id} compact />}</Card>}
-      <WeeklyParamsDrawer articleId={weeklyOf} onClose={() => setWeeklyOf(null)} />
-      {tab === "links" && <Card flush>{links.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={links.data ?? []} columns={linkCols} rowKey={(l) => `${l.article_id}-${l.supplier_id}`} compact />}</Card>}
-      {tab === "suppliers" && <Card flush>{suppliers.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={suppliers.data ?? []} columns={supplierCols} rowKey={(x) => x.supplier_id} compact />}</Card>}
-      {tab === "programs" && (
-        <div className="grid cols-2">
-          <Card flush title="Programmes de production" hint="cliquer pour voir le PDP ERP">
-            {programs.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={programs.data ?? []} columns={programCols} rowKey={(p) => p.program_id} compact onRowClick={(p) => setProgram(p.program_id)} rowClass={(p) => (program === p.program_id ? "selected" : "")} />}
-          </Card>
-          <Card flush title={program ? `PDP ERP – ${program}` : "PDP ERP"} hint="quantités hebdomadaires (version ERP)">
-            {!program ? <Empty title="Sélectionnez un programme" /> : plan.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : !plan.data?.length ? <Empty title="Aucun PDP pour ce programme" /> : (
-              <div style={{ maxHeight: 520, overflow: "auto" }}>
-                <table className="tbl compact"><thead><tr><th>Semaine</th><th>Lundi</th><th className="num">Quantité</th><th>Version</th></tr></thead>
-                  <tbody>{plan.data.map((l, i) => <tr key={i}><td>{l.iso_week}</td><td className="subtle">{l.week_start}</td><td className="num">{fmtQty(l.qty)}</td><td className="subtle">{l.version}</td></tr>)}</tbody></table>
-              </div>
-            )}
-          </Card>
-        </div>
+      {tables.isError ? <ErrorBox error={tables.error} /> : tables.isLoading || !tables.data ? <SkeletonBlock /> : (
+        <>
+          <Tabs value={tab} onChange={(t) => { setTab(t); setReport(null); }} tabs={[...tables.data.map((t) => ({ id: t.name, label: t.label, count: t.rows })), { id: "pdp_erp", label: "PDP ERP" }]} />
+          {table && tab !== "pdp_erp" && (
+            <Card flush title={table.label} hint={table.description}
+              actions={<>
+                <select className="select sm" value={mode} onChange={(e) => setMode(e.target.value as "replace" | "merge")} title="Mode d'import" aria-label="Mode d'import">
+                  <option value="merge">Import : fusionner (mise à jour par clé)</option><option value="replace">Import : remplacer la table</option>
+                </select>
+                <input ref={fileInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f && (mode === "merge" || window.confirm(`Remplacer toute la table « ${table.label} » par le fichier ?`))) importFile.mutate(f); e.target.value = ""; }} />
+                <Button size="sm" onClick={() => fileInput.current?.click()} disabled={importFile.isPending}><Upload />{importFile.isPending ? "Import…" : "Importer un fichier"}</Button>
+                <a className="btn sm" href={api.downloadUrl(`/api/reference/${table.name}/template.xlsx`)} title="Modèle Excel minimaliste (en-têtes, exemple, notice)"><Download />Modèle</a>
+                <a className="btn sm" href={api.downloadUrl(`/api/reference/${table.name}/template.xlsx`, { filled: true })} title="Exporter le contenu actuel"><Download />Exporter</a>
+                <Button size="sm" variant="primary" onClick={() => setEditing({})}><Plus />Ajouter</Button>
+              </>}>
+              {importFile.error && <div className="error-box" style={{ margin: 12 }}>{(importFile.error as Error).message}</div>}
+              {report && <div className="note" style={{ margin: 12 }}>{report.created} ligne(s) importée(s){report.notes.length ? ` · ${report.notes.slice(0, 5).join(" ; ")}${report.notes.length > 5 ? " …" : ""}` : ""}</div>}
+              {rows.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : (
+                <DataTable rows={rows.data ?? []} columns={cols} rowKey={(r) => table.key.map((k) => String(r[k])).join("|")} compact onRowClick={(r) => setEditing(r)}
+                  emptyTitle={`Aucune ligne dans « ${table.label} »`} emptyHint="Télécharger le modèle, le remplir, l'importer ; ou ajouter une ligne." />
+              )}
+            </Card>
+          )}
+          {tab === "pdp_erp" && (
+            <div className="grid cols-2">
+              <Card flush title="Programmes" hint="cliquer pour voir le PDP lu de l'ERP (si une table est configurée)">
+                {programs.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : (
+                  <table className="tbl compact"><thead><tr><th>Programme</th><th className="num">Composants</th></tr></thead>
+                    <tbody>{(programs.data ?? []).map((p) => <tr key={p.program_id} className={`clickable ${program === p.program_id ? "selected" : ""}`} onClick={() => setProgram(p.program_id)}><td><b>{p.name}</b><span className="sub mono">{p.program_id}</span></td><td className="num">{p.components}</td></tr>)}</tbody></table>
+                )}
+              </Card>
+              <Card flush title={program ? `PDP ERP – ${program}` : "PDP ERP"} hint="le PDP importé par fichier (page Imports / exports) remplace cette table pour ses programmes">
+                {!program ? <Empty title="Sélectionnez un programme" /> : pdp.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : !pdp.data?.length ? <Empty title="Aucun PDP ERP pour ce programme" hint="Le PDP vient du fichier importé." /> : (
+                  <div style={{ maxHeight: 520, overflow: "auto" }}>
+                    <table className="tbl compact"><thead><tr><th>Lundi</th><th className="num">Quantité</th><th>Version</th></tr></thead>
+                      <tbody>{pdp.data.map((l, i) => <tr key={i}><td>{fmtDate(l.week_start)}</td><td className="num">{fmtQty(l.qty)}</td><td className="subtle">{l.version}</td></tr>)}</tbody></table>
+                  </div>
+                )}
+              </Card>
+            </div>
+          )}
+        </>
       )}
-      {tab === "bom" && <Card flush>{bom.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={bom.data ?? []} columns={bomCols} rowKey={(b) => `${b.program_id}-${b.article_id}`} compact />}</Card>}
+      {table && <RowEditor table={table} row={editing} onClose={() => setEditing(null)} />}
+      <WeeklyParamsDrawer articleId={weeklyOf} onClose={() => setWeeklyOf(null)} />
     </div>
+  );
+}
+
+/** Create / edit one row of a reference table (typed inputs from the column definitions). */
+function RowEditor({ table, row, onClose }: { table: RefTableInfo; row: RefRow | null; onClose: () => void }) {
+  const toast = useToast();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const isNew = !!row && table.key.every((k) => row[k] === undefined);
+  useEffect(() => {
+    if (!row) return;
+    const v: Record<string, string> = {};
+    table.columns.forEach((c) => { const x = row[c.name]; v[c.name] = x === undefined || x === null ? (c.type === "bool" ? "oui" : "") : c.type === "bool" ? (x ? "oui" : "non") : String(x); });
+    setValues(v);
+  }, [row, table]);
+  const save = useWrite((vals: Record<string, string>) => api.put(`/api/reference/${table.name}/rows`, { values: vals }), () => { toast.push("Ligne enregistrée", "success"); onClose(); });
+  return (
+    <Drawer open={!!row} onClose={onClose} title={`${isNew ? "Ajouter" : "Modifier"} · ${table.label}`}
+      footer={<><Button onClick={onClose}>Annuler</Button><Button variant="primary" disabled={save.isPending} onClick={() => save.mutate(values)}>Enregistrer</Button></>}>
+      <div className="form-grid">
+        {table.columns.map((c) => (
+          <Field key={c.name} label={`${c.label}${c.required ? " *" : ""}`} help={c.description}>
+            {c.type === "bool" ? <select className="select" value={values[c.name] ?? "oui"} onChange={(e) => setValues({ ...values, [c.name]: e.target.value })}><option value="oui">oui</option><option value="non">non</option></select>
+              : <input className="input" type={c.type === "date" ? "date" : c.type === "float" || c.type === "int" ? "number" : "text"} step={c.type === "float" ? "any" : undefined} value={values[c.name] ?? ""} disabled={c.key && !isNew}
+                onChange={(e) => setValues({ ...values, [c.name]: e.target.value })} />}
+          </Field>
+        ))}
+      </div>
+      {save.error && <div className="error-box">{(save.error as Error).message}</div>}
+      <p className="small subtle">* obligatoire · les colonnes clé ({table.key.join(", ")}) identifient la ligne et ne se modifient pas.</p>
+    </Drawer>
   );
 }
