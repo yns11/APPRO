@@ -1,18 +1,24 @@
-"""Supply flows of one article, per supplier **lane**: the ERP scenario (firm orders as is) and the
+"""Supply flows of one article, per supplier **lane**: the ERP scenario (firm orders as is), the
 plan scenario (the planner's plan cells, else the ERP), the receipts and the backlog.
 
 Rules (docs/regles_metier.md § 3):
 
 * an ERP **order** is a delivery slot ``supplier|article|date|firm`` ; the ERP never moves nor
   cancels a slot and its remaining quantity is unreliable once the date is past ;
-* the **ERP scenario** counts the open firm orders dated on or after the reference day ;
+* the **ERP scenario** counts the open firm orders dated on or after the reference day, except the
+  days the planner **ignored** (a click on the Ferme cell: ``order_ignored`` flag) ;
 * the **plan scenario** counts, for each supplier and day, the typed plan cell when there is one,
-  else the firm ERP quantity of the day.  A cell dated before the reference day has expired ;
+  else the firm ERP quantity of the day (ignored days excluded).  A cell dated before the
+  reference day has expired ;
 * on the **reference day** nothing links a receipt to an order: the quantity still expected from
   the firm orders of a supplier is ``max(0, open − receipts of the day)`` (a typed cell is taken as
   is, the planner knows) ;
 * the **backlog** of a supplier is ``max(0, Σ ordered firm quantity − Σ received)`` over the last
   ``backlog_days`` before the reference day: no per-order matching, no action to take, it ages out.
+
+For display the Ferme row also carries, per day, the **ordered** and **ERP remaining** quantities
+of the firm orders whatever their date (``orders_firm_ordered`` / ``orders_firm_open``): the cell
+shows the ordered quantity, or ``remaining / ordered`` when a partial delivery took place.
 """
 from __future__ import annotations
 
@@ -24,7 +30,7 @@ import numpy as np
 
 from .calendar import iso_week_monday
 from .demand import DayIndex
-from .models import EngineParams, Lane, OrderInfo, OrderLine, PlanCell, Receipt, SupplierLink
+from .models import CellFlag, EngineParams, Lane, OrderInfo, OrderLine, PlanCell, Receipt, SupplierLink
 
 EPS = 1e-9
 
@@ -32,15 +38,25 @@ EPS = 1e-9
 @dataclass
 class _LaneAcc:
     supplier_id: str | None
-    orders_firm: np.ndarray
-    orders_firm_hist: np.ndarray
-    orders_forecast: np.ndarray
-    receipts: np.ndarray
-    plan: np.ndarray
-    plan_typed: np.ndarray
+    n: int
+    orders_firm: np.ndarray = field(init=False)
+    orders_firm_hist: np.ndarray = field(init=False)
+    orders_forecast: np.ndarray = field(init=False)
+    receipts: np.ndarray = field(init=False)
+    plan: np.ndarray = field(init=False)
+    plan_typed: np.ndarray = field(init=False)
+    ordered: np.ndarray = field(init=False)
+    open: np.ndarray = field(init=False)
+    ignored: np.ndarray = field(init=False)
     backlog_ordered: float = 0.0
     backlog_received: float = 0.0
     orders: list[OrderInfo] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        n = self.n
+        self.orders_firm, self.orders_firm_hist, self.orders_forecast = np.zeros(n), np.zeros(n), np.zeros(n)
+        self.receipts, self.plan, self.ordered, self.open = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
+        self.plan_typed, self.ignored = np.zeros(n, dtype=bool), np.zeros(n, dtype=bool)
 
 
 def lane_ids(links: list[SupplierLink], orders: list[OrderLine], receipts: list[Receipt], cells: list[PlanCell],
@@ -57,11 +73,11 @@ def lane_ids(links: list[SupplierLink], orders: list[OrderLine], receipts: list[
 
 
 def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: list[Receipt], cells: list[PlanCell],
-                supplier_names: dict[str, str], index: DayIndex, as_of: dt.date, params: EngineParams) -> list[Lane]:
+                supplier_names: dict[str, str], index: DayIndex, as_of: dt.date, params: EngineParams,
+                flags: list[CellFlag] | None = None) -> list[Lane]:
     n = index.n
     ids = lane_ids(links, orders, receipts, cells, as_of)
-    acc = {sid: _LaneAcc(sid, np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n, dtype=bool))
-           for sid in ids}
+    acc = {sid: _LaneAcc(sid, n) for sid in ids}
     fallback = ids[0]
 
     def lane_of(sid: str | None) -> _LaneAcc:
@@ -71,6 +87,13 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         i = index.offset(day)
         if i is not None:
             arr[i] += qty
+
+    # ---- ignored firm days (planner clicks), on/after the reference day only
+    for f in flags or ():
+        if f.kind == "order_ignored" and f.date >= as_of:
+            i = index.offset(f.date)
+            if i is not None:
+                lane_of(f.supplier_id).ignored[i] = True
 
     window_start = as_of - dt.timedelta(days=max(int(params.backlog_days), 0))
     # ---- receipts
@@ -93,13 +116,18 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         day = o.expected_date
         if not firm and params.forecast_date_policy == "week_monday":
             day = iso_week_monday(day)
-        ln.orders.append(OrderInfo(o.order_id, o.supplier_id, typ, day, float(o.qty_ordered), float(o.qty_open or 0.0), o.ref))
+        i = index.offset(day)
+        ignored = bool(firm and i is not None and ln.ignored[i])
+        ln.orders.append(OrderInfo(o.order_id, o.supplier_id, typ, day, float(o.qty_ordered), float(o.qty_open or 0.0),
+                                   o.ref, ignored))
         if firm:
+            add(ln.ordered, day, float(o.qty_ordered))
+            add(ln.open, day, float(o.qty_open or 0.0))
             if day < as_of:
                 add(ln.orders_firm_hist, day, float(o.qty_ordered))
                 if day >= window_start:
                     ln.backlog_ordered += float(o.qty_ordered)
-            elif o.qty_open and o.qty_open > EPS:
+            elif o.qty_open and o.qty_open > EPS and not ignored:
                 add(ln.orders_firm, day, float(o.qty_open))
         elif o.qty_open and o.qty_open > EPS:
             add(ln.orders_forecast, day, float(o.qty_open))
@@ -121,9 +149,9 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         ln.plan[i] = max(0.0, float(c.qty))
         ln.plan_typed[i] = True
     return [Lane(supplier_id=ln.supplier_id, name=supplier_names.get(ln.supplier_id or "", ln.supplier_id or ""),
-                 orders_firm=ln.orders_firm.tolist(), orders_firm_hist=ln.orders_firm_hist.tolist(),
-                 orders_forecast=ln.orders_forecast.tolist(), receipts=ln.receipts.tolist(), plan=ln.plan.tolist(),
-                 supply_proposed=[0.0] * n, plan_typed=ln.plan_typed.tolist(),
+                 orders_firm=ln.orders_firm, orders_firm_hist=ln.orders_firm_hist, orders_forecast=ln.orders_forecast,
+                 receipts=ln.receipts, plan=ln.plan, supply_proposed=np.zeros(n), plan_typed=ln.plan_typed,
+                 orders_firm_ordered=ln.ordered, orders_firm_open=ln.open, orders_ignored=ln.ignored,
                  backlog_ordered=ln.backlog_ordered, backlog_received=ln.backlog_received,
                  backlog_qty=max(0.0, ln.backlog_ordered - ln.backlog_received), orders=ln.orders)
             for ln in acc.values()]
@@ -132,4 +160,16 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
 def lane_totals(lanes: list[Lane], key: str) -> np.ndarray:
     if not lanes:
         return np.zeros(0)
-    return np.sum([np.asarray(getattr(l, key), dtype=float) for l in lanes], axis=0)
+    out = np.zeros_like(getattr(lanes[0], key), dtype=float)
+    for l in lanes:
+        out += getattr(l, key)
+    return out
+
+
+def blocked_windows(flags: list[CellFlag] | None, article_id: str) -> list[tuple[dt.date, dt.date]]:
+    """Days where no CBN proposal may be placed: from each refused proposal to the Sunday of its week."""
+    out = []
+    for f in flags or ():
+        if f.kind == "proposal_refused" and f.article_id == article_id:
+            out.append((f.date, iso_week_monday(f.date) + dt.timedelta(days=6)))
+    return out

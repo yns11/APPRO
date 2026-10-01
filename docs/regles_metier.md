@@ -74,8 +74,31 @@ du plan saisie ce jour-là est prise telle quelle.
 * Une cellule datée avant la référence a **expiré** : ignorée, listée « expirée » dans *Saisies & journal*.
 * Le plan se saisit en granularité jour ; une colonne semaine est en lecture et bascule sur le jour au clic.
 * Un **commentaire** facultatif se pose par clic droit sur une cellule (Plan ou Ajustement).
+* **Recopie** : la cellule active (Plan ou Ajustement) porte un petit carré dans son coin ; le tirer le long de la
+  ligne recopie la valeur sur les cellules traversées, comme Excel (copie, pas de série). Les colonnes semaine
+  et le passé sont sautés ; une seule transaction, un seul recalcul.
 
 Il n'existe **aucun autre objet** : ni ligne de plan, ni statut de commande, ni action « dater / clôturer ».
+Deux lignes en lecture sont néanmoins **cliquables** (§ 3.3 bis et § 7).
+
+### 3.3 bis La ligne Ferme : affichage et commandes ignorées
+
+La cellule *Ferme* d'un fournisseur et d'un jour affiche toujours la **quantité commandée** des commandes
+fermes de ce jour, quelle que soit la quantité restant à livrer :
+
+| Situation | Texte | Couleur |
+|---|---|---|
+| rien reçu, ou tout reçu | quantité commandée | vert (**soldée**) quand le restant ERP est nul, orange (**en cours**) sinon |
+| livraisons partielles, restant > 0 | `restant / commandé` | orange (en cours) |
+| commande **ignorée** (clic) | quantité commandée barrée | rouge |
+
+L'affichage ne change pas le calcul : le Scenario ERP et le pré-remplissage du plan comptent le **restant ERP**
+des commandes à partir de la référence, et rien pour le passé (§ 3.2).
+
+Un **clic** sur une cellule Ferme à partir de la date de référence **ignore** les commandes fermes de ce
+fournisseur et de ce jour : elles sortent du Scenario ERP et ne pré-remplissent plus le Plan (cellule vide =
+0 ; une cellule saisie garde sa valeur). Un nouveau clic les rétablit. Le passé ne s'ignore pas (il ne compte
+dans aucun stock). Ces jours ignorés sont listés dans *Saisies & journal* et comptés dans le KPI *Plan*.
 
 ### 3.4 Backlog fournisseur
 
@@ -165,6 +188,19 @@ exports) : les besoins d'une même semaine ramenés au même lundi sont fusionn�
 Pour la reprendre : taper la quantité dans la cellule *Plan* (la cellule grisée la prérempli). Le CBN se
 recalcule sans elle.
 
+**Refuser une proposition** : un clic sur une cellule *Proposition CBN* la barre, la retire du plan et
+**interdit toute proposition entre sa date et le dimanche de sa semaine** : le besoin est servi par une
+proposition placée après cette fenêtre (jamais avant : l'approvisionneur a dit « pas de livraison cette
+semaine »), au prix d'un manque éventuel entre-temps, affiché dans le Scenario Plan. La quantité refusée reste
+affichée barrée ; un nouveau clic rétablit la proposition. Les refus sont listés dans *Saisies & journal*.
+
+**Planning de livraison** (onglet de la fiche article) : la ligne *Plan* est présentée comme des lignes de
+planning ERP, une par fournisseur et par jour à quantité non nulle : *Quantité livrée*, *Unité*, *Date de
+début de livraison* (le jour du plan), *Heure de début* (11:59:00 PM), *Date de fin* (début + 6 jours), *Heure
+de fin* (11:59:00 PM). Une plage se sélectionne à la souris comme dans Excel (ou par en-tête de colonne / numéro
+de ligne) et se copie par Ctrl+C ou le bouton *Copier*, en texte tabulé prêt à coller dans l'ERP ou une
+feuille. Le bouton *FR / EN* choisit le format des dates (`jj/mm/aaaa` ou `m/j/aaaa`) et le séparateur décimal.
+
 ## 8. Paramètres d'article par semaine
 
 Couverture cible, seuils, surstock, stock de sécurité et cycle de commande sont fixes par article dans le
@@ -185,6 +221,8 @@ Chaque écriture (cellule, référentiel, import, paramètre) est journalisée a
 |---|---|
 | Cellule du plan | à partir de la date de référence (le passé n'est pas planifié) |
 | Ajustement | toute date ; ≤ référence = correction du stock de référence |
+| Commande ferme ignorée | à partir de la date de référence |
+| Proposition CBN refusée | à partir de la date de référence ; bloque jusqu'au dimanche de sa semaine |
 | Référentiel | sans date, sauf le stock de référence (date du stock) |
 
 ## 11. Classeur Excel « vivant »

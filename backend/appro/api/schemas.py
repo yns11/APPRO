@@ -129,6 +129,7 @@ class LaneOut(BaseModel):
     name: str
     series: list[SeriesOut]
     plan_typed: list[bool]
+    orders_ignored: list[bool] = Field(default_factory=list)
     backlog_ordered: float
     backlog_received: float
     backlog_qty: float
@@ -223,6 +224,8 @@ class GridArticle(BaseModel):
 
 
 class GridResponse(BaseModel):
+    """One page of the supply table (``total`` articles in the perimeter after filters)."""
+
     as_of: dt.date
     granularity: Literal["default", "day", "week"]
     periods: list[str]
@@ -230,6 +233,29 @@ class GridResponse(BaseModel):
     period_end: list[dt.date]
     articles: list[GridArticle]
     diagnostics: list[str]
+    total: int = 0
+    page: int = 1
+    page_size: int = 0
+
+
+class DeliveryRow(BaseModel):
+    supplier_id: str | None
+    supplier_name: str
+    date: dt.date
+    end_date: dt.date
+    qty: float
+    typed: bool
+
+
+class DeliveryPlanResponse(BaseModel):
+    """The *Plan* row as an ERP delivery schedule (one line per supplier and day with a quantity)."""
+
+    article_id: str
+    designation: str
+    unit: str
+    as_of: dt.date
+    suppliers: list[dict[str, Any]]
+    rows: list[DeliveryRow]
 
 
 class ProgramImpactResponse(BaseModel):
@@ -278,6 +304,41 @@ class PlanCellOut(ORM):
     supplier_id: str
     date: dt.date
     expression: str
+    qty: float
+    note: str
+    updated_by: str
+    updated_at: dt.datetime
+
+
+class PlanCellBatchIn(BaseModel):
+    """Several plan cells at once (fill handle of the grid): one transaction, one recalculation."""
+
+    cells: list[PlanCellIn] = Field(max_length=2000)
+
+
+class AdjustmentBatchIn(BaseModel):
+    cells: list[AdjustmentIn] = Field(max_length=2000)
+
+
+class FlagIn(BaseModel):
+    """A click on a read-only cell: ``order_ignored`` (Ferme row: supplier × day, the firm orders of
+    the day leave the ERP scenario and the plan) or ``proposal_refused`` (Proposition CBN row: no
+    proposal from that day to the end of its ISO week).  ``qty`` keeps the refused quantity shown."""
+
+    article_id: str
+    supplier_id: str | None = None
+    date: dt.date
+    kind: Literal["order_ignored", "proposal_refused"]
+    qty: float = 0.0
+    note: str | None = Field(None, max_length=500)
+
+
+class FlagOut(ORM):
+    id: str
+    article_id: str
+    supplier_id: str
+    date: dt.date
+    kind: str
     qty: float
     note: str
     updated_by: str

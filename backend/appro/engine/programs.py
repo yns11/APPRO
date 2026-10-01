@@ -61,30 +61,33 @@ def program_impact(results: dict[str, ArticleResult], bom: list[BomLine], progra
             weeks.append(wk)
             bucket.append([])
         bucket[-1].append(i)
+    starts = np.array([b[0] - i0 for b in bucket])      # week boundaries, relative to the reference day
     programs = []
     for pid, daily in sorted(program_daily.items()):
-        planned = np.asarray(daily)
-        if planned[i0:].sum() <= 1e-9:
+        planned = np.asarray(daily)[i0:]
+        if planned.sum() <= 1e-9:
             continue
         articles = comps.get(pid, [])
+        planned_w = np.add.reduceat(planned, starts)
         row: dict[str, Any] = {"program_id": pid, "name": program_names.get(pid, pid), "components": len(articles),
-                               "planned": [], "feasible": {L: [] for L in LAYERS}, "limiting": {L: [] for L in LAYERS},
-                               "first_impact": {L: None for L in LAYERS}}
-        for wk, idxs in zip(weeks, bucket):
-            row["planned"].append(round(float(planned[idxs].sum()), 3))
-            for L in LAYERS:
-                if articles:
-                    mat = np.array([shares[a][L][idxs] for a in articles])   # components × days
-                    share = mat.min(axis=0)
-                    # limiting components of the week: lowest weighted share, ties on quantity
-                    weekly = (mat * planned[idxs]).sum(axis=1) / max(planned[idxs].sum(), 1e-9)
-                    lim = sorted(((float(weekly[k]), a) for k, a in enumerate(articles) if weekly[k] < 0.999))[:3]
-                else:
-                    share, lim = np.ones(len(idxs)), []
-                feasible = float((planned[idxs] * share).sum())
-                row["feasible"][L].append(round(feasible, 3))
-                row["limiting"][L].append([{"article_id": a, "share": round(s, 3)} for s, a in lim])
-                if row["first_impact"][L] is None and feasible < planned[idxs].sum() - 1e-6:
-                    row["first_impact"][L] = wk
+                               "planned": np.round(planned_w, 3).tolist(), "feasible": {}, "limiting": {}, "first_impact": {}}
+        for L in LAYERS:
+            if articles:
+                mat = np.stack([shares[a][L][i0:] for a in articles])          # components × days
+                share = mat.min(axis=0)
+                feasible_w = np.add.reduceat(planned * share, starts)
+                # limiting components of the week: lowest weighted share, ties on quantity
+                weighted = np.add.reduceat(mat * planned, starts, axis=1) / np.maximum(planned_w, 1e-9)
+                limiting = []
+                for w in range(len(weeks)):
+                    ks = np.where(weighted[:, w] < 0.999)[0]
+                    lim = sorted(((float(weighted[k, w]), articles[k]) for k in ks))[:3]
+                    limiting.append([{"article_id": a, "share": round(s, 3)} for s, a in lim])
+            else:
+                feasible_w, limiting = planned_w.copy(), [[] for _ in weeks]
+            row["feasible"][L] = np.round(feasible_w, 3).tolist()
+            row["limiting"][L] = limiting
+            hit = np.where(feasible_w < planned_w - 1e-6)[0]
+            row["first_impact"][L] = weeks[int(hit[0])] if len(hit) else None
         programs.append(row)
     return {"weeks": weeks, "programs": programs}

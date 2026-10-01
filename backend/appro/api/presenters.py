@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 from typing import Any
+
+import numpy as np
 
 from ..engine.calendar import iso_week_label, iso_week_monday
 from ..engine.models import Alert, ArticleResult, Lane, MrpResult, Proposal, SupplierLink
@@ -29,7 +32,11 @@ SERIES_LABELS = [
     ("coverage_plan", "Couverture Plan (j)"),
 ]
 LANE_SERIES = [("orders_firm", "Ferme"), ("orders_firm_hist", "Ferme (passé)"), ("orders_forecast", "Prévisionnel"),
-               ("receipts", "Reçu"), ("plan", "Plan"), ("supply_proposed", "Proposition CBN")]
+               ("receipts", "Reçu"), ("plan", "Plan"), ("supply_proposed", "Proposition CBN"),
+               ("orders_firm_ordered", "Ferme commandé"), ("orders_firm_open", "Ferme restant ERP")]
+#: series of the multi-article table (the article page gets every series)
+GRID_SERIES = {"demand", "supply_proposed", "adjustments", "stock_erp", "stock_plan", "shortage_erp", "shortage_plan",
+               "coverage_erp", "coverage_plan", "target_stock"}
 FLOWS = {"demand", "consumed", "required", "demand_plan", "orders_firm", "orders_firm_hist", "orders_forecast",
          "receipts", "plan", "supply_proposed", "adjustments"}
 SHORTAGES = {"shortage_erp", "shortage_plan"}
@@ -178,57 +185,116 @@ def period_groups(dates: list[dt.date], as_of: dt.date, granularity: str, focus_
     return groups
 
 
-def _agg(key: str, raw: list, groups: dict[str, list[int]], lost: bool) -> list[float]:
-    if key in FLOWS or (lost and key in SHORTAGES):
-        return [round(float(sum(raw[i] for i in g)), 3) for g in groups.values()]
-    return [round(float(raw[g[-1]]), 3) for g in groups.values()]
+@dataclass
+class Columns:
+    """The columns of a grid: contiguous groups of day indexes (vectorised aggregation)."""
+
+    keys: list[str]
+    starts: np.ndarray      # first day index of each column
+    lasts: np.ndarray       # last day index of each column
+    first: int              # first day index shown
+    day_only: bool          # every column is a single day
+
+    @classmethod
+    def build(cls, dates: list[dt.date], as_of: dt.date, granularity: str, focus_weeks: int,
+              start: dt.date | None = None) -> "Columns":
+        groups = period_groups(dates, as_of, granularity, focus_weeks, start)
+        starts = np.array([g[0] for g in groups.values()], dtype=int)
+        lasts = np.array([g[-1] for g in groups.values()], dtype=int)
+        return cls(list(groups), starts, lasts, int(starts[0]) if len(starts) else 0, bool(np.all(starts == lasts)))
+
+    def flow(self, raw) -> list[float]:
+        """Σ over the days of each column."""
+        a = np.asarray(raw, dtype=float)
+        v = a[self.starts] if self.day_only else np.add.reduceat(a[self.first:], self.starts - self.first)
+        return np.round(v, 3).tolist()
+
+    def level(self, raw) -> list[float]:
+        """Value at the last day of each column (stocks, coverage)."""
+        return np.round(np.asarray(raw, dtype=float)[self.lasts], 3).tolist()
+
+    def any(self, raw) -> list[bool]:
+        a = np.asarray(raw, dtype=bool)
+        v = a[self.starts] if self.day_only else np.logical_or.reduceat(a[self.first:], self.starts - self.first)
+        return v.tolist()
+
+    def meta(self, dates: list[dt.date]) -> dict[str, Any]:
+        return {"periods": self.keys, "period_start": [dates[i].isoformat() for i in self.starts],
+                "period_end": [dates[i].isoformat() for i in self.lasts]}
 
 
-def series_out(ar: ArticleResult, groups: dict[str, list[int]], lost: bool) -> list[S.SeriesOut]:
-    return [S.SeriesOut(key=key, label=label, values=_agg(key, getattr(ar, key), groups, lost)) for key, label in SERIES_LABELS]
+def _agg(key: str, raw, cols: Columns, lost: bool) -> list[float]:
+    return cols.flow(raw) if key in FLOWS or (lost and key in SHORTAGES) else cols.level(raw)
 
 
-def lane_out(l: Lane, groups: dict[str, list[int]]) -> S.LaneOut:
-    return S.LaneOut(
-        supplier_id=l.supplier_id, name=l.name,
-        series=[S.SeriesOut(key=key, label=label, values=_agg(key, getattr(l, key), groups, False)) for key, label in LANE_SERIES],
-        plan_typed=[any(l.plan_typed[i] for i in g) for g in groups.values()],
-        backlog_ordered=l.backlog_ordered, backlog_received=l.backlog_received, backlog_qty=l.backlog_qty,
-        orders=[S.OrderInfoOut(**o.__dict__) for o in l.orders])
+def series_out(ar: ArticleResult, cols: Columns, lost: bool, keys: set[str] | None = None) -> list[dict[str, Any]]:
+    return [{"key": key, "label": label, "values": _agg(key, getattr(ar, key), cols, lost)}
+            for key, label in SERIES_LABELS if keys is None or key in keys]
+
+
+def lane_out(l: Lane, cols: Columns, with_orders: bool = True) -> dict[str, Any]:
+    return {
+        "supplier_id": l.supplier_id, "name": l.name,
+        "series": [{"key": key, "label": label, "values": _agg(key, getattr(l, key), cols, False)} for key, label in LANE_SERIES],
+        "plan_typed": cols.any(l.plan_typed), "orders_ignored": cols.any(l.orders_ignored),
+        "backlog_ordered": l.backlog_ordered, "backlog_received": l.backlog_received, "backlog_qty": l.backlog_qty,
+        "orders": [o.__dict__ for o in l.orders] if with_orders else [],
+    }
 
 
 def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, supplier_names: dict[str, str],
-                   programs: list[dict[str, Any]], from_date: dt.date | None = None) -> S.ProjectionResponse:
+                   programs: list[dict[str, Any]], from_date: dt.date | None = None) -> dict[str, Any]:
     start = from_date or (result.as_of - dt.timedelta(days=result.params.history_days))
-    groups = period_groups(ar.dates, result.as_of, granularity, result.params.focus_weeks, start)
+    cols = Columns.build(ar.dates, result.as_of, granularity, result.params.focus_weeks, start)
     lost = result.params.shortage_policy == "lost"
-    return S.ProjectionResponse(
-        article=article_ref(ar), as_of=result.as_of, granularity=granularity, periods=list(groups),
-        period_start=[ar.dates[g[0]] for g in groups.values()], period_end=[ar.dates[g[-1]] for g in groups.values()],
-        series=series_out(ar, groups, lost), lanes=[lane_out(l, groups) for l in ar.lanes],
-        proposals=[proposal_out(p, ar, supplier_names) for p in ar.proposals],
-        alerts=[alert_out(a, ar.article.designation) for a in ar.alerts],
-        kpis=ar.kpis, suppliers=[link_out(l, supplier_names) for l in ar.suppliers], programs=programs,
-        diagnostics=ar.diagnostics + result.diagnostics)
+    return {
+        "article": article_ref(ar).model_dump(mode="json"), "as_of": result.as_of.isoformat(), "granularity": granularity,
+        **cols.meta(ar.dates),
+        "series": series_out(ar, cols, lost), "lanes": [lane_out(l, cols) for l in ar.lanes],
+        "proposals": [proposal_out(p, ar, supplier_names).model_dump(mode="json") for p in ar.proposals],
+        "alerts": [alert_out(a, ar.article.designation).model_dump(mode="json") for a in ar.alerts],
+        "kpis": ar.kpis, "suppliers": [link_out(l, supplier_names).model_dump(mode="json") for l in ar.suppliers],
+        "programs": programs, "diagnostics": ar.diagnostics + result.diagnostics,
+    }
 
 
 def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str],
-             programs_of: dict[str, list[str]], from_date: dt.date | None = None) -> S.GridResponse:
-    """Multi-article supply table: every article on the same columns."""
+             programs_of: dict[str, list[str]], from_date: dt.date | None = None,
+             articles: list[ArticleResult] | None = None, total: int | None = None, page: int = 1,
+             page_size: int | None = None) -> dict[str, Any]:
+    """Multi-article supply table: every article on the same columns (one page of articles)."""
     start = from_date or (result.as_of - dt.timedelta(days=result.params.history_days))
-    arts = list(result.articles.values())
-    if not arts:
-        return S.GridResponse(as_of=result.as_of, granularity=granularity, periods=[], period_start=[], period_end=[],
-                              articles=[], diagnostics=result.diagnostics)
-    dates = arts[0].dates
-    groups = period_groups(dates, result.as_of, granularity, result.params.focus_weeks, start)
+    arts = list(result.articles.values()) if articles is None else articles
+    base = {"as_of": result.as_of.isoformat(), "granularity": granularity, "diagnostics": result.diagnostics,
+            "total": len(result.articles) if total is None else total, "page": page, "page_size": page_size or len(arts)}
+    if not result.articles:
+        return {**base, "periods": [], "period_start": [], "period_end": [], "articles": []}
+    dates = next(iter(result.articles.values())).dates
+    cols = Columns.build(dates, result.as_of, granularity, result.params.focus_weeks, start)
     lost = result.params.shortage_policy == "lost"
-    return S.GridResponse(
-        as_of=result.as_of, granularity=granularity, periods=list(groups),
-        period_start=[dates[g[0]] for g in groups.values()], period_end=[dates[g[-1]] for g in groups.values()],
-        articles=[S.GridArticle(article=article_ref(ar), series=series_out(ar, groups, lost),
-                                lanes=[lane_out(l, groups) for l in ar.lanes], kpis=ar.kpis,
-                                suppliers=[link_out(l, supplier_names) for l in ar.suppliers],
-                                programs=programs_of.get(ar.article.article_id, []))
-                  for ar in sorted(arts, key=lambda r: r.article.article_id)],
-        diagnostics=result.diagnostics)
+    return {
+        **base, **cols.meta(dates),
+        "articles": [{"article": article_ref(ar).model_dump(mode="json"), "series": series_out(ar, cols, lost, GRID_SERIES),
+                      "lanes": [lane_out(l, cols, with_orders=False) for l in ar.lanes], "kpis": ar.kpis,
+                      "suppliers": [link_out(l, supplier_names).model_dump(mode="json") for l in ar.suppliers],
+                      "programs": programs_of.get(ar.article.article_id, [])}
+                     for ar in arts],
+    }
+
+
+def delivery_plan(ar: ArticleResult, as_of: dt.date, supplier_names: dict[str, str]) -> dict[str, Any]:
+    """The *Plan* row as an ERP delivery schedule: one line per supplier and day with a quantity,
+    delivery window = the day and the six following days (what the ERP schedule line expects)."""
+    i0 = ar.dates.index(as_of)
+    rows = []
+    for l in ar.lanes:
+        plan = np.asarray(l.plan)
+        for i in np.where(plan[i0:] > 1e-9)[0] + i0:
+            d = ar.dates[int(i)]
+            rows.append({"supplier_id": l.supplier_id, "supplier_name": l.name, "date": d.isoformat(),
+                         "end_date": (d + dt.timedelta(days=6)).isoformat(), "qty": float(plan[i]),
+                         "typed": bool(l.plan_typed[i])})
+    rows.sort(key=lambda r: (r["date"], r["supplier_id"] or ""))
+    return {"article_id": ar.article.article_id, "designation": ar.article.designation, "unit": ar.article.unit,
+            "as_of": as_of.isoformat(), "suppliers": [{"supplier_id": l.supplier_id, "name": l.name} for l in ar.lanes],
+            "rows": rows}

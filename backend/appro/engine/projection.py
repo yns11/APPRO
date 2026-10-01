@@ -105,8 +105,7 @@ def coverage_days(stock: np.ndarray, demand: np.ndarray, index: DayIndex, calend
     idx = np.arange(n)
     j_max = np.maximum(j_max, idx)  # never before i
     if unit == "working":
-        is_open = np.array([1 if calendar.is_working_day(d) else 0 for d in index.dates])
-        open_cum = np.cumsum(is_open)
+        open_cum = np.cumsum(calendar.working_mask(index.start, n).astype(int))
         cov = open_cum[j_max] - open_cum[idx]
     else:
         cov = j_max - idx
@@ -119,14 +118,26 @@ def target_stock(demand: np.ndarray, article: Article, index: DayIndex, calendar
     """Target / safety level per day according to the article policy."""
     n = len(demand)
     cum = np.concatenate([[0.0], np.cumsum(demand)])  # cum[k] = Σ demand[0..k-1]
-    # the coverage target and the safety stock may change from one ISO week to another
-    days = np.array([max(int(article.param_at("coverage_target_days", d) or 0), 0) for d in index.dates])
-    safety = np.array([float(article.param_at("safety_stock_qty", d) or 0.0) for d in index.dates])
+    # the coverage target and the safety stock may change from one ISO week to another: resolve
+    # them once per ISO week (not per day) ; most articles have no weekly override at all
+    if article.weekly:
+        weeks = index.week_labels
+        uniq = {w: (max(int(article.param_at("coverage_target_days", d) or 0), 0),
+                    float(article.param_at("safety_stock_qty", d) or 0.0))
+                for w, d in zip(weeks, index.dates) if w not in ()}
+        days = np.fromiter((uniq[w][0] for w in weeks), dtype=int, count=n)
+        safety = np.fromiter((uniq[w][1] for w in weeks), dtype=float, count=n)
+    else:
+        days = np.full(n, max(int(article.coverage_target_days or 0), 0), dtype=int)
+        safety = np.full(n, float(article.safety_stock_qty or 0.0))
     if params.coverage_unit == "working":
-        # translate N working days into a calendar span for each day
-        end_idx = np.empty(n, dtype=int)
-        for i, d in enumerate(index.dates):
-            end_idx[i] = min(n - 1, i + (calendar.add_working_days(d, int(days[i])) - d).days)
+        # translate N working days into a calendar span for each day (working-day cumsum)
+        mask = calendar.working_mask(index.start, n + 400)
+        open_cum = np.concatenate([[0], np.cumsum(mask)])
+        idx = np.arange(n)
+        wanted = open_cum[idx + 1] + days           # cumulated open days to reach
+        end_idx = np.searchsorted(open_cum, wanted, side="left") - 1
+        end_idx = np.clip(np.where(days > 0, end_idx, idx), 0, n - 1)
     else:
         end_idx = np.minimum(np.arange(n) + days, n - 1)
     cov_target = cum[end_idx + 1] - cum[np.arange(n) + 1]  # Σ demand[i+1 .. end_idx]

@@ -25,17 +25,17 @@ export interface ProposalOut {
   delivery_date: string; order_date: string; qty: number; net_requirement: number; reason: string; urgent: boolean;
   lead_time_days: number; moq: number; pack_qty: number; projected_stock_before: number; projected_stock_after: number;
 }
-export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; }
+export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; ignored: boolean; }
 export interface SeriesOut { key: string; label: string; values: number[]; }
 /** One supplier of the article: its own Ferme / Prévisionnel / Reçu / Plan rows. */
-export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; }
+export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; }
 
 export interface ArticleKpis {
   stock_on_hand: number; reference_correction: number; stock_reference: number; snapshot_date: string; shortage_policy: "backlog" | "lost";
   stock_as_of_erp: number; stock_as_of_plan: number; coverage_erp_days: number; coverage_plan_days: number; coverage_target_days: number; target_stock: number;
   first_stockout_erp: string | null; first_stockout_plan: string | null; min_stock_erp: number; min_stock_plan: number; max_shortage_erp: number; max_shortage_plan: number;
   demand_next_7d: number; demand_next_30d: number; demand_horizon: number; avg_daily_demand_30d: number;
-  open_firm_qty: number; open_forecast_qty: number; plan_qty: number; plan_cell_count: number;
+  open_firm_qty: number; open_forecast_qty: number; plan_qty: number; plan_cell_count: number; ignored_order_days: number; refused_proposals: number;
   backlog_qty: number; backlog_ordered: number; backlog_received: number;
   proposed_qty: number; proposal_count: number; urgent_proposal_count: number; alert_count: number; severity: Severity | null; actual_share_30d: number; lanes: number;
 }
@@ -62,7 +62,11 @@ export interface ProjectionResponse {
   programs: { program_id: string; name: string; qty_per: number; unit: string; production_next_30d: number }[]; diagnostics: string[];
 }
 export interface GridArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; programs: string[]; }
-export interface GridResponse { as_of: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; articles: GridArticle[]; diagnostics: string[]; }
+/** One page of the supply table (``total`` articles after filters). */
+export interface GridResponse { as_of: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; articles: GridArticle[]; diagnostics: string[]; total: number; page: number; page_size: number; }
+/** The Plan row as ERP delivery schedule lines. */
+export interface DeliveryRow { supplier_id: string | null; supplier_name: string; date: string; end_date: string; qty: number; typed: boolean; }
+export interface DeliveryPlanResponse { article_id: string; designation: string; unit: string; as_of: string; suppliers: { supplier_id: string | null; name: string }[]; rows: DeliveryRow[]; }
 export type ImpactLayer = "onhand" | "erp" | "plan";
 export interface ProgramImpact {
   program_id: string; name: string; components: number; planned: number[];
@@ -75,6 +79,10 @@ export interface WeeklyParamsResponse { article_id: string; fields: string[]; de
 /** The two editable rows. */
 export interface AdjustmentOut { id: string; article_id: string; date: string; expression: string; qty: number; note: string; updated_by: string; updated_at: string; }
 export interface PlanCellOut { id: string; article_id: string; supplier_id: string; date: string; expression: string; qty: number; note: string; updated_by: string; updated_at: string; }
+/** A click on a read-only cell: ignored firm-order day (supplier × day) or refused CBN proposal (day, blocks its week). */
+export type FlagKind = "order_ignored" | "proposal_refused";
+export interface FlagOut { id: string; article_id: string; supplier_id: string; date: string; kind: FlagKind; qty: number; note: string; updated_by: string; updated_at: string; }
+export interface FlagIn { article_id: string; supplier_id?: string | null; date: string; kind: FlagKind; qty?: number; note?: string; }
 
 export interface ParamDoc { field: string; default: unknown; type: string; description: string; options: string[] | null; }
 export interface ParamOverrideOut { id: string; scope: string; key1: string; key2: string; field: string; value: string; updated_by: string; updated_at: string; }

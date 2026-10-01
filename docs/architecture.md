@@ -6,7 +6,8 @@
 │  client/  (React 18 + TypeScript + Vite)      ──── build ───►  client/dist (statique)          │
 │     pages : cockpit, tableau d'appro, fiche article, propositions, saisies & journal,          │
 │             référentiel (CRUD + Excel), impact programmes, imports / exports, paramètres        │
-│     SimulationGrid : une voie par fournisseur, deux lignes saisies (Plan, Ajustement)           │
+│     SimulationGrid : virtualisée (lignes et colonnes), une voie par fournisseur, deux lignes    │
+│                      saisies (Plan, Ajustement), deux lignes cliquables (Ferme, CBN), recopie   │
 │                                       │ /api (JSON, xlsx)                                       │
 │  backend/appro/api  (FastAPI)          ▼                                                        │
 │     routers : mrp (cockpit, projection, grille, backlog, propositions), entries (cellules,       │
@@ -36,8 +37,12 @@
   (`data/erp_sql.py`) sert au job et à la lecture directe.
 * **Le référentiel vit dans l'application** : les tables `ref_*` et le stock de référence sont dans la base
   applicative, éditées à l'écran ou par fichier ; aucune dépendance à une table Unity Catalog de référentiel.
-* **Déterminisme et performance** : NumPy sur une fenêtre glissante ; 16 articles × 150 jours ≈ 90 ms ;
-  résultats en cache par (version des données, périmètre, paramètres), invalidés à chaque écriture.
+* **Déterminisme et performance** : NumPy de bout en bout (les séries restent des tableaux, jamais des listes),
+  calendrier mémoïsé, re-projection seulement pour la politique `lost` ; 500 articles × 1 000 jours ≈ 3 s de
+  calcul, résultats en cache par (version des données, périmètre, paramètres), invalidés à chaque écriture.
+  Le tableau est servi **par pages** d'articles, agrégé par opérations vectorisées et sérialisé sans
+  validation Pydantic (`api/fastjson.py`, `orjson`) : une page de 20 articles sur 1 000 jours ≈ 0,1 s et 2 Mo.
+  Côté client la grille ne rend que les cellules visibles (virtualisation lignes + colonnes).
 * **Livraison sans aller-retour** : `main.py` racine, `app.yaml` = `config` du bundle (testé), jeton Lakebase
   par connexion, `sync.include` du frontend, vérificateur statique dans la suite de tests.
 

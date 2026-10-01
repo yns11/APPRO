@@ -126,6 +126,23 @@ class AppPlanCell(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class AppCellFlag(Base):
+    """A click on a read-only cell of the grid: ``order_ignored`` (article × supplier × day) or
+    ``proposal_refused`` (article × day, ``supplier_id`` empty) ; ``qty`` = refused quantity shown."""
+
+    __tablename__ = "app_cell_flags"
+    __table_args__ = (Index("ix_app_cell_flags_key", "kind", "article_id", "supplier_id", "date", unique=True),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("FL"))
+    kind: Mapped[str] = mapped_column(String(24))
+    article_id: Mapped[str] = mapped_column(String(40), index=True)
+    supplier_id: Mapped[str] = mapped_column(String(40), default="")
+    date: Mapped[dt.date] = mapped_column(Date, index=True)
+    qty: Mapped[float] = mapped_column(Float, default=0.0)
+    note: Mapped[str] = mapped_column(Text, default="")
+    updated_by: Mapped[str] = mapped_column(String(120), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 # =============================================================================
 # PDP versions, parameters, audit
 # =============================================================================

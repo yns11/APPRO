@@ -18,6 +18,7 @@ from ...services.context import AppContext
 from .. import presenters as P
 from .. import schemas as S
 from ..deps import ctx_dep, session_dep
+from ..fastjson import json_response
 
 router = APIRouter(prefix="/api", tags=["mrp"])
 
@@ -56,11 +57,15 @@ def cockpit(planner: str | None = None, article_ids: list[str] | None = Query(No
     names = _supplier_names(ctx)
     arts = sorted(result.articles.values(), key=lambda r: ({"critical": 0, "warning": 1, "info": 2}.get(r.kpis.get("severity") or "", 3),
                                                             r.kpis["coverage_plan_days"], r.article.article_id))
+    # the lists are capped: the cockpit shows the first alerts and KPIs, the dedicated pages page through the rest
+    alerts = sorted((P.alert_out(a, r.article.designation) for r in arts for a in r.alerts),
+                    key=lambda a: ({"critical": 0, "warning": 1}.get(a.severity, 2), a.article_id))[:2000]
+    props = sorted((P.proposal_out(p, r, names) for r in arts for p in r.proposals),
+                   key=lambda p: (not p.urgent, p.order_date, p.article_id))[:500]
     return S.CockpitResponse(
         as_of=result.as_of, horizon_days=result.params.horizon_days, planner=planner, data_source=ctx.source.name,
         pdp_version=None, kpis=P.cockpit_kpis(result), articles=[P.article_summary(r) for r in arts],
-        alerts=[P.alert_out(a, r.article.designation) for r in arts for a in r.alerts],
-        proposals=[P.proposal_out(p, r, names) for r in arts for p in r.proposals], backlog=P.backlog_rows(result),
+        alerts=alerts, proposals=props, backlog=P.backlog_rows(result),
         diagnostics=result.diagnostics, weekly_supply_demand=P.weekly_supply_demand(result))
 
 
@@ -73,7 +78,18 @@ def projection(article_id: str, granularity: Literal["default", "day", "week"] =
     ar = result.articles.get(article_id)
     if ar is None:
         raise HTTPException(404, f"Article inconnu : {article_id}")
-    return P.projection_out(ar, result, granularity, _supplier_names(ctx), _programs_for(ctx, article_id, result))
+    return json_response(P.projection_out(ar, result, granularity, _supplier_names(ctx), _programs_for(ctx, article_id, result)))
+
+
+@router.get("/articles/{article_id}/delivery-plan", response_model=S.DeliveryPlanResponse)
+def delivery_plan(article_id: str, horizon_days: int | None = HORIZON, ctx: AppContext = Depends(ctx_dep),
+                  session: Session = Depends(session_dep)):
+    """The Plan row as an ERP delivery schedule: one line per supplier and day with a quantity."""
+    result = mrp_service.compute(ctx, session, article_ids=[article_id], **_kw(horizon_days=horizon_days))
+    ar = result.articles.get(article_id)
+    if ar is None:
+        raise HTTPException(404, f"Article inconnu : {article_id}")
+    return json_response(P.delivery_plan(ar, result.as_of, _supplier_names(ctx)))
 
 
 def _programs_of(ctx: AppContext) -> dict[str, list[str]]:
@@ -85,10 +101,13 @@ def _programs_of(ctx: AppContext) -> dict[str, list[str]]:
 
 @router.get("/grid", response_model=S.GridResponse)
 def grid(planner: str | None = None, article_ids: list[str] | None = Query(None), program_id: str | None = None,
-         supplier_id: str | None = None, granularity: Literal["default", "day", "week"] = "default",
+         supplier_id: str | None = None, q: str | None = None, granularity: Literal["default", "day", "week"] = "default",
          horizon_days: int | None = HORIZON, history_days: int | None = HISTORY,
+         page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=200),
          ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Supply table of several articles on the same columns (filters: articles, programme, supplier)."""
+    """One page of the supply table (same columns for every article).  Filters: articles, programme,
+    supplier, free text ``q`` on the identifier / designation.  The whole perimeter is computed once
+    (cached) ; only the requested page is serialised."""
     ids = set(article_ids or [])
     if program_id:
         bom = ctx.table("ref_bom")
@@ -100,7 +119,14 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
         ids = (ids & sup_ids if ids else sup_ids) or {"__none__"}
     result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
                                  **_kw(horizon_days=horizon_days, history_days=history_days))
-    return P.grid_out(result, granularity, _supplier_names(ctx), _programs_of(ctx))
+    arts = sorted(result.articles.values(), key=lambda r: r.article.article_id)
+    if q and q.strip():
+        needle = q.strip().lower()
+        arts = [r for r in arts if needle in f"{r.article.article_id} {r.article.designation}".lower()]
+    total = len(arts)
+    page_arts = arts[(page - 1) * page_size: page * page_size]
+    return json_response(P.grid_out(result, granularity, _supplier_names(ctx), _programs_of(ctx), articles=page_arts,
+                                    total=total, page=page, page_size=page_size))
 
 
 @router.get("/backlog", response_model=list[S.BacklogRow])

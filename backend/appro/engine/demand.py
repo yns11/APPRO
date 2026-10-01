@@ -30,7 +30,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from .calendar import WorkCalendar, iso_week_monday
+from .calendar import WorkCalendar, iso_week_label, iso_week_monday
 from .models import ActualLine, BomLine, Dataset, EngineParams, PdpLine
 
 
@@ -60,6 +60,14 @@ class DayIndex:
         self.end = end
         self.n = (end - start).days + 1
         self.dates = [start + dt.timedelta(days=i) for i in range(self.n)]
+        self._weeks: list[str] | None = None
+
+    @property
+    def week_labels(self) -> list[str]:
+        """ISO week label of every day (computed once, shared by every article)."""
+        if self._weeks is None:
+            self._weeks = [iso_week_label(d) for d in self.dates]
+        return self._weeks
 
     def offset(self, day: dt.date) -> int | None:
         i = (day - self.start).days

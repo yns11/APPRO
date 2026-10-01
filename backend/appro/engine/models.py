@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal
 
+import numpy as np
+
 
 # =============================================================================
 # Reference data (managed in the application)
@@ -188,6 +190,27 @@ class PlanCell:
     note: str = ""
 
 
+FlagKind = Literal["order_ignored", "proposal_refused"]
+
+
+@dataclass
+class CellFlag:
+    """A click on a read-only cell of the grid.
+
+    * ``order_ignored`` (Ferme row, supplier × day, on/after the reference day): the firm ERP orders
+      of that day are **ignored** – out of the ERP scenario and of the plan prefill – until the
+      planner clicks again ;
+    * ``proposal_refused`` (Proposition CBN row, article × day): the proposal of that day is refused
+      and **no proposal may be placed from that day to the end of its ISO week** ; ``qty`` keeps
+      the refused quantity for display."""
+
+    article_id: str
+    supplier_id: str | None
+    date: dt.date
+    kind: FlagKind
+    qty: float = 0.0
+
+
 @dataclass
 class Dataset:
     """Everything the engine needs, as plain records."""
@@ -205,6 +228,7 @@ class Dataset:
     holidays: list[dt.date] = field(default_factory=list)
     adjustments: list[AdjustCell] = field(default_factory=list)
     plan: list[PlanCell] = field(default_factory=list)
+    flags: list[CellFlag] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -320,13 +344,16 @@ class Lane:
 
     supplier_id: str | None
     name: str
-    orders_firm: list[float]          # open firm ERP orders counted in the ERP stock (reference day matched)
-    orders_firm_hist: list[float]     # past firm orders, ordered quantity (display only)
-    orders_forecast: list[float]      # forecast ERP orders (information)
-    receipts: list[float]             # receipts (past by construction, reference day included)
-    plan: list[float]                 # plan counted in the plan stock (typed cells, else ERP), CBN excluded
-    supply_proposed: list[float]      # CBN complement placed on this supplier
-    plan_typed: list[bool]            # a plan cell is stored that day
+    orders_firm: np.ndarray           # open firm ERP orders counted in the ERP stock (reference day matched, ignored excluded)
+    orders_firm_hist: np.ndarray      # past firm orders, ordered quantity (display only)
+    orders_forecast: np.ndarray       # forecast ERP orders (information)
+    receipts: np.ndarray              # receipts (past by construction, reference day included)
+    plan: np.ndarray                  # plan counted in the plan stock (typed cells, else ERP), CBN excluded
+    supply_proposed: np.ndarray       # CBN complement placed on this supplier
+    plan_typed: np.ndarray            # bool: a plan cell is stored that day
+    orders_firm_ordered: np.ndarray   # Σ ordered quantity of the firm orders of the day (any date, display)
+    orders_firm_open: np.ndarray      # Σ ERP remaining quantity of the same orders (display)
+    orders_ignored: np.ndarray        # bool: the firm orders of the day are ignored (planner click)
     backlog_ordered: float            # past firm orders of the backlog window (ordered quantity)
     backlog_received: float           # receipts of the same window
     backlog_qty: float                # max(0, ordered − received)
@@ -344,6 +371,7 @@ class OrderInfo:
     qty_ordered: float
     qty_open: float
     ref: str = ""
+    ignored: bool = False
 
 
 @dataclass
@@ -352,32 +380,32 @@ class ArticleResult:
     start_date: dt.date
     as_of: dt.date
     dates: list[dt.date]
-    # daily series aligned on ``dates``
-    demand: list[float]               # consumption (past, actual-based) + requirement (future)
-    consumed: list[float]             # past part of ``demand`` (0 from the reference day)
-    required: list[float]             # future part of ``demand`` (0 before the reference day)
-    demand_plan: list[float]          # PDP only, for information
-    demand_actual_share: list[float]
-    orders_firm: list[float]          # Σ lanes
-    orders_firm_hist: list[float]
-    orders_forecast: list[float]
-    receipts: list[float]
-    plan: list[float]
-    supply_proposed: list[float]      # CBN complement
-    adjustments: list[float]          # planner adjustments (future days ; past ones correct the reference stock)
+    # daily NumPy series aligned on ``dates`` (kept as arrays: no copy, 3× less memory than lists)
+    demand: np.ndarray               # consumption (past, actual-based) + requirement (future)
+    consumed: np.ndarray             # past part of ``demand`` (0 from the reference day)
+    required: np.ndarray             # future part of ``demand`` (0 before the reference day)
+    demand_plan: np.ndarray          # PDP only, for information
+    demand_actual_share: np.ndarray
+    orders_firm: np.ndarray          # Σ lanes
+    orders_firm_hist: np.ndarray
+    orders_forecast: np.ndarray
+    receipts: np.ndarray
+    plan: np.ndarray
+    supply_proposed: np.ndarray      # CBN complement
+    adjustments: np.ndarray          # planner adjustments (future days ; past ones correct the reference stock)
     reference_correction: float       # sum of the adjustments dated on/before the snapshot day
     # physical stocks (never negative), unserved demand and net balances per scenario ; before the
     # reference day both hold the reconstructed history
-    stock_erp: list[float]
-    stock_plan: list[float]
-    shortage_onhand: list[float]
-    shortage_erp: list[float]
-    shortage_plan: list[float]
-    stock_erp_net: list[float]
-    stock_plan_net: list[float]
-    coverage_erp: list[int]
-    coverage_plan: list[int]
-    target_stock: list[float]
+    stock_erp: np.ndarray
+    stock_plan: np.ndarray
+    shortage_onhand: np.ndarray
+    shortage_erp: np.ndarray
+    shortage_plan: np.ndarray
+    stock_erp_net: np.ndarray
+    stock_plan_net: np.ndarray
+    coverage_erp: np.ndarray
+    coverage_plan: np.ndarray
+    target_stock: np.ndarray
     lanes: list[Lane]
     alerts: list[Alert]
     proposals: list[Proposal]

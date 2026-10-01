@@ -176,6 +176,7 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_programs`, `ref_bom`, `fct_stock` | le référentiel (§ 1) + `updated_by`, `updated_at` | clé de la table |
 | `app_plan_cells` | **cellules du plan** : article, fournisseur (`""` si aucun), date, expression saisie, quantité, commentaire, auteur | (article, fournisseur, date) |
 | `app_adjustments` | **cellules d'ajustement** : article, date (toute date), expression, quantité signée, commentaire, auteur | (article, date) |
+| `app_cell_flags` | **clics sur les cellules en lecture** : `kind` = `order_ignored` (commande ferme ignorée : article, fournisseur, jour) ou `proposal_refused` (proposition CBN refusée : article, jour, quantité refusée affichée ; bloque les propositions jusqu'au dimanche), auteur | (kind, article, fournisseur, date) |
 | `app_pdp_versions`, `app_pdp_lines` | versions de PDP importées (une active au plus) | id |
 | `app_param_overrides` | règles globales du moteur (`global`) et paramètres d'article par semaine ISO (`article_week`) | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |

@@ -74,7 +74,9 @@ def test_projection_day_week_and_lanes(client):
     assert day["programs"] and day["suppliers"][0]["supplier_id"] == "S-000545"
     assert len(day["lanes"]) == 1 and day["lanes"][0]["supplier_id"] == "S-000545"
     lane_keys = {s["key"] for s in day["lanes"][0]["series"]}
-    assert lane_keys == {"orders_firm", "orders_firm_hist", "orders_forecast", "receipts", "plan", "supply_proposed"}
+    assert lane_keys == {"orders_firm", "orders_firm_hist", "orders_forecast", "receipts", "plan", "supply_proposed",
+                         "orders_firm_ordered", "orders_firm_open"}
+    assert len(day["lanes"][0]["orders_ignored"]) == len(day["periods"])
     assert len(day["lanes"][0]["plan_typed"]) == len(day["periods"])
     week = client.get(f"/api/articles/{AID}/projection", params={"granularity": "week"}).json()
     assert len(week["periods"]) < len(day["periods"])
@@ -163,7 +165,8 @@ def test_default_calendar_grid_and_program_impact(client):
     client.delete(f"/api/params/overrides/{ov[0]['id']}")
     grid = client.get("/api/grid", params={"planner": "QUENTIN", "granularity": "week"}).json()
     assert len(grid["articles"]) == 16 and grid["articles"][0]["article"]["article_id"] < grid["articles"][1]["article"]["article_id"]
-    assert {x["key"] for x in grid["articles"][0]["series"]} >= {"demand", "plan", "stock_plan"} and grid["articles"][0]["lanes"]
+    assert {x["key"] for x in grid["articles"][0]["series"]} >= {"demand", "stock_plan", "supply_proposed"} and grid["articles"][0]["lanes"]
+    assert grid["total"] == 16 and grid["page"] == 1 and len(grid["articles"]) <= grid["page_size"]
     prog = client.get("/api/grid", params={"planner": "QUENTIN", "program_id": "mass-00040633"}).json()
     assert 0 < len(prog["articles"]) < 16 and all("mass-00040633" in a["programs"] for a in prog["articles"])
     sup = client.get("/api/grid", params={"planner": "QUENTIN", "supplier_id": "S-000545"}).json()
@@ -296,7 +299,7 @@ def test_exports_and_reimport(client):
     assert set(wb.sheetnames) == {"PARAMETRES", "ARTICLES", "SIMULATION", "ALERTES"}
     ws = wb["SIMULATION"]
     labels = [ws.cell(r, 3).value for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == AID]
-    assert labels[:5] == ["Besoin", "Ferme", "Prévisionnel", "Reçu", "Plan"] and "Scenario Plan" in labels
+    assert list(labels[:5]) == ["Besoin", "Ferme", "Prévisionnel", "Reçu", "Plan"] and "Scenario Plan" in labels
     labels2 = [ws.cell(r, 3).value for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == "P-00005775"]
     assert "Plan · S-000032" in labels2 and "Plan · S-001033" in labels2         # two supplier lanes
     assert ws.cell(1, 5).value == AS_OF
@@ -341,3 +344,50 @@ def test_pdp_template(client):
     wb.save(buf)
     rep = client.post("/api/pdp/import", files={"file": ("pdp.xlsx", buf.getvalue())}, data={"name": "modèle"}).json()
     assert rep["created"] >= 1 and rep["version"]["active"]
+
+
+def test_flags_toggle_batches_and_delivery_plan(client):
+    # ignore the firm order of 30/09: out of the ERP scenario and of the plan, still listed
+    body = {"article_id": AID, "supplier_id": "S-000545", "date": "2026-09-30", "kind": "order_ignored"}
+    r = client.post("/api/entries/flags/toggle", json=body)
+    assert r.status_code == 200 and r.json()["kind"] == "order_ignored"
+    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day", "generate_proposals": "false"}).json()
+    s = _series(proj)
+    i = proj["periods"].index("2026-09-30")
+    lane = proj["lanes"][0]
+    assert s["orders_firm"][i] == 0 and s["plan"][i] == 0 and lane["orders_ignored"][i]
+    assert {x["key"]: x["values"][i] for x in lane["series"]}["orders_firm_ordered"] == 1600
+    assert any(o["ignored"] for o in lane["orders"] if o["expected_date"] == "2026-09-30")
+    assert proj["kpis"]["ignored_order_days"] == 1
+    assert client.get("/api/entries/flags", params={"article_id": AID}).json()[0]["date"] == "2026-09-30"
+    assert client.post("/api/entries/flags/toggle", json={**body, "date": "2026-09-01"}).status_code == 422   # past
+    assert client.post("/api/entries/flags/toggle", json=body).json() is None                                  # toggle back
+    assert client.get("/api/entries/flags", params={"article_id": AID}).json() == []
+    # refuse a proposal: nothing proposed until the end of its week
+    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
+    if proj["proposals"]:
+        p = proj["proposals"][0]
+        flag = client.post("/api/entries/flags/toggle", json={"article_id": AID, "date": p["delivery_date"], "kind": "proposal_refused", "qty": p["qty"]}).json()
+        assert flag["qty"] == p["qty"]
+        proj2 = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
+        d = dt.date.fromisoformat(p["delivery_date"])
+        end = (d + dt.timedelta(days=6 - d.weekday())).isoformat()
+        assert all(not (p["delivery_date"] <= q["delivery_date"] <= end) for q in proj2["proposals"])
+        assert client.delete(f"/api/entries/flags/{flag['id']}").status_code == 204
+    # batches (fill handle): several cells, one transaction ; past dates skipped
+    cells = [{"article_id": AID, "supplier_id": "S-000545", "date": d, "expression": "250"} for d in ("2026-09-01", "2026-10-06", "2026-10-07", "2026-10-08")]
+    out = client.put("/api/entries/plan/batch", json={"cells": cells}).json()
+    assert [c["date"] for c in out] == ["2026-10-06", "2026-10-07", "2026-10-08"] and all(c["qty"] == 250 for c in out)
+    adj = client.put("/api/entries/adjustments/batch", json={"cells": [{"article_id": AID, "date": d, "expression": "-10"} for d in ("2026-10-06", "2026-10-07")]}).json()
+    assert len(adj) == 2 and all(c["qty"] == -10 for c in adj)
+    assert client.put("/api/entries/plan/batch", json={"cells": [{"article_id": AID, "date": "2026-10-06", "expression": "-1"}]}).status_code == 422
+    # delivery plan: the Plan row as ERP schedule lines (day + 6 days)
+    dp = client.get(f"/api/articles/{AID}/delivery-plan").json()
+    rows = {r["date"]: r for r in dp["rows"]}
+    assert rows["2026-10-06"]["qty"] == 250 and rows["2026-10-06"]["end_date"] == "2026-10-12" and rows["2026-10-06"]["typed"]
+    assert all(r["qty"] > 0 and r["date"] >= AS_OF for r in dp["rows"]) and dp["unit"] == "KG"
+    # paging and search of the supply table
+    g = client.get("/api/grid", params={"planner": "QUENTIN", "page_size": 5, "page": 2}).json()
+    assert g["total"] == 16 and len(g["articles"]) == 5 and g["page"] == 2
+    g2 = client.get("/api/grid", params={"planner": "QUENTIN", "q": "resin"}).json()
+    assert g2["total"] >= 1 and all("RESIN" in a["article"]["designation"].upper() for a in g2["articles"])

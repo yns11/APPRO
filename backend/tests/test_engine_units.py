@@ -111,7 +111,7 @@ def test_demand_actual_then_remainder():
                                 ActualLine("P1", wed, 200.0)])
     r3 = run(ds3, as_of=wed + D(days=1))
     i3 = r3.dates.index(MON)
-    assert r3.consumed[i3:i3 + 3] == [2400, 2000, 400] and r3.required[i3 + 3] == 0 and r3.required[i3 + 4] == 0
+    assert list(r3.consumed[i3:i3 + 3]) == [2400, 2000, 400] and r3.required[i3 + 3] == 0 and r3.required[i3 + 4] == 0
     r4 = run(ds3, as_of=wed)
     assert r4.consumed[i + 2] == 0 and r4.required[i + 2] == 0
     r5 = run(ds, as_of=wed, production_mode="plan_only")
@@ -134,8 +134,8 @@ def test_two_scenarios_erp_and_plan():
     r = run(ds, horizon_days=10)
     i = r.dates.index(MON)
     # Monday 1000 − 200 = 800 ; Tuesday +50 −20 −200 = 630 ; Wednesday +300 −200 = 730 ; Thursday −200 = 530 ; Friday +600 −200 = 930
-    assert r.stock_erp[i:i + 5] == [800, 630, 730, 530, 930]
-    assert r.stock_plan[i:i + 5] == [800, 630, 730, 530, 930]          # no cell: plan = ERP
+    assert list(r.stock_erp[i:i + 5]) == [800, 630, 730, 530, 930]
+    assert list(r.stock_plan[i:i + 5]) == [800, 630, 730, 530, 930]          # no cell: plan = ERP
     assert r.orders_forecast[i + 3] == 400 and r.stock_erp[i + 3] == 530
     assert r.kpis["open_firm_qty"] == 900 and r.kpis["open_forecast_qty"] == 400 and r.kpis["plan_qty"] == 900
     assert len(r.lanes) == 1 and r.lanes[0].supplier_id == "S1" and len(r.lanes[0].orders) == 4
@@ -230,8 +230,8 @@ def test_adjustments_correct_the_reference_stock_and_history_is_reconstructed():
     i = r.dates.index(MON)
     assert r.reference_correction == -300 and r.kpis["stock_reference"] == 700 and r.kpis["stock_on_hand"] == 1000
     assert r.stock_plan[i] == 500 and r.stock_plan[i + 2] == 500 - 200 + 40 - 200
-    assert r.stock_erp[i - 5:i] == [1300, 1100, 600, 900, 700]
-    assert r.stock_plan[i - 5:i] == r.stock_erp[i - 5:i]
+    assert list(r.stock_erp[i - 5:i]) == [1300, 1100, 600, 900, 700]
+    assert list(r.stock_plan[i - 5:i]) == list(r.stock_erp[i - 5:i])
     assert r.adjustments[i - 3] == -300 and r.adjustments[i + 2] == 40
 
 
@@ -251,11 +251,11 @@ def test_shortage_policies_and_first_stockout():
     backlog = run(ds, horizon_days=6)
     lost = run(ds, horizon_days=6, shortage_policy="lost")
     i = backlog.dates.index(MON)
-    assert backlog.stock_erp[i:i + 4] == [300, 100, 0, 700]
-    assert backlog.stock_erp_net[i:i + 4] == [300, 100, -100, 700]
-    assert backlog.shortage_erp[i:i + 4] == [0, 0, 100, 0]
-    assert lost.stock_erp[i:i + 4] == [300, 100, 0, 800]
-    assert lost.shortage_erp[i:i + 4] == [0, 0, 100, 0]
+    assert list(backlog.stock_erp[i:i + 4]) == [300, 100, 0, 700]
+    assert list(backlog.stock_erp_net[i:i + 4]) == [300, 100, -100, 700]
+    assert list(backlog.shortage_erp[i:i + 4]) == [0, 0, 100, 0]
+    assert list(lost.stock_erp[i:i + 4]) == [300, 100, 0, 800]
+    assert list(lost.shortage_erp[i:i + 4]) == [0, 0, 100, 0]
     for r in (backlog, lost):
         assert min(r.stock_erp) >= 0
         assert r.kpis["first_stockout_erp"] == (MON + D(days=2)).isoformat()
@@ -428,3 +428,49 @@ def test_expression_evaluator():
         except ValueError:
             continue
         raise AssertionError(f"{bad!r} should be rejected")
+
+
+def test_ignored_firm_orders_leave_the_erp_scenario_and_the_plan():
+    """A click on a Ferme cell: the firm orders of that supplier and day are ignored (ERP scenario,
+    plan prefill) but still displayed with their ordered / remaining quantities."""
+    from appro.engine.models import CellFlag
+    wed, fri = MON + D(days=2), MON + D(days=4)
+    ds = make_dataset(orders=[OrderLine("F1", "A1", "S1", wed, 1000, qty_open=400, order_type=OrderType.FIRM),
+                              OrderLine("F2", "A1", "S1", fri, 800, order_type=OrderType.FIRM),
+                              OrderLine("F0", "A1", "S1", MON - D(days=2), 300, qty_open=0, order_type=OrderType.FIRM)])
+    r = run(ds)
+    i = r.dates.index(MON)
+    lane = r.lanes[0]
+    assert lane.orders_firm_ordered[i + 2] == 1000 and lane.orders_firm_open[i + 2] == 400     # partial delivery
+    assert lane.orders_firm_ordered[i - 2] == 300 and lane.orders_firm_open[i - 2] == 0         # settled, past
+    assert r.orders_firm[i + 2] == 400 and r.plan[i + 2] == 400
+    ds.flags = [CellFlag("A1", "S1", wed, "order_ignored"), CellFlag("A1", "S1", MON - D(days=2), "order_ignored")]
+    r2 = run(ds)
+    assert r2.orders_firm[i + 2] == 0 and r2.plan[i + 2] == 0 and r2.orders_firm[i + 4] == 800   # Wednesday ignored
+    assert r2.lanes[0].orders_ignored[i + 2] and not r2.lanes[0].orders_ignored[i + 4]
+    assert r2.lanes[0].orders_firm_ordered[i + 2] == 1000                                      # still displayed
+    assert r2.stock_erp[i + 2] == r.stock_erp[i + 2] - 400 and r2.kpis["ignored_order_days"] == 1
+    assert not r2.lanes[0].orders_ignored[i - 2]                                               # the past is never ignored
+    typed = make_dataset(orders=ds.orders)
+    typed.flags, typed.plan = list(ds.flags), [PlanCell("A1", "S1", wed, 250)]
+    r3 = run(typed)
+    assert r3.orders_firm[i + 2] == 0 and r3.plan[i + 2] == 250                                 # a typed cell still counts
+
+
+def test_refused_proposal_blocks_the_rest_of_its_week():
+    """A click on a Proposition CBN cell refuses it: no proposal from that day to the Sunday of its
+    week, the need is served by a later proposal (never an earlier one)."""
+    from appro.engine.models import CellFlag
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1500.0)],
+                      links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, lead_time_days=0, quota_pct=100, priority=1)])
+    r = run(ds, generate_proposals=True, horizon_days=28)
+    first = r.proposals[0]
+    assert first.delivery_date > MON
+    refused_week_end = first.delivery_date + D(days=6 - first.delivery_date.weekday())
+    ds.flags = [CellFlag("A1", None, first.delivery_date, "proposal_refused", qty=first.qty)]
+    r2 = run(ds, generate_proposals=True, horizon_days=28)
+    assert all(not (first.delivery_date <= p.delivery_date <= refused_week_end) for p in r2.proposals)
+    assert r2.proposals and r2.proposals[0].delivery_date > refused_week_end
+    assert r2.kpis["refused_proposals"] == 1
+    i = r2.dates.index(first.delivery_date)
+    assert r2.supply_proposed[i] == 0 and max(r2.supply_proposed) > 0

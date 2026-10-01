@@ -70,12 +70,30 @@ def fill_level(target: np.ndarray, demand_cum: np.ndarray, i: int, article: Arti
     return float(target[i] + max(extra, 0.0))
 
 
-def _delivery_day(candidate: dt.date, earliest: dt.date, latest: dt.date, calendar: WorkCalendar,
-                  weekdays: frozenset[int] | None, shift: str) -> dt.date | None:
-    """Nearest allowed delivery day for ``candidate`` inside ``[earliest, latest]`` (None if none)."""
-    def allowed(d: dt.date) -> bool:
-        return calendar.is_open_weekday(d, weekdays)
+def _blocked_until(day: dt.date, blocked: list[tuple[dt.date, dt.date]]) -> dt.date | None:
+    """End of the refused window containing ``day`` (None when the day is free)."""
+    for a, b in blocked:
+        if a <= day <= b:
+            return b
+    return None
 
+
+def _delivery_day(candidate: dt.date, earliest: dt.date, latest: dt.date, calendar: WorkCalendar,
+                  weekdays: frozenset[int] | None, shift: str,
+                  blocked: list[tuple[dt.date, dt.date]] | None = None) -> dt.date | None:
+    """Nearest allowed delivery day for ``candidate`` inside ``[earliest, latest]`` (None if none).
+
+    A refused proposal blocks its day and the rest of its ISO week: a candidate inside such a window
+    is pushed to the first allowed day **after** the window (never earlier – the planner said no
+    delivery that week)."""
+    blocked = blocked or []
+
+    def allowed(d: dt.date) -> bool:
+        return calendar.is_open_weekday(d, weekdays) and _blocked_until(d, blocked) is None
+
+    until = _blocked_until(candidate, blocked)
+    if until is not None:
+        candidate, shift = until + dt.timedelta(days=1), "later"
     if shift == "earlier":
         d = candidate
         while d >= earliest:
@@ -104,6 +122,7 @@ def generate_proposals(
     seq_start: int = 1,
     supply_planned: np.ndarray | None = None,
     reproject: Callable[[np.ndarray], Projection] | None = None,
+    blocked: list[tuple[dt.date, dt.date]] | None = None,
 ) -> tuple[list[Proposal], np.ndarray, np.ndarray]:
     """Return proposals, the proposed-supply series and the resulting simulated net stock.
 
@@ -119,6 +138,9 @@ def generate_proposals(
     ``supply_planned`` (forecast / planned, non-firm supply per day) is only used to enrich the
     reason of urgent proposals: when a later non-firm order exists, advancing it is usually the
     preferred action (MRP "expedite" exception message).
+
+    ``blocked`` lists the (first day, last day) windows where the planner refused a proposal: no
+    delivery is proposed inside them (the need moves after the window).
     """
     n = index.n
     stock = stock_sim.copy()
@@ -160,7 +182,7 @@ def generate_proposals(
             if params.respect_lead_time and link:
                 earliest_date = max(earliest_date, calendar.add_working_days(as_of, lead))
             delivery = _delivery_day(index.dates[i], earliest_date, index.dates[last_idx], calendar,
-                                     weekdays, params.delivery_shift)
+                                     weekdays, params.delivery_shift, blocked)
             if delivery is None:
                 break  # no feasible delivery day inside the horizon
             j = index.offset(delivery)
@@ -240,7 +262,7 @@ def merge_same_day(proposals: list[Proposal]) -> list[Proposal]:
         cur.order_date = min(cur.order_date, p.order_date)
         cur.urgent = cur.urgent or p.urgent
         cur.projected_stock_after = p.projected_stock_after
-        if p.reason not in cur.reason:
+        if cur.reason.count(" ; ") < 2 and p.reason not in cur.reason:
             cur.reason = f"{cur.reason} ; {p.reason}"
     out = sorted(merged.values(), key=lambda p: (p.delivery_date, p.supplier_id or ""))
     for k, p in enumerate(out, start=1):

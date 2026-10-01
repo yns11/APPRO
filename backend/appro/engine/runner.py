@@ -13,7 +13,7 @@ from .models import Alert, ArticleResult, Dataset, EngineParams, MrpResult, Orde
 from .programs import program_impact
 from .projection import Projection, coverage_days, first_shortage, project_stock, reconstruct_history, target_stock
 from .proposals import generate_proposals
-from .supply import build_lanes, lane_totals
+from .supply import blocked_windows, build_lanes, lane_totals
 
 
 def resolve_as_of(dataset: Dataset, params: EngineParams) -> dt.date:
@@ -65,6 +65,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     plan_by_article = defaultdict(list)
     for c in dataset.plan:
         plan_by_article[c.article_id].append(c)
+    flags_by_article = defaultdict(list)
+    for f in dataset.flags:
+        flags_by_article[f.article_id].append(f)
 
     selected = [a for a in dataset.articles if a.active and (article_ids is None or a.article_id in article_ids)]
     results: dict[str, ArticleResult] = {}
@@ -94,7 +97,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         snap_date = index.dates[i_snap]
 
         lanes = build_lanes(links_by_article.get(aid, []), orders_by_article.get(aid, []), receipts_by_article.get(aid, []),
-                            plan_by_article.get(aid, []), supplier_names, index, as_of, params)
+                            plan_by_article.get(aid, []), supplier_names, index, as_of, params, flags_by_article.get(aid))
         receipts = lane_totals(lanes, "receipts")
         orders_firm = lane_totals(lanes, "orders_firm")
         plan = lane_totals(lanes, "plan")
@@ -139,10 +142,13 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
 
         proposals, supply_proposed = [], np.zeros(n)
         if params.generate_proposals:
+            # the re-projection is only needed by the ``lost`` policy (a receipt after a lost day does
+            # not serve that day) ; with ``backlog`` adding the proposal from its day on is exact
             proposals, supply_proposed, _ = generate_proposals(
                 article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand, target,
                 index, calendar, as_of, params, supply_planned=lane_totals(lanes, "orders_forecast"),
-                reproject=lambda extra: project(inflow_plan + extra))
+                reproject=(lambda extra: project(inflow_plan + extra)) if params.shortage_policy == "lost" else None,
+                blocked=blocked_windows(flags_by_article.get(aid), aid))
             if params.include_proposals_in_plan:
                 plan_proj = project(inflow_plan + supply_proposed)
             by_lane = {l.supplier_id: l for l in lanes}
@@ -160,7 +166,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         last = None if params.stockout_lookahead_days is None else i_as_of + params.stockout_lookahead_days
         k = {name: first_shortage(layer.shortage, i_as_of, last) for name, layer in (("erp", erp), ("plan", plan_proj))}
         horizon_slice = slice(i_as_of, n)
-        typed = sum(1 for l in lanes for t in l.plan_typed[i_as_of:] if t)
+        typed = int(sum(int(l.plan_typed[i_as_of:].sum()) for l in lanes))
+        ignored_days = int(sum(int(l.orders_ignored[i_as_of:].sum()) for l in lanes))
+        refused = sum(1 for f in flags_by_article.get(aid, []) if f.kind == "proposal_refused")
         kpis = {
             "stock_on_hand": float(stock_snapshot),
             "reference_correction": reference_correction,
@@ -187,6 +195,8 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "open_forecast_qty": float(lane_totals(lanes, "orders_forecast")[horizon_slice].sum()),
             "plan_qty": float(plan[horizon_slice].sum()),
             "plan_cell_count": typed,
+            "ignored_order_days": ignored_days,
+            "refused_proposals": refused,
             "backlog_qty": float(sum(l.backlog_qty for l in lanes)),
             "backlog_ordered": float(sum(l.backlog_ordered for l in lanes)),
             "backlog_received": float(sum(l.backlog_received for l in lanes)),
@@ -200,16 +210,15 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         }
         results[aid] = ArticleResult(
             article=article, start_date=start, as_of=as_of, dates=index.dates,
-            demand=demand.tolist(), consumed=consumed.tolist(), required=required.tolist(), demand_plan=dplan.tolist(),
-            demand_actual_share=share.tolist(),
-            orders_firm=orders_firm.tolist(), orders_firm_hist=lane_totals(lanes, "orders_firm_hist").tolist(),
-            orders_forecast=lane_totals(lanes, "orders_forecast").tolist(), receipts=receipts.tolist(),
-            plan=plan.tolist(), supply_proposed=supply_proposed.tolist(),
-            adjustments=(adjustments + past_adjust).tolist(), reference_correction=reference_correction,
-            stock_erp=erp.stock.tolist(), stock_plan=plan_proj.stock.tolist(),
-            shortage_onhand=onhand.shortage.tolist(), shortage_erp=erp.shortage.tolist(), shortage_plan=plan_proj.shortage.tolist(),
-            stock_erp_net=erp.net.tolist(), stock_plan_net=plan_proj.net.tolist(),
-            coverage_erp=cov["erp"].tolist(), coverage_plan=cov["plan"].tolist(), target_stock=target.tolist(),
+            demand=demand, consumed=consumed, required=required, demand_plan=dplan, demand_actual_share=share,
+            orders_firm=orders_firm, orders_firm_hist=lane_totals(lanes, "orders_firm_hist"),
+            orders_forecast=lane_totals(lanes, "orders_forecast"), receipts=receipts,
+            plan=plan, supply_proposed=supply_proposed,
+            adjustments=adjustments + past_adjust, reference_correction=reference_correction,
+            stock_erp=erp.stock, stock_plan=plan_proj.stock,
+            shortage_onhand=onhand.shortage, shortage_erp=erp.shortage, shortage_plan=plan_proj.shortage,
+            stock_erp_net=erp.net, stock_plan_net=plan_proj.net,
+            coverage_erp=cov["erp"], coverage_plan=cov["plan"], target_stock=target,
             lanes=lanes, alerts=alerts, proposals=proposals, kpis=kpis, suppliers=links_by_article.get(aid, []),
             diagnostics=notes,
         )

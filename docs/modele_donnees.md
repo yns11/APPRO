@@ -10,6 +10,7 @@ donne la vue d'ensemble.
                      │                                                                       │
   Saisies            │ app_plan_cells (article × fournisseur × jour)                         │
   (deux lignes)      │ app_adjustments (article × jour)                                      │
+  Clics             │ app_cell_flags (commande ferme ignorée, proposition CBN refusée)       │
                      │ app_pdp_versions / app_pdp_lines   app_param_overrides   app_audit_log │
                      │                                                                       │
   Faits ERP          │ erp_purchase_orders  erp_receipts  erp_production_actual              │
@@ -56,6 +57,7 @@ Deux tables seulement, à l'image des deux lignes éditables du tableau :
 |---|---|---|
 | `app_plan_cells` | article_id, supplier_id, date | quantité planifiée d'un fournisseur un jour donné (0 = rien attendu), expression, commentaire, auteur |
 | `app_adjustments` | article_id, date | ajustement signé (≤ référence : correction du stock de référence), expression, commentaire, auteur |
+| `app_cell_flags` | kind, article_id, supplier_id, date | commande ferme ignorée (hors Scenario ERP et hors plan) ou proposition CBN refusée (quantité affichée, semaine bloquée) |
 
 Plus les versions de PDP importées, les paramètres (`global`, `article_week`) et le journal.
 

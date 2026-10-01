@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Params } from "./api";
 import type {
-  AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, GridResponse, LinkRef, ParamDoc, ParamOverrideOut, PdpErpLine,
+  AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, DeliveryPlanResponse, FlagOut, GridResponse, LinkRef, ParamDoc, ParamOverrideOut, PdpErpLine,
   PdpVersionOut, PlanCellOut, ProgramImpactResponse, ProgramRef, ProjectionResponse, ProposalOut, RefRow, RefTableInfo, WeeklyParamsResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -40,11 +40,19 @@ export function useBacklog() {
   return useQuery({ queryKey: ["backlog", params], queryFn: () => api.get<BacklogRow[]>("/api/backlog", params), staleTime: 30_000 });
 }
 
-/** Multi-article supply table (same columns for every article). */
+/** One page of the multi-article supply table (same columns for every article) ; the previous page
+ * stays on screen while the next one loads. */
 export function useGrid(extra?: Params) {
   const { engineParams, perimeter } = usePerimeter();
   const params = { ...engineParams, granularity: perimeter.granularity, ...extra };
-  return useQuery({ queryKey: ["grid", params], queryFn: () => api.get<GridResponse>("/api/grid", params), staleTime: 30_000 });
+  return useQuery({ queryKey: ["grid", params], queryFn: () => api.get<GridResponse>("/api/grid", params), staleTime: 30_000, placeholderData: keepPreviousData });
+}
+
+export function useDeliveryPlan(articleId: string | undefined) {
+  const { engineParams } = usePerimeter();
+  const params = { horizon_days: engineParams.horizon_days };
+  return useQuery({ queryKey: ["delivery-plan", articleId, params], enabled: !!articleId, staleTime: 30_000,
+    queryFn: () => api.get<DeliveryPlanResponse>(`/api/articles/${encodeURIComponent(articleId!)}/delivery-plan`, params) });
 }
 
 export function useProgramImpact() {
@@ -55,6 +63,8 @@ export function useProgramImpact() {
 /** The two editable rows: typed plan cells and adjustment cells. */
 export const usePlanCells = (params?: Params) => useQuery({ queryKey: ["plan-cells", params], queryFn: () => api.get<PlanCellOut[]>("/api/entries/plan", params) });
 export const useAdjustments = (params?: Params) => useQuery({ queryKey: ["adjustments", params], queryFn: () => api.get<AdjustmentOut[]>("/api/entries/adjustments", params) });
+/** Clicks on read-only cells: ignored firm-order days, refused CBN proposals. */
+export const useFlags = (params?: Params) => useQuery({ queryKey: ["flags", params], queryFn: () => api.get<FlagOut[]>("/api/entries/flags", params) });
 export const useWeeklyParams = (articleId: string | null, weeks = 26) => useQuery({
   queryKey: ["weekly-params", articleId, weeks], enabled: !!articleId,
   queryFn: () => api.get<WeeklyParamsResponse>(`/api/articles/${encodeURIComponent(articleId!)}/weekly-params`, { weeks }),

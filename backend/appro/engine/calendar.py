@@ -75,18 +75,16 @@ class WorkCalendar:
     def add_working_days(self, day: dt.date, n: int) -> dt.date:
         """Move ``n`` working days forward (``n`` may be negative).
 
-        ``add_working_days(d, 0)`` returns ``d`` itself, even if it is a closure day.
+        ``add_working_days(d, 0)`` returns ``d`` itself, even if it is a closure day.  Memoised:
+        the proposal engine asks the same (day, lead time) pairs thousands of times.
         """
         if n == 0:
             return day
-        step = 1 if n > 0 else -1
-        remaining = abs(n)
-        d = day
-        while remaining > 0:
-            d += dt.timedelta(days=step)
-            if self.is_working_day(d):
-                remaining -= 1
-        return d
+        return _add_working_days(self, day, n)
+
+    def working_mask(self, start: dt.date, n: int):
+        """``mask[i]`` = day ``start + i`` is a working day (memoised per window)."""
+        return _working_mask(self, start, n)
 
     def working_days_between(self, start: dt.date, end: dt.date) -> int:
         """Number of working days in ``(start, end]`` (negative when ``end < start``)."""
@@ -102,6 +100,24 @@ class WorkCalendar:
 
     def open_days_in_week(self, monday: dt.date) -> list[dt.date]:
         return [monday + dt.timedelta(days=i) for i in range(7) if self.is_working_day(monday + dt.timedelta(days=i))]
+
+
+@lru_cache(maxsize=200_000)
+def _add_working_days(cal: WorkCalendar, day: dt.date, n: int) -> dt.date:
+    step = 1 if n > 0 else -1
+    remaining = abs(n)
+    d = day
+    while remaining > 0:
+        d += dt.timedelta(days=step)
+        if cal.is_working_day(d):
+            remaining -= 1
+    return d
+
+
+@lru_cache(maxsize=64)
+def _working_mask(cal: WorkCalendar, start: dt.date, n: int):
+    import numpy as np
+    return np.fromiter((cal.is_working_day(start + dt.timedelta(days=i)) for i in range(n)), dtype=bool, count=n)
 
 
 def iso_week_monday(day: dt.date) -> dt.date:

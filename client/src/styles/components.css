@@ -242,3 +242,38 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 .dt .dt-filters th { top: 30px; padding: 3px 8px; background: var(--bg-elev); text-transform: none; letter-spacing: 0; }
 .input.xs, .select.xs { height: 24px; font-size: var(--fs--2); padding: 0 6px; width: 100%; min-width: 60px; }
 .dt tfoot td { background: var(--bg-subtle); font-size: var(--fs--2); }
+
+/* ---------- simulation grid: virtualised table, clickable Ferme / CBN cells, fill handle ---------- */
+.pivot.virtual { max-height: calc(100vh - 230px); min-height: 240px; }
+.pivot.virtual table { table-layout: fixed; }
+.pivot.virtual th, .pivot.virtual td { overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
+.pivot td.spacer, .pivot th.spacer { padding: 0; border-right: 0; min-width: 0; }
+.pivot tr.vspacer td { padding: 0; border: 0; background: transparent; }
+.pivot td.firm-open { background: var(--cell-yellow); color: var(--warning-fg); font-weight: var(--fw-medium); }
+.pivot td.firm-settled { background: var(--cell-green); color: var(--ok-fg); }
+.pivot td.ignored { background: var(--cell-red); color: var(--critical-fg); }
+.pivot td.ignored s, .pivot td.refused s { text-decoration: line-through; text-decoration-thickness: 2px; }
+.pivot td.refused { color: var(--critical-fg); font-style: normal; }
+.pivot td.clickable { cursor: pointer; }
+.pivot td.clickable:hover { outline: 2px solid var(--brand); outline-offset: -2px; }
+.pivot td.active { outline: 2px solid var(--brand); outline-offset: -2px; }
+.pivot td.fill-range { background: var(--brand-soft) !important; box-shadow: inset 0 0 0 1px var(--brand); }
+.pivot td .fill-handle { position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; background: var(--brand); border: 1px solid #fff; border-radius: 1px; cursor: crosshair; z-index: 3; }
+.pivot-wrap.filling, .pivot-wrap.filling td { cursor: crosshair !important; user-select: none; }
+.pivot td.editing { position: relative; }
+
+/* ---------- pager ---------- */
+.pager { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs--1); color: var(--fg-muted); }
+.pager .select { width: auto; }
+
+/* ---------- delivery schedule grid (Excel-like range selection) ---------- */
+.dgrid-wrap { overflow: auto; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-elev); max-height: 520px; outline: none; }
+.dgrid-wrap:focus { box-shadow: 0 0 0 3px var(--brand-soft); }
+table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs--1); font-variant-numeric: tabular-nums; width: 100%; user-select: none; }
+.dgrid th, .dgrid td { padding: 6px 12px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); white-space: nowrap; text-align: left; }
+.dgrid th { position: sticky; top: 0; z-index: 2; background: var(--bg-subtle); font-size: var(--fs--2); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--fg-subtle); font-weight: var(--fw-semibold); cursor: pointer; }
+.dgrid th.rowno, .dgrid td.rowno { width: 36px; color: var(--fg-subtle); background: var(--bg-subtle); text-align: right; cursor: pointer; font-size: var(--fs--2); }
+.dgrid td.num { text-align: right; }
+.dgrid td { cursor: cell; }
+.dgrid td.sel { background: var(--brand-soft); box-shadow: inset 0 0 0 1px var(--brand); }
+.dgrid td.typed { font-weight: var(--fw-semibold); color: var(--brand-fg); }

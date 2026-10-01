@@ -1,18 +1,19 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Trash2 } from "lucide-react";
-import { useAdjustments, usePlanCells, useProjection, useWrite } from "@/lib/queries";
+import { useAdjustments, useFlags, usePlanCells, useProjection, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
 import { Badge, Button, Card, Empty, ErrorBox, Kpi, Segmented, SeverityBadge, Skeleton, SkeletonBlock, Tabs, useToast } from "@/components/ui";
 import { StockChart, CoverageChart } from "@/components/charts/StockChart";
 import { SimulationGrid } from "@/components/SimulationGrid";
+import { DeliveryPlan } from "@/components/DeliveryPlan";
 import { DataTable, type Column } from "@/components/DataTable";
 import { AlertList } from "./CockpitPage";
 import { ORDER_TYPE_LABELS, fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
 import type { OrderInfo, PlanCellOut, AdjustmentOut } from "@/lib/types";
 
-type Tab = "chart" | "plan" | "orders" | "proposals" | "adjustments" | "alerts" | "master";
+type Tab = "chart" | "delivery" | "plan" | "orders" | "proposals" | "adjustments" | "alerts" | "master";
 
 export default function ArticlePage() {
   const { articleId } = useParams();
@@ -21,6 +22,7 @@ export default function ArticlePage() {
   const q = useProjection(articleId);
   const planCells = usePlanCells(articleId ? { article_id: articleId } : undefined);
   const adjustments = useAdjustments(articleId ? { article_id: articleId } : undefined);
+  const flags = useFlags(articleId ? { article_id: articleId } : undefined);
   const toast = useToast();
   const delPlan = useWrite((id: string) => api.del(`/api/entries/plan/${id}`), () => toast.push("Retour à l'ERP"));
   const delAdj = useWrite((id: string) => api.del(`/api/entries/adjustments/${id}`), () => toast.push("Ajustement supprimé"));
@@ -37,6 +39,7 @@ export default function ArticlePage() {
     { key: "date", label: "Date de livraison", get: (o) => o.expected_date, render: (o) => <>{fmtDate(o.expected_date)}{d && o.expected_date < d.as_of && <span className="sub subtle">passée</span>}</> },
     { key: "ordered", label: "Commandé", get: (o) => o.qty_ordered, num: true, render: (o) => fmtQty(o.qty_ordered, unit) },
     { key: "open", label: "Restant ERP", get: (o) => o.qty_open, num: true, render: (o) => fmtQty(o.qty_open, unit) },
+    { key: "state", label: "État", get: (o) => (o.ignored ? "ignorée" : o.qty_open > 0 ? "en cours" : "soldée"), filter: "select", render: (o) => o.ignored ? <Badge tone="critical">ignorée</Badge> : o.qty_open > 0 ? <Badge tone="warning">en cours</Badge> : <Badge tone="ok">soldée</Badge> },
     { key: "ref", label: "N° commande", get: (o) => o.ref, render: (o) => <span className="mono small">{o.ref}</span> },
   ], [unit, d]);
   const planCols = useMemo<Column<PlanCellOut>[]>(() => [
@@ -82,19 +85,20 @@ export default function ArticlePage() {
         <Kpi label="Rupture plan" value={k ? (k.first_stockout_plan ? fmtDate(k.first_stockout_plan) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_plan ? "critical" : "ok"} meta={k ? (k.first_stockout_plan ? `manque max ${fmtQty(k.max_shortage_plan, unit)}` : `stock mini ${fmtQty(k.min_stock_plan, unit)}`) : ""} />
         <Kpi label="Backlog" value={k ? fmtQty(k.backlog_qty, unit) : <Skeleton w={60} h={28} />} unit={unit} tone={k && k.backlog_qty > 0 ? "warning" : "ok"} meta={k ? `commandé ${fmtQty(k.backlog_ordered, unit)} − reçu ${fmtQty(k.backlog_received, unit)} (fermes passées, hors stocks)` : ""} onClick={() => setTab("orders")} />
         <Kpi label="En-cours ERP" value={k ? fmtQty(k.open_firm_qty, unit) : <Skeleton w={60} h={28} />} meta={k ? `ferme · + ${fmtQty(k.open_forecast_qty, unit)} prévisionnel` : ""} onClick={() => setTab("orders")} />
-        <Kpi label="Plan" value={k ? fmtQty(k.plan_qty, unit) : <Skeleton w={60} h={28} />} tone="brand" meta={k ? `${k.plan_cell_count} cellule(s) saisie(s) · CBN ${fmtQty(k.proposed_qty, unit)}${k.urgent_proposal_count ? ` (${k.urgent_proposal_count} urgent)` : ""}` : ""} onClick={() => setTab("plan")} />
+        <Kpi label="Plan" value={k ? fmtQty(k.plan_qty, unit) : <Skeleton w={60} h={28} />} tone="brand" meta={k ? `${k.plan_cell_count} cellule(s) saisie(s) · CBN ${fmtQty(k.proposed_qty, unit)}${k.urgent_proposal_count ? ` (${k.urgent_proposal_count} urgent)` : ""}${k.ignored_order_days ? ` · ${k.ignored_order_days} j ferme ignoré(s)` : ""}${k.refused_proposals ? ` · ${k.refused_proposals} CBN refusée(s)` : ""}` : ""} onClick={() => setTab("delivery")} />
         <Kpi label="Besoin 30 j" value={k ? fmtQty(k.demand_next_30d, unit) : <Skeleton w={60} h={28} />} meta={k ? `${fmtQty(k.avg_daily_demand_30d, unit)} / jour` : ""} />
       </div>
 
       {q.isLoading || !d ? <SkeletonBlock rows={10} /> : (
         <Card flush tight>
-          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, lanes: d.lanes, kpis: d.kpis }]} planCells={planCells.data ?? []} adjustments={adjustments.data ?? []}
+          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, lanes: d.lanes, kpis: d.kpis }]} planCells={planCells.data ?? []} adjustments={adjustments.data ?? []} flags={flags.data ?? []}
             onSwitchDay={() => set({ granularity: "day" })} />
         </Card>
       )}
 
       <Tabs value={tab} onChange={setTab} tabs={[
         { id: "chart", label: "Courbes" },
+        { id: "delivery", label: "Planning de livraison" },
         { id: "plan", label: "Cellules du plan", count: planCells.data?.length },
         { id: "orders", label: "Commandes ERP", count: orders.length },
         { id: "proposals", label: "Propositions CBN", count: d?.proposals.length },
@@ -104,6 +108,8 @@ export default function ArticlePage() {
       ]} />
 
       {tab === "chart" && (q.isLoading || !d ? <Skeleton h={300} /> : <Card><StockChart data={d} /><div style={{ marginTop: 8 }}><CoverageChart data={d} /></div></Card>)}
+
+      {tab === "delivery" && <DeliveryPlan articleId={articleId} />}
 
       {tab === "plan" && (
         <Card flush title="Cellules saisies dans la ligne Plan" hint="tout ce qui n'est pas ici vient de l'ERP ; supprimer une cellule rend la journée à l'ERP">

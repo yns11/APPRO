@@ -5,13 +5,14 @@ et des commandes ERP, plan de livraison saisi directement dans le tableau, propo
 conditionnement, délais, jours de livraison, quotas), alertes, exports / imports Excel.
 
 **Mode d'emploi : vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se recalcule.** Deux lignes
-du tableau se saisissent, *Plan* (une par fournisseur) et *Ajustement* ; tout le reste se lit.
+du tableau se saisissent, *Plan* (une par fournisseur) et *Ajustement* ; deux lignes se cliquent, *Ferme*
+(ignorer une commande) et *Proposition CBN* (refuser une proposition) ; tout le reste se lit.
 
 | Page | Contenu |
 |---|---|
 | Cockpit du jour | KPI, backlog fournisseur, alertes, perspective 12 semaines, portefeuille filtrable |
-| Tableau d'approvisionnement | le tableau de tous les articles du périmètre (filtres programme / fournisseur / article) |
-| Fiche article | tableau (Besoin ; par fournisseur : Ferme, Prévisionnel, Reçu, **Plan** ; Proposition CBN ; **Ajustement** ; Scenario ERP ; Scenario Plan avec couverture et manque dans les cellules), KPI, courbes, commandes ERP, propositions, alertes |
+| Tableau d'approvisionnement | le tableau des articles du périmètre, **par pages** (filtres programme / fournisseur / recherche), grille virtualisée : 500 articles × 1 000 jours restent fluides |
+| Fiche article | tableau (Besoin ; par fournisseur : Ferme **cliquable** (commandé / restant, en cours / soldée / ignorée), Prévisionnel, Reçu, **Plan** ; Proposition CBN **cliquable** (refus, semaine bloquée) ; **Ajustement** ; Scenario ERP ; Scenario Plan avec couverture et manque dans les cellules ; poignée de **recopie** sur Plan et Ajustement), KPI, courbes, **planning de livraison** (lignes ERP copiables, FR / EN), commandes ERP, propositions, alertes |
 | Propositions CBN | une proposition par fournisseur et par jour de livraison |
 | Saisies & journal | cellules du plan, ajustements, journal nominatif |
 | Référentiel | articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures, stock de référence : CRUD et **modèle Excel par table** |

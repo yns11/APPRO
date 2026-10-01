@@ -11,3 +11,4 @@ openpyxl>=3.1,<4
 databricks-sdk>=0.30
 databricks-sql-connector>=3.3
 psycopg[binary]>=3.1,<4
+orjson>=3.9

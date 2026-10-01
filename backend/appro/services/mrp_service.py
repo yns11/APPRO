@@ -13,9 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..data.assembler import erp_dataset
-from ..data.store import AppAdjustment, AppPlanCell, ParamOverride, PdpLine, PdpVersion, audit
+from ..data.store import AppAdjustment, AppCellFlag, AppPlanCell, ParamOverride, PdpLine, PdpVersion, audit
 from ..engine import run_mrp
-from ..engine.models import AdjustCell, Dataset, EngineParams, MrpResult, PlanCell
+from ..engine.models import AdjustCell, CellFlag, Dataset, EngineParams, MrpResult, PlanCell
 from ..engine.models import PdpLine as EnginePdpLine
 from .context import AppContext
 from .expression import evaluate
@@ -93,6 +93,9 @@ def app_entries_into_dataset(ds: Dataset, session: Session) -> None:
     for c in session.scalars(select(AppPlanCell)):
         if c.article_id in ids:
             ds.plan.append(PlanCell(c.article_id, c.supplier_id or None, c.date, c.qty, c.note))
+    for f in session.scalars(select(AppCellFlag)):
+        if f.article_id in ids:
+            ds.flags.append(CellFlag(f.article_id, f.supplier_id or None, f.date, f.kind, f.qty))
     programs = {b.program_id for b in ds.bom}
     active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
     if active:
@@ -199,4 +202,21 @@ def set_plan_cell(session: Session, user: str, article_id: str, supplier_id: str
         row.note = note
     audit(session, user, "upsert", "plan_cell", row.id, article_id,
           {"date": date.isoformat(), "supplier_id": sid, "expression": row.expression, "qty": qty, "note": row.note})
+    return row
+
+
+def toggle_flag(session: Session, user: str, article_id: str, supplier_id: str | None, date: dt.date, kind: str,
+                qty: float = 0.0, note: str | None = None) -> AppCellFlag | None:
+    """Set the flag when absent, remove it when present (one click = toggle).  Does not commit."""
+    sid = supplier_id or ""
+    row = session.scalars(select(AppCellFlag).where(AppCellFlag.kind == kind, AppCellFlag.article_id == article_id,
+                                                    AppCellFlag.supplier_id == sid, AppCellFlag.date == date)).first()
+    if row is not None:
+        audit(session, user, "delete", kind, row.id, article_id, {"date": date.isoformat(), "supplier_id": sid})
+        session.delete(row)
+        return None
+    row = AppCellFlag(kind=kind, article_id=article_id, supplier_id=sid, date=date, qty=float(qty), note=note or "",
+                      updated_by=user)
+    session.add(row)
+    audit(session, user, "upsert", kind, row.id, article_id, {"date": date.isoformat(), "supplier_id": sid, "qty": qty})
     return row
