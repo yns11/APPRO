@@ -177,7 +177,8 @@ servi est reporté (solde net négatif, les réceptions suivantes le servent d'a
 
 Recalculées à chaque calcul (`generate_proposals` [oui]) sur le Scenario Plan, **après** le plan : elles ne
 proposent que ce que ni l'ERP ni le plan ne couvrent. Algorithme : dès que `stock[d] < cible[d]` (sauf creux
-toléré, `shortfall_tolerance_days` [0]), quantité = max(besoin net jusqu'au niveau de recomplètement, MOQ)
+toléré, `shortfall_tolerance_days` [0] : retour au-dessus de la cible en n jours ouvrés **sans aucun besoin non
+servi**, jugé sur la série des manques quelle que soit la politique de manque), quantité = max(besoin net jusqu'au niveau de recomplètement, MOQ)
 arrondie au PLA ; fournisseur par quota [défaut] ou priorité ; livraison le premier jour ouvré autorisé du
 fournisseur (`delivery_shift` [`earlier`]), ou le **lundi** (`proposal_placement = monday`) ; date de
 commande = livraison − délai ouvré, **urgente** si déjà passée ; re-projection puis itération.

@@ -351,6 +351,21 @@ def test_shortfall_tolerance_skips_short_dips():
     assert not [p for p in tol.proposals if p.delivery_date <= thu]
 
 
+def test_shortfall_tolerance_never_tolerates_lost_demand():
+    """``lost`` policy: the simulated stock is clamped at 0, so a tolerated dip must be judged on the
+    unserved demand, not on the sign of the stock (regression: weeks without any proposal)."""
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1000.0)],
+                      pdp=[PdpLine("P1", MON + D(weeks=k), 1000.0) for k in range(-2, 12)])
+    base = run(ds, horizon_days=60, generate_proposals=True, shortage_policy="lost", proposal_placement="monday")
+    i1 = base.dates.index(MON + D(weeks=1))
+    assert float(np.max(base.shortage_plan[i1:])) == 0.0   # first week: no Monday delivery possible yet
+    for tol in (5, 30):
+        r = run(ds, horizon_days=60, generate_proposals=True, shortage_policy="lost", shortfall_tolerance_days=tol,
+                proposal_placement="monday")
+        assert list(r.shortage_plan) == list(base.shortage_plan), tol
+        assert [(p.delivery_date, p.qty) for p in r.proposals] == [(p.delivery_date, p.qty) for p in base.proposals], tol
+
+
 def test_forecast_monday_policy():
     thu = MON + D(days=3)
     ds = make_dataset(orders=[OrderLine("D1", "A1", "S1", thu, 400, order_type=OrderType.FORECAST)])

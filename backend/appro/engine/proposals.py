@@ -145,6 +145,9 @@ def generate_proposals(
     n = index.n
     stock = stock_sim.copy()
     proposed = np.zeros(n)
+    # unserved demand per day, kept in step with ``stock``: the ``lost`` policy clamps the simulated
+    # stock at 0, so the sign of the stock does not tell whether a day was served or not
+    shortage = reproject(proposed).shortage if reproject is not None else np.maximum(-stock, 0.0)
     proposals: list[Proposal] = []
     as_of_idx = index.offset(as_of)
     if as_of_idx is None:
@@ -165,11 +168,11 @@ def generate_proposals(
             if tolerance:
                 # tolerated dip: back above target within N working days and never below zero
                 k, days = i, 0
-                while k + 1 < n and stock[k] < target[k] - EPS and stock[k] >= -EPS and days <= tolerance:
+                while k + 1 < n and stock[k] < target[k] - EPS and shortage[k] <= EPS and days <= tolerance:
                     k += 1
                     if calendar.is_working_day(index.dates[k]):
                         days += 1
-                if stock[k] >= target[k] - EPS and days <= tolerance and min(stock[i:k + 1]) >= -EPS:
+                if stock[k] >= target[k] - EPS and days <= tolerance and shortage[i:k + 1].max() <= EPS:
                     i = k + 1
                     continue
             link = choose_supplier(links, proposed_by_supplier, params.sourcing_policy)
@@ -207,9 +210,11 @@ def generate_proposals(
             before = float(stock[k])
             proposed[j] += qty
             if reproject is not None:
-                stock = reproject(proposed).net
+                proj = reproject(proposed)
+                stock, shortage = proj.net, proj.shortage
             else:
                 stock[j:] += qty
+                shortage = np.maximum(-stock, 0.0)
             if link:
                 proposed_by_supplier[link.supplier_id] = proposed_by_supplier.get(link.supplier_id, 0.0) + qty
             reason = f"Stock projeté {before:,.0f} < cible {target[k]:,.0f} le {index.dates[k].isoformat()}"
