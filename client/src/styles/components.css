@@ -1,5 +1,6 @@
 /* ---------- layout ---------- */
 .shell { display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
+.shell.collapsed { grid-template-columns: var(--sidebar-w-min) 1fr; }
 .sidebar { position: sticky; top: 0; height: 100vh; background: var(--bg-elev); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: var(--sp-4) var(--sp-3); gap: var(--sp-2); }
 .sidebar .brand { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-2) var(--sp-4); font-weight: var(--fw-bold); font-size: var(--fs-0); letter-spacing: -0.02em; }
 .sidebar .brand .logo { width: 28px; height: 28px; border-radius: 8px; background: var(--brand); display: grid; place-items: center; color: #fff; }
@@ -10,6 +11,14 @@
 .sidebar nav a svg { width: 18px; height: 18px; flex: none; }
 .sidebar .nav-group { margin-top: var(--sp-3); padding: 0 var(--sp-3); }
 .sidebar .foot { margin-top: auto; padding: var(--sp-2) var(--sp-3); color: var(--fg-subtle); font-size: var(--fs--2); }
+.sidebar .collapse { margin: 0 0 var(--sp-2); align-self: flex-end; }
+/* reduced panel: icons only, the label becomes a tooltip */
+.sidebar.mini { padding: var(--sp-4) 6px; align-items: center; }
+.sidebar.mini .brand { padding: var(--sp-2) 0 var(--sp-4); justify-content: center; }
+.sidebar.mini .brand span.txt, .sidebar.mini .foot, .sidebar.mini .nav-group, .sidebar.mini nav a span.lbl { display: none; }
+.sidebar.mini nav { width: 100%; }
+.sidebar.mini nav a { justify-content: center; padding: 10px 0; }
+.sidebar.mini .collapse { align-self: center; }
 .main { display: flex; flex-direction: column; min-width: 0; }
 .topbar { position: sticky; top: 0; z-index: 20; height: var(--topbar-h); display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-6); background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
 .topbar .ctx { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
@@ -244,9 +253,13 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 .dt tfoot td { background: var(--bg-subtle); font-size: var(--fs--2); }
 
 /* ---------- simulation grid: virtualised table, clickable Ferme / CBN cells, fill handle ---------- */
+.pivot td .partial { font-size: 0.58rem; letter-spacing: -0.01em; }
+.pivot-tools .checkbox { font-size: var(--fs--2); gap: 4px; }
+.pivot-tools .checkbox input { width: 13px; height: 13px; }
 .pivot.virtual { max-height: calc(100vh - 230px); min-height: 240px; }
 .pivot.virtual table { table-layout: fixed; }
 .pivot.virtual th, .pivot.virtual td { overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
+.pivot.virtual thead th { padding: 4px 3px; letter-spacing: -0.01em; text-align: center; }
 .pivot td.spacer, .pivot th.spacer { padding: 0; border-right: 0; min-width: 0; }
 .pivot tr.vspacer td { padding: 0; border: 0; background: transparent; }
 .pivot td.firm-open { background: var(--cell-yellow); color: var(--warning-fg); font-weight: var(--fw-medium); }

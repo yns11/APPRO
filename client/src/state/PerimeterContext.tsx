@@ -11,6 +11,11 @@ export interface Perimeter {
   theme: "light" | "dark" | "system";
   /** keys of the simulation grid rows hidden for every article (e.g. "orders_forecast", "stock_erp") */
   hiddenRows: string[];
+  /** day columns of the grid: show Saturdays / Sundays */
+  showSaturday: boolean;
+  showSunday: boolean;
+  /** navigation panel reduced to its icons */
+  sidebarCollapsed: boolean;
 }
 
 interface Ctx {
@@ -23,7 +28,7 @@ interface Ctx {
 }
 
 const KEY = "appro.perimeter.v2";
-const defaults: Perimeter = { planner: null, horizonDays: 120, granularity: "default", theme: "system", hiddenRows: [] };
+const defaults: Perimeter = { planner: null, horizonDays: 120, granularity: "default", theme: "system", hiddenRows: [], showSaturday: true, showSunday: true, sidebarCollapsed: false };
 
 function load(): Perimeter {
   try {

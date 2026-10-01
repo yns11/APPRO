@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, BookOpen, ClipboardList, Factory, FileSpreadsheet, LayoutDashboard, Menu, Moon, PenLine, Settings, ShoppingCart, Sun, Monitor, RefreshCw, Table } from "lucide-react";
+import { Activity, BookOpen, ClipboardList, Factory, FileSpreadsheet, LayoutDashboard, Menu, Moon, PanelLeftClose, PanelLeftOpen, PenLine, Settings, ShoppingCart, Sun, Monitor, RefreshCw, Table } from "lucide-react";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useInvalidateAll } from "@/lib/queries";
 import { Button } from "@/components/ui";
@@ -33,14 +33,16 @@ export default function AppShell() {
     try { await api.post("/api/reference/refresh"); invalidate(); toast.push("Données ERP rechargées", "success"); }
     catch (e) { toast.push(`Rechargement impossible : ${(e as Error).message}`, "error"); }
   };
+  const mini = perimeter.sidebarCollapsed;
   const link = (n: { to: string; label: string; icon: typeof Table; end?: boolean }) => (
-    <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? "active" : "")}><n.icon />{n.label}</NavLink>
+    <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? "active" : "")} title={mini ? n.label : undefined} aria-label={n.label}><n.icon /><span className="lbl">{n.label}</span></NavLink>
   );
 
   return (
-    <div className="shell">
-      <aside className={`sidebar ${open ? "open" : ""}`}>
-        <div className="brand"><span className="logo"><ClipboardList size={16} /></span>APPRO</div>
+    <div className={`shell ${mini ? "collapsed" : ""}`}>
+      <aside className={`sidebar ${open ? "open" : ""} ${mini ? "mini" : ""}`}>
+        <div className="brand"><span className="logo"><ClipboardList size={16} /></span><span className="txt">APPRO</span></div>
+        <Button variant="ghost" icon size="sm" className="collapse no-print" title={mini ? "Déployer le panneau de navigation" : "Réduire le panneau de navigation (icônes seules)"} aria-label={mini ? "Déployer la navigation" : "Réduire la navigation"} onClick={() => set({ sidebarCollapsed: !mini })}>{mini ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
         <nav onClick={() => setOpen(false)}>
           {NAV.map(link)}
           <div className="nav-group small subtle">Plus</div>

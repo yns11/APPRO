@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
-import { ORDER_TYPE_LABELS, fmtDate, fmtQty, isWeekKey, isWeekend, periodLabel } from "@/lib/format";
+import { ORDER_TYPE_LABELS, fmtDate, fmtQty, isSaturday, isSunday, isWeekKey, isWeekend, isoWeekOf, periodLabel } from "@/lib/format";
 import type { AdjustmentOut, ArticleRef, FlagIn, FlagOut, LaneOut, PlanCellOut, SeriesOut } from "@/lib/types";
 
 /** Rows of the grid that can be hidden (for every article) ; lane rows are repeated per supplier. */
@@ -25,7 +25,7 @@ export interface GridColumns { as_of: string; periods: string[]; period_start: s
 export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis?: { severity?: string | null }; }
 
 /* ---------------------------------------------------------------- geometry (virtualisation) */
-const COL_W = 84;          // every data column has the same width: the visible range is arithmetic
+const COL_W = 72;          // every data column has the same width: the visible range is arithmetic
 const LABEL_W = 150;       // sticky first column
 const ROW_H = 26;
 const STOCK_H = 36;        // stock cells carry the coverage above the value
@@ -123,6 +123,22 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
     return m;
   }, [flags, cols]);
   const readOnlyCol = useCallback((i: number) => isWeekKey(cols.periods[i]), [cols]);
+  /** displayed columns → original column indexes (Saturdays / Sundays can be hidden in day mode) */
+  const shown = useMemo(() => {
+    const out: number[] = [];
+    cols.periods.forEach((p, i) => {
+      if (!isWeekKey(p)) {
+        if (!perimeter.showSaturday && isSaturday(p)) return;
+        if (!perimeter.showSunday && isSunday(p)) return;
+      }
+      out.push(i);
+    });
+    return out;
+  }, [cols, perimeter.showSaturday, perimeter.showSunday]);
+  const m = shown.length;
+  const hasDayCols = useMemo(() => cols.periods.some((p) => !isWeekKey(p)), [cols]);
+  /** next displayed column from ``i`` in direction ``dir`` (Tab navigation skips hidden days) */
+  const nextShown = useCallback((i: number, dir: 1 | -1): number => { const k = shown.indexOf(i); return k < 0 ? -1 : (shown[k + dir] ?? -1); }, [shown]);
 
   /* ---------------- rows (flattened, with heights) */
   const rows = useMemo<RowDesc[]>(() => {
@@ -167,7 +183,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
     return () => { ro.disconnect(); cancelAnimationFrame(raf.current); };
   }, [onScroll]);
   const c0 = Math.max(0, Math.floor(view.sl / COL_W) - OVERSCAN_COLS);
-  const c1 = Math.min(n, Math.ceil((view.sl + view.cw - LABEL_W) / COL_W) + OVERSCAN_COLS);
+  const c1 = Math.min(m, Math.ceil((view.sl + view.cw - LABEL_W) / COL_W) + OVERSCAN_COLS);
   const totalH = offsets[rows.length];
   let r0 = 0, r1 = rows.length;
   { // binary searches on the row offsets
@@ -178,8 +194,8 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
     while (lo < hi) { const m = (lo + hi) >> 1; if (offsets[m] < bottom) lo = m + 1; else hi = m; }
     r1 = lo;
   }
-  const visibleCols = useMemo(() => Array.from({ length: Math.max(0, c1 - c0) }, (_, k) => c0 + k), [c0, c1]);
-  const leftW = c0 * COL_W, rightW = (n - c1) * COL_W;
+  const visibleCols = useMemo(() => shown.slice(c0, Math.max(c0, c1)), [shown, c0, c1]);
+  const leftW = c0 * COL_W, rightW = (m - c1) * COL_W;
   const colCount = 1 + (leftW > 0 ? 1 : 0) + visibleCols.length + (rightW > 0 ? 1 : 0);
 
   /* ---------------- editing */
@@ -240,7 +256,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
       onKeyDown={(ev) => {
         if (ev.key === "Enter") { ev.preventDefault(); commit(); }
         else if (ev.key === "Escape") { ev.preventDefault(); setEditing(null); }
-        else if (ev.key === "Tab") { ev.preventDefault(); const ni = e.i + (ev.shiftKey ? -1 : 1); if (ni >= 0 && ni < n && canTab(ni)) { const nv = initial(ni); setActive({ aid: e.aid, key: e.key, lane: e.lane, i: ni }); commit({ ...e, i: ni, value: nv, initial: nv }); } else commit(); }
+        else if (ev.key === "Tab") { ev.preventDefault(); const ni = nextShown(e.i, ev.shiftKey ? -1 : 1); if (ni >= 0 && ni < n && canTab(ni)) { const nv = initial(ni); setActive({ aid: e.aid, key: e.key, lane: e.lane, i: ni }); commit({ ...e, i: ni, value: nv, initial: nv }); } else commit(); }
       }} />
   );
   const handle = (aid: string, key: "plan" | "adjustments", lane: number, i: number, value: string) => (
@@ -303,7 +319,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const past = i < asOfIdx, ro = readOnlyCol(i);
               const clickable = qo > 0 && !past;
               const cls = [...cellBase(i), qo > 0 ? (ignored ? "ignored" : qr > 0 ? "firm-open" : "firm-settled") : "", clickable ? "clickable" : "", l.orders.length && ordersTitle(i) ? "event" : ""].filter(Boolean).join(" ");
-              const text = qo === 0 ? "·" : partial ? `${fmtQty(qr, unit)} / ${fmtQty(qo, unit)}` : fmtQty(qo, unit);
+              const text = qo === 0 ? "·" : partial ? <span className="partial">{fmtQty(qr, unit)} / {fmtQty(qo, unit)}</span> : fmtQty(qo, unit);
               const state = qo === 0 ? "" : ignored ? "Commande ignorée : hors Scenario ERP et hors Plan (cliquer pour la rétablir)" : qr > 0 ? `En cours : ${fmtQty(qr, unit)} restant à livrer sur ${fmtQty(qo, unit)} commandé${clickable ? (ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – cliquer pour l'ignorer") : ""}` : `Soldée : ${fmtQty(qo, unit)} commandé, tout reçu`;
               const title = [state, ordersTitle(i)].filter(Boolean).join("\n");
               const onClick = !clickable ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => toggleFlag.mutate({ article_id: aid, supplier_id: l.supplier_id, date: cols.period_start[i], kind: "order_ignored" });
@@ -438,15 +454,19 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
             ))}
           </div>
         )}
-        <span className="subtle small" style={{ marginLeft: "auto" }}>{articles.length} article{articles.length > 1 ? "s" : ""} · {n} colonnes</span>
+        {hasDayCols && <>
+          <label className="checkbox" title="Afficher les colonnes des samedis (mode jour)"><input type="checkbox" checked={perimeter.showSaturday} onChange={(e) => set({ showSaturday: e.target.checked })} />Samedi</label>
+          <label className="checkbox" title="Afficher les colonnes des dimanches (mode jour)"><input type="checkbox" checked={perimeter.showSunday} onChange={(e) => set({ showSunday: e.target.checked })} />Dimanche</label>
+        </>}
+        <span className="subtle small" style={{ marginLeft: "auto" }}>{articles.length} article{articles.length > 1 ? "s" : ""} · {m} colonnes</span>
       </div>
       <div className="pivot virtual" ref={wrap} onScroll={onScroll}>
-        <table style={{ width: LABEL_W + n * COL_W }}>
+        <table style={{ width: LABEL_W + m * COL_W }}>
           <thead>
             <tr style={{ height: HEAD_H }}>
               <th style={{ width: LABEL_W, minWidth: LABEL_W, maxWidth: LABEL_W }}>Variable</th>
               {leftW > 0 && <th className="spacer" style={{ width: leftW, minWidth: leftW, maxWidth: leftW }} />}
-              {visibleCols.map((i) => { const p = cols.periods[i]; return <th key={p} style={{ width: COL_W, minWidth: COL_W, maxWidth: COL_W }} className={`${i === asOfIdx ? "today" : ""} ${isWeekKey(p) ? "wk wkcol" : ""}`} title={isWeekKey(p) ? `${cols.period_start[i]} → ${cols.period_end[i]}${onSwitchDay ? " · cliquer pour le détail par jour" : ""}` : cols.period_start[i]}
+              {visibleCols.map((i) => { const p = cols.periods[i]; return <th key={p} style={{ width: COL_W, minWidth: COL_W, maxWidth: COL_W }} className={`${i === asOfIdx ? "today" : ""} ${isWeekKey(p) ? "wk wkcol" : ""}`} title={isWeekKey(p) ? `${cols.period_start[i]} → ${cols.period_end[i]}${onSwitchDay ? " · cliquer pour le détail par jour" : ""}` : `${fmtDate(cols.period_start[i], "EEEE dd/MM/yyyy")} · semaine ${isoWeekOf(cols.period_start[i])}`}
                 onClick={isWeekKey(p) && onSwitchDay ? () => onSwitchDay(cols.period_start[i]) : undefined}>{periodLabel(p)}</th>; })}
               {rightW > 0 && <th className="spacer" style={{ width: rightW, minWidth: rightW, maxWidth: rightW }} />}
             </tr>

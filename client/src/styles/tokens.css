@@ -35,6 +35,7 @@
 
   /* layout */
   --sidebar-w: 236px;
+  --sidebar-w-min: 56px;
   --topbar-h: 56px;
   --content-max: 1560px;
   --transition: 160ms ease;
