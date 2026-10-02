@@ -9,19 +9,34 @@ import numpy as np
 from .alerts import classify_alerts, worst_severity
 from .calendar import WorkCalendar
 from .demand import DayIndex, actual_share, build_program_daily, explode_demand
-from .models import Alert, ArticleResult, Dataset, EngineParams, MrpResult, OrderType
+from .models import Alert, ArticleResult, Dataset, DatasetError, EngineParams, MrpResult, OrderType
 from .programs import program_impact
-from .projection import Projection, coverage_days, first_shortage, project_stock, reconstruct_history, target_stock
+from .projection import Projection, coverage_days, first_shortage, project_stock, target_stock
 from .proposals import generate_proposals
 from .supply import blocked_windows, build_lanes, lane_totals
 
 
 def resolve_as_of(dataset: Dataset, params: EngineParams) -> dt.date:
-    if params.as_of:
-        return params.as_of
-    if dataset.stock:
-        return max(s.snapshot_date for s in dataset.stock) + dt.timedelta(days=1)
-    return dt.date.today()
+    """« Today » of the computation: the real date, or the simulated one of the parameters (demo, tests)."""
+    return params.as_of or dt.date.today()
+
+
+def resolve_init_date(dataset: Dataset, as_of: dt.date) -> dt.date:
+    """The stock initialisation date: point zero of the application (docs/regles_metier.md § 1).
+
+    One single date for every article (the ``snapshot_date`` of ``fct_stock``), never after today ;
+    without any stock row the application starts today with empty stocks.  The stock of that day is
+    known at its end ; the projection starts the day after ; nothing before it exists for the engine."""
+    dates = {s.snapshot_date for s in dataset.stock}
+    if len(dates) > 1:
+        raise DatasetError("Le stock de référence porte plusieurs dates d'initialisation (" +
+                           ", ".join(d.isoformat() for d in sorted(dates)) +
+                           ") : une seule date pour tous les articles est admise.")
+    init = next(iter(dates), as_of)
+    if init > as_of:
+        raise DatasetError(f"La date d'initialisation du stock ({init.isoformat()}) est postérieure à aujourd'hui "
+                           f"({as_of.isoformat()}).")
+    return init
 
 
 def run_mrp(dataset: Dataset, params: EngineParams | None = None,
@@ -30,10 +45,11 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     params = params or EngineParams()
     calendar = WorkCalendar.from_spec(params.working_weekdays, dataset.holidays)
     as_of = resolve_as_of(dataset, params)
+    init_date = resolve_init_date(dataset, as_of)
     snapshots = {s.article_id: s for s in dataset.stock}
-    earliest_snapshot = min((s.snapshot_date for s in dataset.stock), default=as_of - dt.timedelta(days=1))
-    back = max(params.history_days, params.backlog_days, 0)
-    start = min(as_of - dt.timedelta(days=back), earliest_snapshot)
+    # the window opens on the initialisation day (stock known at its end) ; the past of the engine is
+    # [init, today) ; what is displayed before today is a presentation choice (history_weeks)
+    start = init_date
     end = as_of + dt.timedelta(days=int(params.horizon_days))
     index = DayIndex(start, end)
     diagnostics: list[str] = []
@@ -86,15 +102,8 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         required = np.where(day_idx >= i_as_of, demand, 0.0)
 
         snap = snapshots.get(aid)
-        if snap is not None:
-            i_snap = index.offset(snap.snapshot_date)
-            stock_snapshot = snap.qty_on_hand - (snap.qty_blocked or 0.0)
-            if i_snap is None:
-                notes.append(f"snapshot du {snap.snapshot_date} hors fenêtre : projection depuis le début de fenêtre")
-                i_snap = 0
-        else:
-            i_snap, stock_snapshot = 0, 0.0
-        snap_date = index.dates[i_snap]
+        i_snap, snap_date = 0, init_date
+        stock_snapshot = snap.qty_on_hand - (snap.qty_blocked or 0.0) if snap is not None else 0.0
 
         lanes = build_lanes(links_by_article.get(aid, []), orders_by_article.get(aid, []), receipts_by_article.get(aid, []),
                             plan_by_article.get(aid, []), supplier_names, index, as_of, params, flags_by_article.get(aid))
@@ -114,10 +123,10 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
                 continue
             (adjustments if c.date > snap_date else past_adjust)[i] += c.qty
 
-        # Reference stock = ERP snapshot + planner corrections dated on/before the snapshot
+        # Reference stock = initial ERP stock + planner corrections dated on/before the initialisation day
         reference_correction = float(past_adjust.sum())
         stock_start = stock_snapshot + reference_correction
-        history = reconstruct_history(stock_start, receipts, past_adjust, consumed, i_snap)
+        history = np.array([stock_start])   # end of the initialisation day ; nothing earlier exists
         demand_proj = demand.copy()
         demand_proj[:i_snap + 1] = 0.0  # snapshot day already consumed
         adjust_proj = adjustments.copy()
@@ -173,7 +182,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "stock_on_hand": float(stock_snapshot),
             "reference_correction": reference_correction,
             "stock_reference": float(stock_start),
-            "snapshot_date": snap_date.isoformat(),
+            "init_date": snap_date.isoformat(),
             "shortage_policy": params.shortage_policy,
             "stock_as_of_erp": float(erp.stock[i_as_of]),
             "stock_as_of_plan": float(plan_proj.stock[i_as_of]),
@@ -227,8 +236,8 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
                      for pid, arr in program_eff.items()}
     names = {p.program_id: p.name for p in dataset.programs}
     impact = program_impact(results, dataset.bom, program_eff, names, index, as_of, params.shortage_policy)
-    return MrpResult(as_of=as_of, start_date=start, end_date=end, params=params, articles=results,
+    return MrpResult(as_of=as_of, init_date=init_date, start_date=start, end_date=end, params=params, articles=results,
                      program_daily=program_daily, diagnostics=diagnostics, program_impact=impact)
 
 
-__all__ = ["run_mrp", "resolve_as_of", "Alert", "OrderType"]
+__all__ = ["run_mrp", "resolve_as_of", "resolve_init_date", "Alert", "OrderType"]

@@ -71,7 +71,7 @@ def build_params(ctx: AppContext, session: Session, **requested: Any) -> EngineP
     """Defaults < settings < global overrides (DB) < request parameters."""
     s = ctx.settings
     base: dict[str, Any] = {
-        "horizon_days": s.horizon_days, "history_days": s.history_days,
+        "horizon_days": s.horizon_days, "history_weeks": s.history_weeks,
         "working_weekdays": tuple(int(x) for x in s.working_weekdays.split(",") if x.strip()),
     }
     if s.as_of:
@@ -112,7 +112,8 @@ def app_entries_into_dataset(ds: Dataset, session: Session) -> None:
 
 
 def _cache_key(version: int, planner: str | None, article_ids: list[str] | None, params: EngineParams) -> str:
-    payload = {"v": version, "planner": planner, "articles": sorted(article_ids or []),
+    # « today » is part of the result: a result computed yesterday must not survive midnight
+    payload = {"v": version, "today": (params.as_of or dt.date.today()).isoformat(), "planner": planner, "articles": sorted(article_ids or []),
                "params": dataclasses.asdict(params)}
     return hashlib.sha1(json.dumps(payload, default=str, sort_keys=True).encode()).hexdigest()
 

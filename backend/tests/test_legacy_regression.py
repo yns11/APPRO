@@ -44,7 +44,7 @@ def legacy_result(seed_source, legacy, fixtures_dir):
             ds.receipts.append(Receipt(f"LEG-{o.order_id}", o.article_id, o.expected_date, o.qty_ordered, o.supplier_id, o.order_id))
         elif o.qty_open > 0:
             o.qty_open = o.qty_ordered
-    params = EngineParams(as_of=start + dt.timedelta(days=1), horizon_days=len(legacy["dates"]) - 2, history_days=1,
+    params = EngineParams(as_of=start + dt.timedelta(days=1), horizon_days=len(legacy["dates"]) - 2, history_weeks=0,
                           backlog_days=0, spread_rounding="per_day", coverage_unit="calendar", coverage_tie_rule="not_covered",
                           firm_sources=("FIRM", "FORECAST"), generate_proposals=False, production_mode="actual_then_plan",
                           missing_actual_policy="plan")

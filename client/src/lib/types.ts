@@ -31,7 +31,7 @@ export interface SeriesOut { key: string; label: string; values: number[]; }
 export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; }
 
 export interface ArticleKpis {
-  stock_on_hand: number; reference_correction: number; stock_reference: number; snapshot_date: string; shortage_policy: "backlog" | "lost";
+  stock_on_hand: number; reference_correction: number; stock_reference: number; init_date: string; shortage_policy: "backlog" | "lost";
   stock_as_of_erp: number; stock_as_of_plan: number; coverage_erp_days: number; coverage_plan_days: number; coverage_target_days: number; target_stock: number;
   first_stockout_erp: string | null; first_stockout_plan: string | null; min_stock_erp: number; min_stock_plan: number; max_shortage_erp: number; max_shortage_plan: number;
   demand_next_7d: number; demand_next_30d: number; demand_horizon: number; avg_daily_demand_30d: number;
@@ -51,19 +51,19 @@ export interface CockpitKpis {
 }
 export interface WeeklyOutlook { week: string; week_start: string; stockout_articles: number; below_target_articles: number; proposals: number; proposed_qty: number; }
 export interface CockpitResponse {
-  as_of: string; horizon_days: number; planner: string | null; data_source: string;
+  as_of: string; init_date: string; horizon_days: number; planner: string | null; data_source: string;
   pdp_version: { id: string; name: string } | null; kpis: CockpitKpis; articles: ArticleSummary[]; alerts: AlertOut[];
   proposals: ProposalOut[]; backlog: BacklogRow[]; diagnostics: string[]; weekly_supply_demand: WeeklyOutlook[];
 }
 export type Granularity = "default" | "day" | "week";
 export interface ProjectionResponse {
-  article: ArticleRef; as_of: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; series: SeriesOut[];
+  article: ArticleRef; as_of: string; init_date: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; series: SeriesOut[];
   lanes: LaneOut[]; proposals: ProposalOut[]; alerts: AlertOut[]; kpis: ArticleKpis; suppliers: LinkRef[];
   programs: { program_id: string; name: string; qty_per: number; unit: string; production_next_30d: number }[]; diagnostics: string[];
 }
 export interface GridArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; programs: string[]; }
 /** One page of the supply table (``total`` articles after filters). */
-export interface GridResponse { as_of: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; articles: GridArticle[]; diagnostics: string[]; total: number; page: number; page_size: number; }
+export interface GridResponse { as_of: string; init_date: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; articles: GridArticle[]; diagnostics: string[]; total: number; page: number; page_size: number; }
 /** The Plan row as ERP delivery schedule lines. */
 export interface DeliveryRow { supplier_id: string | null; supplier_name: string; week: string; date: string; end_date: string; qty: number; typed_qty: number; erp_qty: number; cbn_qty: number; typed: boolean; }
 export interface DeliveryPlanResponse { article_id: string; designation: string; unit: string; as_of: string; suppliers: { supplier_id: string | null; name: string }[]; rows: DeliveryRow[]; }
@@ -95,4 +95,5 @@ export interface AccessOut {
   user: string; role: Role; planner_id: string | null; name: string | null; portfolio: string[]; delegated_from: string[]; bootstrap: boolean;
   can_write: boolean; can_edit_all: boolean; can_manage_params: boolean; can_import_pdp: boolean; is_admin: boolean;
 }
-export interface ConfigOut { title: string; data_source: Record<string, unknown>; as_of: string; horizon_days: number; planners: string[]; default_planner: string | null; user: string; version: string; reference_empty: boolean; access: AccessOut; }
+/** ``as_of`` = today (the real date, or the simulated one) ; ``init_date`` = stock initialisation day, point zero of the application. */
+export interface ConfigOut { title: string; data_source: Record<string, unknown>; as_of: string; init_date: string; horizon_days: number; planners: string[]; default_planner: string | null; user: string; version: string; reference_empty: boolean; access: AccessOut; }

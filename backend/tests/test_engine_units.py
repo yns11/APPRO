@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 
 import numpy as np
+import pytest
 
 from appro.engine import run_mrp
 from appro.engine.calendar import WorkCalendar
@@ -170,6 +171,7 @@ def test_plan_cells_move_split_zero_and_expire():
 def test_backlog_is_cumulative_per_supplier_and_ages_out():
     """Past firm orders not covered by receipts over the backlog window: no order matching, no action."""
     ds = make_dataset(
+        stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],   # point zero ten days ago: the past orders exist
         links=[SupplierLink("A1", "S1", quota_pct=50), SupplierLink("A1", "S2", quota_pct=50, priority=2)],
         orders=[OrderLine("L1", "A1", "S1", MON - D(days=5), 200, order_type=OrderType.FIRM),
                 OrderLine("L0", "A1", "S1", MON - D(days=60), 300, order_type=OrderType.FIRM),   # too old
@@ -221,28 +223,61 @@ def test_lanes_follow_the_active_links_then_the_data():
     assert [l.supplier_id for l in r1.lanes] == [None] and r1.kpis["lanes"] == 1
 
 
-def test_adjustments_correct_the_reference_stock_and_history_is_reconstructed():
-    ds = make_dataset(actuals=[ActualLine("P1", MON - D(days=k), 100.0) for k in (1, 2, 3, 4)],   # 200 components / day
+def test_adjustments_correct_the_reference_stock_and_the_past_is_projected_forward():
+    """The initialisation day is the point zero: its stock (corrected by the adjustments dated up to it)
+    is projected forward with the receipts, the actual consumption and the later adjustments."""
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=5), 2000.0)],
+                      actuals=[ActualLine("P1", MON - D(days=k), 100.0) for k in (1, 2, 3, 4)],   # 200 components / day
                       receipts=[Receipt("R1", "A1", MON - D(days=2), 500)],
-                      adjustments=[AdjustCell("A1", MON - D(days=3), -300.0),                     # count found 300 short
+                      adjustments=[AdjustCell("A1", MON - D(days=6), -300.0),                     # before the point zero: correction
                                    AdjustCell("A1", MON + D(days=2), 40.0)])                      # known future movement
     r = run(ds, horizon_days=5)
     i = r.dates.index(MON)
-    assert r.reference_correction == -300 and r.kpis["stock_reference"] == 700 and r.kpis["stock_on_hand"] == 1000
-    assert r.stock_plan[i] == 500 and r.stock_plan[i + 2] == 500 - 200 + 40 - 200
-    assert list(r.stock_erp[i - 5:i]) == [1300, 1100, 600, 900, 700]
+    assert r.dates[0] == MON - D(days=5)                                   # nothing before the initialisation day
+    assert r.reference_correction == -300 and r.kpis["stock_reference"] == 1700 and r.kpis["stock_on_hand"] == 2000
+    assert r.kpis["init_date"] == (MON - D(days=5)).isoformat()
+    assert list(r.stock_erp[i - 5:i]) == [1700, 1500, 1300, 1600, 1400]
     assert list(r.stock_plan[i - 5:i]) == list(r.stock_erp[i - 5:i])
-    assert r.adjustments[i - 3] == -300 and r.adjustments[i + 2] == 40
+    assert r.stock_plan[i] == 1200 and r.stock_plan[i + 2] == 1200 - 200 - 200 + 40
+    assert r.adjustments[i + 2] == 40
 
 
-def test_adjustment_history_chain():
-    ds = make_dataset(actuals=[ActualLine("P1", MON - D(days=2), 50.0)],
+def test_past_movements_are_projected_forward_from_the_init_day():
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=3), 1000.0)],
+                      actuals=[ActualLine("P1", MON - D(days=2), 50.0)],
                       receipts=[Receipt("R1", "A1", MON - D(days=1), 500)],
-                      adjustments=[AdjustCell("A1", MON - D(days=2), -30.0)])
+                      adjustments=[AdjustCell("A1", MON - D(days=2), -30.0)])   # after the point zero: a movement
     r = run(ds, horizon_days=3)
     i = r.dates.index(MON)
-    assert r.stock_erp[i - 1] == 970 and r.stock_erp[i - 2] == 470 and r.stock_erp[i - 3] == 600
-    assert r.stock_plan[i] == 970 - 200
+    assert r.stock_erp[i - 3] == 1000 and r.stock_erp[i - 2] == 870 and r.stock_erp[i - 1] == 1370
+    assert r.stock_plan[i] == 1370 - 200 and r.reference_correction == 0
+
+
+def test_one_initialisation_date_for_everybody_never_in_the_future():
+    from appro.engine.models import DatasetError
+    ds = make_dataset(articles=[Article("A1", "W"), Article("A2", "W2")],
+                      stock=[StockSnapshot("A1", MON - D(days=1), 10.0), StockSnapshot("A2", MON - D(days=2), 10.0)])
+    with pytest.raises(DatasetError, match="plusieurs dates"):
+        run(ds)
+    ds = make_dataset(stock=[StockSnapshot("A1", MON + D(days=1), 10.0)])
+    with pytest.raises(DatasetError, match="postérieure"):
+        run(ds)
+    # no stock row at all: point zero = today, empty stocks
+    r = run(make_dataset(stock=[]))
+    assert r.dates[0] == MON and r.kpis["stock_reference"] == 0
+
+
+def test_display_start_follows_history_weeks_but_never_the_point_zero():
+    from appro.api.presenters import display_start
+    from appro.engine import run_mrp
+    old = make_dataset(stock=[StockSnapshot("A1", MON - D(days=30), 100.0)])
+    res = run_mrp(old, EngineParams(as_of=MON + D(days=2), horizon_days=10, history_weeks=2))
+    assert display_start(res) == MON - D(weeks=2)                      # Monday of the current week − 2 weeks
+    res0 = run_mrp(old, EngineParams(as_of=MON + D(days=2), horizon_days=10, history_weeks=0))
+    assert display_start(res0) == MON
+    young = make_dataset(stock=[StockSnapshot("A1", MON - D(days=3), 100.0)])
+    res2 = run_mrp(young, EngineParams(as_of=MON + D(days=2), horizon_days=10, history_weeks=2))
+    assert display_start(res2) == MON - D(days=3)                       # the point zero wins
 
 
 def test_shortage_policies_and_first_stockout():
@@ -450,7 +485,8 @@ def test_ignored_firm_orders_leave_the_erp_scenario_and_the_plan():
     plan prefill) but still displayed with their ordered / remaining quantities."""
     from appro.engine.models import CellFlag
     wed, fri = MON + D(days=2), MON + D(days=4)
-    ds = make_dataset(orders=[OrderLine("F1", "A1", "S1", wed, 1000, qty_open=400, order_type=OrderType.FIRM),
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=3), 1000.0)],
+                      orders=[OrderLine("F1", "A1", "S1", wed, 1000, qty_open=400, order_type=OrderType.FIRM),
                               OrderLine("F2", "A1", "S1", fri, 800, order_type=OrderType.FIRM),
                               OrderLine("F0", "A1", "S1", MON - D(days=2), 300, qty_open=0, order_type=OrderType.FIRM)])
     r = run(ds)
@@ -466,7 +502,7 @@ def test_ignored_firm_orders_leave_the_erp_scenario_and_the_plan():
     assert r2.lanes[0].orders_firm_ordered[i + 2] == 1000                                      # still displayed
     assert r2.stock_erp[i + 2] == r.stock_erp[i + 2] - 400 and r2.kpis["ignored_order_days"] == 1
     assert not r2.lanes[0].orders_ignored[i - 2]                                               # the past is never ignored
-    typed = make_dataset(orders=ds.orders)
+    typed = make_dataset(stock=list(ds.stock), orders=ds.orders)
     typed.flags, typed.plan = list(ds.flags), [PlanCell("A1", "S1", wed, 250)]
     r3 = run(typed)
     assert r3.orders_firm[i + 2] == 0 and r3.plan[i + 2] == 250                                 # a typed cell still counts

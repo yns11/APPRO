@@ -73,19 +73,6 @@ def project_stock(stock_start: float, supply: np.ndarray, adjustments: np.ndarra
     return Projection(net=net, stock=np.maximum(net, 0.0), shortage=np.maximum(-net, 0.0))
 
 
-def reconstruct_history(stock_start: float, receipts: np.ndarray, adjustments: np.ndarray, consumed: np.ndarray,
-                        i_snap: int) -> np.ndarray:
-    """Stock at the end of every day up to the snapshot day, reconstructed backwards from the
-    snapshot: ``stock[d-1] = stock[d] − receipts[d] − adjustments[d] + consumed[d]``.
-
-    Only the known movements are used (receipts, planner adjustments and the actual-based
-    consumption), hence a *reconstructed* history, not the ERP stock of those days."""
-    hist = np.full(i_snap + 1, float(stock_start))
-    for d in range(i_snap, 0, -1):
-        hist[d - 1] = hist[d] - receipts[d] - adjustments[d] + consumed[d]
-    return hist
-
-
 def coverage_days(stock: np.ndarray, demand: np.ndarray, index: DayIndex, calendar: WorkCalendar,
                   unit: str = "calendar", tie_rule: str = "covered") -> np.ndarray:
     """Coverage in days for every day of the window.

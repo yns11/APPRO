@@ -3,7 +3,17 @@
 .shell.collapsed { grid-template-columns: var(--sidebar-w-min) 1fr; }
 .sidebar { position: sticky; top: 0; height: 100vh; background: var(--bg-elev); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: var(--sp-4) var(--sp-3); gap: var(--sp-2); }
 .sidebar .brand { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-2) var(--sp-4); font-weight: var(--fw-bold); font-size: var(--fs-0); letter-spacing: -0.02em; }
-.sidebar .brand .logo { width: 28px; height: 28px; border-radius: 8px; background: var(--brand); display: grid; place-items: center; color: #fff; }
+.sidebar .brand img { display: block; }
+.sidebar .brand .logo-full { height: 64px; width: auto; max-width: 100%; margin: -6px 0 -4px -10px; }
+.sidebar .brand .logo-mark { height: 30px; width: 30px; display: none; }
+/* one file per theme: the light one on a light background, the dark one in dark mode */
+.sidebar .brand img.dark { display: none; }
+:root[data-theme="dark"] .sidebar .brand img.light { display: none; }
+:root[data-theme="dark"] .sidebar .brand .logo-full.dark { display: block; }
+.sidebar.mini .brand .logo-full { display: none !important; }
+.sidebar.mini .brand .logo-mark.light { display: block; }
+:root[data-theme="dark"] .sidebar.mini .brand .logo-mark.light { display: none; }
+:root[data-theme="dark"] .sidebar.mini .brand .logo-mark.dark { display: block; }
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; }
 .sidebar nav a { display: flex; align-items: center; gap: var(--sp-3); padding: 9px var(--sp-3); border-radius: var(--r-md); color: var(--fg-muted); font-weight: var(--fw-medium); transition: background var(--transition), color var(--transition); }
 .sidebar nav a:hover { background: var(--bg-hover); text-decoration: none; color: var(--fg); }
@@ -15,7 +25,7 @@
 /* reduced panel: icons only, the label becomes a tooltip */
 .sidebar.mini { padding: var(--sp-4) 6px; align-items: center; }
 .sidebar.mini .brand { padding: var(--sp-2) 0 var(--sp-4); justify-content: center; }
-.sidebar.mini .brand span.txt, .sidebar.mini .foot, .sidebar.mini .nav-group, .sidebar.mini nav a span.lbl { display: none; }
+.sidebar.mini .foot, .sidebar.mini .nav-group, .sidebar.mini nav a span.lbl { display: none; }
 .sidebar.mini nav { width: 100%; }
 .sidebar.mini nav a { justify-content: center; padding: 10px 0; }
 .sidebar.mini .collapse { align-self: center; }

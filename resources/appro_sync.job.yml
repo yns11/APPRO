@@ -15,7 +15,7 @@
 resources:
   jobs:
     appro_sync_erp:
-      name: "[${bundle.target}] APPRO — synchronisation ERP → Lakebase"
+      name: "[${bundle.target}] Ma Routine Appro — synchronisation ERP → Lakebase"
       description: >-
         Copie les commandes, réceptions (et production) de l'ERP dans les tables
         erp_* de l'application APPRO.

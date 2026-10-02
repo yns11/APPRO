@@ -182,6 +182,7 @@ class CockpitKpis(BaseModel):
 
 class CockpitResponse(BaseModel):
     as_of: dt.date
+    init_date: dt.date
     horizon_days: int
     planner: str | None
     data_source: str
@@ -198,6 +199,7 @@ class CockpitResponse(BaseModel):
 class ProjectionResponse(BaseModel):
     article: ArticleRef
     as_of: dt.date
+    init_date: dt.date
     granularity: Literal["default", "day", "week"]
     periods: list[str]              # ISO date (day column) or ISO week label (week column)
     period_start: list[dt.date]
@@ -227,6 +229,7 @@ class GridResponse(BaseModel):
     """One page of the supply table (``total`` articles in the perimeter after filters)."""
 
     as_of: dt.date
+    init_date: dt.date
     granularity: Literal["default", "day", "week"]
     periods: list[str]
     period_start: list[dt.date]
@@ -441,6 +444,7 @@ class ConfigOut(BaseModel):
     title: str
     data_source: dict[str, Any]
     as_of: dt.date
+    init_date: dt.date
     horizon_days: int
     planners: list[str]
     default_planner: str | None

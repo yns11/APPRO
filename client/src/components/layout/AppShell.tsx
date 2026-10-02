@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, BookOpen, ClipboardList, Factory, FileSpreadsheet, LayoutDashboard, Menu, Moon, PanelLeftClose, PanelLeftOpen, PenLine, Settings, ShoppingCart, Sun, Monitor, RefreshCw, Table } from "lucide-react";
+import { Activity, BookOpen, Factory, FileSpreadsheet, LayoutDashboard, Menu, Moon, PanelLeftClose, PanelLeftOpen, PenLine, Settings, ShoppingCart, Sun, Monitor, RefreshCw, Table } from "lucide-react";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useInvalidateAll } from "@/lib/queries";
 import { Button } from "@/components/ui";
@@ -43,7 +43,10 @@ export default function AppShell() {
   return (
     <div className={`shell ${mini ? "collapsed" : ""}`}>
       <aside className={`sidebar ${open ? "open" : ""} ${mini ? "mini" : ""}`}>
-        <div className="brand"><span className="logo"><ClipboardList size={16} /></span><span className="txt">APPRO</span></div>
+        <div className="brand" title="Ma Routine Appro">
+          <img className="logo-full light" src="/brand/logo-light.svg" alt="Ma Routine Appro" /><img className="logo-full dark" src="/brand/logo-dark.svg" alt="" aria-hidden="true" />
+          <img className="logo-mark light" src="/brand/mark-light.svg" alt="Ma Routine Appro" /><img className="logo-mark dark" src="/brand/mark-dark.svg" alt="" aria-hidden="true" />
+        </div>
         <Button variant="ghost" icon size="sm" className="collapse no-print" title={mini ? "Déployer le panneau de navigation" : "Réduire le panneau de navigation (icônes seules)"} aria-label={mini ? "Déployer la navigation" : "Réduire la navigation"} onClick={() => set({ sidebarCollapsed: !mini })}>{mini ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
         <nav onClick={() => setOpen(false)}>
           {NAV.map(link)}
@@ -76,7 +79,7 @@ export default function AppShell() {
             </label>
           </div>
           <div className="right row">
-            <span className="freshness">Référence : <b>{config ? fmtDate(config.as_of) : "…"}</b></span>
+            <span className="freshness" title="Aujourd'hui = date du calcul (passé / futur, propositions, expiration des cellules) · le stock a été initialisé en fin de journée du point zéro, la projection commence le lendemain">Aujourd'hui : <b>{config ? fmtDate(config.as_of) : "…"}</b>{config && <span className="subtle"> · stock initialisé le {fmtDate(config.init_date)}</span>}</span>
             {config?.access?.can_write && <Button variant="ghost" icon title="Recharger les données ERP" onClick={refresh}><RefreshCw /></Button>}
             <Button variant="ghost" icon title={`Thème : ${perimeter.theme}`} onClick={cycleTheme}><ThemeIcon /></Button>
           </div>

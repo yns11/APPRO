@@ -51,7 +51,7 @@ def test_app_yaml_et_bundle_disent_la_meme_chose() -> None:
 def test_le_manifeste_ne_fige_pas_d_ancienne_valeur() -> None:
     env = _env(yaml.safe_load((RACINE / "app.yaml").read_text(encoding="utf-8"))["env"])
     s = Settings(_env_file=None)
-    for variable, attendu in (("APPRO_HORIZON_DAYS", s.horizon_days), ("APPRO_HISTORY_DAYS", s.history_days),
+    for variable, attendu in (("APPRO_HORIZON_DAYS", s.horizon_days), ("APPRO_HISTORY_WEEKS", s.history_weeks),
                               ("APPRO_UC_CATALOG", s.uc_catalog), ("APPRO_UC_SCHEMA", s.uc_schema),
                               ("APPRO_ERP_ORDERS_TABLE", s.erp_orders_table), ("APPRO_ERP_RECEIPTS_TABLE", s.erp_receipts_table),
                               ("APPRO_DB_SCHEMA", s.db_schema)):

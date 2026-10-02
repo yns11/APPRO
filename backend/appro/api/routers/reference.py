@@ -7,6 +7,7 @@ import datetime as dt
 import re
 from typing import Any
 
+import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
@@ -17,8 +18,8 @@ from ...data import reference
 from ...data.assembler import erp_dataset
 from ...data.schemas import REFERENCE_TABLES, TABLES
 from ...data.store import REF_MODELS, ParamOverride, audit
-from ...engine.models import EngineParams
-from ...engine.runner import resolve_as_of
+from ...engine.models import DatasetError, EngineParams
+from ...engine.runner import resolve_as_of, resolve_init_date
 from ...services import mrp_service
 from ...services.access import ROLES, Access
 from ...services.context import AppContext
@@ -30,7 +31,7 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "horizon_days": ("Horizon de projection après la date de référence (jours)", None),
-    "history_days": ("Jours d'historique affichés avant la date de référence", None),
+    "history_weeks": ("Semaines affichées avant la semaine en cours dans le tableau (le tableau commence au plus tard de la date d'initialisation du stock et du lundi obtenu)", None),
     "backlog_days": ("Âge maximal du backlog : commandes fermes passées non reçues comptées sur n jours avant la référence", None),
     "spread_rounding": ("Lissage du PDP hebdomadaire sur les jours ouvrés", ["none", "exact", "per_day"]),
     "production_mode": ("Production effective : réel pour le passé, reliquat du PDP de la semaine en cours sur les jours restants, PDP ensuite / réel puis plan / plan seul / réel seul", ["actual_then_remainder", "actual_then_plan", "plan_only", "actual_only"]),
@@ -64,13 +65,33 @@ def config(ctx: AppContext = Depends(ctx_dep), session: Session = Depends(sessio
     ds = erp_dataset(ctx.table)
     planners = sorted({a.planner for a in ds.articles if a.planner})
     mine = next((p for p in planners if access.name and p.upper() == access.name.upper()), None)
-    return S.ConfigOut(title=ctx.settings.app_title, data_source=ctx.source.describe(), as_of=resolve_as_of(ds, params),
+    as_of = resolve_as_of(ds, params)
+    try:
+        init_date = resolve_init_date(ds, as_of)
+    except DatasetError as exc:   # the cockpit shows the data problem instead of a blank page
+        raise HTTPException(422, str(exc))
+    return S.ConfigOut(title=ctx.settings.app_title, data_source=ctx.source.describe(), as_of=as_of, init_date=init_date,
                        horizon_days=params.horizon_days, planners=planners,
                        default_planner=ctx.settings.default_planner or mine or (planners[0] if len(planners) == 1 else None),
                        user=user, version=__version__, reference_empty=not ds.articles, access=access.to_dict())
 
 
 # ---------------------------------------------------------------- reference tables (CRUD)
+def _check_stock_dates(session: Session, rows: list[dict], replace: bool) -> None:
+    """``fct_stock`` carries the stock initialisation date, the point zero of the application: one single
+    date for every article, never in the future (docs/regles_metier.md § 1)."""
+    dates = {pd.Timestamp(r["snapshot_date"]).date() for r in rows if r.get("snapshot_date") not in (None, "")}
+    if not replace:
+        dates |= {d for d in session.scalars(select(REF_MODELS["fct_stock"].snapshot_date).distinct()).all() if d}
+    if len(dates) > 1:
+        raise HTTPException(422, "Le stock de référence doit porter une seule date d'initialisation pour tous les articles "
+                            f"(trouvé : {', '.join(d.isoformat() for d in sorted(dates))}). Importer la table en mode "
+                            "« remplacer » avec une date unique.")
+    today = dt.date.today()
+    if any(d > today for d in dates):
+        raise HTTPException(422, f"La date d'initialisation du stock ne peut pas être postérieure à aujourd'hui ({today.isoformat()}).")
+
+
 def _schema(name: str):
     if name not in REFERENCE_TABLES:
         raise HTTPException(404, f"Table inconnue : {name}. Tables : {', '.join(REFERENCE_TABLES)}")
@@ -103,6 +124,8 @@ def upsert_row(name: str, body: S.RefRowIn, ctx: AppContext = Depends(ctx_dep), 
     access.require_row(name, body.values)
     if name == "ref_planners" and str(body.values.get("role", "")).lower() not in ROLES:
         raise HTTPException(422, f"Rôle inconnu : {body.values.get('role')} (attendu : {', '.join(ROLES)})")
+    if name == "fct_stock":
+        _check_stock_dates(session, [body.values], replace=False)
     try:
         out = reference.upsert_row(session, name, body.values, user)
     except (ValueError, KeyError) as exc:
@@ -158,6 +181,8 @@ async def import_table(name: str, file: UploadFile = File(...), mode: str = Form
         raise HTTPException(422, "mode : replace ou merge")
     if df.empty and mode == "replace":
         raise HTTPException(422, "Aucune ligne dans le fichier : la table n'a pas été vidée")
+    if name == "fct_stock":
+        _check_stock_dates(session, df.to_dict("records"), replace=(mode == "replace"))
     try:
         n = reference.replace_all(session, name, df, user) if mode == "replace" else reference.merge_all(session, name, df, user)
     except ValueError as exc:

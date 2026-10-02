@@ -21,7 +21,7 @@ export const ROW_LABELS: { key: string; label: string; lane?: boolean }[] = [
   { key: "stock_plan", label: "Scenario Plan" },
 ];
 
-export interface GridColumns { as_of: string; periods: string[]; period_start: string[]; period_end: string[]; }
+export interface GridColumns { as_of: string; init_date: string; periods: string[]; period_start: string[]; period_end: string[]; }
 export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis?: { severity?: string | null }; }
 
 /* ---------------------------------------------------------------- geometry (virtualisation) */
@@ -110,6 +110,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   /* ---------------- lookups */
   const n = cols.periods.length;
   const asOfIdx = useMemo(() => columnOf(cols, cols.as_of), [cols]);
+  const initIdx = useMemo(() => columnOf(cols, cols.init_date), [cols]);
   const planBy = useMemo(() => {
     const m = new Map<string, PlanCellOut>();
     planCells.forEach((c) => { const i = columnOf(cols, c.date); if (i >= 0) m.set(`${c.article_id}|${c.supplier_id}|${i}`, c); });
@@ -407,7 +408,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const isActive = !isEd && active?.aid === aid && active.key === "adjustments" && active.i === i;
               const cls = [...cellBase(i), ro || locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", cell ? "typed" : "", v < 0 ? "neg-val" : "", cell?.note ? "noted" : "", inFill(aid, "adjustments", 0, i) ? "fill-range" : ""].filter(Boolean).join(" ");
               const initial = initialOf(i);
-              const title = [cell ? `${cell.expression || cell.qty} = ${fmtQty(cell.qty, unit)}${cell.note ? ` – ${cell.note}` : ""}` : i <= asOfIdx ? "Quantité signée : corrige le stock de référence" : "Quantité signée ou formule (ex. -(30+20)) : mouvement prévu", ro ? "Semaine agrégée : cliquer l'en-tête pour saisir par jour" : "Clic droit : commentaire · tirer le carré pour recopier"].join("\n");
+              const title = [cell ? `${cell.expression || cell.qty} = ${fmtQty(cell.qty, unit)}${cell.note ? ` – ${cell.note}` : ""}` : i <= initIdx ? "Quantité signée : corrige le stock initial (point zéro)" : "Quantité signée ou formule (ex. -(30+20)) : mouvement, passé ou prévu", ro ? "Semaine agrégée : cliquer l'en-tête pour saisir par jour" : "Clic droit : commentaire · tirer le carré pour recopier"].join("\n");
               const onClick = isEd || locked ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => { setActive({ aid, key: "adjustments", lane: 0, i }); setEditing({ aid, key: "adjustments", lane: 0, i, value: initial, initial }); };
               return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined}
                 onContextMenu={ro || locked ? undefined : (e) => { e.preventDefault(); comment(aid, "adjustments", null, i, cell?.note ?? "", initial); }}>

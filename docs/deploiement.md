@@ -280,7 +280,7 @@ databricks bundle validate -t prod -o json --profile PROD | jq '.resources.jobs.
 | Saisie du plan | App | taper une quantité dans une cellule Plan → cellule bleue, Scenario Plan recalculé ; recharger la page : la valeur est conservée (persistance Lakebase) |
 | Journal | App, *Saisies & journal* | l'utilisateur est votre e-mail Databricks |
 | Export / réimport | App, *Imports / exports* | le classeur exporté se rouvre ; ses lignes Plan modifiées reviennent dans l'App |
-| Job | *Workflows* | `[dev] APPRO — synchronisation ERP → Lakebase` vert ; `erp_sync_log` à jour |
+| Job | *Workflows* | `[dev] Ma Routine Appro — synchronisation ERP → Lakebase` vert ; `erp_sync_log` à jour |
 
 Ouvrir l'App aux approvisionneurs : *Compute → Apps → appro-dev → Permissions → Can use* (utilisateurs ou
 groupe). Leur identité arrive à l'application par l'en-tête `x-forwarded-email`.

@@ -624,7 +624,7 @@ def pdp_template_workbook(programs: list[tuple[str, str]], first_monday: dt.date
     _widths(ws, [30, 18] + [11] * weeks)
     notice = wb.create_sheet("NOTICE")
     lines = [
-        "Modèle du PDP hebdomadaire à importer dans APPRO (page Imports / exports).",
+        "Modèle du PDP hebdomadaire à importer dans Ma Routine Appro (page Imports / exports).",
         "Onglet « SOP - PDP » : une ligne par programme (colonne A = nom du programme tel que connu dans le référentiel ; colonne B = identifiant, facultatif), une colonne par semaine ISO.",
         "En-têtes de semaine acceptés : 2026-W40, S40-26, 2026W40, W40-2026 ou une date de la semaine.",
         "Cellules : quantité à produire dans la semaine (vide = 0 / inchangé). Les programmes inconnus sont ignorés et signalés dans le rapport d'import.",

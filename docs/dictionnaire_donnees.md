@@ -1,4 +1,4 @@
-# Dictionnaire de données APPRO
+# Dictionnaire de données — Ma Routine Appro
 
 Toutes les données lues et écrites par l'application. Les noms sont ceux du schéma canonique
 (`backend/appro/data/schemas.py`), identiques dans le seed CSV, les modèles Excel, la base applicative et
@@ -98,6 +98,8 @@ Reçu, Plan) ; les stocks sont sommés.
 Seule la ligne la plus récente de chaque article est utilisée. Le stock ERP étant souvent faux, les
 **ajustements** saisis dans le tableau (ligne *Ajustement*, toute date) corrigent le stock de référence
 sans toucher à cette table.
+
+`snapshot_date` est la **date d'initialisation du stock** : une seule date pour tous les articles, jamais postérieure à aujourd'hui (refusée sinon). C'est le point zéro de l'application : rien n'est calculé avant.
 
 ### 1.7 `ref_planners` — Approvisionneurs
 

@@ -25,6 +25,7 @@ export default function EntriesPage() {
   const audit = useAudit({ limit: 300 });
   const del = useWrite((path: string) => api.del(path), () => toast.push("Supprimé"));
   const asOf = config?.as_of ?? "";
+  const initDate = config?.init_date ?? "";
   const delCol = <T extends { id: string }>(path: string, title: string): Column<T> => ({ key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (r) => rights.canWrite ? <Button size="sm" variant="ghost" title={title} onClick={(e) => { e.stopPropagation(); del.mutate(`${path}/${r.id}`); }}><Trash2 /></Button> : null });
 
   const planCols = useMemo<Column<PlanCellOut>[]>(() => [
@@ -40,10 +41,10 @@ export default function EntriesPage() {
     article<AdjustmentOut>(),
     { key: "date", label: "Date", get: (c) => c.date, render: (c) => fmtDate(c.date) },
     { key: "qty", label: "Quantité", get: (c) => c.qty, num: true, render: (c) => <span className={c.qty < 0 ? "delta down" : "delta up"}>{c.qty > 0 ? "+" : ""}{fmtQty(c.qty)}</span> },
-    { key: "effect", label: "Effet", get: (c) => (asOf && c.date <= asOf ? "stock de référence" : "mouvement prévu"), filter: "select", render: (c) => asOf && c.date <= asOf ? <Badge tone="warning">stock de référence</Badge> : <Badge tone="neutral">mouvement prévu</Badge> },
+    { key: "effect", label: "Effet", get: (c) => (initDate && c.date <= initDate ? "stock initial" : asOf && c.date <= asOf ? "mouvement passé" : "mouvement prévu"), filter: "select", render: (c) => initDate && c.date <= initDate ? <Badge tone="warning">stock initial</Badge> : <Badge tone="neutral">{asOf && c.date <= asOf ? "mouvement passé" : "mouvement prévu"}</Badge> },
     { key: "note", label: "Commentaire", get: (c) => c.note },
     who<AdjustmentOut>(), delCol<AdjustmentOut>("/api/entries/adjustments", "Supprimer"),
-  ], [asOf]);
+  ], [asOf, initDate]);
   const flagCols = useMemo<Column<FlagOut>[]>(() => [
     article<FlagOut>(),
     { key: "kind", label: "Type", get: (f) => (f.kind === "order_ignored" ? "commande ferme ignorée" : "proposition CBN refusée"), filter: "select", render: (f) => f.kind === "order_ignored" ? <Badge tone="critical">commande ferme ignorée</Badge> : <Badge tone="warning">proposition CBN refusée</Badge> },

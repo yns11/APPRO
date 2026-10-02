@@ -55,7 +55,7 @@ env:
   # --- Règles par défaut (identiques aux défauts du code) --------------------
   - name: APPRO_HORIZON_DAYS
     value: "120"
-  - name: APPRO_HISTORY_DAYS
-    value: "14"
+  - name: APPRO_HISTORY_WEEKS
+    value: "2"
   - name: APPRO_LOG_LEVEL
     value: "INFO"

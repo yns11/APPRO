@@ -10,10 +10,21 @@ se lit.
 
 ## 1. Temps et calendrier
 
-* **Date de référence (`as_of`)** : « aujourd'hui » du calcul. Par défaut la date du jour (production) ou le
-  lendemain du dernier stock de référence (mode local). Le stock est connu **en fin de journée** de la veille ;
-  la projection commence le jour de référence.
-* **Fenêtre glissante** : `history_days` [14] jours affichés avant la référence, `horizon_days` [120] après.
+* **Date d'initialisation du stock (point zéro)** : la `snapshot_date` du stock de référence (`fct_stock`),
+  **une seule pour tous les articles**, jamais postérieure à aujourd'hui (refusée à la saisie, à l'import et
+  au calcul). Le stock de ce jour est connu **en fin de journée** ; la projection commence le lendemain ;
+  **rien n'existe avant** pour le moteur (aucun historique reconstitué, aucun mouvement antérieur, un
+  ajustement daté avant corrige simplement le stock initial). Sans aucune ligne de stock, le point zéro est
+  aujourd'hui avec des stocks nuls.
+* **Aujourd'hui (`as_of`)** : la date du jour du serveur ; `APPRO_AS_OF` ou la règle globale `as_of` ne
+  servent qu'à simuler un autre jour (démonstration, tests) et ne peuvent pas précéder le point zéro.
+  Le **passé** = les jours du point zéro (exclu) à aujourd'hui (exclu) : besoin consommé sur la production
+  réelle, réceptions réelles, commandes fermes non reçues en backlog, cellules du plan expirées. Le **futur**
+  = aujourd'hui et après : besoin sur PDP, commandes fermes restantes, plan, propositions.
+* **Fenêtre** : du point zéro à aujourd'hui + `horizon_days` [120]. Le **tableau d'approvisionnement**
+  commence au plus tard du point zéro et du lundi de la semaine en cours moins `history_weeks` [2]
+  semaines (la semaine en cours est toujours affichée en entier depuis son lundi) ; le moteur calcule la
+  fenêtre entière, seul l'affichage est tronqué.
 * **Calendrier ouvré** : `working_weekdays` [1-5] + fermetures (`APPRO_HOLIDAYS`). Les délais fournisseurs
   sont en **jours ouvrés** ; les jours de livraison autorisés sont par fournisseur (`delivery_weekdays`).
 
@@ -115,10 +126,11 @@ encore, il tape la quantité dans le plan au jour prévu ; sinon il ne fait rien
 ### 3.5 Ajustements et stock de référence
 
 Seules les commandes et les réceptions sont lues de l'ERP : les ajustements sont des **saisies** (ligne
-*Ajustement*, toute date, quantité signée ou expression). Daté du jour de référence ou avant, un ajustement
-**corrige le stock de référence** (le stock ERP est souvent faux, l'application ne l'écrit jamais) et persiste
-jusqu'à sa suppression ; rappelé dans le KPI *Stock de référence*. Daté après, c'est un mouvement prévu
-(casse, transfert) compté à sa date. Les ajustements comptent dans les deux scenarios.
+*Ajustement*, toute date, quantité signée ou expression). Daté du jour d'initialisation du stock ou avant, un
+ajustement **corrige le stock initial** (le stock ERP est souvent faux, l'application ne l'écrit jamais) et
+persiste jusqu'à sa suppression ; rappelé dans le KPI *Stock de référence*. Daté après, c'est un mouvement
+(casse, transfert, inventaire) compté à sa date, passé ou futur. Les ajustements comptent dans les deux
+scenarios.
 
 | Élément | Scenario ERP | Scenario Plan | Règle |
 |---|---|---|---|
@@ -130,8 +142,9 @@ jusqu'à sa suppression ; rappelé dans le KPI *Stock de référence*. Daté apr
 | Réception | ✔ | ✔ | fait ERP, à sa date |
 | Ajustement | ✔ | ✔ | saisie signée, toute date |
 
-**Affichage du passé** : commandes fermes passées (quantité commandée), réceptions, ajustements, besoin
-consommé ; les cellules du plan passées ne s'affichent pas. Le stock passé est reconstitué (§ 4).
+**Affichage du passé** (du point zéro à hier) : commandes fermes passées (quantité commandée), réceptions,
+ajustements, besoin consommé ; les cellules du plan passées ne s'affichent pas. Le stock passé est le stock
+initial projeté en avant avec ces mouvements (§ 4) ; le backlog ne regarde jamais avant le point zéro.
 
 **Calendrier d'affichage** (`focus_weeks` [2]) : *Par défaut* détaille jour par jour la semaine en cours et
 les `focus_weeks` suivantes, et agrège en semaines ISO le passé et le futur lointain ; *Jour* et *Semaine*
@@ -232,11 +245,12 @@ Chaque écriture (cellule, référentiel, import, paramètre) est journalisée a
 
 | Objet | Date admise |
 |---|---|
-| Cellule du plan | à partir de la date de référence (le passé n'est pas planifié) |
-| Ajustement | toute date ; ≤ référence = correction du stock de référence |
-| Commande ferme ignorée | à partir de la date de référence |
-| Proposition CBN refusée | à partir de la date de référence ; bloque jusqu'au dimanche de sa semaine |
-| Référentiel | sans date, sauf le stock de référence (date du stock) |
+| Cellule du plan | à partir d'aujourd'hui (le passé n'est pas planifié) |
+| Ajustement | toute date ; ≤ point zéro = correction du stock initial ; après = mouvement à sa date |
+| Commande ferme ignorée | à partir d'aujourd'hui |
+| Proposition CBN refusée | à partir d'aujourd'hui ; bloque jusqu'au dimanche de sa semaine |
+| Stock de référence | une seule date pour tous les articles, jamais après aujourd'hui (point zéro) |
+| Autres tables du référentiel | sans date |
 
 ## 11. Classeur Excel « vivant »
 

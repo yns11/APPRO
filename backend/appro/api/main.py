@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
 from ..config import get_settings
+from ..engine.models import DatasetError
 from .routers import entries, files, mrp, pdp, reference
 
 
@@ -52,6 +53,11 @@ def create_app() -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
+    @app.exception_handler(DatasetError)
+    async def dataset_error(request: Request, exc: DatasetError):
+        """Data refused by the engine (several stock initialisation dates…): a 422 with the reason."""
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover - defensive
         logging.getLogger("appro").exception("Unhandled error on %s", request.url.path)
@@ -70,7 +76,7 @@ def create_app() -> FastAPI:
     else:
         @app.get("/", include_in_schema=False)
         def root():
-            return {"message": "APPRO API – frontend non construit (npm run build dans client/)", "docs": "/api/docs"}
+            return {"message": "Ma Routine Appro – API : frontend non construit (npm run build dans client/)", "docs": "/api/docs"}
     return app
 
 

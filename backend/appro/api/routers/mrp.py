@@ -23,7 +23,7 @@ from ..fastjson import json_response
 router = APIRouter(prefix="/api", tags=["mrp"])
 
 HORIZON = Query(None, ge=7, le=730)
-HISTORY = Query(None, ge=0, le=365)
+HISTORY = Query(None, ge=0, le=52)
 
 
 def _kw(**kw):
@@ -63,7 +63,7 @@ def cockpit(planner: str | None = None, article_ids: list[str] | None = Query(No
     props = sorted((P.proposal_out(p, r, names) for r in arts for p in r.proposals),
                    key=lambda p: (not p.urgent, p.order_date, p.article_id))[:500]
     return S.CockpitResponse(
-        as_of=result.as_of, horizon_days=result.params.horizon_days, planner=planner, data_source=ctx.source.name,
+        as_of=result.as_of, init_date=result.init_date, horizon_days=result.params.horizon_days, planner=planner, data_source=ctx.source.name,
         pdp_version=None, kpis=P.cockpit_kpis(result), articles=[P.article_summary(r) for r in arts],
         alerts=alerts, proposals=props, backlog=P.backlog_rows(result),
         diagnostics=result.diagnostics, weekly_supply_demand=P.weekly_supply_demand(result))
@@ -71,10 +71,10 @@ def cockpit(planner: str | None = None, article_ids: list[str] | None = Query(No
 
 @router.get("/articles/{article_id}/projection", response_model=S.ProjectionResponse)
 def projection(article_id: str, granularity: Literal["default", "day", "week"] = "default",
-               horizon_days: int | None = HORIZON, history_days: int | None = HISTORY, generate_proposals: bool | None = None,
+               horizon_days: int | None = HORIZON, history_weeks: int | None = HISTORY, generate_proposals: bool | None = None,
                ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     result = mrp_service.compute(ctx, session, article_ids=[article_id],
-                                 **_kw(horizon_days=horizon_days, history_days=history_days, generate_proposals=generate_proposals))
+                                 **_kw(horizon_days=horizon_days, history_weeks=history_weeks, generate_proposals=generate_proposals))
     ar = result.articles.get(article_id)
     if ar is None:
         raise HTTPException(404, f"Article inconnu : {article_id}")
@@ -102,7 +102,7 @@ def _programs_of(ctx: AppContext) -> dict[str, list[str]]:
 @router.get("/grid", response_model=S.GridResponse)
 def grid(planner: str | None = None, article_ids: list[str] | None = Query(None), program_id: str | None = None,
          supplier_id: str | None = None, q: str | None = None, granularity: Literal["default", "day", "week"] = "default",
-         horizon_days: int | None = HORIZON, history_days: int | None = HISTORY,
+         horizon_days: int | None = HORIZON, history_weeks: int | None = HISTORY,
          page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=200),
          ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """One page of the supply table (same columns for every article).  Filters: articles, programme,
@@ -118,7 +118,7 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
         sup_ids = set(lk[lk["supplier_id"] == supplier_id]["article_id"])
         ids = (ids & sup_ids if ids else sup_ids) or {"__none__"}
     result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
-                                 **_kw(horizon_days=horizon_days, history_days=history_days))
+                                 **_kw(horizon_days=horizon_days, history_weeks=history_weeks))
     arts = sorted(result.articles.values(), key=lambda r: r.article.article_id)
     if q and q.strip():
         needle = q.strip().lower()

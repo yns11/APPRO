@@ -15,7 +15,7 @@ resources:
     appro:
       name: "appro-${bundle.target}"
       description: >-
-        APPRO – cockpit approvisionnement : projection de stock, plan de livraison,
+        Ma Routine Appro – cockpit approvisionnement : projection de stock, plan de livraison,
         propositions CBN (remplace le classeur SIMULATION).
       source_code_path: ..
 
@@ -52,8 +52,8 @@ resources:
             value: ${var.erp_receipts_table}
           - name: APPRO_HORIZON_DAYS
             value: "120"
-          - name: APPRO_HISTORY_DAYS
-            value: "14"
+          - name: APPRO_HISTORY_WEEKS
+            value: "2"
           - name: APPRO_LOG_LEVEL
             value: INFO
 

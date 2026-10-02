@@ -40,7 +40,7 @@ export default function CockpitPage() {
     { key: "stock", label: "Stock référence", get: (a) => a.kpis.stock_reference, num: true, render: (a) => <>{fmtQty(a.kpis.stock_reference, a.unit)} <span className="subtle">{a.unit}</span></> },
     { key: "cov", label: "Couverture plan", get: (a) => a.kpis.coverage_plan_days, num: true, render: (a) => <CoverageCell days={a.kpis.coverage_plan_days} a={a} /> },
     { key: "target", label: "Cible", get: (a) => a.kpis.coverage_target_days, num: true, render: (a) => <span className="subtle">{a.kpis.coverage_target_days} j</span> },
-    { key: "stockout", label: "Rupture ERP", get: (a) => a.kpis.first_stockout_erp ?? "", render: (a) => { const d = daysFrom(a.kpis.first_stockout_erp, asOf ?? a.kpis.snapshot_date); return a.kpis.first_stockout_erp ? <Badge tone={d !== null && d <= 7 ? "critical" : "warning"}>{fmtDate(a.kpis.first_stockout_erp)} · J+{d}</Badge> : <span className="subtle">–</span>; } },
+    { key: "stockout", label: "Rupture ERP", get: (a) => a.kpis.first_stockout_erp ?? "", render: (a) => { const d = daysFrom(a.kpis.first_stockout_erp, asOf ?? a.kpis.init_date); return a.kpis.first_stockout_erp ? <Badge tone={d !== null && d <= 7 ? "critical" : "warning"}>{fmtDate(a.kpis.first_stockout_erp)} · J+{d}</Badge> : <span className="subtle">–</span>; } },
     { key: "stockout_plan", label: "Rupture plan", get: (a) => a.kpis.first_stockout_plan ?? "", render: (a) => a.kpis.first_stockout_plan ? <Badge tone="critical">{fmtDate(a.kpis.first_stockout_plan)}</Badge> : <span className="subtle">–</span> },
     { key: "demand", label: "Besoin 30 j", get: (a) => a.kpis.demand_next_30d, num: true, render: (a) => fmtQty(a.kpis.demand_next_30d, a.unit) },
     { key: "open", label: "En-cours ERP", get: (a) => a.kpis.open_firm_qty, num: true, render: (a) => <>{fmtQty(a.kpis.open_firm_qty, a.unit)}{a.kpis.open_forecast_qty > 0 && <span className="sub">+ {fmtQty(a.kpis.open_forecast_qty, a.unit)} prév.</span>}</> },
@@ -67,7 +67,7 @@ export default function CockpitPage() {
       <div className="page-header">
         <div className="title">
           <h1>Cockpit du jour</h1>
-          <p>{asOf ? <>Situation au <b>{fmtDate(asOf)}</b> · horizon {q.data?.horizon_days} j · {q.data?.kpis.articles} articles{perimeter.planner ? ` · ${perimeter.planner}` : ""}</> : <Skeleton w={280} />}</p>
+          <p>{asOf ? <>Aujourd'hui <b>{fmtDate(asOf)}</b> · stock initialisé le {fmtDate(q.data!.init_date)} · horizon {q.data?.horizon_days} j · {q.data?.kpis.articles} articles{perimeter.planner ? ` · ${perimeter.planner}` : ""}</> : <Skeleton w={280} />}</p>
         </div>
         <div className="actions">
           <a className="btn" href={api.downloadUrl("/api/exports/alerts.xlsx", { planner: engineParams.planner })}><Download />Alertes (xlsx)</a>

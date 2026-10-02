@@ -20,7 +20,7 @@ export default function ArticlesPage() {
     { key: "stock", label: "Stock référence", get: (a) => a.kpis.stock_reference, num: true, render: (a) => fmtQty(a.kpis.stock_reference, a.unit) },
     { key: "cov", label: "Couverture plan", get: (a) => a.kpis.coverage_plan_days, num: true, render: (a) => <CoverageCell days={a.kpis.coverage_plan_days} a={a} /> },
     { key: "backlog", label: "Backlog", get: (a) => a.kpis.backlog_qty, num: true, render: (a) => a.kpis.backlog_qty ? fmtQty(a.kpis.backlog_qty, a.unit) : <span className="subtle">–</span> },
-    { key: "snap", label: "Snapshot", get: (a) => a.kpis.snapshot_date, render: (a) => <span className="subtle">{fmtDate(a.kpis.snapshot_date)}</span> },
+    { key: "snap", label: "Stock initialisé le", get: (a) => a.kpis.init_date, render: (a) => <span className="subtle">{fmtDate(a.kpis.init_date)}</span> },
     { key: "spark", label: "Scenario Plan", get: () => "", filter: "none", sortable: false, render: (a) => <Sparkline values={a.sparkline} /> },
   ], []);
   if (q.isError) return <ErrorBox error={q.error} retry={() => q.refetch()} />;

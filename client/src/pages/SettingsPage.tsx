@@ -141,7 +141,8 @@ function AdminTab() {
       <Card title="Environnement" tight>
         <dl className="stack small">
           <div><h4>Source ERP</h4><div>{String(config?.data_source?.name ?? "…")}</div><div className="subtle mono" style={{ wordBreak: "break-all" }}>{String(config?.data_source?.folder ?? (config?.data_source?.catalog ? `${config.data_source.catalog}.${config.data_source.schema}` : ""))}</div></div>
-          <div><h4>Date de référence</h4><div>{config?.as_of}</div></div>
+          <div><h4>Aujourd'hui (date du calcul)</h4><div>{config?.as_of}</div></div>
+          <div><h4>Initialisation du stock (point zéro)</h4><div>{config?.init_date}</div></div>
           <div><h4>Version</h4><div>{config?.version}</div></div>
         </dl>
         {rights.isAdmin && <div style={{ marginTop: 12 }}><Button size="sm" onClick={() => { if (window.confirm("Supprimer toutes les surcharges globales des règles du moteur ?")) resetRules.mutate(undefined); }}><RotateCcw />Rétablir toutes les règles par défaut</Button></div>}

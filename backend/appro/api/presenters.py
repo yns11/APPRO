@@ -242,13 +242,20 @@ def lane_out(l: Lane, cols: Columns, with_orders: bool = True) -> dict[str, Any]
     }
 
 
+def display_start(result: MrpResult) -> dt.date:
+    """First day shown in the supply table: the Monday ``history_weeks`` weeks before the current week,
+    never before the stock initialisation day (the point zero : nothing exists before it)."""
+    monday = iso_week_monday(result.as_of) - dt.timedelta(days=7 * max(int(result.params.history_weeks), 0))
+    return max(monday, result.init_date)
+
+
 def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, supplier_names: dict[str, str],
                    programs: list[dict[str, Any]], from_date: dt.date | None = None) -> dict[str, Any]:
-    start = from_date or (result.as_of - dt.timedelta(days=result.params.history_days))
+    start = from_date or display_start(result)
     cols = Columns.build(ar.dates, result.as_of, granularity, result.params.focus_weeks, start)
     lost = result.params.shortage_policy == "lost"
     return {
-        "article": article_ref(ar).model_dump(mode="json"), "as_of": result.as_of.isoformat(), "granularity": granularity,
+        "article": article_ref(ar).model_dump(mode="json"), "as_of": result.as_of.isoformat(), "init_date": result.init_date.isoformat(), "granularity": granularity,
         **cols.meta(ar.dates),
         "series": series_out(ar, cols, lost), "lanes": [lane_out(l, cols) for l in ar.lanes],
         "proposals": [proposal_out(p, ar, supplier_names).model_dump(mode="json") for p in ar.proposals],
@@ -263,9 +270,9 @@ def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str]
              articles: list[ArticleResult] | None = None, total: int | None = None, page: int = 1,
              page_size: int | None = None) -> dict[str, Any]:
     """Multi-article supply table: every article on the same columns (one page of articles)."""
-    start = from_date or (result.as_of - dt.timedelta(days=result.params.history_days))
+    start = from_date or display_start(result)
     arts = list(result.articles.values()) if articles is None else articles
-    base = {"as_of": result.as_of.isoformat(), "granularity": granularity, "diagnostics": result.diagnostics,
+    base = {"as_of": result.as_of.isoformat(), "init_date": result.init_date.isoformat(), "granularity": granularity, "diagnostics": result.diagnostics,
             "total": len(result.articles) if total is None else total, "page": page, "page_size": page_size or len(arts)}
     if not result.articles:
         return {**base, "periods": [], "period_start": [], "period_end": [], "articles": []}

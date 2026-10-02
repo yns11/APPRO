@@ -98,12 +98,11 @@ def test_adjustment_cells_any_date_with_note(client):
     proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day", "generate_proposals": "false"}).json()
     sa = _series(proj)
     j = proj["periods"].index("2026-09-23")
-    assert sa["adjustments"][j] == -50 and sa["adjustments"][proj["periods"].index("2026-09-10")] == -300
+    # dated before the initialisation day (2026-09-18): no column, it corrects the reference stock
+    assert sa["adjustments"][j] == -50 and "2026-09-10" not in proj["periods"] and proj["init_date"] == "2026-09-18"
     assert proj["kpis"]["reference_correction"] == -300 and proj["kpis"]["stock_reference"] == pytest.approx(proj["kpis"]["stock_on_hand"] - 300)
     assert sa["stock_erp"][i0] - sb["stock_erp"][i0] == pytest.approx(-300)
     assert sa["stock_plan"][j] - sb["stock_plan"][j] == pytest.approx(-350)
-    k = proj["periods"].index("2026-09-10")
-    assert sa["stock_erp"][k] - sb["stock_erp"][k] == pytest.approx(-300) and sa["stock_erp"][k - 1] == pytest.approx(sb["stock_erp"][k - 1])
     # note only, then clear
     assert client.put("/api/entries/adjustments", json={"article_id": AID, "date": "2026-09-23", "note": "casse confirmée"}).json()["qty"] == -50
     assert client.put("/api/entries/adjustments", json={"article_id": AID, "date": "2026-09-23", "expression": "0"}).json() is None
@@ -155,11 +154,12 @@ def test_default_calendar_grid_and_program_impact(client):
     proj = client.get(f"/api/articles/{AID}/projection").json()   # granularity "default"
     days = [p for p in proj["periods"] if "-W" not in p]
     weeks = [p for p in proj["periods"] if "-W" in p]
-    assert days[0] == "2026-09-14" and days[-1] == "2026-10-04" and len(days) == 21
-    assert weeks and weeks[0] < "2026-W38" and weeks[-1] > "2026-W40" and proj["periods"][0].startswith("2026-W")
+    # the table starts on the stock initialisation day (2026-09-18, the seed) : nothing exists before it
+    assert days[0] == "2026-09-18" and days[-1] == "2026-10-04" and len(days) == 17
+    assert weeks and all(w > "2026-W40" for w in weeks) and proj["periods"][0] == "2026-09-18"
     assert client.put("/api/params/overrides", json={"scope": "global", "field": "focus_weeks", "value": 1}).status_code == 200
     proj1 = client.get(f"/api/articles/{AID}/projection").json()
-    assert len([p for p in proj1["periods"] if "-W" not in p]) == 14
+    assert len([p for p in proj1["periods"] if "-W" not in p]) == 10   # 2026-09-18 → Sunday 2026-09-27
     ov = [o for o in client.get("/api/params/overrides").json() if o["field"] == "focus_weeks"]
     client.delete(f"/api/params/overrides/{ov[0]['id']}")
     grid = client.get("/api/grid", params={"planner": "QUENTIN", "granularity": "week"}).json()
@@ -528,3 +528,17 @@ def test_zero_article_parameters_are_kept(client):
     assert all(w["values"]["order_cycle_days"] == 0 and w["values"]["coverage_target_days"] == 0 for w in weeks["weeks"])
     art = client.get(f"/api/articles/{AID}/projection").json()["article"]
     assert art["order_cycle_days"] == 0 and art["coverage_target_days"] == 0
+
+
+def test_stock_initialisation_date_is_unique_and_never_in_the_future(client):
+    """``fct_stock`` is the point zero of the application: one date for every article, not after today."""
+    rows = client.get("/api/reference/fct_stock/rows").json()
+    row = next(r for r in rows if r["article_id"] == AID)
+    r = client.put("/api/reference/fct_stock/rows", json={"values": {**row, "snapshot_date": "2026-09-01"}})
+    assert r.status_code == 422 and "une seule date" in r.json()["detail"]
+    future = (dt.date.today() + dt.timedelta(days=3)).isoformat()
+    assert client.put("/api/reference/fct_stock/rows", json={"values": {**row, "snapshot_date": future}}).status_code == 422
+    # same date, new quantity: fine
+    assert client.put("/api/reference/fct_stock/rows", json={"values": {**row, "qty_on_hand": 123}}).status_code == 200
+    cfg = client.get("/api/config").json()
+    assert cfg["init_date"] == "2026-09-18" and cfg["as_of"] == AS_OF

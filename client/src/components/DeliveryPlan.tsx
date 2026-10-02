@@ -96,12 +96,12 @@ export function DeliveryPlan({ articleId }: { articleId: string }) {
       actions={<>
         {several && <select className="select sm" value={supplier} onChange={(e) => setSupplier(e.target.value)} aria-label="Fournisseur"><option value="">Tous les fournisseurs</option>{q.data.suppliers.map((s) => <option key={s.supplier_id ?? ""} value={s.supplier_id ?? ""}>{s.supplier_id} · {s.name}</option>)}</select>}
         <button className={`btn sm ${futureOnly ? "primary" : ""}`} onClick={() => setFutureOnly((v) => !v)} aria-pressed={futureOnly} aria-label="Semaines à venir seulement"
-          title={futureOnly ? `Semaines commençant après la date de référence (${hiddenPast} masquée(s)) – cliquer pour tout afficher` : "N'afficher que les semaines commençant après la date de référence"}><CalendarClock /></button>
+          title={futureOnly ? `Semaines commençant après aujourd'hui (${hiddenPast} masquée(s)) – cliquer pour tout afficher` : "N'afficher que les semaines commençant après aujourd'hui"}><CalendarClock /></button>
         <Segmented size="sm" value={locale} onChange={setLocale} options={[{ id: "FR", label: "FR" }, { id: "EN", label: "EN" }]} />
         <button className="btn sm" onClick={() => copy(false)} disabled={!range} title="Copier la sélection (Ctrl+C)">{copied ? <CopyCheck /> : <Copy />}Copier la sélection</button>
         <button className="btn sm" onClick={() => copy(true)} disabled={!cells.length}>Tout copier</button>
       </>}>
-      {rows.length === 0 ? <Empty title="Aucune livraison planifiée" hint={futureOnly && total ? "Aucune semaine après la date de référence : désactiver le filtre pour voir la semaine en cours." : "La ligne Plan ne contient aucune quantité sur l'horizon."} /> : (
+      {rows.length === 0 ? <Empty title="Aucune livraison planifiée" hint={futureOnly && total ? "Aucune semaine après aujourd'hui : désactiver le filtre pour voir la semaine en cours." : "La ligne Plan ne contient aucune quantité sur l'horizon."} /> : (
         <div className="dgrid-wrap" ref={wrap} tabIndex={0} onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") { e.preventDefault(); copy(false); } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") { e.preventDefault(); selectAll(); } }}
           onCopy={(e) => { const t = selectionText(false); if (t) { e.clipboardData.setData("text/plain", t); e.preventDefault(); } }}>
           <table className="dgrid" aria-label="Planning de livraison">

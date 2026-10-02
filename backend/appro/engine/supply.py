@@ -95,7 +95,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
             if i is not None:
                 lane_of(f.supplier_id).ignored[i] = True
 
-    window_start = as_of - dt.timedelta(days=max(int(params.backlog_days), 0))
+    window_start = max(as_of - dt.timedelta(days=max(int(params.backlog_days), 0)), index.start)  # never before the point zero
     # ---- receipts
     for r in receipts:
         if r.qty == 0:

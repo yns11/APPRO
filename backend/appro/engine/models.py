@@ -211,6 +211,10 @@ class CellFlag:
     qty: float = 0.0
 
 
+class DatasetError(ValueError):
+    """The data cannot be computed as is (several stock initialisation dates, a future one…)."""
+
+
 @dataclass
 class Dataset:
     """Everything the engine needs, as plain records."""
@@ -239,9 +243,9 @@ class Dataset:
 class EngineParams:
     """All business rules that are configurable (see docs/regles_metier.md)."""
 
-    as_of: dt.date | None = None                  # default: max stock snapshot date + 1
+    as_of: dt.date | None = None                  # « today » of the computation ; default: the real date of the day
     horizon_days: int = 120                       # projection horizon after as_of
-    history_days: int = 14                        # days before as_of kept in the output series
+    history_weeks: int = 2                        # weeks shown before the current week (display start = max(init date, Monday − N weeks))
     working_weekdays: tuple[int, ...] = (1, 2, 3, 4, 5)
 
     # Demand
@@ -416,7 +420,8 @@ class ArticleResult:
 
 @dataclass
 class MrpResult:
-    as_of: dt.date
+    as_of: dt.date            # « today » of the computation
+    init_date: dt.date        # stock initialisation day = first day of the window (point zero)
     start_date: dt.date
     end_date: dt.date
     params: EngineParams

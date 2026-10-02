@@ -1,4 +1,6 @@
-# APPRO — cockpit approvisionnement (Databricks App)
+# Ma Routine Appro — cockpit approvisionnement (Databricks App)
+
+> Nom de l'application : **Ma Routine Appro**. Les identifiants techniques (bundle `appro`, App `appro-<cible>`, paquet Python `appro`, variables `APPRO_*`) ne changent pas : les renommer recréerait les Apps Databricks, leurs principaux de service et leurs schémas.
 
 Application qui remplace le classeur Excel `SIMULATION_<appro>.xlsx` : projection de stock à partir du PDP
 et des commandes ERP, plan de livraison saisi directement dans le tableau, propositions CBN (MOQ,

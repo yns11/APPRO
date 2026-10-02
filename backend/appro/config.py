@@ -38,16 +38,16 @@ class Settings(BaseSettings):
     sync_role: str | None = Field(None, description="Postgres role of the synchronisation job, granted write access on the ERP mirror")
 
     # --- business defaults ---------------------------------------------------------------
-    as_of: dt.date | None = Field(None, description="Fixed reference date (demo). Default: today, or snapshot + 1 locally")
+    as_of: dt.date | None = Field(None, description="Simulated « today » (demo, tests). Default: the real date of the day")
     default_planner: str | None = Field(None)
     horizon_days: int = Field(120)
-    history_days: int = Field(14)
+    history_weeks: int = Field(2, description="Weeks shown before the current week in the supply table")
     working_weekdays: str = Field("1,2,3,4,5")
     holidays: str = Field("", description="Comma separated ISO dates of plant closures")
 
     # --- web -------------------------------------------------------------------------------
     static_dir: Path = Field(REPO_ROOT / "client" / "dist")
-    app_title: str = Field("APPRO – Cockpit approvisionnement")
+    app_title: str = Field("Ma Routine Appro – Cockpit approvisionnement")
     log_level: str = Field("INFO")
 
     @field_validator("seed_reference", "erp_production_table", "erp_pdp_table", "db_url", "lakebase_branch", "sync_role",

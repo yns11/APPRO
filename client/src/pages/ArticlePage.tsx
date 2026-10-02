@@ -54,7 +54,7 @@ export default function ArticlePage() {
   const adjCols = useMemo<Column<AdjustmentOut>[]>(() => [
     { key: "date", label: "Date", get: (c) => c.date, render: (c) => fmtDate(c.date) },
     { key: "qty", label: "Quantité", get: (c) => c.qty, num: true, render: (c) => <b className={c.qty < 0 ? "delta down" : "delta up"}>{c.qty > 0 ? "+" : ""}{fmtQty(c.qty, unit)}</b> },
-    { key: "effect", label: "Effet", get: (c) => (d && c.date <= d.as_of ? "stock de référence" : "mouvement prévu"), filter: "select", render: (c) => d && c.date <= d.as_of ? <Badge tone="warning">stock de référence</Badge> : <Badge tone="neutral">mouvement prévu</Badge> },
+    { key: "effect", label: "Effet", get: (c) => (d && c.date <= d.init_date ? "stock initial" : c.date <= (d?.as_of ?? "") ? "mouvement passé" : "mouvement prévu"), filter: "select", render: (c) => d && c.date <= d.init_date ? <Badge tone="warning">stock initial</Badge> : <Badge tone="neutral">{d && c.date <= d.as_of ? "mouvement passé" : "mouvement prévu"}</Badge> },
     { key: "expr", label: "Saisie", get: (c) => c.expression, render: (c) => <span className="mono small">{c.expression}</span> },
     { key: "note", label: "Commentaire", get: (c) => c.note },
     { key: "who", label: "Modifié", get: (c) => `${c.updated_by} ${c.updated_at}`, render: (c) => <span className="subtle small">{c.updated_by}<br />{fmtDateTime(c.updated_at)}</span> },
@@ -79,7 +79,7 @@ export default function ArticlePage() {
       </div>
 
       <div className="grid kpis">
-        <Kpi label="Stock de référence" value={k ? fmtQty(k.stock_reference, unit) : <Skeleton w={60} h={28} />} unit={unit} meta={k ? `ERP ${fmtQty(k.stock_on_hand, unit)} au ${fmtDate(k.snapshot_date)}${k.reference_correction ? ` · corrigé de ${k.reference_correction > 0 ? "+" : ""}${fmtQty(k.reference_correction, unit)}` : ""}` : ""} tone={k?.reference_correction ? "warning" : undefined} onClick={() => setTab("adjustments")} />
+        <Kpi label="Stock de référence" value={k ? fmtQty(k.stock_reference, unit) : <Skeleton w={60} h={28} />} unit={unit} meta={k ? `ERP ${fmtQty(k.stock_on_hand, unit)} initialisé le ${fmtDate(k.init_date)}${k.reference_correction ? ` · corrigé de ${k.reference_correction > 0 ? "+" : ""}${fmtQty(k.reference_correction, unit)}` : ""}` : ""} tone={k?.reference_correction ? "warning" : undefined} onClick={() => setTab("adjustments")} />
         <Kpi label="Couverture plan" value={k ? k.coverage_plan_days : <Skeleton w={40} h={28} />} unit="j" tone={k ? (k.coverage_plan_days <= (a?.alert_red_days ?? 3) ? "critical" : k.coverage_plan_days <= (a?.alert_yellow_days ?? 7) ? "warning" : "ok") : undefined} meta={k ? `ERP : ${k.coverage_erp_days} j · cible ${k.coverage_target_days} j` : ""} />
         <Kpi label="Rupture ERP" value={k ? (k.first_stockout_erp ? fmtDate(k.first_stockout_erp) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_erp ? "critical" : "ok"} meta={k ? (k.first_stockout_erp ? `manque max ${fmtQty(k.max_shortage_erp, unit)}` : `stock mini ${fmtQty(k.min_stock_erp, unit)}`) : ""} />
         <Kpi label="Rupture plan" value={k ? (k.first_stockout_plan ? fmtDate(k.first_stockout_plan) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_plan ? "critical" : "ok"} meta={k ? (k.first_stockout_plan ? `manque max ${fmtQty(k.max_shortage_plan, unit)}` : `stock mini ${fmtQty(k.min_stock_plan, unit)}`) : ""} />
@@ -145,7 +145,7 @@ export default function ArticlePage() {
       ))}
 
       {tab === "adjustments" && (
-        <Card flush title="Ajustements" hint="datés jusqu'à la référence : correction du stock de référence, persistante jusqu'à suppression ; datés après : mouvement prévu">
+        <Card flush title="Ajustements" hint="datés jusqu'au jour d'initialisation du stock : correction du stock initial, persistante jusqu'à suppression ; datés après : mouvement compté à sa date">
           <DataTable rows={adjustments.data ?? []} columns={adjCols} rowKey={(c) => c.id} compact emptyTitle="Aucun ajustement" emptyHint="Saisir directement dans la ligne Ajustement du tableau." />
         </Card>
       )}
