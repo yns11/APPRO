@@ -53,7 +53,10 @@ variables:
   app_schema:
     description: >-
       Schéma Postgres que l'application crée et possède (son rôle n'a pas CREATE sur « public »).
-      Le job écrit dans ce même schéma.
+      Le job écrit dans ce même schéma. UN SCHÉMA PAR CIBLE : chaque cible déploie sa propre App,
+      donc son propre principal de service ; un schéma créé par l'App de dev appartient à dev et
+      l'App de prod ne peut pas y créer de tables (PostgreSQL retombe sur « public » :
+      « permission denied for schema public »).
     default: appro
 
   # --- Source ERP --------------------------------------------------------------
@@ -107,6 +110,10 @@ targets:
     variables:
       schedule_pause_status: UNPAUSED
       lakebase_branch: preprod
+      app_schema: appro_preprod
+    permissions:
+      - level: CAN_MANAGE
+        user_name: ${workspace.current_user.userName}
 
   prod:
     mode: production
@@ -114,6 +121,11 @@ targets:
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
       schedule_pause_status: UNPAUSED
+      # la cible prod partage (par défaut) le projet et la branche Lakebase de dev : son App a son
+      # propre principal de service, donc son propre schéma (celui de dev, « appro », appartient à dev)
+      app_schema: appro_prod
     permissions:
+      - level: CAN_MANAGE
+        user_name: ${workspace.current_user.userName}
       - level: CAN_VIEW
         group_name: users

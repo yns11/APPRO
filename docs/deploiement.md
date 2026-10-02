@@ -303,6 +303,7 @@ groupe). Leur identité arrive à l'application par l'en-tête `x-forwarded-emai
 | Job : `permission denied` sur les tables de l'App | l'App accorde elle-même l'écriture sur `erp_*` (et `USAGE` sur son schéma) au `sync_role` ; le job vérifie la présence des tables et nomme la cause |
 | `permission denied for schema public` au premier `CREATE TABLE` (rôle de l'App sans `CREATE` sur `public`) | l'App crée et possède son propre schéma `appro` (`APPRO_DB_SCHEMA`), placé en tête du `search_path` de chaque connexion ; le job écrit dans ce schéma (`--pg-schema`) |
 | `Scheduled — Paused` sans qu'aucune commande n'échoue | `pause_status` posé sur la ressource, déclaré par chaque cible, avec `timezone_id` |
+| `permission denied for schema public` **en prod alors que dev fonctionne** : les deux cibles partagent le projet Lakebase ; le schéma `appro` a été créé par l'App de dev (son principal de service), l'App de prod ne peut pas y créer de tables et PostgreSQL retombe sur `public` | un schéma par cible (`app_schema` : `appro` en dev, `appro_preprod`, `appro_prod`) ; au démarrage l'App vérifie `has_schema_privilege(schema, 'CREATE')` et nomme la cause (schéma possédé par un autre rôle) au lieu de laisser PostgreSQL retomber sur `public` |
 | Le tableau ne se rafraîchit pas après une saisie (il faut Ctrl+Maj+R) : l'App tourne avec **plusieurs workers** uvicorn (`APPRO_WORKERS`, 2 par défaut), chacun avec son cache mémoire ; l'écriture servie par l'un n'invalidait pas le cache de l'autre | compteur `data_version` dans la table `app_meta`, incrémenté à chaque écriture et relu à chaque calcul : tout worker jette son cache dès qu'un autre a écrit ; réponses `/api/*` en `Cache-Control: no-store` |
 
 ---
@@ -318,8 +319,9 @@ Avant `prod`, dans `databricks.yml` :
 
 - [ ] `targets.prod.variables.sync_role` = identité de production (principal de service recommandé, rôle ajouté au projet Lakebase, `SELECT` sur les tables ERP) ;
 - [ ] `notification_email` renseigné : un job qui échoue en silence n'est vu de personne ;
-- [ ] `schedule_pause_status: UNPAUSED` (déjà posé) ; `lakebase_branch` distinct de `dev` si plusieurs cibles partagent le projet ;
-- [ ] référentiel chargé (l'export de `dev` se réimporte tel quel en `prod`) ;
+- [ ] `schedule_pause_status: UNPAUSED` (déjà posé) ; `app_schema` propre à la cible (déjà posé : `appro_prod`) et, de préférence, `lakebase_branch` distinct de `dev` ;
+- [ ] référentiel chargé (l'export de `dev` se réimporte tel quel en `prod` : les tables, dont *Approvisionneurs* et *Délégations*, sont dans le schéma de la cible, pas partagées) ;
+- [ ] premier utilisateur déclaré en `admin` dans *Approvisionneurs* (tant que la table est vide, tout le monde est administrateur) ;
 - [ ] `/api/health` vert, une saisie test persistante, journal nominatif ;
 - [ ] permissions *Can use* accordées au groupe des approvisionneurs.
 

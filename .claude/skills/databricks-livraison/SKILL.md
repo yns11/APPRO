@@ -288,6 +288,15 @@ crée et possède son propre schéma (`CREATE SCHEMA IF NOT EXISTS appro`) et pl
 écrit dans ce schéma. Si même `CREATE SCHEMA` est refusé, un seul ordre du
 propriétaire : `GRANT CREATE ON DATABASE <base> TO "<client_id>"`.
 
+**Même erreur en `prod` alors que `dev` fonctionne** (observé sur APPRO) : les deux
+cibles partagent le projet Lakebase et le même nom de schéma. Chaque App a son
+principal de service ; `CREATE SCHEMA IF NOT EXISTS appro` réussit en silence pour
+prod (le schéma existe, créé par dev) mais prod n'y a pas `CREATE`, et PostgreSQL
+place alors `CREATE TABLE` dans le premier schéma du `search_path` où il a ce droit —
+aucun, d'où `public`. Le symptôme désigne `public`, la cause est le schéma voisin.
+Parade : un schéma par cible (`app_schema: appro_prod`) et, au démarrage,
+`SELECT has_schema_privilege(schema, 'CREATE')` pour nommer la cause.
+
 La ressource attachée donne `CAN_CONNECT_AND_CREATE` : le droit de créer, pas
 celui de lire l'existant. Trois ordres, trois portées :
 

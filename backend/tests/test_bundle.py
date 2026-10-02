@@ -73,3 +73,12 @@ def test_le_job_et_l_application_partagent_le_sql_de_correspondance() -> None:
             assert f'"{col}"' in notebook, (name, col)
     job = (RACINE / "jobs" / "sync_erp_to_lakebase.py").read_text(encoding="utf-8")
     assert "sys.exit" not in job and "raise SystemExit" not in job
+
+
+def test_chaque_cible_de_production_a_son_schema() -> None:
+    """Toutes les cibles peuvent partager le projet Lakebase : chaque App (principal de service distinct)
+    doit posséder son propre schéma, sinon « permission denied for schema public » à la première table."""
+    bundle = yaml.safe_load((RACINE / "databricks.yml").read_text(encoding="utf-8"))
+    default = bundle["variables"]["app_schema"]["default"]
+    schemas = {name: t.get("variables", {}).get("app_schema", default) for name, t in bundle["targets"].items()}
+    assert len(set(schemas.values())) == len(schemas), schemas

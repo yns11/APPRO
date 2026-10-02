@@ -365,9 +365,22 @@ SCHEMA_HELP = (
 )
 
 
+SCHEMA_OWNED_HELP = (
+    "Le schéma « {schema} » de la base {db} existe déjà mais le rôle de l'application ({user}) n'a pas le droit "
+    "d'y créer des tables : il appartient à un autre rôle, en général l'application d'une AUTRE cible du bundle "
+    "(dev / preprod / prod partageant le même projet Lakebase ; PostgreSQL retombe alors sur « public », d'où "
+    "« permission denied for schema public »). Deux solutions : donner à chaque cible son propre schéma "
+    "(variable app_schema du bundle / APPRO_DB_SCHEMA, ex. appro_prod), ou faire exécuter par le propriétaire "
+    'du schéma : GRANT ALL ON SCHEMA "{schema}" TO "{user}"; puis redémarrer l\'application.'
+)
+
+
 def ensure_schema(engine, schema: str | None) -> None:
     """PostgreSQL : the app owns its schema (a Databricks App's role has no CREATE on ``public`` ;
-    ``CAN_CONNECT_AND_CREATE`` lets it create schemas in the database). Idempotent."""
+    ``CAN_CONNECT_AND_CREATE`` lets it create schemas in the database). Idempotent.  When the schema
+    already exists but belongs to another role (another target's app on the same Lakebase branch)
+    the role cannot create tables in it – PostgreSQL would silently fall back to ``public`` – so the
+    privilege is checked here and the failure names the cause."""
     if engine.dialect.name != "postgresql" or not schema or schema == "public":
         return
     try:
@@ -376,6 +389,11 @@ def ensure_schema(engine, schema: str | None) -> None:
     except Exception as exc:  # pragma: no cover - needs PostgreSQL
         raise RuntimeError(SCHEMA_HELP.format(user=engine.url.username or "?", schema=schema,
                                               db=engine.url.database or "?", exc=exc)) from exc
+    with engine.connect() as conn:  # pragma: no cover - needs PostgreSQL
+        ok = conn.execute(text("SELECT has_schema_privilege(:s, 'CREATE')"), {"s": schema}).scalar()
+    if not ok:  # pragma: no cover - needs PostgreSQL
+        raise RuntimeError(SCHEMA_OWNED_HELP.format(user=engine.url.username or "?", schema=schema,
+                                                    db=engine.url.database or "?"))
 
 
 def init_store(engine, schema: str | None = None) -> sessionmaker[Session]:
