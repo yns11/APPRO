@@ -283,18 +283,33 @@ def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str]
 
 
 def delivery_plan(ar: ArticleResult, as_of: dt.date, supplier_names: dict[str, str]) -> dict[str, Any]:
-    """The *Plan* row as an ERP delivery schedule: one line per supplier and day with a quantity,
-    delivery window = the day and the six following days (what the ERP schedule line expects)."""
+    """The *Plan* row as an ERP delivery schedule, **one line per supplier and ISO week** from the
+    reference day: everything the Plan row shows (typed cells, firm ERP orders taken over, CBN
+    proposals) added up over the week ; delivery window = Monday → Sunday of the week."""
     i0 = ar.dates.index(as_of)
-    rows = []
+    rows: dict[tuple[str | None, dt.date], dict[str, Any]] = {}
     for l in ar.lanes:
-        plan = np.asarray(l.plan)
-        for i in np.where(plan[i0:] > 1e-9)[0] + i0:
+        plan, cbn = np.asarray(l.plan), np.asarray(l.supply_proposed)
+        typed = np.asarray(l.plan_typed, dtype=bool)
+        total = plan + cbn
+        for i in np.where(total[i0:] > 1e-9)[0] + i0:
             d = ar.dates[int(i)]
-            rows.append({"supplier_id": l.supplier_id, "supplier_name": l.name, "date": d.isoformat(),
-                         "end_date": (d + dt.timedelta(days=6)).isoformat(), "qty": float(plan[i]),
-                         "typed": bool(l.plan_typed[i])})
-    rows.sort(key=lambda r: (r["date"], r["supplier_id"] or ""))
+            monday = d - dt.timedelta(days=d.weekday())
+            r = rows.get((l.supplier_id, monday))
+            if r is None:
+                y, w, _ = monday.isocalendar()
+                r = rows[(l.supplier_id, monday)] = {
+                    "supplier_id": l.supplier_id, "supplier_name": l.name, "week": f"{y}-W{w:02d}",
+                    "date": monday.isoformat(), "end_date": (monday + dt.timedelta(days=6)).isoformat(),
+                    "qty": 0.0, "typed_qty": 0.0, "erp_qty": 0.0, "cbn_qty": 0.0, "typed": False}
+            r["qty"] += float(total[i])
+            r["cbn_qty"] += float(cbn[i])
+            if typed[i]:
+                r["typed_qty"] += float(plan[i])
+                r["typed"] = True
+            else:
+                r["erp_qty"] += float(plan[i])
+    out = sorted(rows.values(), key=lambda r: (r["date"], r["supplier_id"] or ""))
     return {"article_id": ar.article.article_id, "designation": ar.article.designation, "unit": ar.article.unit,
             "as_of": as_of.isoformat(), "suppliers": [{"supplier_id": l.supplier_id, "name": l.name} for l in ar.lanes],
-            "rows": rows}
+            "rows": out}

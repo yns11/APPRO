@@ -99,6 +99,29 @@ Seule la ligne la plus récente de chaque article est utilisée. Le stock ERP é
 **ajustements** saisis dans le tableau (ligne *Ajustement*, toute date) corrigent le stock de référence
 sans toucher à cette table.
 
+### 1.7 `ref_planners` — Approvisionneurs
+
+| Colonne | Type | Description |
+|---|---|---|
+| `planner_id` | str, clé | identifiant (PROC1, PROC2…) |
+| `name` | str | prénom / code tel qu'il figure dans la colonne *Approvisionneur* des articles (= son carnet) |
+| `email` | str | identifiant de connexion Databricks (`x-forwarded-email`), comparé sans la casse |
+| `role` | str | `appro`, `manager` ou `admin` (règles métier § 12) |
+| `active` | bool | inactif = lecture seule |
+
+Table vide = tout utilisateur est administrateur (première installation).
+
+### 1.8 `ref_delegations` — Délégations
+
+| Colonne | Type | Description |
+|---|---|---|
+| `from_planner` | str, clé | approvisionneur qui délègue son carnet (`planner_id`) |
+| `to_planner` | str, clé | approvisionneur qui reçoit l'accès |
+| `date_from` | date, clé | premier jour |
+| `date_to` | date | dernier jour (vide = sans fin) |
+| `note` | str | motif |
+| `active` | bool | |
+
 ## 2. Faits ERP
 
 Correspondance appliquée par `backend/appro/data/erp_sql.py` (Databricks SQL), exécutée soit par le job
@@ -173,7 +196,8 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 
 | Table | Contenu | Clé |
 |---|---|---|
-| `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_programs`, `ref_bom`, `fct_stock` | le référentiel (§ 1) + `updated_by`, `updated_at` | clé de la table |
+| `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) + `updated_by`, `updated_at` | clé de la table |
+| `app_meta` | clé / valeur partagées par tous les processus de l'App : `data_version`, incrémentée à chaque écriture pour invalider les caches mémoire de chaque worker | key |
 | `app_plan_cells` | **cellules du plan** : article, fournisseur (`""` si aucun), date, expression saisie, quantité, commentaire, auteur | (article, fournisseur, date) |
 | `app_adjustments` | **cellules d'ajustement** : article, date (toute date), expression, quantité signée, commentaire, auteur | (article, date) |
 | `app_cell_flags` | **clics sur les cellules en lecture** : `kind` = `order_ignored` (commande ferme ignorée : article, fournisseur, jour) ou `proposal_refused` (proposition CBN refusée : article, jour, quantité refusée affichée ; bloque les propositions jusqu'au dimanche), auteur | (kind, article, fournisseur, date) |

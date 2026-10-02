@@ -76,7 +76,7 @@ export default function CockpitPage() {
       </div>
       {config?.reference_empty && <div className="note">Le référentiel est vide : chargez d'abord les articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures et le stock de référence dans la page <Link to="/referentiel">Référentiel</Link> (modèles Excel à télécharger).</div>}
 
-      <div className="grid kpis">
+      <div className="grid kpis sticky-kpis">
         <Kpi label="Critiques" icon={<AlertOctagon size={14} />} tone="critical" value={k ? fmtInt(k.critical) : <Skeleton w={40} h={28} />} meta="rupture ou couverture rouge" onClick={() => setFilter(filter === "critical" ? "all" : "critical")} active={filter === "critical"} />
         <Kpi label="À surveiller" icon={<AlertTriangle size={14} />} tone="warning" value={k ? fmtInt(k.warning) : <Skeleton w={40} h={28} />} meta="couverture orange, backlog" onClick={() => setFilter(filter === "warning" ? "all" : "warning")} active={filter === "warning"} />
         <Kpi label="Ruptures plan" icon={<PackageSearch size={14} />} tone={k && k.stockouts_7d > 0 ? "critical" : "info"} value={k ? fmtInt(k.stockouts) : <Skeleton w={40} h={28} />} meta={k ? `${k.stockouts_7d} sous 7 jours` : ""} onClick={() => setFilter(filter === "stockout" ? "all" : "stockout")} active={filter === "stockout"} />

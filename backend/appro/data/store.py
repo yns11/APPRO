@@ -80,6 +80,15 @@ REF_MODELS: dict[str, type[Base]] = {name: _model(TABLES[name], name, True) for 
 ERP_MODELS: dict[str, type[Base]] = {name: _model(TABLES[name], f"erp_{name[4:]}", False) for name in FACT_TABLES}
 
 
+class AppMeta(Base):
+    """Key / value rows shared by every worker process: ``data_version`` is incremented on each write
+    so that the in-memory caches of all the processes are invalidated together."""
+
+    __tablename__ = "app_meta"
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[str] = mapped_column(String(200), default="")
+
+
 class ErpSyncLog(Base):
     """One row per mirrored fact table: when and how many rows the synchronisation job wrote."""
 
@@ -372,7 +381,31 @@ def ensure_schema(engine, schema: str | None) -> None:
 def init_store(engine, schema: str | None = None) -> sessionmaker[Session]:
     ensure_schema(engine, schema)
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False, future=True)
+    factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+    with factory() as session:
+        if session.get(AppMeta, DATA_VERSION_KEY) is None:
+            session.add(AppMeta(key=DATA_VERSION_KEY, value="0"))
+            session.commit()
+    return factory
+
+
+DATA_VERSION_KEY = "data_version"
+
+
+def read_data_version(session: Session) -> int:
+    row = session.get(AppMeta, DATA_VERSION_KEY)
+    return int(row.value or 0) if row else 0
+
+
+def bump_data_version(session: Session) -> int:
+    """Increment the shared counter (row lock on PostgreSQL: concurrent writers serialise)."""
+    row = session.get(AppMeta, DATA_VERSION_KEY, with_for_update=session.bind.dialect.name == "postgresql")
+    if row is None:
+        row = AppMeta(key=DATA_VERSION_KEY, value="0")
+        session.add(row)
+    row.value = str(int(row.value or 0) + 1)
+    session.commit()
+    return int(row.value)
 
 
 def grant_sync_role(engine, role: str, schema: str | None = None) -> None:

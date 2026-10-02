@@ -18,14 +18,14 @@ const who = <T extends { updated_by: string; updated_at: string }>(): Column<T> 
 export default function EntriesPage() {
   const [tab, setTab] = useState<Tab>("plan");
   const toast = useToast();
-  const { config } = usePerimeter();
+  const { config, rights } = usePerimeter();
   const plan = usePlanCells();
   const adjustments = useAdjustments();
   const flags = useFlags();
   const audit = useAudit({ limit: 300 });
   const del = useWrite((path: string) => api.del(path), () => toast.push("Supprimé"));
   const asOf = config?.as_of ?? "";
-  const delCol = <T extends { id: string }>(path: string, title: string): Column<T> => ({ key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (r) => <Button size="sm" variant="ghost" title={title} onClick={(e) => { e.stopPropagation(); del.mutate(`${path}/${r.id}`); }}><Trash2 /></Button> });
+  const delCol = <T extends { id: string }>(path: string, title: string): Column<T> => ({ key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (r) => rights.canWrite ? <Button size="sm" variant="ghost" title={title} onClick={(e) => { e.stopPropagation(); del.mutate(`${path}/${r.id}`); }}><Trash2 /></Button> : null });
 
   const planCols = useMemo<Column<PlanCellOut>[]>(() => [
     article<PlanCellOut>(),

@@ -44,6 +44,14 @@ def create_app() -> FastAPI:
     for r in (reference.router, mrp.router, entries.router, pdp.router, files.router):
         app.include_router(r)
 
+    @app.middleware("http")
+    async def no_store(request: Request, call_next):
+        """API answers depend on the planner's latest writes: never cached by the browser or a proxy."""
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover - defensive
         logging.getLogger("appro").exception("Unhandled error on %s", request.url.path)

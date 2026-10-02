@@ -9,7 +9,7 @@ import type { ImportReport } from "@/lib/types";
 
 /** Imports (PDP, simulation workbook re-import) and exports (simulation, alerts, plan). */
 export default function ImportsPage() {
-  const { perimeter, engineParams } = usePerimeter();
+  const { perimeter, engineParams, rights } = usePerimeter();
   const toast = useToast();
   const versions = usePdpVersions();
   const cockpit = useCockpit();
@@ -43,9 +43,10 @@ export default function ImportsPage() {
             <Field label="Activation"><label className="checkbox" style={{ height: 34 }}><input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} />activer immédiatement</label></Field>
           </div>
           <input ref={pdpInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importPdp.mutate(f); e.target.value = ""; }} />
-          <div className="dropzone" style={{ marginTop: 12 }} onClick={() => pdpInput.current?.click()} onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("over"); }} onDragLeave={(e) => e.currentTarget.classList.remove("over")} onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove("over"); const f = e.dataTransfer.files?.[0]; if (f) importPdp.mutate(f); }}>
+          {!rights.canImportPdp && <div className="note" style={{ marginTop: 12 }}>L'import du PDP est réservé aux managers et administrateurs (Référentiel › Approvisionneurs).</div>}
+          {rights.canImportPdp && <div className="dropzone" style={{ marginTop: 12 }} onClick={() => pdpInput.current?.click()} onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("over"); }} onDragLeave={(e) => e.currentTarget.classList.remove("over")} onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove("over"); const f = e.dataTransfer.files?.[0]; if (f) importPdp.mutate(f); }}>
             <FileUp /><div>{importPdp.isPending ? "Import en cours…" : "Déposer le classeur PDP ici ou cliquer"}</div>
-          </div>
+          </div>}
           {importPdp.error && <div className="error-box" style={{ marginTop: 12 }}>{(importPdp.error as Error).message}</div>}
           <p className="note" style={{ marginTop: 12 }}>Une version importée et active remplace le PDP ERP pour les programmes qu'elle contient ; la désactiver revient au PDP ERP.</p>
         </Card>
@@ -69,7 +70,7 @@ export default function ImportsPage() {
           <h4>Réimporter un classeur de simulation (jour)</h4>
           <p className="small subtle">Les lignes Plan et Ajustement des articles du classeur remplacent les cellules de l'application : une valeur Plan égale au Ferme vaut « ERP », une valeur différente devient une cellule saisie.</p>
           <input ref={simInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importSim.mutate(f); e.target.value = ""; }} />
-          <Button style={{ marginTop: 8 }} onClick={() => simInput.current?.click()} disabled={importSim.isPending}><Upload />{importSim.isPending ? "Import…" : "Choisir le classeur"}</Button>
+          <Button style={{ marginTop: 8 }} onClick={() => simInput.current?.click()} disabled={importSim.isPending || !rights.canWrite} title={rights.canWrite ? "Les lignes Plan et Ajustement des articles de votre carnet sont reprises" : "Lecture seule"}><Upload />{importSim.isPending ? "Import…" : "Choisir le classeur"}</Button>
           {importSim.error && <div className="error-box" style={{ marginTop: 12 }}>{(importSim.error as Error).message}</div>}
         </Card>
       </div>

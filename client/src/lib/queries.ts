@@ -5,6 +5,7 @@ import type {
   PdpVersionOut, PlanCellOut, ProgramImpactResponse, ProgramRef, ProjectionResponse, ProposalOut, RefRow, RefTableInfo, WeeklyParamsResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
+import { useToast } from "@/components/ui";
 
 /** Every write invalidates the engine-derived queries (the backend cache is bumped too). */
 export function useInvalidateAll() {
@@ -65,9 +66,10 @@ export const usePlanCells = (params?: Params) => useQuery({ queryKey: ["plan-cel
 export const useAdjustments = (params?: Params) => useQuery({ queryKey: ["adjustments", params], queryFn: () => api.get<AdjustmentOut[]>("/api/entries/adjustments", params) });
 /** Clicks on read-only cells: ignored firm-order days, refused CBN proposals. */
 export const useFlags = (params?: Params) => useQuery({ queryKey: ["flags", params], queryFn: () => api.get<FlagOut[]>("/api/entries/flags", params) });
-export const useWeeklyParams = (articleId: string | null, weeks = 26) => useQuery({
-  queryKey: ["weekly-params", articleId, weeks], enabled: !!articleId,
-  queryFn: () => api.get<WeeklyParamsResponse>(`/api/articles/${encodeURIComponent(articleId!)}/weekly-params`, { weeks }),
+/** Weekly stock-policy calendar of an article: from the reference week to the last PDP week / end of horizon. */
+export const useWeeklyParams = (articleId: string | null) => useQuery({
+  queryKey: ["weekly-params", articleId], enabled: !!articleId,
+  queryFn: () => api.get<WeeklyParamsResponse>(`/api/articles/${encodeURIComponent(articleId!)}/weekly-params`),
 });
 
 export const useArticles = (planner?: string | null) => useQuery({ queryKey: ["ref-articles", planner], queryFn: () => api.get<ArticleRef[]>("/api/reference/articles", { planner }), staleTime: 300_000 });
@@ -83,8 +85,10 @@ export const useOverrides = (params?: Params) => useQuery({ queryKey: ["override
 export const usePdpVersions = () => useQuery({ queryKey: ["pdp-versions"], queryFn: () => api.get<PdpVersionOut[]>("/api/pdp/versions") });
 export const useAudit = (params?: Params) => useQuery({ queryKey: ["audit", params], queryFn: () => api.get<AuditOut[]>("/api/entries/audit", params) });
 
-/** Generic mutation that invalidates everything on success. */
+/** Generic mutation that invalidates everything on success and shows the server message on failure
+ * (a refused write – 403 outside the user's portfolio, 422 invalid value – is never silent). */
 export function useWrite<TIn, TOut = unknown>(fn: (input: TIn) => Promise<TOut>, onDone?: (out: TOut) => void) {
   const invalidate = useInvalidateAll();
-  return useMutation({ mutationFn: fn, onSuccess: (out) => { invalidate(); onDone?.(out); } });
+  const toast = useToast();
+  return useMutation({ mutationFn: fn, onSuccess: (out) => { invalidate(); onDone?.(out); }, onError: (e) => toast.push((e as Error).message, "error") });
 }

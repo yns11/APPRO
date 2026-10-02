@@ -65,7 +65,7 @@ export interface GridArticle { article: ArticleRef; series: SeriesOut[]; lanes: 
 /** One page of the supply table (``total`` articles after filters). */
 export interface GridResponse { as_of: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; articles: GridArticle[]; diagnostics: string[]; total: number; page: number; page_size: number; }
 /** The Plan row as ERP delivery schedule lines. */
-export interface DeliveryRow { supplier_id: string | null; supplier_name: string; date: string; end_date: string; qty: number; typed: boolean; }
+export interface DeliveryRow { supplier_id: string | null; supplier_name: string; week: string; date: string; end_date: string; qty: number; typed_qty: number; erp_qty: number; cbn_qty: number; typed: boolean; }
 export interface DeliveryPlanResponse { article_id: string; designation: string; unit: string; as_of: string; suppliers: { supplier_id: string | null; name: string }[]; rows: DeliveryRow[]; }
 export type ImpactLayer = "onhand" | "erp" | "plan";
 export interface ProgramImpact {
@@ -89,4 +89,10 @@ export interface ParamOverrideOut { id: string; scope: string; key1: string; key
 export interface PdpVersionOut { id: string; name: string; source_file: string; note: string; active: boolean; imported_by: string; imported_at: string; line_count: number; programs: number; first_week: string | null; last_week: string | null; }
 export interface ImportReport { created: number; ignored: number; notes: string[]; version: PdpVersionOut | null; }
 export interface AuditOut { id: number; ts: string; user: string; action: string; entity_type: string; entity_id: string; article_id: string | null; payload: Record<string, unknown>; }
-export interface ConfigOut { title: string; data_source: Record<string, unknown>; as_of: string; horizon_days: number; planners: string[]; default_planner: string | null; user: string; version: string; reference_empty: boolean; }
+/** Rights of the signed-in user (backend/appro/services/access.py). */
+export type Role = "reader" | "appro" | "manager" | "admin";
+export interface AccessOut {
+  user: string; role: Role; planner_id: string | null; name: string | null; portfolio: string[]; delegated_from: string[]; bootstrap: boolean;
+  can_write: boolean; can_edit_all: boolean; can_manage_params: boolean; can_import_pdp: boolean; is_admin: boolean;
+}
+export interface ConfigOut { title: string; data_source: Record<string, unknown>; as_of: string; horizon_days: number; planners: string[]; default_planner: string | null; user: string; version: string; reference_empty: boolean; access: AccessOut; }

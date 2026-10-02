@@ -6,6 +6,7 @@ from typing import Iterator
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from ..services.access import Access, resolve_access
 from ..services.context import AppContext, get_context
 
 
@@ -28,3 +29,8 @@ def current_user(request: Request) -> str:
         if v:
             return v
     return request.headers.get("x-appro-user", "local-dev")
+
+
+def access_dep(ctx: AppContext = Depends(ctx_dep), user: str = Depends(current_user)) -> Access:
+    """Rights of the signed-in user (planners, delegations, roles – services/access.py)."""
+    return resolve_access(user, ctx.table("ref_planners"), ctx.table("ref_delegations"), ctx.table("ref_articles"))

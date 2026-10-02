@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from ...data.store import PdpLine, PdpVersion, audit
 from ...services import excel_service
+from ...services.access import Access
 from ...services.context import AppContext
 from .. import schemas as S
-from ..deps import ctx_dep, current_user, session_dep
+from ..deps import access_dep, ctx_dep, current_user, session_dep
 
 router = APIRouter(prefix="/api/pdp", tags=["pdp"])
 
@@ -52,7 +53,8 @@ def versions(session: Session = Depends(session_dep)):
 async def import_pdp(file: UploadFile = File(...), name: str = Form(""), note: str = Form(""),
                      activate: bool = Form(True), sheet: str | None = Form(None),
                      ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-                     user: str = Depends(current_user)):
+                     user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    access.require_pdp()
     content = await file.read()
     if not content:
         raise HTTPException(422, "Fichier vide")
@@ -84,7 +86,8 @@ async def import_pdp(file: UploadFile = File(...), name: str = Form(""), note: s
 
 @router.post("/versions/{version_id}/activate", response_model=S.PdpVersionOut)
 def activate(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-             user: str = Depends(current_user)):
+             user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    access.require_pdp()
     v = session.get(PdpVersion, version_id)
     if v is None:
         raise HTTPException(404, "Version inconnue")
@@ -99,7 +102,8 @@ def activate(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Sessi
 
 @router.post("/versions/{version_id}/deactivate", response_model=S.PdpVersionOut)
 def deactivate(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-               user: str = Depends(current_user)):
+               user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    access.require_pdp()
     v = session.get(PdpVersion, version_id)
     if v is None:
         raise HTTPException(404, "Version inconnue")
@@ -112,7 +116,8 @@ def deactivate(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Ses
 
 @router.delete("/versions/{version_id}", status_code=204)
 def delete_version(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-                   user: str = Depends(current_user)):
+                   user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    access.require_pdp()
     v = session.get(PdpVersion, version_id)
     if v is None:
         raise HTTPException(404, "Version inconnue")

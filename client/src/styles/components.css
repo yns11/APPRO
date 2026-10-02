@@ -121,7 +121,7 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 
 /* pivot (article grid) */
 .pivot { overflow: auto; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-elev); max-height: 520px; }
-.pivot table { border-collapse: separate; border-spacing: 0; font-size: var(--fs--2); font-variant-numeric: tabular-nums; }
+.pivot table { border-collapse: separate; border-spacing: 0; font-family: var(--font-grid); font-size: var(--grid-fs); font-variant-numeric: tabular-nums; }
 .pivot th, .pivot td { padding: 5px 8px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); white-space: nowrap; text-align: right; min-width: 64px; }
 .pivot th { position: sticky; top: 0; z-index: 3; background: var(--bg-subtle); font-weight: var(--fw-semibold); color: var(--fg-muted); }
 .pivot th.wk { font-weight: var(--fw-regular); color: var(--fg-subtle); }
@@ -290,3 +290,40 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .dgrid td { cursor: cell; }
 .dgrid td.sel { background: var(--brand-soft); box-shadow: inset 0 0 0 1px var(--brand); }
 .dgrid td.typed { font-weight: var(--fw-semibold); color: var(--brand-fg); }
+
+/* ---------- sticky headers (Référentiel, Cockpit) ---------- */
+.page-header.sticky { position: sticky; top: var(--topbar-h); z-index: 12; background: var(--bg); padding-top: var(--sp-2); margin-top: calc(-1 * var(--sp-2)); flex-direction: column; align-items: stretch; gap: var(--sp-3); }
+.page-header.sticky .tabs { margin-bottom: 0; }
+.sticky-kpis { position: sticky; top: var(--topbar-h); z-index: 12; background: var(--bg); padding: var(--sp-2) 0; margin: calc(-1 * var(--sp-2)) 0; box-shadow: 0 8px 8px -8px rgb(16 24 40 / 0.12); }
+.sticky-kpis .kpi { min-height: 84px; }
+@media (max-width: 900px) { .sticky-kpis, .page-header.sticky { position: static; } }
+
+/* ---------- weekly parameters grid (sheet-like) ---------- */
+.wgrid { max-height: calc(100vh - 230px); }
+.wgrid td { position: relative; }
+.wgrid td.over { box-shadow: inset 0 0 0 1px var(--brand); }
+.wgrid td.sel.over { box-shadow: inset 0 0 0 1px var(--brand); }
+.wgrid td.active { outline: 2px solid var(--brand); outline-offset: -2px; }
+.wgrid td.fill-range { background: var(--brand-soft); }
+.wgrid td.ro { cursor: default; }
+.wgrid td .cell-input { width: 100%; min-width: 60px; border: 0; background: var(--bg-elev); color: var(--fg); font: inherit; text-align: right; padding: 0; outline: none; }
+.wgrid td .fill-handle { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; background: var(--brand); border: 1px solid var(--bg-elev); cursor: crosshair; z-index: 3; }
+.wgrid.filling, .wgrid.filling td { cursor: crosshair; }
+.dgrid tr.current td.rowno { background: var(--cell-today); }
+
+/* ---------- settings › display ---------- */
+.font-options { display: flex; flex-direction: column; gap: 6px; }
+.font-option { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-md); cursor: pointer; }
+.font-option.selected { border-color: var(--brand); background: var(--brand-soft); }
+.font-option input { margin-top: 3px; }
+.font-option .sample { margin-top: 4px; font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.font-preview { border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
+.font-preview th, .font-preview td { padding: 5px 8px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); white-space: nowrap; text-align: right; width: 72px; max-width: 72px; overflow: hidden; }
+.font-preview th { background: var(--bg-subtle); font-weight: var(--fw-semibold); color: var(--fg-muted); }
+.font-preview td:first-child, .font-preview th:first-child { text-align: left; width: 120px; max-width: 120px; }
+.font-preview td.neg { background: var(--cell-neg); color: var(--critical-fg); font-weight: var(--fw-semibold); }
+
+/* two sticky header rows (labels + filters) when the table scrolls inside its card */
+.dt thead tr:first-child th { top: 0; height: 34px; }
+.dt thead tr.dt-filters th { position: sticky; top: 34px; z-index: 2; background: var(--bg-elev); }
+.dgrid th .sub { display: block; color: var(--fg-subtle); font-size: 0.6rem; text-transform: none; letter-spacing: 0; font-weight: var(--fw-regular); }

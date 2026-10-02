@@ -214,6 +214,10 @@ redéployer (`scripts/deploy.sh dev PROD --var=...`) ; l'App rejoue le `GRANT` �
 3. **Article ↔ fournisseur** — MOQ, PLA (conditionnement), délai en jours ouvrés, quota %, priorité.
 4. **Programmes** — le nom doit être celui utilisé dans le fichier PDP.
 5. **Nomenclatures** — programme, composant, quantité par unité, unité, rebut %.
+6. **Approvisionneurs** — ID, prénom (= colonne *Approvisionneur* des articles), e-mail Databricks, rôle
+   (`appro`, `manager`, `admin`), actif. **Commencer par soi-même avec le rôle `admin`** : tant que la table
+   est vide tout le monde est administrateur, dès la première ligne les autres utilisateurs passent en lecture
+   seule (règles métier § 12). Les **Délégations** (délégant, destinataire, dates) se saisissent ensuite.
 6. **Stock de référence** — article, date du stock (veille au soir), stock physique, stock bloqué.
 
 Chaque ligne est aussi modifiable à la souris (clic sur la ligne) ou ajoutable (*Ajouter*). *Exporter*
@@ -299,6 +303,7 @@ groupe). Leur identité arrive à l'application par l'en-tête `x-forwarded-emai
 | Job : `permission denied` sur les tables de l'App | l'App accorde elle-même l'écriture sur `erp_*` (et `USAGE` sur son schéma) au `sync_role` ; le job vérifie la présence des tables et nomme la cause |
 | `permission denied for schema public` au premier `CREATE TABLE` (rôle de l'App sans `CREATE` sur `public`) | l'App crée et possède son propre schéma `appro` (`APPRO_DB_SCHEMA`), placé en tête du `search_path` de chaque connexion ; le job écrit dans ce schéma (`--pg-schema`) |
 | `Scheduled — Paused` sans qu'aucune commande n'échoue | `pause_status` posé sur la ressource, déclaré par chaque cible, avec `timezone_id` |
+| Le tableau ne se rafraîchit pas après une saisie (il faut Ctrl+Maj+R) : l'App tourne avec **plusieurs workers** uvicorn (`APPRO_WORKERS`, 2 par défaut), chacun avec son cache mémoire ; l'écriture servie par l'un n'invalidait pas le cache de l'autre | compteur `data_version` dans la table `app_meta`, incrémenté à chaque écriture et relu à chaque calcul : tout worker jette son cache dès qu'un autre a écrit ; réponses `/api/*` en `Cache-Control: no-store` |
 
 ---
 

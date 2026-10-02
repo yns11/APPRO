@@ -84,7 +84,7 @@ def projection(article_id: str, granularity: Literal["default", "day", "week"] =
 @router.get("/articles/{article_id}/delivery-plan", response_model=S.DeliveryPlanResponse)
 def delivery_plan(article_id: str, horizon_days: int | None = HORIZON, ctx: AppContext = Depends(ctx_dep),
                   session: Session = Depends(session_dep)):
-    """The Plan row as an ERP delivery schedule: one line per supplier and day with a quantity."""
+    """The Plan row as an ERP delivery schedule: one line per supplier and ISO week with a quantity."""
     result = mrp_service.compute(ctx, session, article_ids=[article_id], **_kw(horizon_days=horizon_days))
     ar = result.articles.get(article_id)
     if ar is None:
@@ -147,14 +147,20 @@ def programs_impact(planner: str | None = None, horizon_days: int | None = HORIZ
 @router.get("/articles/{article_id}/weekly-params", response_model=S.WeeklyParamsResponse)
 def weekly_params(article_id: str, weeks: int = Query(26, ge=1, le=104), ctx: AppContext = Depends(ctx_dep),
                   session: Session = Depends(session_dep)):
-    """Stock-policy parameters per ISO week from the reference week (article values, weekly overrides)."""
+    """Stock-policy parameters per ISO week from the reference week (article values, weekly overrides).
+    The calendar runs at least ``weeks`` weeks and up to the last week of the loaded PDP (ERP table or
+    imported version) and to the end of the horizon, whichever is later."""
     ds = erp_dataset(ctx.table, article_ids=[article_id])
     if not ds.articles:
         raise HTTPException(404, f"Article inconnu : {article_id}")
+    mrp_service.app_entries_into_dataset(ds, session)
     mrp_service.apply_weekly_overrides(ds, session.scalars(select(ParamOverride).where(ParamOverride.scope == "article_week")).all())
     a = ds.articles[0]
     params = mrp_service.build_params(ctx, session)
-    monday = iso_week_monday(resolve_as_of(ds, params))
+    as_of = resolve_as_of(ds, params)
+    monday = iso_week_monday(as_of)
+    last = max([p.week_start for p in ds.pdp] + [as_of + dt.timedelta(days=params.horizon_days)])
+    weeks = min(max(weeks, (last - monday).days // 7 + 1), 160)
     rows = []
     for k in range(weeks):
         d = monday + dt.timedelta(days=7 * k)

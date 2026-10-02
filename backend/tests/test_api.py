@@ -9,13 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from tests.conftest import SEED
 
 from appro.api.main import create_app
 from appro.config import Settings
-from appro.data.store import Base
+from appro.data.store import init_store
+from appro.services import mrp_service
 from appro.services.context import AppContext, bootstrap_reference, set_context
 
 AS_OF = "2026-09-19"
@@ -23,10 +22,10 @@ AID = "P-00001046"
 
 
 @pytest.fixture()
-def client(seed_source):
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+def client(seed_source, tmp_path):
+    # a file database: several connections, like the PostgreSQL pool of the deployed application
+    engine = create_engine(f"sqlite:///{tmp_path / 'appro.db'}", connect_args={"check_same_thread": False})
+    factory = init_store(engine)
     assert bootstrap_reference(factory, SEED) > 0
     settings = Settings(data_source="local", seed_dir=SEED, as_of=dt.date.fromisoformat(AS_OF), horizon_days=90,
                         static_dir=SEED / "no-such-dir")
@@ -180,7 +179,8 @@ def test_default_calendar_grid_and_program_impact(client):
 
 def test_weekly_article_parameters_api(client):
     r = client.get(f"/api/articles/{AID}/weekly-params", params={"weeks": 4}).json()
-    assert r["fields"][0] == "coverage_target_days" and len(r["weeks"]) == 4 and r["weeks"][0]["week"] == "2026-W38"
+    # at least 4 weeks, and up to the last PDP week / end of horizon (90 days here = 13 weeks)
+    assert r["fields"][0] == "coverage_target_days" and len(r["weeks"]) >= 13 and r["weeks"][0]["week"] == "2026-W38"
     wk = r["weeks"][1]["week"]
     assert client.put("/api/params/overrides", json={"scope": "article_week", "key1": AID, "key2": "bad", "field": "coverage_target_days", "value": 20}).status_code == 422
     ok = client.put("/api/params/overrides", json={"scope": "article_week", "key1": AID, "key2": wk, "field": "coverage_target_days", "value": 20})
@@ -212,7 +212,8 @@ def test_params_overrides(client):
 def test_reference_crud_template_and_import(client):
     tables = client.get("/api/reference/tables").json()
     names = {t["name"]: t for t in tables}
-    assert set(names) == {"ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_programs", "ref_bom", "fct_stock"}
+    assert set(names) == {"ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_programs", "ref_bom", "fct_stock",
+                          "ref_planners", "ref_delegations"}
     assert names["ref_articles"]["rows"] == 16 and names["ref_suppliers"]["rows"] == 11 and names["ref_programs"]["rows"] == 25
     assert names["ref_articles"]["key"] == ["article_id"] and any(c["label"] == "Couverture cible (j)" for c in names["ref_articles"]["columns"])
     # edit a threshold directly: the engine sees it
@@ -381,13 +382,137 @@ def test_flags_toggle_batches_and_delivery_plan(client):
     adj = client.put("/api/entries/adjustments/batch", json={"cells": [{"article_id": AID, "date": d, "expression": "-10"} for d in ("2026-10-06", "2026-10-07")]}).json()
     assert len(adj) == 2 and all(c["qty"] == -10 for c in adj)
     assert client.put("/api/entries/plan/batch", json={"cells": [{"article_id": AID, "date": "2026-10-06", "expression": "-1"}]}).status_code == 422
-    # delivery plan: the Plan row as ERP schedule lines (day + 6 days)
+    # delivery plan: the Plan row (typed cells, ERP firm, CBN proposals) per supplier and ISO week (Monday → Sunday)
     dp = client.get(f"/api/articles/{AID}/delivery-plan").json()
     rows = {r["date"]: r for r in dp["rows"]}
-    assert rows["2026-10-06"]["qty"] == 250 and rows["2026-10-06"]["end_date"] == "2026-10-12" and rows["2026-10-06"]["typed"]
-    assert all(r["qty"] > 0 and r["date"] >= AS_OF for r in dp["rows"]) and dp["unit"] == "KG"
+    wk = rows["2026-10-05"]
+    assert wk["week"] == "2026-W41" and wk["end_date"] == "2026-10-11" and wk["typed"] and wk["typed_qty"] == 750
+    assert abs(wk["qty"] - (wk["typed_qty"] + wk["erp_qty"] + wk["cbn_qty"])) < 1e-6
+    assert all(r["qty"] > 0 and r["date"] >= "2026-09-14" and dt.date.fromisoformat(r["date"]).weekday() == 0 for r in dp["rows"])
+    assert dp["unit"] == "KG"
+    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "week"}).json()
+    assert any(p["qty"] > 0 for p in proj["proposals"])   # proposals exist, so the schedule carries CBN quantities
+    assert sum(r["cbn_qty"] for r in dp["rows"]) > 0
     # paging and search of the supply table
     g = client.get("/api/grid", params={"planner": "QUENTIN", "page_size": 5, "page": 2}).json()
     assert g["total"] == 16 and len(g["articles"]) == 5 and g["page"] == 2
     g2 = client.get("/api/grid", params={"planner": "QUENTIN", "q": "resin"}).json()
     assert g2["total"] >= 1 and all("RESIN" in a["article"]["designation"].upper() for a in g2["articles"])
+
+
+def test_data_version_is_shared_between_worker_processes(seed_source, tmp_path):
+    """Two application contexts over the same database (= two uvicorn workers): a write served by one
+    must invalidate the computed cache of the other."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'appro.db'}", connect_args={"check_same_thread": False})
+    factory = init_store(engine)
+    assert bootstrap_reference(factory, SEED) > 0
+    settings = Settings(data_source="local", seed_dir=SEED, as_of=dt.date.fromisoformat(AS_OF), horizon_days=60,
+                        static_dir=SEED / "no-such-dir")
+    a = AppContext(settings=settings, source=seed_source, session_factory=factory)
+    b = AppContext(settings=settings, source=seed_source, session_factory=factory)
+    with a.session() as s:
+        before = mrp_service.compute(a, s, article_ids=[AID]).articles[AID].kpis["plan_cell_count"]
+    with b.session() as s:
+        assert mrp_service.compute(b, s, article_ids=[AID]).articles[AID].kpis["plan_cell_count"] == before
+    # worker A writes a plan cell (route code path: service + commit + bump)
+    with a.session() as s:
+        d = dt.date.fromisoformat(AS_OF) + dt.timedelta(days=3)
+        mrp_service.set_plan_cell(s, "quentin@example.com", AID, None, d, "123")
+        s.commit()
+    a.bump()
+    with b.session() as s:
+        after = mrp_service.compute(b, s, article_ids=[AID]).articles[AID].kpis["plan_cell_count"]
+    assert after == before + 1
+    assert b.data_version == a.data_version
+
+
+def test_weekly_overrides_batch_and_reset(client):
+    items = [{"key2": "2026-W40", "field": "coverage_target_days", "value": 12}, {"key2": "2026-W41", "field": "coverage_target_days", "value": 14},
+             {"key2": "2026-W41", "field": "safety_stock_qty", "value": 50}]
+    r = client.put("/api/params/overrides/batch", json={"scope": "article_week", "key1": AID, "items": items})
+    assert r.status_code == 200 and len(r.json()) == 3
+    weeks = {w["week"]: w for w in client.get(f"/api/articles/{AID}/weekly-params").json()["weeks"]}
+    assert weeks["2026-W41"]["values"]["coverage_target_days"] == 14 and weeks["2026-W41"]["overridden"] == ["coverage_target_days", "safety_stock_qty"]
+    # an empty value restores the article value for that week
+    r = client.put("/api/params/overrides/batch", json={"scope": "article_week", "key1": AID, "items": [{"key2": "2026-W41", "field": "coverage_target_days", "value": ""}]})
+    assert r.status_code == 200 and r.json() == []
+    weeks = {w["week"]: w for w in client.get(f"/api/articles/{AID}/weekly-params").json()["weeks"]}
+    assert weeks["2026-W41"]["overridden"] == ["safety_stock_qty"] and weeks["2026-W40"]["overridden"] == ["coverage_target_days"]
+    assert client.put("/api/params/overrides/batch", json={"scope": "article_week", "key1": AID, "items": [{"key2": "2026-W41", "field": "coverage_target_days", "value": "abc"}]}).status_code == 422
+    # reset everything
+    assert client.delete("/api/params/overrides", params={"scope": "article_week", "key1": AID}).status_code == 204
+    assert all(not w["overridden"] for w in client.get(f"/api/articles/{AID}/weekly-params").json()["weeks"])
+    assert client.get("/api/params/overrides", params={"scope": "article_week", "key1": AID}).json() == []
+
+
+def test_planners_delegations_and_roles(client):
+    """Empty planner table = everybody admin ; then each role sees its rights enforced."""
+    cfg = client.get("/api/config").json()
+    assert cfg["access"]["role"] == "admin" and cfg["access"]["bootstrap"] is True
+    arts = client.get("/api/reference/ref_articles/rows").json()
+    mine = next(a for a in arts if a["article_id"] == AID)["planner"]
+    # the seed has a single planner: hand one article over to a colleague (as the bootstrap admin)
+    other = next(a for a in arts if a["article_id"] != AID)
+    other["planner"] = "ALICE"
+    assert client.put("/api/reference/ref_articles/rows", json={"values": other}).status_code == 200
+    root = {"x-forwarded-email": "root@example.com"}
+    put = lambda vals, h=root: client.put("/api/reference/ref_planners/rows", json={"values": vals}, headers=h)  # noqa: E731
+    # first row = the administrator (declared while everybody is still admin) ; the others by the admin
+    assert put({"planner_id": "PROC0", "name": "ROOT", "email": "root@example.com", "role": "admin", "active": True}, {}).status_code == 200
+    assert put({"planner_id": "PROC1", "name": mine, "email": "Quentin@Example.com", "role": "appro", "active": True}, {}).status_code == 403  # quentin is now a reader
+    assert put({"planner_id": "PROC1", "name": mine, "email": "Quentin@Example.com", "role": "appro", "active": True}).status_code == 200
+    assert put({"planner_id": "PROC2", "name": other["planner"], "email": "other@example.com", "role": "appro", "active": True}).status_code == 200
+    assert put({"planner_id": "PROC9", "name": "BOSS", "email": "boss@example.com", "role": "manager", "active": True}).status_code == 200
+    assert put({"planner_id": "PROCX", "name": "X", "email": "x@example.com", "role": "king", "active": True}).status_code == 422
+    # the test client is quentin: an appro (e-mail matched case-insensitively), default perimeter = his portfolio
+    cfg = client.get("/api/config").json()
+    acc = cfg["access"]
+    assert acc["role"] == "appro" and acc["planner_id"] == "PROC1" and acc["portfolio"] == [mine.upper()] and not acc["can_manage_params"]
+    assert cfg["default_planner"] == mine
+    day = (dt.date.fromisoformat(AS_OF) + dt.timedelta(days=5)).isoformat()
+    assert client.put("/api/entries/plan", json={"article_id": AID, "date": day, "expression": "10"}).status_code == 200
+    r = client.put("/api/entries/plan", json={"article_id": other["article_id"], "date": day, "expression": "10"})
+    assert r.status_code == 403 and "hors de votre carnet" in r.json()["detail"]
+    assert client.put("/api/entries/adjustments", json={"article_id": other["article_id"], "date": day, "expression": "-1"}).status_code == 403
+    assert client.post("/api/entries/flags/toggle", json={"article_id": other["article_id"], "date": day, "kind": "proposal_refused", "qty": 1}).status_code == 403
+    assert client.put("/api/params/overrides", json={"scope": "global", "field": "frozen_days", "value": 2}).status_code == 403
+    assert client.put("/api/params/overrides", json={"scope": "article_week", "key1": other["article_id"], "key2": "2026-W40", "field": "coverage_target_days", "value": 2}).status_code == 403
+    assert client.put("/api/params/overrides", json={"scope": "article_week", "key1": AID, "key2": "2026-W40", "field": "coverage_target_days", "value": 2}).status_code == 200
+    assert put({"planner_id": "PROC3", "name": "Z", "email": "z@example.com", "role": "appro", "active": True}, {}).status_code == 403
+    assert client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", b"x")}).status_code == 403
+    # his own article row: yes ; somebody else's: no ; giving his article away: no
+    row = next(a for a in arts if a["article_id"] == AID)
+    assert client.put("/api/reference/ref_articles/rows", json={"values": {**row, "coverage_target_days": 9}}).status_code == 200
+    assert client.put("/api/reference/ref_articles/rows", json={"values": {**row, "planner": other["planner"]}}).status_code == 403
+    assert client.put("/api/reference/ref_articles/rows", json={"values": {**other, "coverage_target_days": 9}}).status_code == 403
+    # a reader (not declared) and an inactive planner write nothing
+    reader = {"x-forwarded-email": "nobody@example.com"}
+    assert client.get("/api/config", headers=reader).json()["access"]["role"] == "reader"
+    assert client.put("/api/entries/plan", json={"article_id": AID, "date": day, "expression": "10"}, headers=reader).status_code == 403
+    assert client.post("/api/reference/refresh", headers=reader).status_code == 403
+    # delegation PROC2 → PROC1 (other's portfolio) between two dates covering today
+    today = dt.date.today()
+    deleg = {"from_planner": "PROC2", "to_planner": "PROC1", "date_from": (today - dt.timedelta(days=1)).isoformat(),
+             "date_to": (today + dt.timedelta(days=7)).isoformat(), "note": "congés", "active": True}
+    # an appro may only delegate his own portfolio: quentin cannot create a delegation from PROC2
+    assert client.put("/api/reference/ref_delegations/rows", json={"values": deleg}).status_code == 403
+    other_hdr = {"x-forwarded-email": "other@example.com"}
+    assert client.put("/api/reference/ref_delegations/rows", json={"values": deleg}, headers=other_hdr).status_code == 200
+    acc = client.get("/api/config").json()["access"]
+    assert set(acc["portfolio"]) == {mine.upper(), other["planner"].upper()} and acc["delegated_from"] == ["PROC2"]
+    assert client.put("/api/entries/plan", json={"article_id": other["article_id"], "date": day, "expression": "10"}).status_code == 200
+    # expired delegation does not count
+    assert client.put("/api/reference/ref_delegations/rows", json={"values": {**deleg, "date_to": (today - dt.timedelta(days=1)).isoformat()}}, headers=other_hdr).status_code == 200
+    assert client.get("/api/config").json()["access"]["portfolio"] == [mine.upper()]
+    # manager: global rules, any article's weeks, PDP, reference tables – but not the planners
+    boss = {"x-forwarded-email": "boss@example.com"}
+    assert client.put("/api/params/overrides", json={"scope": "global", "field": "frozen_days", "value": 2}, headers=boss).status_code == 200
+    assert client.put("/api/params/overrides", json={"scope": "article_week", "key1": other["article_id"], "key2": "2026-W40", "field": "coverage_target_days", "value": 2}, headers=boss).status_code == 200
+    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC3", "name": "Z", "email": "z@example.com", "role": "appro", "active": True}}, headers=boss).status_code == 403
+    assert client.put("/api/entries/plan", json={"article_id": other["article_id"], "date": day, "expression": "10"}, headers=boss).status_code == 403
+    assert client.get("/api/config", headers=boss).json()["access"]["can_import_pdp"] is True
+    assert client.post("/api/pdp/import", files={"file": ("f.xlsx", b"")}, headers=reader).status_code == 403
+    # admin: everything
+    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC3", "name": "Z", "email": "z@example.com", "role": "appro", "active": True}}, headers=root).status_code == 200
+    assert client.put("/api/entries/plan", json={"article_id": other["article_id"], "date": day, "expression": "10"}, headers=root).status_code == 200
+    assert client.delete("/api/params/overrides", params={"scope": "global"}, headers=root).status_code == 204

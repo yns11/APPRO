@@ -1,11 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { ConfigOut } from "@/lib/types";
+import { DISPLAY_DEFAULTS, applyDisplay, type Display } from "@/lib/display";
+import type { AccessOut, ConfigOut } from "@/lib/types";
 
 /** Global "perimeter" of the analysis: planner, horizon, granularity, theme, hidden grid rows. */
 export interface Perimeter {
   planner: string | null;
+  /** the user picked a perimeter in the top bar (null = everybody) ; until then the default applies */
+  plannerChosen?: boolean;
   horizonDays: number;
   granularity: "default" | "day" | "week";
   theme: "light" | "dark" | "system";
@@ -16,6 +19,23 @@ export interface Perimeter {
   showSunday: boolean;
   /** navigation panel reduced to its icons */
   sidebarCollapsed: boolean;
+  /** fonts and sizes (Paramètres › Affichage) */
+  display: Display;
+}
+
+/** What the signed-in user may write (mirror of the server rules ; the server enforces them). */
+export interface Rights {
+  access: AccessOut | undefined;
+  /** the Plan / Ajustement / Ferme / CBN cells of this article's planner are editable */
+  canEditPlanner: (planner: string | null | undefined) => boolean;
+  canWrite: boolean;
+  canManageParams: boolean;
+  canImportPdp: boolean;
+  isAdmin: boolean;
+  /** add / edit rows of a reference table (row-level rules still apply on the server) */
+  canEditTable: (name: string) => boolean;
+  /** replace / import a whole reference table */
+  canImportTable: (name: string) => boolean;
 }
 
 interface Ctx {
@@ -25,15 +45,17 @@ interface Ctx {
   configError: Error | null;
   /** query params shared by every engine call */
   engineParams: { planner: string | null; horizon_days: number };
+  rights: Rights;
 }
 
 const KEY = "appro.perimeter.v2";
-const defaults: Perimeter = { planner: null, horizonDays: 120, granularity: "default", theme: "system", hiddenRows: [], showSaturday: true, showSunday: true, sidebarCollapsed: false };
+const defaults: Perimeter = { planner: null, horizonDays: 120, granularity: "default", theme: "system", hiddenRows: [], showSaturday: true, showSunday: true, sidebarCollapsed: false, display: DISPLAY_DEFAULTS };
 
 function load(): Perimeter {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...defaults, ...(JSON.parse(raw) as Partial<Perimeter>) } : defaults;
+    const saved = raw ? (JSON.parse(raw) as Partial<Perimeter>) : {};
+    return { ...defaults, ...saved, display: { ...DISPLAY_DEFAULTS, ...(saved.display ?? {}) } };
   } catch {
     return defaults;
   }
@@ -50,8 +72,8 @@ export function PerimeterProvider({ children }: { children: ReactNode }) {
   }, [perimeter]);
 
   useEffect(() => {
-    if (config && perimeter.planner === null && config.default_planner) setPerimeter((p) => ({ ...p, planner: config.default_planner }));
-  }, [config, perimeter.planner]);
+    if (config && perimeter.planner === null && !perimeter.plannerChosen && config.default_planner) setPerimeter((p) => ({ ...p, planner: config.default_planner }));
+  }, [config, perimeter.planner, perimeter.plannerChosen]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -65,9 +87,23 @@ export function PerimeterProvider({ children }: { children: ReactNode }) {
     return () => mq.removeEventListener("change", apply);
   }, [perimeter.theme]);
 
+  useEffect(() => { applyDisplay(perimeter.display); }, [perimeter.display]);
+
   const set = useCallback((patch: Partial<Perimeter>) => setPerimeter((p) => ({ ...p, ...patch })), []);
   const engineParams = useMemo(() => ({ planner: perimeter.planner, horizon_days: perimeter.horizonDays }), [perimeter.planner, perimeter.horizonDays]);
-  const value = useMemo(() => ({ perimeter, set, config, configError: error as Error | null, engineParams }), [perimeter, set, config, error, engineParams]);
+  const rights = useMemo<Rights>(() => {
+    const a = config?.access;
+    const portfolio = new Set((a?.portfolio ?? []).map((p) => p.toUpperCase()));
+    const ARTICLE_TABLES = ["ref_articles", "ref_article_suppliers", "ref_bom", "fct_stock", "ref_delegations"];
+    return {
+      access: a,
+      canEditPlanner: (planner) => !!a && (a.is_admin || (!!planner && portfolio.has(planner.toUpperCase()))),
+      canWrite: !!a?.can_write, canManageParams: !!a?.can_manage_params, canImportPdp: !!a?.can_import_pdp, isAdmin: !!a?.is_admin,
+      canEditTable: (name) => !!a && (a.is_admin || (a.can_manage_params && name !== "ref_planners") || (a.can_write && ARTICLE_TABLES.includes(name))),
+      canImportTable: (name) => !!a && (a.is_admin || (a.can_manage_params && name !== "ref_planners")),
+    };
+  }, [config]);
+  const value = useMemo(() => ({ perimeter, set, config, configError: error as Error | null, engineParams, rights }), [perimeter, set, config, error, engineParams, rights]);
   return <PerimeterCtx.Provider value={value}>{children}</PerimeterCtx.Provider>;
 }
 

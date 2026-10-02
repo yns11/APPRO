@@ -111,6 +111,25 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("qty_blocked", "float", "Stock bloqué", "déduit du stock physique", False, 0),
            Column("unit", "str", "Unité", "", False, "KG"),
        ]),
+    _t("ref_planners", "Approvisionneurs", "Approvisionneurs et droits : chaque approvisionneur écrit sur son carnet d'articles "
+       "(colonne Approvisionneur des articles) ; manager = paramètres pour tous + import des PDP ; admin = tous les droits. "
+       "Tant que la table est vide, tout utilisateur est administrateur.",
+       ("planner_id",), [
+           Column("planner_id", "str", "ID", "identifiant (PROC1, PROC2…)", True, "PROC1"),
+           Column("name", "str", "Approvisionneur", "prénom / code tel qu'il figure dans la colonne Approvisionneur des articles", True, "QUENTIN"),
+           Column("email", "str", "Email", "identifiant de connexion Databricks", True, "quentin@exemple.com"),
+           Column("role", "str", "Rôle", "appro, manager ou admin", True, "appro"),
+           Column("active", "bool", "Actif", "inactif = lecture seule", True, True),
+       ]),
+    _t("ref_delegations", "Délégations", "Un approvisionneur confie l'écriture sur son carnet à un collègue entre deux dates.",
+       ("from_planner", "to_planner", "date_from"), [
+           Column("from_planner", "str", "Délégant (ID)", "approvisionneur qui délègue son carnet", True, "PROC1"),
+           Column("to_planner", "str", "Destinataire (ID)", "approvisionneur qui reçoit l'accès", True, "PROC2"),
+           Column("date_from", "date", "Du", "premier jour de la délégation", True, dt.date(2026, 10, 5)),
+           Column("date_to", "date", "Au", "dernier jour (vide = sans fin)", False, dt.date(2026, 10, 16)),
+           Column("note", "str", "Motif", "", False, "congés"),
+           Column("active", "bool", "Active", "", True, True),
+       ]),
     # ------------------------------------------------------------------ ERP facts
     _t("fct_purchase_orders", "Commandes ERP", "Créneaux de livraison ERP : fournisseur | article | date | ferme (commandes_edi).",
        ("order_id",), [

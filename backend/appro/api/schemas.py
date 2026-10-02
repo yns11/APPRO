@@ -239,16 +239,22 @@ class GridResponse(BaseModel):
 
 
 class DeliveryRow(BaseModel):
+    """One ISO week of the Plan row for one supplier: ``date`` = Monday, ``end_date`` = Sunday."""
+
     supplier_id: str | None
     supplier_name: str
+    week: str
     date: dt.date
     end_date: dt.date
     qty: float
+    typed_qty: float
+    erp_qty: float
+    cbn_qty: float
     typed: bool
 
 
 class DeliveryPlanResponse(BaseModel):
-    """The *Plan* row as an ERP delivery schedule (one line per supplier and day with a quantity)."""
+    """The *Plan* row as an ERP delivery schedule (one line per supplier and ISO week with a quantity)."""
 
     article_id: str
     designation: str
@@ -368,6 +374,18 @@ class ParamOverrideIn(BaseModel):
     value: str | int | float | bool | None
 
 
+class ParamOverrideItemIn(BaseModel):
+    key2: str = ""
+    field: str
+    value: str | int | float | bool | None
+
+
+class ParamOverrideBatchIn(BaseModel):
+    scope: Literal["global", "article_week"]
+    key1: str = ""
+    items: list[ParamOverrideItemIn]
+
+
 class ParamOverrideOut(ORM):
     id: str
     scope: str
@@ -429,3 +447,4 @@ class ConfigOut(BaseModel):
     user: str
     version: str
     reference_empty: bool
+    access: dict[str, Any]

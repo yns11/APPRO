@@ -15,10 +15,10 @@ du tableau se saisissent, *Plan* (une par fournisseur) et *Ajustement* ; deux li
 | Fiche article | tableau (Besoin ; par fournisseur : Ferme **cliquable** (commandé / restant, en cours / soldée / ignorée), Prévisionnel, Reçu, **Plan** ; Proposition CBN **cliquable** (refus, semaine bloquée) ; **Ajustement** ; Scenario ERP ; Scenario Plan avec couverture et manque dans les cellules ; poignée de **recopie** sur Plan et Ajustement), KPI, courbes, **planning de livraison** (lignes ERP copiables, FR / EN), commandes ERP, propositions, alertes |
 | Propositions CBN | une proposition par fournisseur et par jour de livraison |
 | Saisies & journal | cellules du plan, ajustements, journal nominatif |
-| Référentiel | articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures, stock de référence : CRUD et **modèle Excel par table** |
+| Référentiel | articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures, stock de référence, **approvisionneurs (rôles) et délégations** : CRUD et **modèle Excel par table** ; paramètres par semaine édités comme une feuille |
 | Impact programmes | production réalisable par programme et semaine |
 | Imports / exports | PDP hebdomadaire (modèle), classeur de simulation à formules (export, réimport), alertes, plan |
-| Paramètres & règles | règles globales du moteur |
+| Paramètres | règles d'approvisionnement du moteur, affichage (polices, tailles), administration (droits) |
 
 ## Démarrage rapide (local)
 

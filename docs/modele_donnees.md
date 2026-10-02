@@ -33,6 +33,8 @@ import *remplacer* / *fusionner*, export). Schéma canonique `backend/appro/data
 | `ref_article_suppliers` | article_id, supplier_id | MOQ, PLA, délai, quota, priorité → **voies** du tableau |
 | `ref_programs` | program_id | programmes (nom du fichier PDP) |
 | `ref_bom` | program_id, article_id | nomenclature 1 niveau |
+| `ref_planners` | planner_id | approvisionneurs : nom (= colonne *Approvisionneur* des articles), e-mail Databricks, rôle (appro / manager / admin), actif |
+| `ref_delegations` | from_planner, to_planner, date_from | un carnet confié à un collègue entre deux dates |
 | `fct_stock` | article_id, snapshot_date | stock de référence (fin de journée) |
 
 ## 2. Faits ERP
@@ -58,6 +60,7 @@ Deux tables seulement, à l'image des deux lignes éditables du tableau :
 | `app_plan_cells` | article_id, supplier_id, date | quantité planifiée d'un fournisseur un jour donné (0 = rien attendu), expression, commentaire, auteur |
 | `app_adjustments` | article_id, date | ajustement signé (≤ référence : correction du stock de référence), expression, commentaire, auteur |
 | `app_cell_flags` | kind, article_id, supplier_id, date | commande ferme ignorée (hors Scenario ERP et hors plan) ou proposition CBN refusée (quantité affichée, semaine bloquée) |
+| `app_meta` | key | `data_version` : compteur partagé entre les workers de l'App, incrémenté à chaque écriture (invalidation des caches) |
 
 Plus les versions de PDP importées, les paramètres (`global`, `article_week`) et le journal.
 

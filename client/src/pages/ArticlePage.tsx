@@ -17,7 +17,7 @@ type Tab = "chart" | "delivery" | "plan" | "orders" | "proposals" | "adjustments
 
 export default function ArticlePage() {
   const { articleId } = useParams();
-  const { perimeter, set, engineParams } = usePerimeter();
+  const { perimeter, set, engineParams, rights } = usePerimeter();
   const [tab, setTab] = useState<Tab>("chart");
   const q = useProjection(articleId);
   const planCells = usePlanCells(articleId ? { article_id: articleId } : undefined);
@@ -49,8 +49,8 @@ export default function ArticlePage() {
     { key: "expr", label: "Saisie", get: (c) => c.expression, render: (c) => <span className="mono small">{c.expression}</span> },
     { key: "note", label: "Commentaire", get: (c) => c.note },
     { key: "who", label: "Modifié", get: (c) => `${c.updated_by} ${c.updated_at}`, render: (c) => <span className="subtle small">{c.updated_by}<br />{fmtDateTime(c.updated_at)}</span> },
-    { key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (c) => <Button size="sm" variant="ghost" title="Supprimer : la cellule revient à l'ERP" onClick={() => delPlan.mutate(c.id)}><Trash2 /></Button> },
-  ], [unit, delPlan]);
+    ...(rights.canWrite ? [{ key: "del", label: "", get: () => "", filter: "none" as const, sortable: false, render: (c: PlanCellOut) => <Button size="sm" variant="ghost" title="Supprimer : la cellule revient à l'ERP" onClick={() => delPlan.mutate(c.id)}><Trash2 /></Button> }] : []),
+  ], [unit, delPlan, rights.canWrite]);
   const adjCols = useMemo<Column<AdjustmentOut>[]>(() => [
     { key: "date", label: "Date", get: (c) => c.date, render: (c) => fmtDate(c.date) },
     { key: "qty", label: "Quantité", get: (c) => c.qty, num: true, render: (c) => <b className={c.qty < 0 ? "delta down" : "delta up"}>{c.qty > 0 ? "+" : ""}{fmtQty(c.qty, unit)}</b> },

@@ -111,8 +111,8 @@ def app_entries_into_dataset(ds: Dataset, session: Session) -> None:
         ds.meta["pdp_version"] = {"id": active.id, "name": active.name}
 
 
-def _cache_key(ctx: AppContext, planner: str | None, article_ids: list[str] | None, params: EngineParams) -> str:
-    payload = {"v": ctx.data_version, "planner": planner, "articles": sorted(article_ids or []),
+def _cache_key(version: int, planner: str | None, article_ids: list[str] | None, params: EngineParams) -> str:
+    payload = {"v": version, "planner": planner, "articles": sorted(article_ids or []),
                "params": dataclasses.asdict(params)}
     return hashlib.sha1(json.dumps(payload, default=str, sort_keys=True).encode()).hexdigest()
 
@@ -121,7 +121,7 @@ def compute(ctx: AppContext, session: Session, planner: str | None = None, artic
             **param_overrides: Any) -> MrpResult:
     """Run (or fetch from cache) the MRP for the given perimeter / parameters."""
     params = build_params(ctx, session, **{k: v for k, v in param_overrides.items() if v is not None})
-    key = _cache_key(ctx, planner, article_ids, params)
+    key = _cache_key(ctx.sync_version(session), planner, article_ids, params)
     cached = ctx.cache_get(key)
     if cached is not None:
         return cached

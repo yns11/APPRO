@@ -8,6 +8,8 @@ import { fmtDate } from "@/lib/format";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/ui";
 
+const ROLE_LABELS: Record<string, string> = { reader: "lecture seule", appro: "approvisionneur", manager: "manager", admin: "administrateur" };
+
 const NAV = [
   { to: "/", label: "Cockpit du jour", icon: LayoutDashboard, end: true },
   { to: "/tableau", label: "Tableau d'approvisionnement", icon: Table },
@@ -49,7 +51,8 @@ export default function AppShell() {
           {MORE.map(link)}
         </nav>
         <div className="foot">
-          <div>{config?.user ?? "…"}</div>
+          <div title={config?.access ? `${config.access.user} · ${ROLE_LABELS[config.access.role]}${config.access.portfolio.length ? ` · carnet : ${config.access.portfolio.join(", ")}` : ""}` : undefined}>{config?.access?.name || config?.user || "…"}</div>
+          {config?.access && <div><span className={`badge ${config.access.role === "reader" ? "neutral" : config.access.role === "admin" ? "critical" : config.access.role === "manager" ? "warning" : "brand"}`}>{ROLE_LABELS[config.access.role]}{config.access.bootstrap ? " (table vide)" : ""}</span></div>}
           <div>Source : {String(config?.data_source?.name ?? "…")}</div>
           <div>v{config?.version ?? ""}</div>
         </div>
@@ -60,7 +63,7 @@ export default function AppShell() {
           <div className="ctx">
             <label className="field" style={{ minWidth: 150 }}>
               <span className="sr-only">Périmètre</span>
-              <select className="select sm" value={perimeter.planner ?? ""} onChange={(e) => set({ planner: e.target.value || null })}>
+              <select className="select sm" value={perimeter.planner ?? ""} onChange={(e) => set({ planner: e.target.value || null, plannerChosen: true })}>
                 <option value="">Tous les approvisionneurs</option>
                 {(config?.planners ?? []).map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
@@ -74,7 +77,7 @@ export default function AppShell() {
           </div>
           <div className="right row">
             <span className="freshness">Référence : <b>{config ? fmtDate(config.as_of) : "…"}</b></span>
-            <Button variant="ghost" icon title="Recharger les données ERP" onClick={refresh}><RefreshCw /></Button>
+            {config?.access?.can_write && <Button variant="ghost" icon title="Recharger les données ERP" onClick={refresh}><RefreshCw /></Button>}
             <Button variant="ghost" icon title={`Thème : ${perimeter.theme}`} onClick={cycleTheme}><ThemeIcon /></Button>
           </div>
         </header>

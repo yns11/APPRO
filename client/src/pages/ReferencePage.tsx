@@ -4,6 +4,7 @@ import { CalendarDays, Download, Plus, Trash2, Upload } from "lucide-react";
 import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { DataTable, type Column } from "@/components/DataTable";
 import { usePdpErp, usePrograms, useRefRows, useRefTables, useWrite } from "@/lib/queries";
+import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
 import { Badge, Button, Card, Drawer, Empty, ErrorBox, Field, SkeletonBlock, Tabs, useToast } from "@/components/ui";
 import { fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
@@ -14,9 +15,10 @@ const fmtCell = (c: RefColumn, v: RefValue) => v === null || v === undefined || 
 /** Reference data managed in the application: one CRUD table per reference table, Excel template / import / export. */
 export default function ReferencePage() {
   const tables = useRefTables();
+  const { rights } = usePerimeter();
   const [tab, setTab] = useState<string>("ref_articles");
   const [editing, setEditing] = useState<RefRow | null>(null);
-  const [weeklyOf, setWeeklyOf] = useState<string | null>(null);
+  const [weeklyOf, setWeeklyOf] = useState<{ id: string; planner: string | null } | null>(null);
   const [report, setReport] = useState<ImportReport | null>(null);
   const [program, setProgram] = useState("");
   const toast = useToast();
@@ -37,40 +39,43 @@ export default function ReferencePage() {
       render: (r) => c.key && c.name === "article_id" ? <Link to={`/articles/${encodeURIComponent(String(r[c.name]))}`} onClick={(e) => e.stopPropagation()}><b>{String(r[c.name])}</b></Link>
         : c.type === "bool" ? <Badge tone={r[c.name] ? "ok" : "neutral"}>{r[c.name] ? "oui" : "non"}</Badge> : <>{fmtCell(c, r[c.name])}</>,
     }));
-    if (table.name === "ref_articles") out.push({ key: "weeks", label: "Semaines", get: () => "", filter: "none", sortable: false, render: (r) => <Button size="sm" variant="ghost" title="Personnaliser la politique de stock semaine par semaine" onClick={(e) => { e.stopPropagation(); setWeeklyOf(String(r.article_id)); }}><CalendarDays /></Button> });
+    if (table.name === "ref_articles") out.push({ key: "weeks", label: "Semaines", get: () => "", filter: "none", sortable: false, render: (r) => <Button size="sm" variant="ghost" title="Politique de stock semaine par semaine" onClick={(e) => { e.stopPropagation(); setWeeklyOf({ id: String(r.article_id), planner: r.planner == null ? null : String(r.planner) }); }}><CalendarDays /></Button> });
     out.push({ key: "who", label: "Modifié", get: (r) => `${r.updated_by ?? ""} ${r.updated_at ?? ""}`, render: (r) => <span className="subtle small">{r.updated_by}{r.updated_at ? <><br />{fmtDateTime(r.updated_at)}</> : null}</span> });
-    out.push({ key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (r) => <Button size="sm" variant="ghost" title="Supprimer" onClick={(e) => { e.stopPropagation(); if (window.confirm("Supprimer cette ligne ?")) del.mutate({ name: table.name, key: Object.fromEntries(table.key.map((k) => [k, r[k]])) }); }}><Trash2 /></Button> });
+    if (rights.canEditTable(table.name)) out.push({ key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (r) => <Button size="sm" variant="ghost" title="Supprimer" onClick={(e) => { e.stopPropagation(); if (window.confirm("Supprimer cette ligne ?")) del.mutate({ name: table.name, key: Object.fromEntries(table.key.map((k) => [k, r[k]])) }); }}><Trash2 /></Button> });
     return out;
-  }, [table, del]);
+  }, [table, del, rights]);
 
   const programs = usePrograms();
   const pdp = usePdpErp(program || undefined);
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div className="title"><h1>Référentiel</h1><p>Articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures et stock de référence sont gérés ici : ligne par ligne, ou par fichier Excel (modèle à télécharger, puis importer).</p></div>
+      <div className="page-header sticky">
+        <div className="title"><h1>Référentiel</h1><p>Articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures, stock de référence, approvisionneurs et délégations sont gérés ici : ligne par ligne, ou par fichier Excel (modèle à télécharger, puis importer).{rights.access && !rights.canWrite ? " Lecture seule : vous n'êtes pas déclaré comme approvisionneur." : ""}</p></div>
+        {tables.data && <Tabs value={tab} onChange={(t) => { setTab(t); setReport(null); }} tabs={[...tables.data.map((t) => ({ id: t.name, label: t.label, count: t.rows })), { id: "pdp_erp", label: "PDP ERP" }]} />}
       </div>
       {tables.isError ? <ErrorBox error={tables.error} /> : tables.isLoading || !tables.data ? <SkeletonBlock /> : (
         <>
-          <Tabs value={tab} onChange={(t) => { setTab(t); setReport(null); }} tabs={[...tables.data.map((t) => ({ id: t.name, label: t.label, count: t.rows })), { id: "pdp_erp", label: "PDP ERP" }]} />
           {table && tab !== "pdp_erp" && (
             <Card flush title={table.label} hint={table.description}
               actions={<>
-                <select className="select sm" value={mode} onChange={(e) => setMode(e.target.value as "replace" | "merge")} title="Mode d'import" aria-label="Mode d'import">
-                  <option value="merge">Import : fusionner (mise à jour par clé)</option><option value="replace">Import : remplacer la table</option>
-                </select>
-                <input ref={fileInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f && (mode === "merge" || window.confirm(`Remplacer toute la table « ${table.label} » par le fichier ?`))) importFile.mutate(f); e.target.value = ""; }} />
-                <Button size="sm" onClick={() => fileInput.current?.click()} disabled={importFile.isPending}><Upload />{importFile.isPending ? "Import…" : "Importer un fichier"}</Button>
+                {rights.canImportTable(table.name) && <>
+                  <select className="select sm" value={mode} onChange={(e) => setMode(e.target.value as "replace" | "merge")} title="Mode d'import" aria-label="Mode d'import">
+                    <option value="merge">Import : fusionner (mise à jour par clé)</option><option value="replace">Import : remplacer la table</option>
+                  </select>
+                  <input ref={fileInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f && (mode === "merge" || window.confirm(`Remplacer toute la table « ${table.label} » par le fichier ?`))) importFile.mutate(f); e.target.value = ""; }} />
+                  <Button size="sm" onClick={() => fileInput.current?.click()} disabled={importFile.isPending}><Upload />{importFile.isPending ? "Import…" : "Importer un fichier"}</Button>
+                </>}
                 <a className="btn sm" href={api.downloadUrl(`/api/reference/${table.name}/template.xlsx`)} title="Modèle Excel minimaliste (en-têtes, exemple, notice)"><Download />Modèle</a>
                 <a className="btn sm" href={api.downloadUrl(`/api/reference/${table.name}/template.xlsx`, { filled: true })} title="Exporter le contenu actuel"><Download />Exporter</a>
-                <Button size="sm" variant="primary" onClick={() => setEditing({})}><Plus />Ajouter</Button>
+                {rights.canEditTable(table.name) && <Button size="sm" variant="primary" onClick={() => setEditing({})}><Plus />Ajouter</Button>}
               </>}>
               {importFile.error && <div className="error-box" style={{ margin: 12 }}>{(importFile.error as Error).message}</div>}
               {report && <div className="note" style={{ margin: 12 }}>{report.created} ligne(s) importée(s){report.notes.length ? ` · ${report.notes.slice(0, 5).join(" ; ")}${report.notes.length > 5 ? " …" : ""}` : ""}</div>}
               {rows.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : (
-                <DataTable rows={rows.data ?? []} columns={cols} rowKey={(r) => table.key.map((k) => String(r[k])).join("|")} compact onRowClick={(r) => setEditing(r)}
-                  emptyTitle={`Aucune ligne dans « ${table.label} »`} emptyHint="Télécharger le modèle, le remplir, l'importer ; ou ajouter une ligne." />
+                <DataTable rows={rows.data ?? []} columns={cols} rowKey={(r) => table.key.map((k) => String(r[k])).join("|")} compact maxHeight="calc(100vh - 290px)"
+                  onRowClick={rights.canEditTable(table.name) ? (r) => setEditing(r) : undefined}
+                  emptyTitle={`Aucune ligne dans « ${table.label} »`} emptyHint={table.name === "ref_planners" ? "Tant que cette table est vide, tout utilisateur est administrateur : commencez par vous déclarer avec le rôle admin." : "Télécharger le modèle, le remplir, l'importer ; ou ajouter une ligne."} />
               )}
             </Card>
           )}
@@ -95,7 +100,7 @@ export default function ReferencePage() {
         </>
       )}
       {table && <RowEditor table={table} row={editing} onClose={() => setEditing(null)} />}
-      <WeeklyParamsDrawer articleId={weeklyOf} onClose={() => setWeeklyOf(null)} />
+      <WeeklyParamsDrawer articleId={weeklyOf?.id ?? null} planner={weeklyOf?.planner} onClose={() => setWeeklyOf(null)} />
     </div>
   );
 }
@@ -119,6 +124,7 @@ function RowEditor({ table, row, onClose }: { table: RefTableInfo; row: RefRow |
         {table.columns.map((c) => (
           <Field key={c.name} label={`${c.label}${c.required ? " *" : ""}`} help={c.description}>
             {c.type === "bool" ? <select className="select" value={values[c.name] ?? "oui"} onChange={(e) => setValues({ ...values, [c.name]: e.target.value })}><option value="oui">oui</option><option value="non">non</option></select>
+              : table.name === "ref_planners" && c.name === "role" ? <select className="select" value={values[c.name] || "appro"} onChange={(e) => setValues({ ...values, [c.name]: e.target.value })}><option value="appro">appro – écrit sur son carnet</option><option value="manager">manager – + paramètres pour tous, import PDP</option><option value="admin">admin – tous les droits</option></select>
               : <input className="input" type={c.type === "date" ? "date" : c.type === "float" || c.type === "int" ? "number" : "text"} step={c.type === "float" ? "any" : undefined} value={values[c.name] ?? ""} disabled={c.key && !isNew}
                 onChange={(e) => setValues({ ...values, [c.name]: e.target.value })} />}
           </Field>

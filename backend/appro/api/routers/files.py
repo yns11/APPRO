@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from ...data.store import audit
 from ...services import excel_service, mrp_service
+from ...services.access import Access
 from ...services.context import AppContext
 from .. import schemas as S
-from ..deps import ctx_dep, current_user, session_dep
+from ..deps import access_dep, ctx_dep, current_user, session_dep
 
 router = APIRouter(prefix="/api", tags=["files"])
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -47,7 +48,7 @@ def export_plan(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), 
 
 @router.post("/imports/simulation", response_model=S.ImportReport, status_code=201)
 async def import_simulation(file: UploadFile = File(...), ctx: AppContext = Depends(ctx_dep),
-                            session: Session = Depends(session_dep), user: str = Depends(current_user)):
+                            session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Re-import the *Plan* and *Ajustement* rows of an exported ``SIMULATION`` sheet (day
     granularity): the plan cells and adjustments of every article present in the workbook replace
     the stored ones for the days of the sheet."""
@@ -64,6 +65,9 @@ async def import_simulation(file: UploadFile = File(...), ctx: AppContext = Depe
     for aid, items in cells.items():
         if aid not in known:
             notes.append(f"article inconnu : {aid}")
+            continue
+        if not access.can_edit_article(aid):
+            notes.append(f"article hors de votre carnet, ignoré : {aid}")
             continue
         for c in items:
             if c.kind == "PLAN":

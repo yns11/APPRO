@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Lock } from "lucide-react";
 import { api } from "@/lib/api";
 import { useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -84,8 +84,11 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   showArticleRows?: boolean; onSwitchDay?: (date: string) => void;
 }) {
   const toast = useToast();
-  const { perimeter, set } = usePerimeter();
+  const { perimeter, set, rights } = usePerimeter();
   const hidden = useMemo(() => new Set(perimeter.hiddenRows), [perimeter.hiddenRows]);
+  /** read-only article: outside the user's portfolio (the server refuses the writes too) */
+  const lockedOf = useCallback((a: GridRowArticle) => !rights.canEditPlanner(a.article.planner), [rights]);
+  const LOCK = "Lecture seule : article hors de votre carnet";
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<Edit | null>(null);
@@ -281,13 +284,13 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   );
 
   const renderRow = (r: RowDesc): ReactNode => {
-    const a = r.a, aid = a.article.article_id, unit = a.article.unit;
+    const a = r.a, aid = a.article.article_id, unit = a.article.unit, locked = lockedOf(a);
     const series = (k: string, i: number) => a.series.find((s) => s.key === k)?.values[i] ?? 0;
     switch (r.kind) {
       case "article":
         return (
           <tr key={r.key} className="article-head" style={{ height: r.h }}>
-            <td><Link to={`/articles/${encodeURIComponent(aid)}`}>{aid}</Link> <span className="subtle" style={{ fontWeight: 400 }}>· {a.article.designation}</span></td>
+            <td><Link to={`/articles/${encodeURIComponent(aid)}`}>{aid}</Link> <span className="subtle" style={{ fontWeight: 400 }}>· {a.article.designation}</span>{locked && <span className="subtle" style={{ fontWeight: 400 }} title={LOCK}> · <Lock size={11} style={{ verticalAlign: "-1px" }} /> {a.article.planner}</span>}</td>
             <td colSpan={colCount - 1} />
           </tr>
         );
@@ -317,7 +320,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const ignored = !!l.orders_ignored[i];
               const partial = qr > 0 && qr < qo;
               const past = i < asOfIdx, ro = readOnlyCol(i);
-              const clickable = qo > 0 && !past;
+              const clickable = qo > 0 && !past && !locked;
               const cls = [...cellBase(i), qo > 0 ? (ignored ? "ignored" : qr > 0 ? "firm-open" : "firm-settled") : "", clickable ? "clickable" : "", l.orders.length && ordersTitle(i) ? "event" : ""].filter(Boolean).join(" ");
               const text = qo === 0 ? "·" : partial ? <span className="partial">{fmtQty(qr, unit)} / {fmtQty(qo, unit)}</span> : fmtQty(qo, unit);
               const state = qo === 0 ? "" : ignored ? "Commande ignorée : hors Scenario ERP et hors Plan (cliquer pour la rétablir)" : qr > 0 ? `En cours : ${fmtQty(qr, unit)} restant à livrer sur ${fmtQty(qo, unit)} commandé${clickable ? (ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – cliquer pour l'ignorer") : ""}` : `Soldée : ${fmtQty(qo, unit)} commandé, tout reçu`;
@@ -354,14 +357,14 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const isEd = editing?.aid === aid && editing.key === "plan" && editing.lane === li && editing.i === i;
               const isActive = !isEd && active?.aid === aid && active.key === "plan" && active.lane === li && active.i === i;
               const ghost = !past && !typed && v === 0 && cbn > 0;
-              const cls = [...cellBase(i), past || ro ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", typed ? "typed" : "erp", ghost ? "ghost" : "", cell?.note ? "noted" : "", inFill(aid, "plan", li, i) ? "fill-range" : ""].filter(Boolean).join(" ");
+              const cls = [...cellBase(i), past || ro || locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", typed ? "typed" : "erp", ghost ? "ghost" : "", cell?.note ? "noted" : "", inFill(aid, "plan", li, i) ? "fill-range" : ""].filter(Boolean).join(" ");
               const shown = shownOf(i);
               const initial = ghost ? String(cbn) : shown;
               const title = past ? "" : [typed ? `Saisi : ${fmtQty(v, unit)}${cell?.note ? ` – ${cell.note}` : ""} (vider = retour à l'ERP)` : v ? `ERP : ${fmtQty(v, unit)} – taper une quantité pour décider (0 = rien attendu)` : "Vide = rien dans l'ERP – taper une quantité pour planifier une livraison",
                 cbn ? `Proposition CBN : ${fmtQty(cbn, unit)}${ghost ? " (cliquer puis Entrée pour la reprendre)" : ""}` : "", ro ? "Semaine agrégée : cliquer l'en-tête pour saisir par jour" : "Clic droit : commentaire · tirer le carré pour recopier"].filter(Boolean).join("\n");
-              const onClick = past || isEd ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => { setActive({ aid, key: "plan", lane: li, i }); setEditing({ aid, key: "plan", lane: li, i, value: initial, initial: shown }); };
+              const onClick = past || isEd || locked ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => { setActive({ aid, key: "plan", lane: li, i }); setEditing({ aid, key: "plan", lane: li, i, value: initial, initial: shown }); };
               return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined}
-                onContextMenu={past || ro ? undefined : (e) => { e.preventDefault(); comment(aid, "plan", l, i, cell?.note ?? "", initial); }}>
+                onContextMenu={past || ro || locked ? undefined : (e) => { e.preventDefault(); comment(aid, "plan", l, i, cell?.note ?? "", initial); }}>
                 {isEd ? input(editing!, `Plan ${l.supplier_id ?? ""} ${periodLabel(cols.periods[i])}`, shownOf, (ni) => ni >= asOfIdx && !readOnlyCol(ni))
                   : past ? "" : ghost ? <span className="ghostv">{fmtQty(cbn, unit)}</span> : <>{v === 0 && !typed ? "·" : fmtQty(v, unit)}{cbn > 0 && !ghost && <span className="ghostv small"> +{fmtQty(cbn, unit)}</span>}</>}
                 {(isEd || isActive) && !past && !ro && handle(aid, "plan", li, i, isEd ? editing!.value : shown)}
@@ -380,7 +383,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const v = series("supply_proposed", i);
               const flag = flagBy.get(`proposal_refused|${aid}||${i}`);
               const ro = readOnlyCol(i), past = i < asOfIdx;
-              const clickable = !past && (v > 0 || !!flag);
+              const clickable = !past && !locked && (v > 0 || !!flag);
               const cls = [...cellBase(i), "cbn", flag ? "refused" : "", clickable ? "clickable" : ""].filter(Boolean).join(" ");
               const title = flag ? `Proposition refusée (${fmtQty(flag.qty, unit)}) : aucune proposition jusqu'à la fin de sa semaine – cliquer pour la rétablir`
                 : v > 0 ? `Besoin net calculé sur le Scenario Plan : ${fmtQty(v, unit)}${ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – reprise dans le Plan (cellule grisée) ; cliquer pour la refuser"}` : "";
@@ -402,12 +405,12 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const ro = readOnlyCol(i);
               const isEd = editing?.aid === aid && editing.key === "adjustments" && editing.i === i;
               const isActive = !isEd && active?.aid === aid && active.key === "adjustments" && active.i === i;
-              const cls = [...cellBase(i), ro ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", cell ? "typed" : "", v < 0 ? "neg-val" : "", cell?.note ? "noted" : "", inFill(aid, "adjustments", 0, i) ? "fill-range" : ""].filter(Boolean).join(" ");
+              const cls = [...cellBase(i), ro || locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", cell ? "typed" : "", v < 0 ? "neg-val" : "", cell?.note ? "noted" : "", inFill(aid, "adjustments", 0, i) ? "fill-range" : ""].filter(Boolean).join(" ");
               const initial = initialOf(i);
               const title = [cell ? `${cell.expression || cell.qty} = ${fmtQty(cell.qty, unit)}${cell.note ? ` – ${cell.note}` : ""}` : i <= asOfIdx ? "Quantité signée : corrige le stock de référence" : "Quantité signée ou formule (ex. -(30+20)) : mouvement prévu", ro ? "Semaine agrégée : cliquer l'en-tête pour saisir par jour" : "Clic droit : commentaire · tirer le carré pour recopier"].join("\n");
-              const onClick = isEd ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => { setActive({ aid, key: "adjustments", lane: 0, i }); setEditing({ aid, key: "adjustments", lane: 0, i, value: initial, initial }); };
+              const onClick = isEd || locked ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => { setActive({ aid, key: "adjustments", lane: 0, i }); setEditing({ aid, key: "adjustments", lane: 0, i, value: initial, initial }); };
               return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined}
-                onContextMenu={ro ? undefined : (e) => { e.preventDefault(); comment(aid, "adjustments", null, i, cell?.note ?? "", initial); }}>
+                onContextMenu={ro || locked ? undefined : (e) => { e.preventDefault(); comment(aid, "adjustments", null, i, cell?.note ?? "", initial); }}>
                 {isEd ? input(editing!, `Ajustement ${periodLabel(cols.periods[i])}`, initialOf, (ni) => !readOnlyCol(ni)) : v === 0 ? "·" : `${v > 0 ? "+" : ""}${fmtQty(v, unit)}`}
                 {(isEd || isActive) && !ro && handle(aid, "adjustments", 0, i, isEd ? editing!.value : initial)}
               </td>;

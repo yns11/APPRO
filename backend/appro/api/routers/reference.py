@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import re
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -19,9 +20,10 @@ from ...data.store import REF_MODELS, ParamOverride, audit
 from ...engine.models import EngineParams
 from ...engine.runner import resolve_as_of
 from ...services import mrp_service
+from ...services.access import ROLES, Access
 from ...services.context import AppContext
 from .. import schemas as S
-from ..deps import ctx_dep, current_user, session_dep
+from ..deps import access_dep, ctx_dep, current_user, session_dep
 
 router = APIRouter(prefix="/api", tags=["reference"])
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -56,14 +58,16 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
 
 
 @router.get("/config", response_model=S.ConfigOut)
-def config(ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep), user: str = Depends(current_user)):
+def config(ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep), user: str = Depends(current_user),
+           access: Access = Depends(access_dep)):
     params = mrp_service.build_params(ctx, session)
     ds = erp_dataset(ctx.table)
     planners = sorted({a.planner for a in ds.articles if a.planner})
+    mine = next((p for p in planners if access.name and p.upper() == access.name.upper()), None)
     return S.ConfigOut(title=ctx.settings.app_title, data_source=ctx.source.describe(), as_of=resolve_as_of(ds, params),
                        horizon_days=params.horizon_days, planners=planners,
-                       default_planner=ctx.settings.default_planner or (planners[0] if len(planners) == 1 else None),
-                       user=user, version=__version__, reference_empty=not ds.articles)
+                       default_planner=ctx.settings.default_planner or mine or (planners[0] if len(planners) == 1 else None),
+                       user=user, version=__version__, reference_empty=not ds.articles, access=access.to_dict())
 
 
 # ---------------------------------------------------------------- reference tables (CRUD)
@@ -94,8 +98,11 @@ def rows(name: str, session: Session = Depends(session_dep)):
 
 @router.put("/reference/{name}/rows")
 def upsert_row(name: str, body: S.RefRowIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-               user: str = Depends(current_user)):
+               user: str = Depends(current_user), access: Access = Depends(access_dep)):
     _schema(name)
+    access.require_row(name, body.values)
+    if name == "ref_planners" and str(body.values.get("role", "")).lower() not in ROLES:
+        raise HTTPException(422, f"Rôle inconnu : {body.values.get('role')} (attendu : {', '.join(ROLES)})")
     try:
         out = reference.upsert_row(session, name, body.values, user)
     except (ValueError, KeyError) as exc:
@@ -107,8 +114,9 @@ def upsert_row(name: str, body: S.RefRowIn, ctx: AppContext = Depends(ctx_dep), 
 
 @router.post("/reference/{name}/delete", status_code=204)
 def delete_row(name: str, body: S.RefKeyIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-               user: str = Depends(current_user)):
+               user: str = Depends(current_user), access: Access = Depends(access_dep)):
     _schema(name)
+    access.require_row(name, body.key)
     try:
         found = reference.delete_row(session, name, body.key, user)
     except (ValueError, KeyError) as exc:
@@ -132,10 +140,11 @@ def template(name: str, filled: bool = False, session: Session = Depends(session
 @router.post("/reference/{name}/import", response_model=S.ImportReport, status_code=201)
 async def import_table(name: str, file: UploadFile = File(...), mode: str = Form("replace"),
                        ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-                       user: str = Depends(current_user)):
+                       user: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Load an Excel file built on the template.  ``mode`` = ``replace`` (the table is replaced) or
     ``merge`` (rows are created / updated by key)."""
     _schema(name)
+    access.require_table(name)
     content = await file.read()
     if not content:
         raise HTTPException(422, "Fichier vide")
@@ -194,7 +203,8 @@ def pdp(program_id: str | None = None, ctx: AppContext = Depends(ctx_dep)):
 
 
 @router.post("/reference/refresh")
-def refresh(ctx: AppContext = Depends(ctx_dep)):
+def refresh(ctx: AppContext = Depends(ctx_dep), access: Access = Depends(access_dep)):
+    access.require_write()
     ctx.source.refresh()
     ctx.bump()
     return {"status": "ok", "source": ctx.source.describe()}
@@ -235,32 +245,94 @@ def list_overrides(scope: str | None = None, key1: str | None = None, session: S
     return session.scalars(q).all()
 
 
-@router.put("/params/overrides", response_model=S.ParamOverrideOut)
-def upsert_override(body: S.ParamOverrideIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-                    user: str = Depends(current_user)):
-    allowed = {"global": set(mrp_service.GLOBAL_FIELDS), "article_week": set(mrp_service.ARTICLE_WEEK_FIELDS)}[body.scope]
-    if body.scope == "article_week" and not re.fullmatch(r"\d{4}-W\d{2}", body.key2 or ""):
+def _check_override(scope: str, key2: str, field: str, value: Any) -> None:
+    allowed = {"global": set(mrp_service.GLOBAL_FIELDS), "article_week": set(mrp_service.ARTICLE_WEEK_FIELDS)}[scope]
+    if scope == "article_week" and not re.fullmatch(r"\d{4}-W\d{2}", key2 or ""):
         raise HTTPException(422, "key2 doit être une semaine ISO, ex. 2026-W40")
-    if body.field not in allowed:
-        raise HTTPException(422, f"Champ non paramétrable pour {body.scope} : {body.field}. Autorisés : {sorted(allowed)}")
-    if body.scope == "global":
+    if field not in allowed:
+        raise HTTPException(422, f"Champ non paramétrable pour {scope} : {field}. Autorisés : {sorted(allowed)}")
+    if scope == "global":
         try:
-            mrp_service._coerce_param(body.field, body.value)
+            mrp_service._coerce_param(field, value)
         except (TypeError, ValueError) as exc:
             raise HTTPException(422, f"Valeur invalide : {exc}")
-    row = session.scalars(select(ParamOverride).where(ParamOverride.scope == body.scope, ParamOverride.key1 == body.key1,
-                                                      ParamOverride.key2 == body.key2, ParamOverride.field == body.field)).first()
-    value = "" if body.value is None else str(body.value)
+    elif value is not None and value != "":
+        try:
+            mrp_service.ARTICLE_WEEK_FIELDS[field](value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, f"Valeur invalide pour {field} : {exc}")
+
+
+def _write_override(session: Session, user: str, scope: str, key1: str, key2: str, field: str,
+                    value: Any) -> ParamOverride | None:
+    """Upsert one override ; ``None`` / empty value for an article week deletes it (back to the article value)."""
+    row = session.scalars(select(ParamOverride).where(ParamOverride.scope == scope, ParamOverride.key1 == key1,
+                                                      ParamOverride.key2 == key2, ParamOverride.field == field)).first()
+    if scope == "article_week" and (value is None or value == ""):
+        if row is not None:
+            audit(session, user, "delete_param", "param_override", row.id, key1, {"field": field, "week": key2})
+            session.delete(row)
+        return None
+    text = "" if value is None else str(value)
     if row is None:
-        row = ParamOverride(scope=body.scope, key1=body.key1, key2=body.key2, field=body.field, value=value, updated_by=user)
+        row = ParamOverride(scope=scope, key1=key1, key2=key2, field=field, value=text, updated_by=user)
         session.add(row)
     else:
-        row.value, row.updated_by = value, user
-    audit(session, user, "set_param", "param_override", f"{body.scope}/{body.key1}/{body.key2}/{body.field}",
-          body.key1 if body.scope == "article_week" else None, {"value": value})
+        row.value, row.updated_by = text, user
+    audit(session, user, "set_param", "param_override", f"{scope}/{key1}/{key2}/{field}",
+          key1 if scope == "article_week" else None, {"value": text})
+    return row
+
+
+def _authorize_override(access: Access, scope: str, key1: str) -> None:
+    if scope == "global":
+        access.require_params()
+    else:
+        access.require_article_params(key1)
+
+
+@router.put("/params/overrides", response_model=S.ParamOverrideOut | None)
+def upsert_override(body: S.ParamOverrideIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+                    user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    _authorize_override(access, body.scope, body.key1)
+    _check_override(body.scope, body.key2, body.field, body.value)
+    row = _write_override(session, user, body.scope, body.key1, body.key2, body.field, body.value)
     session.commit()
     ctx.bump()
     return row
+
+
+@router.put("/params/overrides/batch", response_model=list[S.ParamOverrideOut])
+def upsert_overrides(body: S.ParamOverrideBatchIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+                     user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """Several weekly values of one article in one transaction (paste / fill of the weekly grid) ;
+    an empty value restores the article value for that week."""
+    _authorize_override(access, body.scope, body.key1)
+    for it in body.items:
+        _check_override(body.scope, it.key2, it.field, it.value)
+    out = []
+    for it in body.items:
+        row = _write_override(session, user, body.scope, body.key1, it.key2, it.field, it.value)
+        if row is not None:
+            out.append(row)
+    session.commit()
+    ctx.bump()
+    return out
+
+
+@router.delete("/params/overrides", status_code=204)
+def reset_overrides(scope: str, key1: str = "", ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+                    user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """Remove every override of a scope / key (all the weekly values of an article, or all the global rules)."""
+    if scope not in ("global", "article_week"):
+        raise HTTPException(422, "scope : global ou article_week")
+    _authorize_override(access, scope, key1)
+    rows = session.scalars(select(ParamOverride).where(ParamOverride.scope == scope, ParamOverride.key1 == key1)).all()
+    for row in rows:
+        session.delete(row)
+    audit(session, user, "reset_params", "param_override", f"{scope}/{key1}", key1 or None, {"rows": len(rows)})
+    session.commit()
+    ctx.bump()
 
 
 @router.delete("/params/overrides/{override_id}", status_code=204)

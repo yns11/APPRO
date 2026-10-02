@@ -196,17 +196,29 @@ semaine »), au prix d'un manque éventuel entre-temps, affiché dans le Scenari
 affichée barrée ; un nouveau clic rétablit la proposition. Les refus sont listés dans *Saisies & journal*.
 
 **Planning de livraison** (onglet de la fiche article) : la ligne *Plan* est présentée comme des lignes de
-planning ERP, une par fournisseur et par jour à quantité non nulle : *Quantité livrée*, *Unité*, *Date de
-début de livraison* (le jour du plan), *Heure de début* (11:59:00 PM), *Date de fin* (début + 6 jours), *Heure
-de fin* (11:59:00 PM). Une plage se sélectionne à la souris comme dans Excel (ou par en-tête de colonne / numéro
-de ligne) et se copie par Ctrl+C ou le bouton *Copier*, en texte tabulé prêt à coller dans l'ERP ou une
-feuille. Le bouton *FR / EN* choisit le format des dates (`jj/mm/aaaa` ou `m/j/aaaa`) et le séparateur décimal.
+planning ERP, **une par fournisseur et par semaine ISO** à quantité non nulle, à partir de la date de
+référence. La quantité de la semaine additionne **tout ce que porte la ligne Plan** : cellules saisies,
+commandes fermes ERP reprises (cellules vides) et propositions CBN (cellules grisées) ; l'infobulle de la
+quantité en donne la décomposition. Colonnes : *Quantité livrée*, *Unité*, *Date de début de livraison* (le
+lundi), *Heure de début* (11:59:00 PM), *Date de fin* (le dimanche), *Heure de fin* (11:59:00 PM). Le bouton
+calendrier ne garde que les semaines commençant **après** la date de référence. Une plage se sélectionne à la
+souris comme dans Excel (ou par en-tête de colonne / numéro de ligne) et se copie par Ctrl+C ou le bouton
+*Copier*, en texte tabulé prêt à coller dans l'ERP ou une feuille. Le bouton *FR / EN* choisit le format des
+dates (`jj/mm/aaaa` ou `m/j/aaaa`) et le séparateur décimal.
 
 ## 8. Paramètres d'article par semaine
 
 Couverture cible, seuils, surstock, stock de sécurité et cycle de commande sont fixes par article dans le
 référentiel ; le bouton *Semaines* ouvre un calendrier hebdomadaire où chaque valeur peut être personnalisée
 pour une semaine ISO (réversible). Le moteur applique la valeur de la semaine du jour calculé.
+
+Le calendrier court de la semaine de référence à la **dernière semaine du PDP chargé** (table ERP ou version
+importée active) ou à la fin de l'horizon, la plus lointaine des deux (26 semaines au minimum). Il s'édite
+comme une feuille : cliquer une cellule et taper (Entrée, Tab, flèches), glisser pour sélectionner une plage,
+Ctrl+C / Ctrl+V (bloc tabulé venant d'Excel, ou une valeur recopiée sur toute la plage), tirer le carré de la
+cellule active pour recopier vers le bas, Suppr ou une cellule vide = valeur de l'article. Chaque bloc est
+enregistré en une transaction (`PUT /api/params/overrides/batch`) ; *Tout rétablir* supprime toutes les valeurs
+par semaine de l'article (`DELETE /api/params/overrides?scope=article_week&key1=…`).
 
 ## 9. Impact sur les programmes
 
@@ -242,7 +254,28 @@ une cellule. Les cellules des articles présents dans le classeur remplacent cel
 Le **modèle du fichier PDP** (onglet `SOP - PDP`, une ligne par programme, une colonne par semaine ISO)
 se télécharge dans *Imports / exports* ; les **modèles du référentiel** (un par table) dans *Référentiel*.
 
-## 12. Données de démonstration
+## 12. Approvisionneurs, délégations et droits
+
+Les droits se lisent dans deux tables du référentiel (`ref_planners`, `ref_delegations`) et dans la colonne
+*Approvisionneur* des articles ; le serveur les applique sur chaque écriture (HTTP 403 sinon), l'interface
+verrouille ce qui n'est pas permis (cellules non éditables, cadenas sur l'article, boutons absents).
+
+| Qui | Peut écrire |
+|---|---|
+| utilisateur non déclaré, ou inactif (**lecteur**) | rien : lecture seule partout |
+| **appro** | les cellules Plan / Ajustement / Ferme / CBN, les paramètres hebdomadaires et les lignes du référentiel (articles, article ↔ fournisseur, nomenclatures, stock) **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations |
+| **manager** | comme un appro sur son carnet, **plus** les règles globales du moteur, les paramètres hebdomadaires de tout article, l'import et l'activation des PDP, l'import des tables du référentiel (sauf celle des approvisionneurs) |
+| **admin** | tout, y compris la table des approvisionneurs |
+
+L'identité est l'e-mail transmis par Databricks Apps (`x-forwarded-email`), comparé sans tenir compte de la
+casse à la colonne *Email*. Une **délégation** (délégant, destinataire, du, au, active) ajoute le carnet du
+délégant à celui du destinataire entre les deux dates incluses (*au* vide = sans fin) ; un appro ne peut créer
+que des délégations de son propre carnet. L'import d'un classeur de simulation ignore les articles hors
+carnet (ligne notée dans le rapport). **Tant que la table des approvisionneurs est vide, tout utilisateur est
+administrateur** : la première ligne à créer est donc son propre compte avec le rôle `admin`. Le périmètre
+proposé par défaut en haut de page est le carnet de l'utilisateur connecté.
+
+## 13. Données de démonstration
 
 `data/seed` (16 articles, 11 fournisseurs, 20 liens, 25 programmes, 28 lignes de nomenclature, PDP et
 production réelle, 772 créneaux de commande, 477 réceptions, 16 stocks de référence au 18/09/2026), extrait
