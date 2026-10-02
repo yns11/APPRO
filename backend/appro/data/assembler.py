@@ -29,6 +29,19 @@ def _records(df: pd.DataFrame) -> Iterable[dict]:
     return df.to_dict("records")
 
 
+def _missing(v) -> bool:
+    """Empty cell (None, "", NaN) – **0 is a value**, never a missing one."""
+    return v is None or v == "" or (isinstance(v, float) and v != v)
+
+
+def _int(v, default: int) -> int:
+    return default if _missing(v) else int(float(v))
+
+
+def _float(v, default: float) -> float:
+    return default if _missing(v) else float(v)
+
+
 def _tables(source) -> Tables:
     return source if callable(source) else source.table
 
@@ -47,19 +60,19 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
 
     articles = [Article(
         article_id=r["article_id"], designation=r["designation"], unit=r["unit"] or "PCE", family=r["family"],
-        planner=r["planner"], coverage_target_days=int(r["coverage_target_days"] or 7),
-        alert_red_days=int(r["alert_red_days"] or 3), alert_yellow_days=int(r["alert_yellow_days"] or 7),
-        overstock_days=int(r["overstock_days"] or 30), safety_stock_qty=float(r["safety_stock_qty"] or 0.0),
-        order_cycle_days=int(r["order_cycle_days"] or 7), active=bool(r["active"]),
+        planner=r["planner"], coverage_target_days=_int(r["coverage_target_days"], 7),
+        alert_red_days=_int(r["alert_red_days"], 3), alert_yellow_days=_int(r["alert_yellow_days"], 7),
+        overstock_days=_int(r["overstock_days"], 30), safety_stock_qty=_float(r["safety_stock_qty"], 0.0),
+        order_cycle_days=_int(r["order_cycle_days"], 7), active=bool(r["active"]),
     ) for r in _records(arts)]
 
     suppliers = [Supplier(r["supplier_id"], r["name"], r["country"], r["contact"], parse_weekdays(r["delivery_weekdays"]),
                           bool(r["active"])) for r in _records(t("ref_suppliers"))]
     links = [SupplierLink(r["article_id"], r["supplier_id"], float(r["moq"]), float(r["pack_qty"]),
-                          int(r["lead_time_days"]), float(r["quota_pct"]), int(r["priority"] or 1), bool(r["active"]))
+                          int(r["lead_time_days"]), float(r["quota_pct"]), _int(r["priority"], 1), bool(r["active"]))
              for r in _records(t("ref_article_suppliers")) if r["article_id"] in ids]
     programs = [Program(r["program_id"], r["name"], r["family"], bool(r["active"])) for r in _records(t("ref_programs"))]
-    bom = [BomLine(r["program_id"], r["article_id"], float(r["qty_per"]), r["unit"], float(r["scrap_pct"] or 0),
+    bom = [BomLine(r["program_id"], r["article_id"], float(r["qty_per"]), r["unit"], _float(r["scrap_pct"], 0.0),
                    as_date(r["valid_from"]), as_date(r["valid_to"]))
            for r in _records(t("ref_bom")) if r["article_id"] in ids]
     needed_programs = {b.program_id for b in bom}

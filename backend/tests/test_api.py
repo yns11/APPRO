@@ -516,3 +516,15 @@ def test_planners_delegations_and_roles(client):
     assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC3", "name": "Z", "email": "z@example.com", "role": "appro", "active": True}}, headers=root).status_code == 200
     assert client.put("/api/entries/plan", json={"article_id": other["article_id"], "date": day, "expression": "10"}, headers=root).status_code == 200
     assert client.delete("/api/params/overrides", params={"scope": "global"}, headers=root).status_code == 204
+
+
+def test_zero_article_parameters_are_kept(client):
+    """0 typed in the Référentiel (order cycle, coverage, thresholds) is a value, not a missing cell."""
+    row = next(r for r in client.get("/api/reference/ref_articles/rows").json() if r["article_id"] == AID)
+    r = client.put("/api/reference/ref_articles/rows", json={"values": {**row, "order_cycle_days": 0, "coverage_target_days": 0, "alert_red_days": 0}})
+    assert r.status_code == 200, r.text
+    weeks = client.get(f"/api/articles/{AID}/weekly-params").json()
+    assert weeks["defaults"]["order_cycle_days"] == 0 and weeks["defaults"]["coverage_target_days"] == 0 and weeks["defaults"]["alert_red_days"] == 0
+    assert all(w["values"]["order_cycle_days"] == 0 and w["values"]["coverage_target_days"] == 0 for w in weeks["weeks"])
+    art = client.get(f"/api/articles/{AID}/projection").json()["article"]
+    assert art["order_cycle_days"] == 0 and art["coverage_target_days"] == 0
