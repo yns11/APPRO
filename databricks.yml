@@ -1,0 +1,143 @@
+# =============================================================================
+# Bundle Databricks (DAB) — APPRO
+# =============================================================================
+# Une application (resources/appro_app.yml) et un job de synchronisation des
+# faits ERP vers Lakebase (resources/appro_sync.job.yml). Trois cibles.
+#
+#   python .claude/skills/databricks-livraison/verifier_bundle.py .   # avant tout déploiement
+#   scripts/deploy.sh dev <PROFIL>        # compile le frontend, valide, déploie, démarre
+#   databricks bundle run appro_sync_erp -t dev --profile <PROFIL>
+#
+# ⚠️ Un bundle EXCLUT tout ce que .gitignore ignore : client/dist (le frontend
+# compilé) y figure. Sans le bloc `sync.include`, le déploiement réussit, l'API
+# répond… et l'interface est absente, sans aucune erreur.
+# =============================================================================
+bundle:
+  name: appro
+
+sync:
+  include:
+    - client/dist/**
+  exclude:
+    - client/node_modules/**
+    - data/local/**
+    - .ruff_cache/**
+    - backend/.ruff_cache/**
+    - backend/.pytest_cache/**
+    - "**/__pycache__/**"
+    - backend/tests/**
+
+variables:
+  # --- Lakebase (chemins de ressource COMPLETS, jamais des noms courts) -------
+  #   databricks postgres list-projects  --profile <PROFIL>
+  #   databricks postgres list-branches  projects/<projet> --profile <PROFIL>
+  #   databricks postgres list-databases projects/<projet>/branches/<branche> --profile <PROFIL>
+  #   databricks postgres list-endpoints projects/<projet>/branches/<branche> --profile <PROFIL>
+  lakebase_project:
+    description: Identifiant du projet Lakebase (2e élément du fil d'Ariane de la console).
+    default: appro
+  lakebase_branch:
+    description: Identifiant de la branche (un projet neuf la nomme « production »).
+    default: production
+  lakebase_database:
+    description: >-
+      Identifiant de la base (dernier segment du `name` de list-databases, RFC 1123 :
+      « databricks-postgres » et non « databricks_postgres »).
+    default: databricks-postgres
+  lakebase_endpoint:
+    description: >-
+      Identifiant de l'endpoint en écriture (dernier segment de list-endpoints, souvent « primary »).
+      Sert au job, qui ne reçoit aucune variable PG* de la plateforme.
+    default: primary
+
+  app_schema:
+    description: >-
+      Schéma Postgres que l'application crée et possède (son rôle n'a pas CREATE sur « public »).
+      Le job écrit dans ce même schéma. UN SCHÉMA PAR CIBLE : chaque cible déploie sa propre App,
+      donc son propre principal de service ; un schéma créé par l'App de dev appartient à dev et
+      l'App de prod ne peut pas y créer de tables (PostgreSQL retombe sur « public » :
+      « permission denied for schema public »).
+    default: appro
+
+  # --- Source ERP --------------------------------------------------------------
+  uc_catalog:
+    default: emotors_data_champions
+  uc_schema:
+    description: Schéma des extractions ERP (commandes_edi, recep_edi).
+    default: silver_erp_ye
+  erp_orders_table:
+    default: commandes_edi
+  erp_receipts_table:
+    default: recep_edi
+  erp_consumption_table:
+    description: >-
+      Table UC de consommation réelle journalière PAR COMPOSANT, déjà éclatée (colonnes article_id,
+      date, qty dans l'unité de stock de l'article). Vide = aucune : le besoin passé suit
+      missing_actual_policy. Voir docs/dictionnaire_donnees.md § 2.3.
+    default: conso_composants
+  erp_desadv_table:
+    description: Table UC des avis d'expédition EDI (DESADV, DespatchAdvice-Purchase). Vide = aucune.
+    default: desadv_edi
+  erp_pdp_table:
+    description: Table de PDP hebdomadaire (program_id, week_start, qty, version). Vide = aucune (PDP importé par fichier).
+    default: ""
+
+  # --- Identités et exploitation (propres à chaque cible) ---------------------
+  admin_emails:
+    description: >-
+      E-mails (séparés par des virgules) toujours administrateurs de l'application, quelle que soit la
+      table des approvisionneurs : impossible de s'enfermer en lecture seule. Défaut = l'identité qui
+      déploie le bundle.
+    default: ${workspace.current_user.userName}
+  sync_role:
+    description: >-
+      Rôle Postgres de l'identité qui exécute le job de synchronisation (votre e-mail Databricks,
+      ou le client_id d'un principal de service). L'application lui accorde l'écriture sur erp_*.
+      Vide = aucun GRANT (le job échouera avec « permission denied »).
+    default: ""
+  notification_email:
+    description: Destinataire des alertes d'échec du job.
+    default: ""
+  schedule_pause_status:
+    description: PAUSED ou UNPAUSED ; chaque cible DOIT déclarer sa valeur (le défaut est suspendu).
+    default: PAUSED
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      schedule_pause_status: PAUSED
+      # sync_role: "prenom.nom@exemple.com"
+
+  preprod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      schedule_pause_status: UNPAUSED
+      lakebase_branch: preprod
+      app_schema: appro_preprod
+    permissions:
+      - level: CAN_MANAGE
+        user_name: ${workspace.current_user.userName}
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      schedule_pause_status: UNPAUSED
+      # la cible prod partage (par défaut) le projet et la branche Lakebase de dev : son App a son
+      # propre principal de service, donc son propre schéma (celui de dev, « appro », appartient à dev)
+      app_schema: appro_prod
+    permissions:
+      - level: CAN_MANAGE
+        user_name: ${workspace.current_user.userName}
+      - level: CAN_VIEW
+        group_name: users
