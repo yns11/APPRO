@@ -11,6 +11,7 @@ from ..engine.models import (
     BomLine,
     ConsumptionLine,
     Dataset,
+    DesadvLine,
     OrderLine,
     OrderType,
     PdpLine,
@@ -87,8 +88,12 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
                         qty_open=float(r["qty_open"]), order_type=OrderType(r["order_type"] or "FIRM"), ref=r["purch_id"])
               for r in _records(t("fct_purchase_orders")) if r["article_id"] in ids and r["expected_date"]]
     receipts = [Receipt(r["receipt_id"], r["article_id"], as_date(r["receipt_date"]), float(r["qty"]),
-                        r["supplier_id"] or None, r["purch_id"])
+                        r["supplier_id"] or None, r["purch_id"], str(r.get("packing_slip") or ""))
                 for r in _records(t("fct_receipts")) if r["article_id"] in ids and r["receipt_date"]]
+    desadv = [DesadvLine(r["desadv_id"], r["article_id"], r["supplier_id"] or None, str(r["packing_slip"] or ""),
+                         as_date(r["issue_date"]), float(r["qty"] or 0.0), str(r.get("purch_id") or ""),
+                         str(r.get("state") or ""), str(r.get("final_processing") or ""))
+              for r in _records(t("fct_desadv")) if r["article_id"] in ids and r["issue_date"] and r["packing_slip"]]
     stock: dict[str, StockSnapshot] = {}
     for r in _records(t("fct_stock")):
         if r["article_id"] not in ids or not r["snapshot_date"]:
@@ -102,5 +107,5 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
             cur.qty_blocked += float(r["qty_blocked"] or 0)
 
     return Dataset(articles=articles, suppliers=suppliers, links=links, programs=programs, bom=bom, pdp=pdp,
-                   consumption=consumption, orders=orders, receipts=receipts, stock=list(stock.values()),
+                   consumption=consumption, desadv=desadv, orders=orders, receipts=receipts, stock=list(stock.values()),
                    holidays=list(holidays or []))

@@ -70,7 +70,7 @@ export default function ArticlePage() {
         <div className="title">
           <div className="row"><Link to="/" className="btn ghost sm"><ArrowLeft />Cockpit</Link>{a && <SeverityBadge severity={k?.severity ?? null} />}</div>
           <h1 style={{ marginTop: 6 }}>{articleId} {a && <span className="muted" style={{ fontWeight: 400 }}>· {a.designation}</span>}</h1>
-          <p>{a ? <>{a.unit} · cible {a.coverage_target_days} j · rouge ≤ {a.alert_red_days} j · orange ≤ {a.alert_yellow_days} j · surstock ≥ {a.overstock_days} j · {d?.suppliers.map((s) => `${s.supplier_id} (délai ${s.lead_time_days} j, MOQ ${fmtQty(s.moq, a.unit)}, PLA ${fmtQty(s.pack_qty, a.unit)})`).join(" · ")}</> : <Skeleton w={400} />}</p>
+          <p>{a ? <>{a.unit} · cible {a.coverage_target_days} j · rouge ≤ {a.alert_red_days} j · orange ≤ {a.alert_yellow_days} j · surstock ≥ {a.overstock_days} j · {d?.suppliers.map((s) => `${s.supplier_id} (délai ${s.lead_time_days} j, MOQ ${fmtQty(s.moq, a.unit)}, UM ${fmtQty(s.pack_qty, a.unit)})`).join(" · ")}</> : <Skeleton w={400} />}</p>
         </div>
         <div className="actions">
           <Segmented size="sm" value={perimeter.granularity} onChange={(g) => set({ granularity: g })} options={[{ id: "default", label: "Par défaut" }, { id: "day", label: "Jour" }, { id: "week", label: "Semaine" }]} />
@@ -133,7 +133,7 @@ export default function ArticlePage() {
                   <td>{fmtDate(p.order_date)} {p.urgent && <Badge tone="critical">urgent</Badge>}</td>
                   <td>{fmtDate(p.delivery_date)}</td>
                   <td>{p.supplier_id} <span className="sub">délai {p.lead_time_days} j</span></td>
-                  <td className="num"><b>{fmtQty(p.qty, p.unit)}</b><span className="sub">MOQ {fmtQty(p.moq, p.unit)} · PLA {fmtQty(p.pack_qty, p.unit)}</span></td>
+                  <td className="num"><b>{fmtQty(p.qty, p.unit)}</b><span className="sub">MOQ {fmtQty(p.moq, p.unit)} · UM {fmtQty(p.pack_qty, p.unit)}</span></td>
                   <td className="num">{fmtQty(p.net_requirement, p.unit)}</td>
                   <td className="num">{fmtQty(p.projected_stock_before, p.unit)} → {fmtQty(p.projected_stock_after, p.unit)}</td>
                   <td className="small" style={{ whiteSpace: "normal", maxWidth: 360 }}>{p.reason}</td>
@@ -156,7 +156,7 @@ export default function ArticlePage() {
         <div className="grid cols-2">
           <Card title="Fournisseurs & règles d'approvisionnement" hint="modifiables dans le Référentiel">
             <table className="tbl compact">
-              <thead><tr><th>Fournisseur</th><th className="num">MOQ</th><th className="num">PLA</th><th className="num">Délai (j ouvrés)</th><th className="num">Quota</th><th className="num">Priorité</th></tr></thead>
+              <thead><tr><th>Fournisseur</th><th className="num">MOQ</th><th className="num">UM</th><th className="num">Délai (j ouvrés)</th><th className="num">Quota</th><th className="num">Priorité</th></tr></thead>
               <tbody>{d.suppliers.map((s) => <tr key={s.supplier_id}><td>{s.supplier_id}<span className="sub">{s.supplier_name}</span></td><td className="num">{fmtQty(s.moq, unit)}</td><td className="num">{fmtQty(s.pack_qty, unit)}</td><td className="num">{s.lead_time_days}</td><td className="num">{s.quota_pct} %</td><td className="num">{s.priority}</td></tr>)}</tbody>
             </table>
           </Card>

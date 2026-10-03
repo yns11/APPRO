@@ -16,6 +16,7 @@ from appro.engine.models import (
     BomLine,
     ConsumptionLine,
     Dataset,
+    DesadvLine,
     EngineParams,
     OrderLine,
     OrderType,
@@ -188,8 +189,7 @@ def test_backlog_is_cumulative_per_supplier_and_ages_out():
     assert lanes["S1"].backlog_ordered == 450 and lanes["S1"].backlog_received == 250 and lanes["S1"].backlog_qty == 200
     assert lanes["S2"].backlog_ordered == 100 and lanes["S2"].backlog_received == 130 and lanes["S2"].backlog_qty == 0
     assert r.kpis["backlog_qty"] == 200
-    alerts = [a for a in r.alerts if a.alert_type == AlertType.BACKLOG]
-    assert len(alerts) == 1 and "S1 200" in alerts[0].message and alerts[0].scope == "erp"
+    assert not [a for a in r.alerts if a.alert_type == AlertType.BACKLOG]   # shown on the lane, never alerted
     # the planner types the quantity where he expects it: plan scenario only
     ds.plan = [PlanCell("A1", "S1", MON + D(days=2), 200)]
     r2 = run(ds, horizon_days=5)
@@ -526,3 +526,52 @@ def test_refused_proposal_blocks_the_rest_of_its_week():
     assert r2.kpis["refused_proposals"] == 1
     i = r2.dates.index(first.delivery_date)
     assert r2.supply_proposed[i] == 0 and max(r2.supply_proposed) > 0
+
+
+def test_desadv_shown_in_the_receipt_row_until_received_or_hidden():
+    """Despatch advices: announced quantities of the supplier on their issue day, never counted ;
+    gone once the delivery note (BL) is received or once the planner hides the day ; green when the
+    message is « Traité / OK », red otherwise ; receipts without a processed DESADV are flagged."""
+    from appro.engine.models import CellFlag
+    mon1, tue1, wed1 = MON - D(days=7), MON - D(days=6), MON - D(days=5)
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
+                      receipts=[Receipt("R1", "A1", tue1, 300, supplier_id="S1", packing_slip="BL-1"),
+                                Receipt("R2", "A1", wed1, 100, supplier_id="S1", packing_slip="BL-9")])
+    ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", mon1, 300, state="Traité", final_processing="OK"),      # received
+                 DesadvLine("D2|1", "A1", "S1", "BL-2", wed1, 500, state="Traité", final_processing="OK"),      # open, ok
+                 DesadvLine("D3|1", "A1", "S1", "BL-3", wed1, 50, state="Erreur", final_processing="Non traité"),
+                 DesadvLine("D4|1", "A1", "S1", "BL-4", MON, 70, state="Annulé"),                               # cancelled: ignored
+                 DesadvLine("D5|1", "A1", "S2", "BL-5", MON, 20, state="Traité", final_processing="OK")]        # another supplier → its own lane
+    r = run(ds, horizon_days=5)
+    i = r.dates.index(MON)
+    lanes = {l.supplier_id: l for l in r.lanes}
+    s1 = lanes["S1"]
+    assert s1.desadv_open[i - 7] == 0 and s1.desadv_open[i - 5] == 550 and s1.desadv_open[i] == 0
+    assert bool(s1.desadv_ko[i - 5]) and not bool(s1.desadv_ko[i - 6])
+    assert not bool(s1.receipts_ko[i - 6]) and bool(s1.receipts_ko[i - 5])          # BL-1 processed, BL-9 unknown
+    assert lanes["S2"].desadv_open[i] == 20 and not bool(lanes["S2"].desadv_ko[i])
+    assert [d.received for d in s1.desadv] == [True, False, False]          # the cancelled one is not listed
+    # never counted: the stocks ignore the announced quantities
+    assert sum(r.receipts) == 400 and r.stock_erp[i - 5] == r.stock_erp[i - 6] + 100 - r.demand[i - 5]
+    # hidden by the planner (double-click): the day disappears, the data stays listed
+    ds.flags = [CellFlag("A1", "S1", wed1, "desadv_hidden", qty=550)]
+    r2 = run(ds, horizon_days=5)
+    s1b = {l.supplier_id: l for l in r2.lanes}["S1"]
+    assert s1b.desadv_open[i - 5] == 0 and [d.hidden for d in s1b.desadv][1:3] == [True, True]
+
+
+def test_refused_proposal_is_per_supplier():
+    """A refusal on a supplier's CBN row blocks that supplier only ; a refusal without supplier blocks all."""
+    from appro.engine.models import CellFlag
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100.0)],
+                      links=[SupplierLink("A1", "S1", quota_pct=100, priority=1, lead_time_days=1),
+                             SupplierLink("A1", "S2", quota_pct=0, priority=2, lead_time_days=1)])
+    base = run(ds, horizon_days=21, generate_proposals=True, sourcing_policy="priority", proposal_placement="monday")
+    first = next(p for p in base.proposals if p.supplier_id == "S1")
+    end = first.delivery_date - D(days=first.delivery_date.weekday()) + D(days=6)
+    ds.flags = [CellFlag("A1", "S2", first.delivery_date, "proposal_refused", qty=first.qty)]   # other supplier: no effect
+    same = run(ds, horizon_days=21, generate_proposals=True, sourcing_policy="priority", proposal_placement="monday")
+    assert [(p.delivery_date, p.qty) for p in same.proposals] == [(p.delivery_date, p.qty) for p in base.proposals]
+    ds.flags = [CellFlag("A1", "S1", first.delivery_date, "proposal_refused", qty=first.qty)]
+    blocked = run(ds, horizon_days=21, generate_proposals=True, sourcing_policy="priority", proposal_placement="monday")
+    assert all(not (first.delivery_date <= p.delivery_date <= end) for p in blocked.proposals if p.supplier_id == "S1")

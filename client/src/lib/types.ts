@@ -28,7 +28,9 @@ export interface ProposalOut {
 export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; ignored: boolean; }
 export interface SeriesOut { key: string; label: string; values: number[]; }
 /** One supplier of the article: its own Ferme / Prévisionnel / Reçu / Plan rows. */
-export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; }
+/** One despatch advice (DESADV) line of the supplier ; shown in the Reçu row while not received. */
+export interface DesadvInfo { desadv_id: string; packing_slip: string; issue_date: string; qty: number; state: string; final_processing: string; processed: boolean; received: boolean; hidden: boolean; purch_id: string; }
+export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; desadv_ko: boolean[]; receipts_ko: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; desadv: DesadvInfo[]; }
 
 export interface ArticleKpis {
   stock_on_hand: number; reference_correction: number; stock_reference: number; init_date: string; shortage_policy: "backlog" | "lost";
@@ -79,8 +81,8 @@ export interface WeeklyParamsResponse { article_id: string; fields: string[]; de
 /** The two editable rows. */
 export interface AdjustmentOut { id: string; article_id: string; date: string; expression: string; qty: number; note: string; updated_by: string; updated_at: string; }
 export interface PlanCellOut { id: string; article_id: string; supplier_id: string; date: string; expression: string; qty: number; note: string; updated_by: string; updated_at: string; }
-/** A click on a read-only cell: ignored firm-order day (supplier × day) or refused CBN proposal (day, blocks its week). */
-export type FlagKind = "order_ignored" | "proposal_refused";
+/** A click on a read-only cell: ignored firm-order day (supplier × day), refused CBN proposal (supplier × day, blocks its week) or hidden unreceived DESADV (supplier × day). */
+export type FlagKind = "order_ignored" | "proposal_refused" | "desadv_hidden";
 export interface FlagOut { id: string; article_id: string; supplier_id: string; date: string; kind: FlagKind; qty: number; note: string; updated_by: string; updated_at: string; }
 export interface FlagIn { article_id: string; supplier_id?: string | null; date: string; kind: FlagKind; qty?: number; note?: string; }
 

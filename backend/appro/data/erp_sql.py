@@ -26,6 +26,7 @@ class ErpTables:
     orders: str = "commandes_edi"
     receipts: str = "recep_edi"
     consumption: str = ""         # empty: no actual consumption read from the ERP
+    desadv: str = ""              # empty: no despatch advices (DESADV) read from the ERP
     pdp: str = ""                 # empty: the PDP comes from the file imported in the application
 
     def fqn(self, table: str) -> str:
@@ -80,6 +81,25 @@ GROUP BY c.article_id, CAST(c.date AS DATE)
 """.strip()
 
 
+def desadv_sql(t: ErpTables) -> str:
+    """Despatch advices, one row per article line of a DespatchAdvice-Purchase message (``desadv_edi``)."""
+    return f"""
+SELECT
+  CONCAT_WS('|', CAST(d.Document_ID AS STRING), CAST(d.ID_Ligne AS STRING)) AS desadv_id,
+  d.Code_article                                                  AS article_id,
+  d.Code_fournisseur                                              AS supplier_id,
+  d.Nom_fournisseur                                               AS supplier_name,
+  CAST(d.BL AS STRING)                                            AS packing_slip,
+  CAST(d.Commande_ouverte AS STRING)                              AS purch_id,
+  CAST(d.Date_emission AS DATE)                                   AS issue_date,
+  CAST(d.Quantite_achat AS DOUBLE)                                AS qty,
+  d.Etat_message                                                  AS state,
+  d.Traitement_final                                              AS final_processing
+FROM {t.fqn(t.desadv)} d
+WHERE d.Code_article IS NOT NULL AND d.BL IS NOT NULL AND d.Date_emission IS NOT NULL
+""".strip()
+
+
 def production_plan_sql(t: ErpTables) -> str:
     return f"""
 SELECT p.program_id AS program_id, CAST(p.week_start AS DATE) AS week_start, CAST(p.qty AS DOUBLE) AS qty,
@@ -93,6 +113,8 @@ def fact_queries(t: ErpTables) -> dict[str, str]:
     out = {"fct_purchase_orders": purchase_orders_sql(t), "fct_receipts": receipts_sql(t)}
     if t.consumption:
         out["fct_consumption_actual"] = consumption_actual_sql(t)
+    if t.desadv:
+        out["fct_desadv"] = desadv_sql(t)
     if t.pdp:
         out["fct_production_plan"] = production_plan_sql(t)
     return out

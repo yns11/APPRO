@@ -74,7 +74,10 @@ variables:
       Table UC de consommation réelle journalière PAR COMPOSANT, déjà éclatée (colonnes article_id,
       date, qty dans l'unité de stock de l'article). Vide = aucune : le besoin passé suit
       missing_actual_policy. Voir docs/dictionnaire_donnees.md § 2.3.
-    default: ""
+    default: conso_composants
+  erp_desadv_table:
+    description: Table UC des avis d'expédition EDI (DESADV, DespatchAdvice-Purchase). Vide = aucune.
+    default: desadv_edi
   erp_pdp_table:
     description: Table de PDP hebdomadaire (program_id, week_start, qty, version). Vide = aucune (PDP importé par fichier).
     default: ""

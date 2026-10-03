@@ -33,12 +33,13 @@ SERIES_LABELS = [
 ]
 LANE_SERIES = [("orders_firm", "Ferme"), ("orders_firm_hist", "Ferme (passé)"), ("orders_forecast", "Prévisionnel"),
                ("receipts", "Reçu"), ("plan", "Plan"), ("supply_proposed", "Proposition CBN"),
-               ("orders_firm_ordered", "Ferme commandé"), ("orders_firm_open", "Ferme restant ERP")]
+               ("orders_firm_ordered", "Ferme commandé"), ("orders_firm_open", "Ferme restant ERP"),
+               ("desadv_open", "DESADV non reçu")]
 #: series of the multi-article table (the article page gets every series)
 GRID_SERIES = {"demand", "supply_proposed", "adjustments", "stock_erp", "stock_plan", "shortage_erp", "shortage_plan",
                "coverage_erp", "coverage_plan", "target_stock"}
 FLOWS = {"demand", "consumed", "required", "demand_plan", "orders_firm", "orders_firm_hist", "orders_forecast",
-         "receipts", "plan", "supply_proposed", "adjustments"}
+         "receipts", "plan", "supply_proposed", "adjustments", "desadv_open"}
 SHORTAGES = {"shortage_erp", "shortage_plan"}
 
 
@@ -237,8 +238,11 @@ def lane_out(l: Lane, cols: Columns, with_orders: bool = True) -> dict[str, Any]
         "supplier_id": l.supplier_id, "name": l.name,
         "series": [{"key": key, "label": label, "values": _agg(key, getattr(l, key), cols, False)} for key, label in LANE_SERIES],
         "plan_typed": cols.any(l.plan_typed), "orders_ignored": cols.any(l.orders_ignored),
+        "desadv_ko": cols.any(l.desadv_ko) if l.desadv_ko is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
+        "receipts_ko": cols.any(l.receipts_ko) if l.receipts_ko is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
         "backlog_ordered": l.backlog_ordered, "backlog_received": l.backlog_received, "backlog_qty": l.backlog_qty,
         "orders": [o.__dict__ for o in l.orders] if with_orders else [],
+        "desadv": [d.__dict__ for d in l.desadv] if with_orders else [],
     }
 
 

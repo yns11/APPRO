@@ -116,6 +116,21 @@ class OrderInfoOut(BaseModel):
     ref: str = ""
 
 
+class DesadvInfoOut(BaseModel):
+    """One despatch advice line of the supplier: shown in the Reçu row while not received."""
+
+    desadv_id: str
+    packing_slip: str
+    issue_date: dt.date
+    qty: float
+    state: str
+    final_processing: str
+    processed: bool
+    received: bool
+    hidden: bool
+    purch_id: str = ""
+
+
 class SeriesOut(BaseModel):
     key: str
     label: str
@@ -130,10 +145,13 @@ class LaneOut(BaseModel):
     series: list[SeriesOut]
     plan_typed: list[bool]
     orders_ignored: list[bool] = Field(default_factory=list)
+    desadv_ko: list[bool] = Field(default_factory=list)
+    receipts_ko: list[bool] = Field(default_factory=list)
     backlog_ordered: float
     backlog_received: float
     backlog_qty: float
     orders: list[OrderInfoOut] = Field(default_factory=list)
+    desadv: list[DesadvInfoOut] = Field(default_factory=list)
 
 
 class ArticleSummary(BaseModel):
@@ -337,7 +355,7 @@ class FlagIn(BaseModel):
     article_id: str
     supplier_id: str | None = None
     date: dt.date
-    kind: Literal["order_ignored", "proposal_refused"]
+    kind: Literal["order_ignored", "proposal_refused", "desadv_hidden"]
     qty: float = 0.0
     note: str | None = Field(None, max_length=500)
 

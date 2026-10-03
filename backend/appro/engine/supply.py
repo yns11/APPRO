@@ -30,7 +30,18 @@ import numpy as np
 
 from .calendar import iso_week_monday
 from .demand import DayIndex
-from .models import CellFlag, EngineParams, Lane, OrderInfo, OrderLine, PlanCell, Receipt, SupplierLink
+from .models import (
+    CellFlag,
+    DesadvInfo,
+    DesadvLine,
+    EngineParams,
+    Lane,
+    OrderInfo,
+    OrderLine,
+    PlanCell,
+    Receipt,
+    SupplierLink,
+)
 
 EPS = 1e-9
 
@@ -48,23 +59,31 @@ class _LaneAcc:
     ordered: np.ndarray = field(init=False)
     open: np.ndarray = field(init=False)
     ignored: np.ndarray = field(init=False)
+    desadv_open: np.ndarray = field(init=False)
+    desadv_ko: np.ndarray = field(init=False)
+    receipts_ko: np.ndarray = field(init=False)
     backlog_ordered: float = 0.0
     backlog_received: float = 0.0
     orders: list[OrderInfo] = field(default_factory=list)
+    desadv: list[DesadvInfo] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         n = self.n
         self.orders_firm, self.orders_firm_hist, self.orders_forecast = np.zeros(n), np.zeros(n), np.zeros(n)
         self.receipts, self.plan, self.ordered, self.open = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
         self.plan_typed, self.ignored = np.zeros(n, dtype=bool), np.zeros(n, dtype=bool)
+        self.desadv_open = np.zeros(n)
+        self.desadv_ko, self.receipts_ko = np.zeros(n, dtype=bool), np.zeros(n, dtype=bool)
 
 
 def lane_ids(links: list[SupplierLink], orders: list[OrderLine], receipts: list[Receipt], cells: list[PlanCell],
-             as_of: dt.date) -> list[str | None]:
+             as_of: dt.date, desadv: list[DesadvLine] | None = None) -> list[str | None]:
     """Suppliers shown as lanes: the active links (priority order), then any other supplier that
-    appears in the orders, receipts or plan cells ; a single anonymous lane when there is none."""
+    appears in the orders, receipts, plan cells or despatch advices ; a single anonymous lane when
+    there is none."""
     ids: list[str | None] = [l.supplier_id for l in sorted(links, key=lambda l: (l.priority, l.supplier_id)) if l.active]
-    extra = {o.supplier_id for o in orders} | {r.supplier_id for r in receipts} | {c.supplier_id for c in cells if c.date >= as_of}
+    extra = ({o.supplier_id for o in orders} | {r.supplier_id for r in receipts} | {c.supplier_id for c in cells if c.date >= as_of}
+             | {d.supplier_id for d in (desadv or ())})
     for sid in sorted((s for s in extra if s and s not in ids)):
         ids.append(sid)
     if None in extra and not ids:
@@ -74,9 +93,9 @@ def lane_ids(links: list[SupplierLink], orders: list[OrderLine], receipts: list[
 
 def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: list[Receipt], cells: list[PlanCell],
                 supplier_names: dict[str, str], index: DayIndex, as_of: dt.date, params: EngineParams,
-                flags: list[CellFlag] | None = None) -> list[Lane]:
+                flags: list[CellFlag] | None = None, desadv: list[DesadvLine] | None = None) -> list[Lane]:
     n = index.n
-    ids = lane_ids(links, orders, receipts, cells, as_of)
+    ids = lane_ids(links, orders, receipts, cells, as_of, desadv)
     acc = {sid: _LaneAcc(sid, n) for sid in ids}
     fallback = ids[0]
 
@@ -136,6 +155,32 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     if i0 is not None:
         for ln in acc.values():
             ln.orders_firm[i0] = max(0.0, ln.orders_firm[i0] - received_today.get(ln.supplier_id, 0.0))
+    # ---- despatch advices (DESADV): announced, matched to the receipts by delivery note (BL)
+    hidden_days = {(f.supplier_id or None, f.date) for f in (flags or ()) if f.kind == "desadv_hidden"}
+    received_bls = {r.packing_slip.strip() for r in receipts if r.packing_slip and r.packing_slip.strip()}
+    processed_bls: set[str] = set()
+    for d in desadv or ():
+        if d.state.strip().lower() == "annulé":
+            continue
+        bl = d.packing_slip.strip()
+        ln = lane_of(d.supplier_id)
+        received = bl in received_bls
+        hidden = (ln.supplier_id, d.issue_date) in hidden_days
+        if d.processed:
+            processed_bls.add(bl)
+        ln.desadv.append(DesadvInfo(d.desadv_id, bl, d.issue_date, float(d.qty), d.state, d.final_processing,
+                                    d.processed, received, hidden, d.purch_id))
+        if received or hidden:
+            continue
+        i = index.offset(d.issue_date)
+        if i is not None:
+            ln.desadv_open[i] += float(d.qty)
+            if not d.processed:
+                ln.desadv_ko[i] = True
+    for r in receipts:
+        i = index.offset(r.receipt_date)
+        if i is not None and r.qty and (r.packing_slip or "").strip() not in processed_bls:
+            lane_of(r.supplier_id).receipts_ko[i] = True
     # ---- plan: typed cells, else the ERP
     for ln in acc.values():
         ln.plan[:] = ln.orders_firm
@@ -151,6 +196,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     return [Lane(supplier_id=ln.supplier_id, name=supplier_names.get(ln.supplier_id or "", ln.supplier_id or ""),
                  orders_firm=ln.orders_firm, orders_firm_hist=ln.orders_firm_hist, orders_forecast=ln.orders_forecast,
                  receipts=ln.receipts, plan=ln.plan, supply_proposed=np.zeros(n), plan_typed=ln.plan_typed,
+                 desadv_open=ln.desadv_open, desadv_ko=ln.desadv_ko, receipts_ko=ln.receipts_ko, desadv=ln.desadv,
                  orders_firm_ordered=ln.ordered, orders_firm_open=ln.open, orders_ignored=ln.ignored,
                  backlog_ordered=ln.backlog_ordered, backlog_received=ln.backlog_received,
                  backlog_qty=max(0.0, ln.backlog_ordered - ln.backlog_received), orders=ln.orders)
@@ -166,10 +212,11 @@ def lane_totals(lanes: list[Lane], key: str) -> np.ndarray:
     return out
 
 
-def blocked_windows(flags: list[CellFlag] | None, article_id: str) -> list[tuple[dt.date, dt.date]]:
-    """Days where no CBN proposal may be placed: from each refused proposal to the Sunday of its week."""
-    out = []
+def blocked_windows(flags: list[CellFlag] | None, article_id: str) -> dict[str | None, list[tuple[dt.date, dt.date]]]:
+    """Days where no CBN proposal may be placed, per supplier: from each refused proposal to the
+    Sunday of its week.  A refusal without supplier (key ``None``) applies to every supplier."""
+    out: dict[str | None, list[tuple[dt.date, dt.date]]] = {}
     for f in flags or ():
         if f.kind == "proposal_refused" and f.article_id == article_id:
-            out.append((f.date, iso_week_monday(f.date) + dt.timedelta(days=6)))
+            out.setdefault(f.supplier_id or None, []).append((f.date, iso_week_monday(f.date) + dt.timedelta(days=6)))
     return out

@@ -77,6 +77,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--receipts-table", default="recep_edi")
     p.add_argument("--consumption-table", default="", help="table UC de consommation réelle par composant (article_id, date, qty) ; vide = aucune")
     p.add_argument("--pdp-table", default="")
+    p.add_argument("--desadv-table", default="desadv_edi", help="table UC des avis d'expédition (DESADV) ; vide = aucune")
     p.add_argument("--branch", default="", help="projects/<projet>/branches/<branche>")
     p.add_argument("--endpoint", default="", help="projects/<projet>/branches/<branche>/endpoints/<endpoint>")
     p.add_argument("--pg-host", default="", help="hôte Lakebase si la découverte est impossible")
@@ -107,7 +108,7 @@ def _table_exists(spark, fqn: str) -> bool:
 def _check_sources(spark, tables: ErpTables) -> None:
     """Fail once, naming every missing source, rather than one table per run."""
     missing = [fqn for fqn in (tables.fqn(tables.orders), tables.fqn(tables.receipts)) if not _table_exists(spark, fqn)]
-    for opt in (tables.consumption, tables.pdp):
+    for opt in (tables.consumption, tables.pdp, tables.desadv):
         if opt and not _table_exists(spark, tables.fqn(opt)):
             missing.append(tables.fqn(opt))
     if missing:
@@ -158,7 +159,7 @@ def publish(conn, spark, query: str, name: str, pg_schema: str, run_id: str, sou
 def run(args: argparse.Namespace) -> dict[str, int]:
     import psycopg
     tables = ErpTables(args.catalog, args.schema, args.orders_table, args.receipts_table, args.consumption_table or "",
-                       args.pdp_table or "")
+                       args.pdp_table or "", args.desadv_table or "")
     queries = fact_queries(tables)
     wanted = {t.strip() for t in args.tables.split(",") if t.strip()}
     if wanted:
@@ -174,7 +175,8 @@ def run(args: argparse.Namespace) -> dict[str, int]:
         _check_targets(conn, args.pg_schema, [f"erp_{n[4:]}" for n in queries])
         for name, query in queries.items():
             src = {"fct_purchase_orders": tables.fqn(tables.orders), "fct_receipts": tables.fqn(tables.receipts),
-                   "fct_consumption_actual": tables.fqn(tables.consumption), "fct_production_plan": tables.fqn(tables.pdp)}[name]
+                   "fct_consumption_actual": tables.fqn(tables.consumption), "fct_production_plan": tables.fqn(tables.pdp),
+                   "fct_desadv": tables.fqn(tables.desadv)}[name]
             results[name] = publish(conn, spark, query, name, args.pg_schema, args.run_id, src.replace("`", ""))
     return results
 

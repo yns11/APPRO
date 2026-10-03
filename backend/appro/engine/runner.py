@@ -86,6 +86,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     flags_by_article = defaultdict(list)
     for f in dataset.flags:
         flags_by_article[f.article_id].append(f)
+    desadv_by_article = defaultdict(list)
+    for d in dataset.desadv:
+        desadv_by_article[d.article_id].append(d)
 
     selected = [a for a in dataset.articles if a.active and (article_ids is None or a.article_id in article_ids)]
     results: dict[str, ArticleResult] = {}
@@ -108,7 +111,8 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         stock_snapshot = snap.qty_on_hand - (snap.qty_blocked or 0.0) if snap is not None else 0.0
 
         lanes = build_lanes(links_by_article.get(aid, []), orders_by_article.get(aid, []), receipts_by_article.get(aid, []),
-                            plan_by_article.get(aid, []), supplier_names, index, as_of, params, flags_by_article.get(aid))
+                            plan_by_article.get(aid, []), supplier_names, index, as_of, params, flags_by_article.get(aid),
+                            desadv_by_article.get(aid))
         receipts = lane_totals(lanes, "receipts")
         orders_firm = lane_totals(lanes, "orders_firm")
         plan = lane_totals(lanes, "plan")

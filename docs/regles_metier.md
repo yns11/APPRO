@@ -113,6 +113,17 @@ fournisseur et de ce jour : elles sortent du Scenario ERP et ne pré-remplissent
 0 ; une cellule saisie garde sa valeur). Un nouveau clic les rétablit. Le passé ne s'ignore pas (il ne compte
 dans aucun stock). Ces jours ignorés sont listés dans *Saisies & journal* et comptés dans le KPI *Plan*.
 
+### 3.3 ter La ligne Reçu : réceptions et avis d'expédition (DESADV)
+
+La ligne *Reçu* de chaque fournisseur montre les réceptions ERP et, **en italique sur fond orange, les DESADV
+non reçus** : un avis d'expédition dont le BL n'apparaît pas encore dans les réceptions, affiché au jour
+d'émission avec sa quantité annoncée. Cette quantité **n'entre dans aucun calcul** (ni stock, ni backlog, ni
+proposition) : elle prévient que la marchandise est en route. Point **vert** si le message est *Traité* et son
+traitement final *OK*, **rouge** sinon (erreur, en attente, créé). Le DESADV disparaît du tableau dès que son BL
+est réceptionné, ou si l'approvisionneur **double-clique** la cellule et confirme (drapeau `desadv_hidden`,
+listé et rétablissable dans *Saisies & journal*). Les messages annulés ne sont jamais affichés. Les réceptions
+portent elles aussi un point : vert si leur BL correspond à un DESADV traité, rouge sinon.
+
 ### 3.4 Backlog fournisseur
 
 Les commandes fermes **passées** ne comptent dans aucun stock (leur restant ERP n'est pas fiable). Par
@@ -124,6 +135,9 @@ Cumul, sans lettrage : une réception en avance ou en retard de quelques jours n
 Le backlog est affiché (KPI de la fiche, liste du cockpit, en-tête de la voie, alerte `BACKLOG`) et **sort
 tout seul** : réception dans l'ERP, ou commande plus ancienne que la fenêtre. Si l'approvisionneur l'attend
 encore, il tape la quantité dans le plan au jour prévu ; sinon il ne fait rien.
+
+
+Le backlog est **affiché** (en-tête de voie, fiche article), jamais une alerte ni un KPI du cockpit.
 
 ### 3.5 Ajustements et stock de référence
 
@@ -194,20 +208,22 @@ Recalculées à chaque calcul (`generate_proposals` [oui]) sur le Scenario Plan,
 proposent que ce que ni l'ERP ni le plan ne couvrent. Algorithme : dès que `stock[d] < cible[d]` (sauf creux
 toléré, `shortfall_tolerance_days` [0] : retour au-dessus de la cible en n jours ouvrés **sans aucun besoin non
 servi**, jugé sur la série des manques quelle que soit la politique de manque), quantité = max(besoin net jusqu'au niveau de recomplètement, MOQ)
-arrondie au PLA ; fournisseur par quota [défaut] ou priorité ; livraison le premier jour ouvré autorisé du
+arrondie à l'UM (unité de manutention) ; fournisseur par quota [défaut] ou priorité ; livraison le premier jour ouvré autorisé du
 fournisseur (`delivery_shift` [`earlier`]), ou le **lundi** (`proposal_placement = monday`) ; date de
 commande = livraison − délai ouvré, **urgente** si déjà passée ; re-projection puis itération.
 
 **Une proposition par fournisseur et par jour de livraison**, partout (tableau, listes, infobulles,
-exports) : les besoins d'une même semaine ramenés au même lundi sont fusionnés.
+exports) : les besoins d'une même semaine ramenés au même lundi sont fusionnés. Dans le tableau, la ligne
+*Proposition CBN* est **à la maille fournisseur** (une par voie, sous la ligne *Plan*), comme dans l'export Excel.
 
 Pour la reprendre : taper la quantité dans la cellule *Plan* (la cellule grisée la prérempli). Le CBN se
 recalcule sans elle.
 
 **Refuser une proposition** : un clic sur une cellule *Proposition CBN* la barre, la retire du plan et
-**interdit toute proposition entre sa date et le dimanche de sa semaine** : le besoin est servi par une
-proposition placée après cette fenêtre (jamais avant : l'approvisionneur a dit « pas de livraison cette
-semaine »), au prix d'un manque éventuel entre-temps, affiché dans le Scenario Plan. La quantité refusée reste
+**interdit toute proposition à ce fournisseur entre sa date et le dimanche de sa semaine** : le besoin est servi
+par une proposition placée après cette fenêtre (jamais avant : l'approvisionneur a dit « pas de livraison de ce
+fournisseur cette semaine »), au prix d'un manque éventuel entre-temps, affiché dans le Scenario Plan. Un refus
+enregistré sans fournisseur (anciennes données) vaut pour tous. La quantité refusée reste
 affichée barrée ; un nouveau clic rétablit la proposition. Les refus sont listés dans *Saisies & journal*.
 
 **Planning de livraison** (onglet de la fiche article) : la ligne *Plan* est présentée comme des lignes de
@@ -250,7 +266,8 @@ Chaque écriture (cellule, référentiel, import, paramètre) est journalisée a
 | Cellule du plan | à partir d'aujourd'hui (le passé n'est pas planifié) |
 | Ajustement | toute date ; ≤ point zéro = correction du stock initial ; après = mouvement à sa date |
 | Commande ferme ignorée | à partir d'aujourd'hui |
-| Proposition CBN refusée | à partir d'aujourd'hui ; bloque jusqu'au dimanche de sa semaine |
+| Proposition CBN refusée | à partir d'aujourd'hui ; bloque ce fournisseur jusqu'au dimanche de sa semaine |
+| DESADV non reçu masqué | toute date (double-clic confirmé) |
 | Stock de référence | une seule date pour tous les articles, jamais après aujourd'hui (point zéro) |
 | Autres tables du référentiel | sans date |
 

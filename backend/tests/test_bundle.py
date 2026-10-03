@@ -62,8 +62,8 @@ def test_le_job_et_l_application_partagent_le_sql_de_correspondance() -> None:
     """Le notebook duplique le SQL de erp_sql.py : les deux doivent nommer les mêmes colonnes."""
     from appro.data.erp_sql import ErpTables, fact_queries
     from appro.data.schemas import TABLES
-    q = fact_queries(ErpTables(consumption="prod", pdp="pdp"))
-    assert set(q) == {"fct_purchase_orders", "fct_receipts", "fct_consumption_actual", "fct_production_plan"}
+    q = fact_queries(ErpTables(consumption="prod", pdp="pdp", desadv="desadv_edi"))
+    assert set(q) == {"fct_purchase_orders", "fct_receipts", "fct_consumption_actual", "fct_production_plan", "fct_desadv"}
     for name, sql in q.items():
         for col in TABLES[name].column_names:
             assert f"AS {col}" in sql, (name, col)

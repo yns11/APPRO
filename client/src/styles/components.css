@@ -337,3 +337,10 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .dt thead tr:first-child th { top: 0; height: 34px; }
 .dt thead tr.dt-filters th { position: sticky; top: 34px; z-index: 2; background: var(--bg-elev); }
 .dgrid th .sub { display: block; color: var(--fg-subtle); font-size: 0.6rem; text-transform: none; letter-spacing: 0; font-weight: var(--fw-regular); }
+
+/* ---------- DESADV in the Reçu row ---------- */
+.pivot td.desadv { background: var(--cell-yellow); }
+.pivot td .desadv-qty { color: var(--warning-fg); font-style: italic; }
+.pivot td .dot, .legend .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 4px; vertical-align: 1px; }
+.pivot td .dot.ok, .legend .dot.ok { background: var(--ok); }
+.pivot td .dot.ko, .legend .dot.ko { background: var(--critical); }

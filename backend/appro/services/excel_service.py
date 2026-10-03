@@ -76,8 +76,8 @@ SIM_HEADER_ROWS = 3       # label / period start / period end
 SIM_FIRST_COL = 5         # E
 COL_ARTICLE, COL_DESIGNATION, COL_VARIABLE, COL_REF = 1, 2, 3, 4
 LANE_ROWS = [("orders_firm", "Ferme", "value"), ("orders_forecast", "Prévisionnel", "value"),
-             ("receipts", "Reçu", "value"), ("plan", "Plan", "input")]
-TAIL_ROWS = [("cbn", "Proposition CBN", "value"), ("adjustments", "Ajustement", "input"),
+             ("receipts", "Reçu", "value"), ("plan", "Plan", "input"), ("cbn", "Proposition CBN", "value")]
+TAIL_ROWS = [("adjustments", "Ajustement", "input"),
              ("stock_erp", "Scenario ERP", "stock"), ("stock_plan", "Scenario Plan", "stock"),
              ("shortage_plan", "Manque (plan, besoin non servi)", "formula"), ("target", "Stock cible", "formula"),
              ("coverage", "Couverture plan (périodes)", "formula"), ("cum_demand", "Besoin cumulé (aide au calcul)", "helper")]
@@ -200,7 +200,7 @@ def _layer_start(ar: ArticleResult, key: str, i_start: int) -> float:
 def _articles_sheet(ws, result: MrpResult, ids: list[str], start: dt.date) -> dict[str, int]:
     headers = ["Article", "Désignation", "Unité", "Fournisseur(s)", "Stock initial ERP", "Stock initial plan",
                "Correction de référence", "Stock au", "Couverture cible (j)", "Stock de sécurité", "Seuil rouge (j)",
-               "Seuil orange (j)", "Surstock (j)", "MOQ", "PLA", "Délai (j ouvrés)", "Approvisionneur"]
+               "Seuil orange (j)", "Surstock (j)", "MOQ", "UM", "Délai (j ouvrés)", "Approvisionneur"]
     for c, h in enumerate(headers, start=1):
         ws.cell(1, c, h)
     _style_header(ws, 1, len(headers))
@@ -303,7 +303,7 @@ def _simulation_grid(ws, result: MrpResult, ids: list[str], granularity: str, st
                 plan_cell.font = BLUE_FONT
                 if not past:
                     plan_cell.fill = TYPED_FILL if any(lane.plan_typed[i] for i in idxs) else INPUT_FILL
-            cell("cbn", round(float(sum(ar.supply_proposed[i] for i in idxs)), 3))
+                cell("cbn", round(float(sum(lane.supply_proposed[i] for i in idxs)), 3), li)
             adj = cell("adjustments", round(float(sum(ar.adjustments[i] for i in idxs)), 3))
             adj.font = BLUE_FONT
             adj.fill = INPUT_FILL
@@ -313,7 +313,8 @@ def _simulation_grid(ws, result: MrpResult, ids: list[str], granularity: str, st
             plan_sum = "+".join(f"{col}{row('plan', li)}" for li in lane_idx)
             common = f"{receipts_sum}+{col}{row('adjustments')}-{demand_ref}"
             erp_in = f"{firm_sum}+{common}"
-            plan_in = f"{plan_sum}+{col}{row('cbn')}+{common}"
+            cbn_sum = "+".join(f"{col}{row('cbn', li)}" for li in lane_idx)
+            plan_in = f"{plan_sum}+{cbn_sum}+{common}"
             for key, inflow in (("stock_erp", erp_in), ("stock_plan", plan_in)):
                 prev_ref = f"$D{row(key)}" if first_period else f"{prev}{row(key)}"
                 x = f"{prev_ref}+{inflow}"

@@ -82,7 +82,7 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("article_id", "str", "Article", "", True, "P-00001046"),
            Column("supplier_id", "str", "Fournisseur", "", True, "S-000545"),
            Column("moq", "float", "MOQ", "quantité minimale de commande", True, 400),
-           Column("pack_qty", "float", "PLA", "conditionnement : les propositions sont arrondies au multiple supérieur", True, 400),
+           Column("pack_qty", "float", "UM", "unité de manutention (conditionnement) : les propositions sont arrondies au multiple supérieur", True, 400),
            Column("lead_time_days", "int", "Délai (j ouvrés)", "délai fournisseur en jours ouvrés", True, 15),
            Column("quota_pct", "float", "Quota %", "répartition multi-sourcing (100 si mono-source)", True, 100),
            Column("priority", "int", "Priorité", "1 = fournisseur principal", True, 1),
@@ -160,6 +160,19 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("article_id", "str", "Article", "référence composant (P-00…), telle que dans le référentiel", True),
            Column("date", "date", "Jour", "jour de consommation", True),
            Column("qty", "float", "Quantité consommée", "unité de stock de l'article ; un 0 déclaré est respecté", True),
+       ], reference=False),
+    _t("fct_desadv", "DESADV", "Avis d'expédition EDI (DespatchAdvice-Purchase, desadv_edi) : une ligne par ligne d'article d'un message ; "
+       "non reçu tant que son BL n'apparaît pas dans les réceptions.", ("desadv_id",), [
+           Column("desadv_id", "str", "Identifiant", "Document_ID|ID_Ligne", True),
+           Column("article_id", "str", "Article", "", True),
+           Column("supplier_id", "str", "Fournisseur", "", True),
+           Column("supplier_name", "str", "Nom fournisseur", "", False),
+           Column("packing_slip", "str", "N° BL", "référence du bon de livraison (BL) ; clé de rapprochement avec recep_edi", True),
+           Column("purch_id", "str", "N° commande", "", False),
+           Column("issue_date", "date", "Date d'émission", "date d'émission de l'avis = jour affiché dans la ligne Reçu", True),
+           Column("qty", "float", "Quantité annoncée", "", True),
+           Column("state", "str", "État du message", "Créé, Traité, Erreur, En attente, Annulé", False),
+           Column("final_processing", "str", "Traitement final", "Non traité, OK", False),
        ], reference=False),
     _t("fct_production_plan", "PDP ERP", "Plan de production hebdomadaire (facultatif : le PDP est importé par fichier).",
        ("program_id", "week_start", "version"), [

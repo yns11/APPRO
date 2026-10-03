@@ -52,6 +52,7 @@ resources:
               - --receipts-table=${var.erp_receipts_table}
               - --consumption-table=${var.erp_consumption_table}
               - --pdp-table=${var.erp_pdp_table}
+              - --desadv-table=${var.erp_desadv_table}
               - --branch=projects/${var.lakebase_project}/branches/${var.lakebase_branch}
               - --endpoint=projects/${var.lakebase_project}/branches/${var.lakebase_branch}/endpoints/${var.lakebase_endpoint}
               - --pg-database=databricks_postgres

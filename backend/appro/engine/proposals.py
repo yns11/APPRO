@@ -122,7 +122,7 @@ def generate_proposals(
     seq_start: int = 1,
     supply_planned: np.ndarray | None = None,
     reproject: Callable[[np.ndarray], Projection] | None = None,
-    blocked: list[tuple[dt.date, dt.date]] | None = None,
+    blocked: dict[str | None, list[tuple[dt.date, dt.date]]] | None = None,
 ) -> tuple[list[Proposal], np.ndarray, np.ndarray]:
     """Return proposals, the proposed-supply series and the resulting simulated net stock.
 
@@ -139,8 +139,9 @@ def generate_proposals(
     reason of urgent proposals: when a later non-firm order exists, advancing it is usually the
     preferred action (MRP "expedite" exception message).
 
-    ``blocked`` lists the (first day, last day) windows where the planner refused a proposal: no
-    delivery is proposed inside them (the need moves after the window).
+    ``blocked`` maps a supplier (``None`` = every supplier) to the (first day, last day) windows where
+    the planner refused a proposal: no delivery is proposed to that supplier inside them (the need
+    moves after the window).
     """
     n = index.n
     stock = stock_sim.copy()
@@ -184,8 +185,9 @@ def generate_proposals(
             earliest_date = index.dates[earliest_idx]
             if params.respect_lead_time and link:
                 earliest_date = max(earliest_date, calendar.add_working_days(as_of, lead))
+            blocked_here = (blocked or {}).get(None, []) + ((blocked or {}).get(link.supplier_id, []) if link else [])
             delivery = _delivery_day(index.dates[i], earliest_date, index.dates[last_idx], calendar,
-                                     weekdays, params.delivery_shift, blocked)
+                                     weekdays, params.delivery_shift, blocked_here)
             if delivery is None:
                 break  # no feasible delivery day inside the horizon
             j = index.offset(delivery)

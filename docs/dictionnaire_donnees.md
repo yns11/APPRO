@@ -10,7 +10,7 @@ Deux familles :
 | Famille | Tables | Source | Où elles vivent |
 |---|---|---|---|
 | **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_programs`, `ref_bom`, `fct_stock` | **gérées dans l'application** (page Référentiel : ligne par ligne, ou modèle Excel par table) | base applicative (Lakebase ; SQLite en local) |
-| **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_production_plan` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
+| **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_desadv`, `fct_production_plan` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
 
 ## 1. Référentiel (géré dans l'application)
 
@@ -56,7 +56,7 @@ sans modifier la table.
 | article_id | Article | texte **clé** | oui | |
 | supplier_id | Fournisseur | texte **clé** | oui | |
 | moq | MOQ | nombre | oui | quantité minimale de commande |
-| pack_qty | PLA | nombre | oui | conditionnement : arrondi au multiple supérieur |
+| pack_qty | UM | nombre | oui | unité de manutention (conditionnement) : arrondi au multiple supérieur |
 | lead_time_days | Délai (j ouvrés) | entier | oui | |
 | quota_pct | Quota % | nombre | oui | répartition multi-sourcing (100 si mono-source) |
 | priority | Priorité | entier | oui | 1 = principal |
@@ -222,7 +222,32 @@ Colonnes canoniques côté application (miroir `erp_consumption_actual`) :
 | date | date **clé** | jour de consommation |
 | qty | nombre | quantité consommée (unité de stock) |
 
-### 2.4 `fct_production_plan` — PDP hebdomadaire ERP (facultatif)
+### 2.4 `fct_desadv` ← `silver_erp_ye.desadv_edi` — avis d'expédition EDI (DESADV)
+
+Table préparée en amont depuis `bronze_erp.siledimessage` (messages `DespatchAdvice-Purchase`),
+`siledi_item_line` et `purch_table` (`APPRO_ERP_DESADV_TABLE`, variable `erp_desadv_table`, défaut `desadv_edi`).
+Une ligne par ligne d'article d'un message.
+
+| Colonne | Type | Source | Règle |
+|---|---|---|---|
+| desadv_id | texte **clé** | `Document_ID` \| `ID_Ligne` | |
+| article_id | texte | `Code_article` | |
+| supplier_id | texte | `Code_fournisseur` | voie du tableau |
+| supplier_name | texte | `Nom_fournisseur` | |
+| packing_slip | texte | `BL` | **clé de rapprochement** avec `fct_receipts.packing_slip` (`recep_edi.BL`) |
+| purch_id | texte | `Commande_ouverte` | information |
+| issue_date | date | `Date_emission` | jour affiché dans la ligne *Reçu* |
+| qty | nombre | `Quantite_achat` | quantité annoncée, **jamais comptée** dans un stock |
+| state | texte | `Etat_message` | Créé, Traité, Erreur, En attente, Annulé (un message annulé est ignoré) |
+| final_processing | texte | `Traitement_final` | Non traité, OK |
+
+Un DESADV est **non reçu** tant que son BL n'apparaît pas dans `recep_edi` ; il est alors affiché, en italique
+sur fond orange, dans la ligne *Reçu* du fournisseur au jour d'émission, avec un point vert s'il est *Traité* et
+*OK*, rouge sinon. Il disparaît dès que le BL est réceptionné, ou si l'approvisionneur le masque (double-clic
+confirmé, drapeau `desadv_hidden`). Les réceptions portent un point vert si leur BL correspond à un DESADV
+traité, rouge sinon.
+
+### 2.5 `fct_production_plan` — PDP hebdomadaire ERP (facultatif)
 
 Le PDP est le plus souvent **importé par fichier** (modèle dans *Imports / exports*, le jeudi ou le
 vendredi) ; une version importée et active remplace cette table pour ses programmes.
@@ -246,11 +271,11 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `app_meta` | clé / valeur partagées par tous les processus de l'App : `data_version`, incrémentée à chaque écriture pour invalider les caches mémoire de chaque worker | key |
 | `app_plan_cells` | **cellules du plan** : article, fournisseur (`""` si aucun), date, expression saisie, quantité, commentaire, auteur | (article, fournisseur, date) |
 | `app_adjustments` | **cellules d'ajustement** : article, date (toute date), expression, quantité signée, commentaire, auteur | (article, date) |
-| `app_cell_flags` | **clics sur les cellules en lecture** : `kind` = `order_ignored` (commande ferme ignorée : article, fournisseur, jour) ou `proposal_refused` (proposition CBN refusée : article, jour, quantité refusée affichée ; bloque les propositions jusqu'au dimanche), auteur | (kind, article, fournisseur, date) |
+| `app_cell_flags` | **clics sur les cellules en lecture** : `kind` = `order_ignored` (commande ferme ignorée : article, fournisseur, jour), `proposal_refused` (proposition CBN refusée : article, fournisseur, jour, quantité refusée affichée ; bloque les propositions à ce fournisseur jusqu'au dimanche) ou `desadv_hidden` (DESADV non reçu masqué : article, fournisseur, jour, BL en note), auteur | (kind, article, fournisseur, date) |
 | `app_pdp_versions`, `app_pdp_lines` | versions de PDP importées (une active au plus) | id |
 | `app_param_overrides` | règles globales du moteur (`global`) et paramètres d'article par semaine ISO (`article_week`) | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
-| `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_production_plan` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
+| `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_desadv`, `erp_production_plan` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
 | `erp_sync_log` | par table miroir : nombre de lignes, horodatage, source, identifiant d'exécution (affiché dans `/api/health`) | table_name |
 
 Volumétrie : quelques milliers de lignes par table ; le miroir des commandes suit la source (dizaines de

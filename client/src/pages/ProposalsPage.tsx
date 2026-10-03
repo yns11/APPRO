@@ -19,7 +19,7 @@ export default function ProposalsPage() {
     { key: "urgent", label: "Urgence", get: (p) => p.urgent ? "urgent" : "normal", filter: "select", render: (p) => p.urgent ? <Badge tone="critical">urgent</Badge> : <span className="subtle">–</span> },
     { key: "order", label: "Commander le", get: (p) => p.order_date, render: (p) => fmtDate(p.order_date) },
     { key: "delivery", label: "Livraison", get: (p) => p.delivery_date, render: (p) => fmtDate(p.delivery_date) },
-    { key: "qty", label: "Quantité", get: (p) => p.qty, num: true, render: (p) => <><b>{fmtQty(p.qty, p.unit)}</b> <span className="subtle">{p.unit}</span><span className="sub">MOQ {fmtQty(p.moq, p.unit)} · PLA {fmtQty(p.pack_qty, p.unit)}</span></> },
+    { key: "qty", label: "Quantité", get: (p) => p.qty, num: true, render: (p) => <><b>{fmtQty(p.qty, p.unit)}</b> <span className="subtle">{p.unit}</span><span className="sub">MOQ {fmtQty(p.moq, p.unit)} · UM {fmtQty(p.pack_qty, p.unit)}</span></> },
     { key: "net", label: "Besoin net", get: (p) => p.net_requirement, num: true, render: (p) => fmtQty(p.net_requirement, p.unit) },
     { key: "stock", label: "Stock avant → après", get: (p) => p.projected_stock_before, num: true, render: (p) => <>{fmtQty(p.projected_stock_before, p.unit)} → {fmtQty(p.projected_stock_after, p.unit)}</> },
     { key: "reason", label: "Motif", get: (p) => p.reason, render: (p) => <span className="small subtle" style={{ whiteSpace: "normal", minWidth: 220, maxWidth: 320, display: "block" }} title={p.reason}>{p.reason.length > 110 ? `${p.reason.slice(0, 110)}…` : p.reason}</span> },

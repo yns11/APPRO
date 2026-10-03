@@ -6,7 +6,7 @@ import { useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
 import { ORDER_TYPE_LABELS, fmtDate, fmtQty, isSaturday, isSunday, isWeekKey, isWeekend, isoWeekOf, periodLabel } from "@/lib/format";
-import type { AdjustmentOut, ArticleRef, FlagIn, FlagOut, LaneOut, PlanCellOut, SeriesOut } from "@/lib/types";
+import type { DesadvInfo, AdjustmentOut, ArticleRef, FlagIn, FlagOut, LaneOut, PlanCellOut, SeriesOut } from "@/lib/types";
 
 /** Rows of the grid that can be hidden (for every article) ; lane rows are repeated per supplier. */
 export const ROW_LABELS: { key: string; label: string; lane?: boolean }[] = [
@@ -15,7 +15,7 @@ export const ROW_LABELS: { key: string; label: string; lane?: boolean }[] = [
   { key: "orders_forecast", label: "Prévisionnel", lane: true },
   { key: "receipts", label: "Reçu", lane: true },
   { key: "plan", label: "Plan", lane: true },
-  { key: "supply_proposed", label: "Proposition CBN" },
+  { key: "supply_proposed", label: "Proposition CBN", lane: true },
   { key: "adjustments", label: "Ajustement" },
   { key: "stock_erp", label: "Scenario ERP" },
   { key: "stock_plan", label: "Scenario Plan" },
@@ -158,8 +158,8 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         if (!hidden.has("orders_forecast")) out.push({ kind: "fcst", a, li, h: ROW_H, key: `${aid}-fcst-${li}` });
         if (!hidden.has("receipts")) out.push({ kind: "rec", a, li, h: ROW_H, key: `${aid}-rec-${li}` });
         if (!hidden.has("plan")) out.push({ kind: "plan", a, li, h: ROW_H, key: `${aid}-plan-${li}` });
+        if (!hidden.has("supply_proposed")) out.push({ kind: "cbn", a, li, h: ROW_H, key: `${aid}-cbn-${li}` });
       });
-      if (!hidden.has("supply_proposed")) out.push({ kind: "cbn", a, li: 0, h: ROW_H, key: `${aid}-cbn` });
       if (!hidden.has("adjustments")) out.push({ kind: "adj", a, li: 0, h: ROW_H, key: `${aid}-adj` });
       if (!hidden.has("stock_erp")) out.push({ kind: "stock", a, li: 0, h: STOCK_H, sk: "stock_erp", key: `${aid}-stock_erp` });
       if (!hidden.has("stock_plan")) out.push({ kind: "stock", a, li: 0, h: STOCK_H, sk: "stock_plan", key: `${aid}-stock_plan` });
@@ -339,8 +339,39 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         return plainRow(r, "Prévisionnel", "", (i) => fc?.[i] ?? 0, t, (i) => (t(i) ? "event" : ""));
       }
       case "rec": {
-        const l = a.lanes[r.li], rc = laneSeries(l, "receipts");
-        return plainRow(r, "Reçu", "", (i) => rc?.[i] ?? 0);
+        const l = a.lanes[r.li], rc = laneSeries(l, "receipts"), dv = laneSeries(l, "desadv_open");
+        const sid = l.supplier_id ?? "";
+        const inCol = (d: DesadvInfo, i: number) => columnOf(cols, d.issue_date) === i;
+        const openOf = (i: number) => l.desadv.filter((d) => inCol(d, i) && !d.received && !d.hidden);
+        return (
+          <tr key={r.key} style={{ height: r.h }}>
+            <td>Reçu</td>
+            {spacerL}
+            {visibleCols.map((i) => {
+              const v = rc?.[i] ?? 0, open = dv?.[i] ?? 0;
+              const ro = readOnlyCol(i);
+              const hasDesadvData = l.desadv.length > 0;
+              const recKo = !!l.receipts_ko?.[i], dvKo = !!l.desadv_ko?.[i];
+              const openList = open > 0 ? openOf(i) : [];
+              const title = [
+                v > 0 ? `Reçu ${fmtQty(v, unit)}${hasDesadvData ? (recKo ? " – point rouge : un BL reçu sans DESADV traité" : " – point vert : BL annoncé par un DESADV traité") : ""}` : "",
+                open > 0 ? `DESADV non reçu ${fmtQty(open, unit)} (annoncé, hors calculs) : ${openList.map((d) => `BL ${d.packing_slip} ${fmtQty(d.qty, unit)} · ${d.state}${d.final_processing ? ` / ${d.final_processing}` : ""}${d.purch_id ? ` · ${d.purch_id}` : ""}`).join(" ; ")}${ro ? " – semaine agrégée : cliquer l'en-tête pour le détail" : locked ? "" : " – double-clic pour le masquer"}` : "",
+              ].filter(Boolean).join("\n");
+              const cls = [...cellBase(i), open > 0 ? "desadv" : "", open > 0 && !ro && !locked ? "clickable" : ""].filter(Boolean).join(" ");
+              const onDouble = open <= 0 || locked ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i])
+                : () => { if (window.confirm(`Masquer le DESADV non reçu du ${fmtDate(cols.period_start[i])} (${fmtQty(open, unit)}, BL ${openList.map((d) => d.packing_slip).join(", ")}) ?\nIl ne sera plus affiché dans le tableau ; rétablissable depuis Saisies & journal.`)) toggleFlag.mutate({ article_id: aid, supplier_id: sid || null, date: cols.period_start[i], kind: "desadv_hidden", qty: open, note: openList.map((d) => d.packing_slip).join(", ") }); };
+              return (
+                <td key={i} className={cls} title={title} onDoubleClick={onDouble}>
+                  {v > 0 && <>{fmtQty(v, unit)}{hasDesadvData && <span className={`dot ${recKo ? "ko" : "ok"}`} />}</>}
+                  {v > 0 && open > 0 && <br />}
+                  {open > 0 && <span className="desadv-qty">{fmtQty(open, unit)}<span className={`dot ${dvKo ? "ko" : "ok"}`} /></span>}
+                  {v === 0 && open === 0 && "·"}
+                </td>
+              );
+            })}
+            {spacerR}
+          </tr>
+        );
       }
       case "plan": {
         const l = a.lanes[r.li], li = r.li;
@@ -375,25 +406,27 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
           </tr>
         );
       }
-      case "cbn":
+      case "cbn": {
+        const l = a.lanes[r.li], cbs = laneSeries(l, "supply_proposed"), sid = l.supplier_id ?? "";
         return (
           <tr key={r.key} style={{ height: r.h }}>
             <td>Proposition CBN</td>
             {spacerL}
             {visibleCols.map((i) => {
-              const v = series("supply_proposed", i);
-              const flag = flagBy.get(`proposal_refused|${aid}||${i}`);
+              const v = cbs?.[i] ?? 0;
+              const flag = flagBy.get(`proposal_refused|${aid}|${sid}|${i}`) ?? flagBy.get(`proposal_refused|${aid}||${i}`);
               const ro = readOnlyCol(i), past = i < asOfIdx;
               const clickable = !past && !locked && (v > 0 || !!flag);
               const cls = [...cellBase(i), "cbn", flag ? "refused" : "", clickable ? "clickable" : ""].filter(Boolean).join(" ");
-              const title = flag ? `Proposition refusée (${fmtQty(flag.qty, unit)}) : aucune proposition jusqu'à la fin de sa semaine – cliquer pour la rétablir`
+              const title = flag ? `Proposition refusée (${fmtQty(flag.qty, unit)}) : aucune proposition à ce fournisseur jusqu'à la fin de sa semaine – cliquer pour la rétablir`
                 : v > 0 ? `Besoin net calculé sur le Scenario Plan : ${fmtQty(v, unit)}${ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – reprise dans le Plan (cellule grisée) ; cliquer pour la refuser"}` : "";
-              const onClick = !clickable ? undefined : ro && !flag ? () => onSwitchDay?.(cols.period_start[i]) : () => toggleFlag.mutate({ article_id: aid, supplier_id: null, date: flag ? flag.date : cols.period_start[i], kind: "proposal_refused", qty: v });
+              const onClick = !clickable ? undefined : ro && !flag ? () => onSwitchDay?.(cols.period_start[i]) : () => toggleFlag.mutate({ article_id: aid, supplier_id: flag ? (flag.supplier_id || null) : (sid || null), date: flag ? flag.date : cols.period_start[i], kind: "proposal_refused", qty: v });
               return <td key={i} className={cls} title={title} onClick={onClick}>{flag ? <s>{fmtQty(flag.qty, unit)}</s> : v === 0 ? "·" : fmtQty(v, unit)}</td>;
             })}
             {spacerR}
           </tr>
         );
+      }
       case "adj": {
         const initialOf = (ni: number) => { const c = adjBy.get(`${aid}|${ni}`); const av = series("adjustments", ni); return c ? (c.expression || String(c.qty)) : av ? String(av) : ""; };
         return (
@@ -484,6 +517,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
       </div>
       <div className="legend small" style={{ padding: "6px 10px" }}>
         <span><span className="sw bar" style={{ background: "var(--bg-subtle)", border: "1px solid var(--border-strong)" }} />vide = ERP</span>
+        <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} /><i>DESADV non reçu</i> (annoncé, hors calculs ; double-clic pour masquer) · <span className="dot ok" style={{ verticalAlign: "middle" }} /> traité OK · <span className="dot ko" style={{ verticalAlign: "middle" }} /> non traité / BL sans DESADV</span>
         <span><span className="sw bar" style={{ background: "var(--brand-soft)", boxShadow: "inset 0 -2px 0 var(--brand)" }} />chiffre = votre plan (0 = rien attendu, vider = retour ERP) · carré = recopier en tirant</span>
         <span><span className="sw bar" style={{ background: "transparent", border: "1px dashed var(--warning)" }} />grisé = proposition CBN, cliquer puis Entrée pour la reprendre · cliquer la ligne CBN pour la refuser</span>
         <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} />ferme en cours · <span className="sw bar" style={{ background: "var(--cell-green)" }} />ferme soldée · <span className="sw bar" style={{ background: "var(--cell-red)" }} />ferme ignorée (clic)</span>

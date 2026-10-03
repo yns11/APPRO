@@ -107,16 +107,7 @@ def classify_alerts(
                             date=as_of, value=float(plan.stock[i0])))
 
     # --- supply --------------------------------------------------------------------
-    # Backlog: past firm ERP orders not covered by receipts over the backlog window.  Nothing to
-    # qualify: the planner types the quantity in the plan if it still arrives ; it ages out otherwise.
-    backlog = float(sum(l.backlog_qty for l in lanes))
-    if backlog > 1e-6:
-        who = ", ".join(f"{l.supplier_id or 'sans fournisseur'} {l.backlog_qty:,.0f}" for l in lanes if l.backlog_qty > 1e-6)
-        alerts.append(Alert(aid, AlertType.BACKLOG, Severity.WARNING,
-                            f"Backlog fournisseur {backlog:,.0f} : commandes fermes passées non reçues sur "
-                            f"{params.backlog_days} j ({who}) ; hors stocks, à reprendre dans le plan si elles arrivent encore",
-                            date=as_of, value=backlog, scope="erp",
-                            details={"lanes": {l.supplier_id or "": l.backlog_qty for l in lanes if l.backlog_qty > 1e-6}}))
+    # The supplier backlog is shown (lane header, article page), not alerted: nothing to qualify.
     urgent = [p for p in proposals if p.urgent]
     if urgent:
         p = urgent[0]

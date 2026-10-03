@@ -153,6 +153,27 @@ class Receipt:
     qty: float
     supplier_id: str | None = None
     ref: str = ""
+    packing_slip: str = ""         # delivery note number (BL) : matched with the despatch advices
+
+
+@dataclass
+class DesadvLine:
+    """One article line of an EDI despatch advice (DESADV).  *Not received* while its ``packing_slip``
+    is absent from the receipts ; shown in the Reçu row on its issue day, never counted anywhere."""
+
+    desadv_id: str
+    article_id: str
+    supplier_id: str | None
+    packing_slip: str
+    issue_date: dt.date
+    qty: float
+    purch_id: str = ""
+    state: str = ""                # Créé, Traité, Erreur, En attente, Annulé
+    final_processing: str = ""     # Non traité, OK
+
+    @property
+    def processed(self) -> bool:
+        return self.state.strip().lower() == "traité" and self.final_processing.strip().upper() == "OK"
 
 
 @dataclass
@@ -191,7 +212,7 @@ class PlanCell:
     note: str = ""
 
 
-FlagKind = Literal["order_ignored", "proposal_refused"]
+FlagKind = Literal["order_ignored", "proposal_refused", "desadv_hidden"]
 
 
 @dataclass
@@ -201,7 +222,10 @@ class CellFlag:
     * ``order_ignored`` (Ferme row, supplier × day, on/after the reference day): the firm ERP orders
       of that day are **ignored** – out of the ERP scenario and of the plan prefill – until the
       planner clicks again ;
-    * ``proposal_refused`` (Proposition CBN row, article × day): the proposal of that day is refused
+    * ``desadv_hidden`` (Reçu row, supplier × day): the unreceived despatch advices of that day are
+      no longer shown (double-click confirmed by the planner) ;
+    * ``proposal_refused`` (Proposition CBN row, supplier × day ; article-wide when ``supplier_id`` is
+      empty): the proposal of that day is refused
       and **no proposal may be placed from that day to the end of its ISO week** ; ``qty`` keeps
       the refused quantity for display."""
 
@@ -234,6 +258,7 @@ class Dataset:
     adjustments: list[AdjustCell] = field(default_factory=list)
     plan: list[PlanCell] = field(default_factory=list)
     flags: list[CellFlag] = field(default_factory=list)
+    desadv: list[DesadvLine] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -363,6 +388,24 @@ class Lane:
     backlog_received: float           # receipts of the same window
     backlog_qty: float                # max(0, ordered − received)
     orders: list["OrderInfo"] = field(default_factory=list)
+    desadv_open: np.ndarray | None = None   # announced, not received, not hidden DESADV quantity (display only)
+    desadv_ko: np.ndarray | None = None     # bool: an unreceived DESADV of the day is not « Traité / OK »
+    receipts_ko: np.ndarray | None = None   # bool: a receipt of the day has no processed DESADV for its BL
+    desadv: list["DesadvInfo"] = field(default_factory=list)
+
+
+@dataclass
+class DesadvInfo:
+    desadv_id: str
+    packing_slip: str
+    issue_date: dt.date
+    qty: float
+    state: str
+    final_processing: str
+    processed: bool
+    received: bool
+    hidden: bool
+    purch_id: str = ""
 
 
 @dataclass

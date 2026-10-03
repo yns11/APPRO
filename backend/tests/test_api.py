@@ -74,7 +74,7 @@ def test_projection_day_week_and_lanes(client):
     assert len(day["lanes"]) == 1 and day["lanes"][0]["supplier_id"] == "S-000545"
     lane_keys = {s["key"] for s in day["lanes"][0]["series"]}
     assert lane_keys == {"orders_firm", "orders_firm_hist", "orders_forecast", "receipts", "plan", "supply_proposed",
-                         "orders_firm_ordered", "orders_firm_open"}
+                         "orders_firm_ordered", "orders_firm_open", "desadv_open"}
     assert len(day["lanes"][0]["orders_ignored"]) == len(day["periods"])
     assert len(day["lanes"][0]["plan_typed"]) == len(day["periods"])
     week = client.get(f"/api/articles/{AID}/projection", params={"granularity": "week"}).json()

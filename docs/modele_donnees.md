@@ -30,7 +30,7 @@ import *remplacer* / *fusionner*, export). Schéma canonique `backend/appro/data
 |---|---|---|
 | `ref_articles` | article_id | identité, unité, approvisionneur (périmètre), politique de stock |
 | `ref_suppliers` | supplier_id | fournisseurs et jours de livraison |
-| `ref_article_suppliers` | article_id, supplier_id | MOQ, PLA, délai, quota, priorité → **voies** du tableau |
+| `ref_article_suppliers` | article_id, supplier_id | MOQ, UM, délai, quota, priorité → **voies** du tableau |
 | `ref_programs` | program_id | programmes (nom du fichier PDP) |
 | `ref_bom` | program_id, article_id | nomenclature 1 niveau |
 | `ref_planners` | planner_id | approvisionneurs : nom (= colonne *Approvisionneur* des articles), e-mail Databricks, rôle (appro / manager / admin), actif |
@@ -49,6 +49,7 @@ un SQL warehouse (`uc`).
 | `fct_purchase_orders` | order_id | `commandes_edi` | créneau `fournisseur|article|date|ferme`, FIRM / FORECAST, restant ERP |
 | `fct_receipts` | receipt_id | `recep_edi` | réception par fournisseur / commande / BL / article / jour |
 | `fct_consumption_actual` | article_id, date | table UC à configurer (facultatif) | consommation réelle par composant, déjà éclatée |
+| `fct_desadv` | desadv_id | `desadv_edi` | avis d'expédition EDI : BL, quantité annoncée, état ; affichés non reçus dans la ligne Reçu |
 | `fct_production_plan` | program_id, week_start, version | table à configurer (facultatif) | PDP ERP ; le PDP importé le remplace |
 
 ## 3. Saisies
@@ -59,7 +60,7 @@ Deux tables seulement, à l'image des deux lignes éditables du tableau :
 |---|---|---|
 | `app_plan_cells` | article_id, supplier_id, date | quantité planifiée d'un fournisseur un jour donné (0 = rien attendu), expression, commentaire, auteur |
 | `app_adjustments` | article_id, date | ajustement signé (≤ référence : correction du stock de référence), expression, commentaire, auteur |
-| `app_cell_flags` | kind, article_id, supplier_id, date | commande ferme ignorée (hors Scenario ERP et hors plan) ou proposition CBN refusée (quantité affichée, semaine bloquée) |
+| `app_cell_flags` | kind, article_id, supplier_id, date | commande ferme ignorée (hors Scenario ERP et hors plan), proposition CBN refusée (quantité affichée, semaine bloquée pour ce fournisseur) ou DESADV non reçu masqué |
 | `app_meta` | key | `data_version` : compteur partagé entre les workers de l'App, incrémenté à chaque écriture (invalidation des caches) |
 
 Plus les versions de PDP importées, les paramètres (`global`, `article_week`) et le journal.

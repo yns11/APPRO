@@ -35,7 +35,8 @@ dbutils.widgets.text("erp_catalog", "emotors_data_champions", "5. Catalogue ERP"
 dbutils.widgets.text("erp_schema", "silver_erp_ye", "6. Schéma ERP")
 dbutils.widgets.text("orders_table", "commandes_edi", "7. Table commandes")
 dbutils.widgets.text("receipts_table", "recep_edi", "8. Table réceptions")
-dbutils.widgets.text("consumption_table", "", "9. Table consommation réelle par composant (vide = aucune)")
+dbutils.widgets.text("consumption_table", "conso_composants", "9. Table consommation réelle par composant (vide = aucune)")
+dbutils.widgets.text("desadv_table", "desadv_edi", "9b. Table des avis d'expédition DESADV (vide = aucune)")
 dbutils.widgets.text("pdp_table", "", "10. Table PDP ERP (vide = aucune)")
 
 # COMMAND ----------
@@ -50,7 +51,7 @@ from psycopg import sql
 logging.basicConfig(level=logging.INFO)
 LOG = logging.getLogger("appro.sync")
 W = {k: dbutils.widgets.get(k).strip() for k in ("lakebase_endpoint", "pg_host", "pg_database", "pg_schema", "erp_catalog",
-                                                  "erp_schema", "orders_table", "receipts_table", "consumption_table", "pdp_table")}
+                                                  "erp_schema", "orders_table", "receipts_table", "consumption_table", "pdp_table", "desadv_table")}
 
 # --- SQL de correspondance (copie de backend/appro/data/erp_sql.py : à tenir identique) ----------
 def fqn(t):
@@ -76,6 +77,13 @@ if W["consumption_table"]:
 SELECT c.article_id AS article_id, CAST(c.date AS DATE) AS date, CAST(SUM(c.qty) AS DOUBLE) AS qty
 FROM {fqn(W['consumption_table'])} c WHERE c.article_id IS NOT NULL AND c.date IS NOT NULL AND c.qty IS NOT NULL
 GROUP BY c.article_id, CAST(c.date AS DATE)""")
+if W["desadv_table"]:
+    QUERIES["erp_desadv"] = (["desadv_id", "article_id", "supplier_id", "supplier_name", "packing_slip", "purch_id", "issue_date", "qty", "state", "final_processing"], f"""
+SELECT CONCAT_WS('|', CAST(d.Document_ID AS STRING), CAST(d.ID_Ligne AS STRING)) AS desadv_id, d.Code_article AS article_id,
+       d.Code_fournisseur AS supplier_id, d.Nom_fournisseur AS supplier_name, CAST(d.BL AS STRING) AS packing_slip,
+       CAST(d.Commande_ouverte AS STRING) AS purch_id, CAST(d.Date_emission AS DATE) AS issue_date,
+       CAST(d.Quantite_achat AS DOUBLE) AS qty, d.Etat_message AS state, d.Traitement_final AS final_processing
+FROM {fqn(W['desadv_table'])} d WHERE d.Code_article IS NOT NULL AND d.BL IS NOT NULL AND d.Date_emission IS NOT NULL""")
 if W["pdp_table"]:
     QUERIES["erp_production_plan"] = (["program_id", "week_start", "qty", "version"], f"""
 SELECT p.program_id AS program_id, CAST(p.week_start AS DATE) AS week_start, CAST(p.qty AS DOUBLE) AS qty,
@@ -114,7 +122,7 @@ with conn.cursor() as cur:
 missing = [t for t in list(QUERIES) + ["erp_sync_log"] if t not in present]
 if missing:
     raise RuntimeError(f"Tables absentes de Lakebase : {missing}. Déployer et démarrer l'application APPRO d'abord.")
-for t in (W["orders_table"], W["receipts_table"], W["consumption_table"], W["pdp_table"]):
+for t in (W["orders_table"], W["receipts_table"], W["consumption_table"], W["pdp_table"], W["desadv_table"]):
     if t and not spark.catalog.tableExists(f"{W['erp_catalog']}.{W['erp_schema']}.{t}"):
         raise RuntimeError(f"Table source introuvable : {W['erp_catalog']}.{W['erp_schema']}.{t}")
 print("Contrôles OK")

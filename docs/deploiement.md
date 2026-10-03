@@ -192,7 +192,7 @@ a déjà accordé l'écriture sur ses tables `erp_*` (et rien d'autre).
 SELECT table_name, string_agg(privilege_type, ', ' ORDER BY privilege_type) AS droits
 FROM information_schema.role_table_grants
 WHERE grantee = 'prenom.nom@exemple.com' AND table_schema = 'appro' GROUP BY table_name ORDER BY table_name;
--- attendu : erp_consumption_actual, erp_production_plan, erp_purchase_orders, erp_receipts, erp_sync_log : DELETE, INSERT, SELECT, TRUNCATE, UPDATE
+-- attendu : erp_consumption_actual, erp_desadv, erp_production_plan, erp_purchase_orders, erp_receipts, erp_sync_log : DELETE, INSERT, SELECT, TRUNCATE, UPDATE
 -- vide ? vérifier d'abord que les tables existent : SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'appro';
 -- puis que le rôle existe :                     SELECT rolname FROM pg_roles WHERE rolname = 'prenom.nom@exemple.com';
 ```
@@ -211,7 +211,7 @@ redéployer (`scripts/deploy.sh dev PROD --var=...`) ; l'App rejoue le `GRANT` �
    *remplacer la table*.
 2. **Articles** — colonnes : Article, Désignation, Unité, Famille, Approvisionneur (= périmètre),
    Couverture cible, Seuil rouge, Seuil orange, Surstock, Stock de sécurité, Cycle de commande, Actif.
-3. **Article ↔ fournisseur** — MOQ, PLA (conditionnement), délai en jours ouvrés, quota %, priorité.
+3. **Article ↔ fournisseur** — MOQ, UM (unité de manutention), délai en jours ouvrés, quota %, priorité.
 4. **Programmes** — le nom doit être celui utilisé dans le fichier PDP.
 5. **Nomenclatures** — programme, composant, quantité par unité, unité, rebut %.
 6. **Approvisionneurs** — ID, prénom (= colonne *Approvisionneur* des articles), e-mail Databricks, rôle
