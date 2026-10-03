@@ -19,8 +19,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ErpTables:
+    """Keyword-only on purpose: a positional construction once sent the DESADV table to the PDP query."""
+
     catalog: str = "emotors_data_champions"
     schema: str = "silver_erp_ye"
     orders: str = "commandes_edi"

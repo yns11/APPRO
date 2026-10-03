@@ -82,3 +82,25 @@ def test_chaque_cible_de_production_a_son_schema() -> None:
     default = bundle["variables"]["app_schema"]["default"]
     schemas = {name: t.get("variables", {}).get("app_schema", default) for name, t in bundle["targets"].items()}
     assert len(set(schemas.values())) == len(schemas), schemas
+
+
+def test_chaque_requete_lit_sa_table() -> None:
+    """Le job et l'application construisent le mapping par mots-clés : chaque requête vise SA table
+    (observé : la table DESADV passée en position du PDP, requête PDP exécutée sur desadv_edi)."""
+    import argparse
+    import importlib.util
+
+    from appro.config import Settings
+    from appro.services.context import erp_tables
+    t = erp_tables(Settings(data_source="local", erp_consumption_table="conso", erp_desadv_table="desadv", erp_pdp_table="pdp_erp"))
+    assert (t.consumption, t.desadv, t.pdp) == ("conso", "desadv", "pdp_erp")
+    spec = importlib.util.spec_from_file_location("sync_job", RACINE / "jobs" / "sync_erp_to_lakebase.py")
+    job = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(job)
+    args = job.build_arg_parser().parse_args(["--consumption-table", "conso", "--desadv-table", "desadv", "--pdp-table", "pdp_erp"])
+    assert isinstance(args, argparse.Namespace)
+    tj = ErpTables(catalog=args.catalog, schema=args.schema, orders=args.orders_table, receipts=args.receipts_table,
+                   consumption=args.consumption_table or "", desadv=args.desadv_table or "", pdp=args.pdp_table or "")
+    q = fact_queries(tj)
+    assert "`desadv`" in q["fct_desadv"] and "`pdp_erp`" in q["fct_production_plan"] and "`conso`" in q["fct_consumption_actual"]
+    assert "`desadv`" not in q["fct_production_plan"]

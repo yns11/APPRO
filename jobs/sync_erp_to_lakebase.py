@@ -159,8 +159,8 @@ def publish(conn, spark, query: str, name: str, pg_schema: str, run_id: str, sou
 
 def run(args: argparse.Namespace) -> dict[str, int]:
     import psycopg
-    tables = ErpTables(args.catalog, args.schema, args.orders_table, args.receipts_table, args.consumption_table or "",
-                       args.pdp_table or "", args.desadv_table or "")
+    tables = ErpTables(catalog=args.catalog, schema=args.schema, orders=args.orders_table, receipts=args.receipts_table,
+                       consumption=args.consumption_table or "", desadv=args.desadv_table or "", pdp=args.pdp_table or "")
     queries = fact_queries(tables)
     wanted = {t.strip() for t in args.tables.split(",") if t.strip()}
     if wanted:

@@ -31,8 +31,9 @@ log = logging.getLogger(__name__)
 
 
 def erp_tables(settings: Settings) -> ErpTables:
-    return ErpTables(settings.uc_catalog, settings.uc_schema, settings.erp_orders_table, settings.erp_receipts_table,
-                     settings.erp_consumption_table or "", settings.erp_pdp_table or "", settings.erp_desadv_table or "")
+    return ErpTables(catalog=settings.uc_catalog, schema=settings.uc_schema, orders=settings.erp_orders_table,
+                     receipts=settings.erp_receipts_table, consumption=settings.erp_consumption_table or "",
+                     desadv=settings.erp_desadv_table or "", pdp=settings.erp_pdp_table or "")
 
 
 def build_source(settings: Settings, engine) -> FactSource:
