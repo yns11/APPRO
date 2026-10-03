@@ -90,7 +90,7 @@ def test_chaque_requete_lit_sa_table() -> None:
     import argparse
     import importlib.util
 
-    from appro.config import Settings
+    from appro.data.erp_sql import ErpTables, fact_queries
     from appro.services.context import erp_tables
     t = erp_tables(Settings(data_source="local", erp_consumption_table="conso", erp_desadv_table="desadv", erp_pdp_table="pdp_erp"))
     assert (t.consumption, t.desadv, t.pdp) == ("conso", "desadv", "pdp_erp")
