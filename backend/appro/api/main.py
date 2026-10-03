@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,10 +16,25 @@ from ..engine.models import DatasetError
 from .routers import entries, files, mrp, pdp, reference
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialise the context (database tables, grants, reference bootstrap) as soon as the process
+    starts – not at the first request – so that a synchronisation job launched right after a deployment
+    finds the ``erp_*`` tables.  A failure is logged and retried at the first request (``/api/health``
+    then names the cause instead of the application refusing to start)."""
+    try:
+        from ..services.context import get_context
+        get_context()
+    except Exception:  # pragma: no cover - needs a broken database
+        logging.getLogger("appro").exception("Initialisation différée : la base n'est pas joignable au démarrage")
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    app = FastAPI(title=settings.app_title, version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
+    app = FastAPI(title=settings.app_title, version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json",
+                  lifespan=lifespan)
 
     @app.get("/api/health", tags=["health"])
     def health():

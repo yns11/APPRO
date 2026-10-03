@@ -275,6 +275,16 @@ except Exception as exc:
 
 ## 4. Ce qu'aucun contrôle statique ne verra
 
+### 4.0 « Tables cibles absentes » juste après un déploiement réussi
+
+Observé sur APPRO : l'App redéployée répond « App started successfully », le job lancé dans la
+foulée échoue sur une table `erp_*` nouvellement ajoutée au modèle. L'App ne créait ses tables
+(`create_all`) qu'à la **première requête HTTP** : sans ouverture de l'interface ni appel à
+`/api/health`, rien n'existe encore. Parade : initialiser le contexte dans le `lifespan` FastAPI
+(au démarrage du processus), en journalisant l'échec sans empêcher l'App de servir.
+
+
+
 ### 4.1 Les droits Postgres du principal de service
 
 **`permission denied for schema public` au premier `CREATE TABLE`** (observé sur

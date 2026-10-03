@@ -123,8 +123,9 @@ def _check_targets(conn, pg_schema: str, names: list[str]) -> None:
     missing = [n for n in names + ["erp_sync_log"] if n not in present]
     if missing:
         raise RuntimeError("Tables cibles absentes de Lakebase : " + ", ".join(missing) +
-                           ". Déployer et démarrer l'application APPRO d'abord : c'est elle qui crée les tables erp_* "
-                           "et accorde l'écriture au rôle APPRO_SYNC_ROLE.")
+                           ". C'est l'application qui crée les tables erp_* à son démarrage et accorde l'écriture au rôle "
+                           "APPRO_SYNC_ROLE : déployer et démarrer l'application d'abord (une version qui connaît ces tables), "
+                           "vérifier /api/health, puis relancer le job.")
     _ = sql  # imported for symmetry with the writers
 
 
