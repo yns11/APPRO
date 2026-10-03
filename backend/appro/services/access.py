@@ -127,21 +127,27 @@ def _s(v) -> str:
 
 
 def resolve_access(user: str, planners: pd.DataFrame, delegations: pd.DataFrame, articles: pd.DataFrame,
-                   today: dt.date | None = None) -> Access:
-    """Rights of ``user`` (the e-mail forwarded by Databricks Apps) from the three reference frames."""
+                   today: dt.date | None = None, admins: set[str] | None = None) -> Access:
+    """Rights of ``user`` (the e-mail forwarded by Databricks Apps) from the three reference frames.
+
+    ``admins`` (``APPRO_ADMINS``, the bundle deployer by default) are administrators whatever the
+    planners table says: the person who installs the application can never lock herself out."""
     today = today or dt.date.today()
     art_planner = {str(r["article_id"]): _s(r.get("planner")) for r in articles.to_dict("records")}
     names = {_s(r["planner_id"]): _s(r["name"]) for r in planners.to_dict("records")}
     acc = Access(user=user, _article_planner=art_planner, _planner_name=names)
+    forced_admin = (user or "").strip().lower() in (admins or set())
     if planners.empty:
         acc.role, acc.bootstrap = "admin", True
         return acc
     me = [r for r in planners.to_dict("records") if _s(r.get("email")).lower() == (user or "").strip().lower() and bool(r.get("active", True))]
     if not me:
+        if forced_admin:
+            acc.role = "admin"
         return acc
     row = me[0]
     role = _s(row.get("role")).lower()
-    acc.role = role if role in ROLES else "appro"
+    acc.role = "admin" if forced_admin else (role if role in ROLES else "appro")
     acc.planner_id, acc.name = _s(row["planner_id"]), _s(row["name"])
     portfolio = {acc.name.upper()} if acc.name else set()
     for d in delegations.to_dict("records"):

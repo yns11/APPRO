@@ -542,3 +542,18 @@ def test_stock_initialisation_date_is_unique_and_never_in_the_future(client):
     assert client.put("/api/reference/fct_stock/rows", json={"values": {**row, "qty_on_hand": 123}}).status_code == 200
     cfg = client.get("/api/config").json()
     assert cfg["init_date"] == "2026-09-18" and cfg["as_of"] == AS_OF
+
+
+def test_configured_admins_can_never_be_locked_out(client, seed_source, tmp_path):
+    """APPRO_ADMINS (the bundle deployer) stays administrator whatever the planners table says."""
+    import pandas as pd
+
+    from appro.services.access import resolve_access
+    planners = pd.DataFrame([{"planner_id": "PROC1", "name": "QUENTIN", "email": "quentin@example.com", "role": "appro", "active": True}])
+    empty = pd.DataFrame(columns=["from_planner", "to_planner", "date_from", "date_to", "active"])
+    arts = pd.DataFrame([{"article_id": "A", "planner": "QUENTIN"}])
+    assert resolve_access("quentin@example.com", planners, empty, arts).role == "appro"
+    assert resolve_access("quentin@example.com", planners, empty, arts, admins={"quentin@example.com"}).role == "admin"
+    assert resolve_access("Boss@Example.com", planners, empty, arts).role == "reader"
+    assert resolve_access("Boss@Example.com", planners, empty, arts, admins={"boss@example.com"}).role == "admin"
+    assert resolve_access("quentin@example.com", planners, empty, arts, admins={"quentin@example.com"}).name == "QUENTIN"

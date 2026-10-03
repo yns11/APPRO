@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # --- business defaults ---------------------------------------------------------------
     as_of: dt.date | None = Field(None, description="Simulated « today » (demo, tests). Default: the real date of the day")
     default_planner: str | None = Field(None)
+    admins: str = Field("", description="Comma separated e-mails that are always administrators, whatever the planners table (the bundle deployer by default): no lock-out possible")
     horizon_days: int = Field(120)
     history_weeks: int = Field(2, description="Weeks shown before the current week in the supply table")
     working_weekdays: str = Field("1,2,3,4,5")
@@ -84,6 +85,10 @@ class Settings(BaseSettings):
     @property
     def seed_reference_enabled(self) -> bool:
         return self.data_source.lower() == "local" if self.seed_reference is None else self.seed_reference
+
+    @property
+    def admin_emails(self) -> set[str]:
+        return {x.strip().lower() for x in self.admins.split(",") if x.strip()}
 
     @property
     def holiday_dates(self) -> list[dt.date]:

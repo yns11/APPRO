@@ -36,6 +36,10 @@ env:
   # droit CREATE sur « public » (« permission denied for schema public »).
   - name: APPRO_DB_SCHEMA
     value: "appro"
+  # Administrateurs permanents (e-mails séparés par des virgules), quelle que soit la table des
+  # approvisionneurs : le bundle y met l'identité qui déploie. Vide = aucun.
+  - name: APPRO_ADMINS
+    value: ""
 
   # --- Source des faits ERP -------------------------------------------------
   # lakebase : tables erp_* de la base applicative, alimentées par le job

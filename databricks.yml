@@ -83,6 +83,12 @@ variables:
     default: ""
 
   # --- Identités et exploitation (propres à chaque cible) ---------------------
+  admin_emails:
+    description: >-
+      E-mails (séparés par des virgules) toujours administrateurs de l'application, quelle que soit la
+      table des approvisionneurs : impossible de s'enfermer en lecture seule. Défaut = l'identité qui
+      déploie le bundle.
+    default: ${workspace.current_user.userName}
   sync_role:
     description: >-
       Rôle Postgres de l'identité qui exécute le job de synchronisation (votre e-mail Databricks,

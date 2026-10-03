@@ -217,7 +217,10 @@ redéployer (`scripts/deploy.sh dev PROD --var=...`) ; l'App rejoue le `GRANT` �
 6. **Approvisionneurs** — ID, prénom (= colonne *Approvisionneur* des articles), e-mail Databricks, rôle
    (`appro`, `manager`, `admin`), actif. **Commencer par soi-même avec le rôle `admin`** : tant que la table
    est vide tout le monde est administrateur, dès la première ligne les autres utilisateurs passent en lecture
-   seule (règles métier § 12). Les **Délégations** (délégant, destinataire, dates) se saisissent ensuite.
+   seule (règles métier § 12). L'identité qui déploie le bundle reste administrateur quoi qu'il arrive
+   (`admin_emails`, `APPRO_ADMINS`). Enfermé malgré tout ? Dans l'éditeur SQL Lakebase, sur le schéma de la cible :
+   `UPDATE appro.ref_planners SET role = 'admin' WHERE lower(email) = '<votre e-mail>';` (ou un `INSERT` de votre
+   ligne), puis recharger l'application. Les **Délégations** (délégant, destinataire, dates) se saisissent ensuite.
 6. **Stock de référence** — article, date du stock (veille au soir), stock physique, stock bloqué.
 
 Chaque ligne est aussi modifiable à la souris (clic sur la ligne) ou ajoutable (*Ajouter*). *Exporter*

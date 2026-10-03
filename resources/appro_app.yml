@@ -40,6 +40,8 @@ resources:
             value: ${var.sync_role}
           - name: APPRO_DB_SCHEMA
             value: ${var.app_schema}
+          - name: APPRO_ADMINS
+            value: ${var.admin_emails}
           - name: APPRO_DATA_SOURCE
             value: lakebase
           - name: APPRO_UC_CATALOG

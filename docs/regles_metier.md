@@ -305,7 +305,10 @@ casse à la colonne *Email*. Une **délégation** (délégant, destinataire, du,
 délégant à celui du destinataire entre les deux dates incluses (*au* vide = sans fin) ; un appro ne peut créer
 que des délégations de son propre carnet. L'import d'un classeur de simulation ignore les articles hors
 carnet (ligne notée dans le rapport). **Tant que la table des approvisionneurs est vide, tout utilisateur est
-administrateur** : la première ligne à créer est donc son propre compte avec le rôle `admin`. Le périmètre
+administrateur** : la première ligne à créer est donc son propre compte avec le rôle `admin`. Filet de sécurité :
+les e-mails de `APPRO_ADMINS` (variable `admin_emails` du bundle, par défaut l'identité qui déploie) sont
+administrateurs quoi que dise la table, pour qu'aucune erreur de saisie ne puisse enfermer l'installateur en
+lecture seule. Le périmètre
 proposé par défaut en haut de page est le carnet de l'utilisateur connecté.
 
 ## 13. Données de démonstration

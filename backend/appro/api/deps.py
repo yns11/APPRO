@@ -33,4 +33,5 @@ def current_user(request: Request) -> str:
 
 def access_dep(ctx: AppContext = Depends(ctx_dep), user: str = Depends(current_user)) -> Access:
     """Rights of the signed-in user (planners, delegations, roles – services/access.py)."""
-    return resolve_access(user, ctx.table("ref_planners"), ctx.table("ref_delegations"), ctx.table("ref_articles"))
+    return resolve_access(user, ctx.table("ref_planners"), ctx.table("ref_delegations"), ctx.table("ref_articles"),
+                          admins=ctx.settings.admin_emails)
