@@ -154,11 +154,13 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("purch_id", "str", "N° commande", "", False),
            Column("packing_slip", "str", "N° BL", "", False),
        ], reference=False),
-    _t("fct_production_actual", "Production réelle", "Production réelle journalière par programme.", ("program_id", "date"), [
-        Column("program_id", "str", "Programme", "", True),
-        Column("date", "date", "Jour", "", True),
-        Column("qty", "float", "Quantité produite", "", True),
-    ], reference=False),
+    _t("fct_consumption_actual", "Consommation réelle", "Consommation réelle journalière par composant (déjà éclatée : "
+       "quantité d'article consommée, dans son unité de stock). Alimente le besoin des jours passés et le reliquat de la "
+       "semaine en cours.", ("article_id", "date"), [
+           Column("article_id", "str", "Article", "référence composant (P-00…), telle que dans le référentiel", True),
+           Column("date", "date", "Jour", "jour de consommation", True),
+           Column("qty", "float", "Quantité consommée", "unité de stock de l'article ; un 0 déclaré est respecté", True),
+       ], reference=False),
     _t("fct_production_plan", "PDP ERP", "Plan de production hebdomadaire (facultatif : le PDP est importé par fichier).",
        ("program_id", "week_start", "version"), [
            Column("program_id", "str", "Programme", "", True),

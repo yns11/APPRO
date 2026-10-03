@@ -113,10 +113,11 @@ class PdpLine:
 
 
 @dataclass
-class ActualLine:
-    """Actual daily production reported for a program."""
+class ConsumptionLine:
+    """Actual consumption of one component on one day, **already exploded** through the bill of
+    material by the upstream pipeline (the PDP, on the contrary, is exploded by the engine)."""
 
-    program_id: str
+    article_id: str
     date: dt.date
     qty: float
 
@@ -225,7 +226,7 @@ class Dataset:
     programs: list[Program]
     bom: list[BomLine]
     pdp: list[PdpLine]
-    actuals: list[ActualLine]
+    consumption: list[ConsumptionLine]
     orders: list[OrderLine]
     receipts: list[Receipt]
     stock: list[StockSnapshot]
@@ -251,7 +252,7 @@ class EngineParams:
     # Demand
     spread_rounding: Literal["none", "exact", "per_day"] = "exact"
     # actual_then_remainder [default]: past days = reported actual production ; current ISO week =
-    # remainder of the weekly PDP (PDP − actuals already reported) spread over the remaining open
+    # remainder of the weekly PDP (PDP − actual consumption already reported) spread over the remaining open
     # days ; later weeks = PDP.  Other modes: actual_then_plan, plan_only, actual_only.
     production_mode: Literal["actual_then_remainder", "actual_then_plan", "plan_only", "actual_only"] = "actual_then_remainder"
     missing_actual_policy: Literal["plan", "zero"] = "zero"   # past day without actual report: plan or 0

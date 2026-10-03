@@ -10,7 +10,7 @@ Deux familles :
 | Famille | Tables | Source | Où elles vivent |
 |---|---|---|---|
 | **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_programs`, `ref_bom`, `fct_stock` | **gérées dans l'application** (page Référentiel : ligne par ligne, ou modèle Excel par table) | base applicative (Lakebase ; SQLite en local) |
-| **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_production_actual` (facultatif), `fct_production_plan` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
+| **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_production_plan` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
 
 ## 1. Référentiel (géré dans l'application)
 
@@ -166,17 +166,61 @@ elle entre dans le **backlog** du fournisseur (§ 3.3 des règles métier).
 
 Historique souhaité : au moins la fenêtre de backlog (28 jours par défaut, `backlog_days`).
 
-### 2.3 `fct_production_actual` — production réelle journalière (facultatif)
+### 2.3 `fct_consumption_actual` ← table UC de consommation réelle par composant (facultatif)
 
-Table à fournir avec les colonnes canoniques (`APPRO_ERP_PRODUCTION_TABLE`, variable `erp_production_table`).
-Vide = aucune production réelle : le besoin passé est nul et le reliquat de la semaine en cours est le PDP
-entier.
+Table **à préparer dans Unity Catalog** (`APPRO_ERP_CONSUMPTION_TABLE`, variable `erp_consumption_table` du bundle,
+ex. `emotors_data_champions.silver_erp_ye.conso_composants`). Contrairement au PDP, que le moteur éclate par la
+nomenclature, la consommation réelle arrive **déjà éclatée** : une quantité de composant consommée, par jour.
+Vide (aucune table configurée) : le besoin des jours passés suit `missing_actual_policy` (0 ou PDP) et le reliquat
+de la semaine en cours est le PDP entier.
+
+**Contrat de la table source** (une seule exigence de nom : les trois colonnes canoniques ; le reste est libre) :
+
+| Colonne | Type UC | Obligatoire | Règle |
+|---|---|---|---|
+| `article_id` | STRING | oui | référence du **composant** telle qu'elle figure dans `ref_articles` (ex. `P-00001046`) ; les lignes d'articles inconnus de l'application sont ignorées |
+| `date` | DATE (ou TIMESTAMP, tronqué au jour) | oui | **jour de consommation** (date du mouvement de sortie de stock / de l'ordre de fabrication), pas la date de déclaration |
+| `qty` | DOUBLE | oui | quantité consommée dans l'**unité de stock de l'article** (PCE, KG, M…), positive ; plusieurs lignes d'un même jour (plusieurs programmes, plusieurs mouvements) sont **sommées** par le job ; un **0 déclaré** est respecté (jour sans consommation) ; un retour en stock s'exprime en négatif et se soustrait |
+
+Grain attendu : une ligne par composant × jour × (programme, mouvement…) au choix ; le job agrège en
+`(article_id, date)`. Colonnes supplémentaires (programme, ordre de fabrication, atelier) tolérées et ignorées.
+
+Règles d'alimentation :
+
+* couvrir **tous les jours depuis la date d'initialisation du stock** (point zéro) jusqu'à hier ; un jour
+  absent est traité selon `missing_actual_policy` [`zero`] : mieux vaut déclarer un 0 explicite qu'omettre
+  le jour ;
+* ne jamais déclarer le jour courant ni le futur (ignorés par le mode par défaut, et sources de confusion) ;
+* la rupture avec l'ancien schéma : plus de `program_id` ni de production en unités de produit fini ;
+  l'éclatement (quantité par unité, rebut) est fait **en amont**, avec la nomenclature réellement
+  consommée (ordre de fabrication), ce qui absorbe les écarts de rebut et de substitution.
+
+SQL exécuté par le job (identique en lecture directe par SQL warehouse) :
+
+```sql
+SELECT c.article_id, CAST(c.date AS DATE) AS date, CAST(SUM(c.qty) AS DOUBLE) AS qty
+FROM <catalogue>.<schéma>.<table> c
+WHERE c.article_id IS NOT NULL AND c.date IS NOT NULL AND c.qty IS NOT NULL
+GROUP BY c.article_id, CAST(c.date AS DATE)
+```
+
+Contrôle de cohérence avant mise en service (à exécuter dans l'éditeur SQL) : la somme hebdomadaire par
+composant doit être de l'ordre du PDP éclaté de la semaine :
+
+```sql
+SELECT article_id, DATE_TRUNC('week', date) AS semaine, SUM(qty) AS conso
+FROM <catalogue>.<schéma>.<table>
+WHERE date >= DATE'2026-09-18'          -- date d'initialisation du stock
+GROUP BY ALL ORDER BY 1, 2
+```
+
+Colonnes canoniques côté application (miroir `erp_consumption_actual`) :
 
 | Colonne | Type | Description |
 |---|---|---|
-| program_id | texte **clé** | |
-| date | date **clé** | jour de production |
-| qty | nombre | quantité produite (un 0 déclaré est respecté) |
+| article_id | texte **clé** | composant |
+| date | date **clé** | jour de consommation |
+| qty | nombre | quantité consommée (unité de stock) |
 
 ### 2.4 `fct_production_plan` — PDP hebdomadaire ERP (facultatif)
 
@@ -206,7 +250,7 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `app_pdp_versions`, `app_pdp_lines` | versions de PDP importées (une active au plus) | id |
 | `app_param_overrides` | règles globales du moteur (`global`) et paramètres d'article par semaine ISO (`article_week`) | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
-| `erp_purchase_orders`, `erp_receipts`, `erp_production_actual`, `erp_production_plan` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
+| `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_production_plan` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
 | `erp_sync_log` | par table miroir : nombre de lignes, horodatage, source, identifiant d'exécution (affiché dans `/api/health`) | table_name |
 
 Volumétrie : quelques milliers de lignes par table ; le miroir des commandes suit la source (dizaines de

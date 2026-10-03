@@ -1,6 +1,6 @@
 """Job Databricks : copie des faits ERP (Unity Catalog) vers les tables ``erp_*`` de Lakebase.
 
-Pour chaque table de faits configurée (commandes, réceptions, production, PDP) :
+Pour chaque table de faits configurée (commandes, réceptions, consommation réelle, PDP) :
 
 1. le SQL de correspondance de ``backend/appro/data/erp_sql.py`` est exécuté par Spark sur les
    extractions (``commandes_edi``, ``recep_edi``…) ;
@@ -75,7 +75,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--schema", default="silver_erp_ye")
     p.add_argument("--orders-table", default="commandes_edi")
     p.add_argument("--receipts-table", default="recep_edi")
-    p.add_argument("--production-table", default="")
+    p.add_argument("--consumption-table", default="", help="table UC de consommation réelle par composant (article_id, date, qty) ; vide = aucune")
     p.add_argument("--pdp-table", default="")
     p.add_argument("--branch", default="", help="projects/<projet>/branches/<branche>")
     p.add_argument("--endpoint", default="", help="projects/<projet>/branches/<branche>/endpoints/<endpoint>")
@@ -107,7 +107,7 @@ def _table_exists(spark, fqn: str) -> bool:
 def _check_sources(spark, tables: ErpTables) -> None:
     """Fail once, naming every missing source, rather than one table per run."""
     missing = [fqn for fqn in (tables.fqn(tables.orders), tables.fqn(tables.receipts)) if not _table_exists(spark, fqn)]
-    for opt in (tables.production, tables.pdp):
+    for opt in (tables.consumption, tables.pdp):
         if opt and not _table_exists(spark, tables.fqn(opt)):
             missing.append(tables.fqn(opt))
     if missing:
@@ -157,7 +157,7 @@ def publish(conn, spark, query: str, name: str, pg_schema: str, run_id: str, sou
 
 def run(args: argparse.Namespace) -> dict[str, int]:
     import psycopg
-    tables = ErpTables(args.catalog, args.schema, args.orders_table, args.receipts_table, args.production_table or "",
+    tables = ErpTables(args.catalog, args.schema, args.orders_table, args.receipts_table, args.consumption_table or "",
                        args.pdp_table or "")
     queries = fact_queries(tables)
     wanted = {t.strip() for t in args.tables.split(",") if t.strip()}
@@ -174,7 +174,7 @@ def run(args: argparse.Namespace) -> dict[str, int]:
         _check_targets(conn, args.pg_schema, [f"erp_{n[4:]}" for n in queries])
         for name, query in queries.items():
             src = {"fct_purchase_orders": tables.fqn(tables.orders), "fct_receipts": tables.fqn(tables.receipts),
-                   "fct_production_actual": tables.fqn(tables.production), "fct_production_plan": tables.fqn(tables.pdp)}[name]
+                   "fct_consumption_actual": tables.fqn(tables.consumption), "fct_production_plan": tables.fqn(tables.pdp)}[name]
             results[name] = publish(conn, spark, query, name, args.pg_schema, args.run_id, src.replace("`", ""))
     return results
 

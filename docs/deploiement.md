@@ -23,7 +23,7 @@ Architecture déployée :
 Le référentiel (articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures, stock de
 référence) **n'est pas lu de l'ERP** : il se charge dans l'application, par fichier Excel (modèle par
 table) ou ligne par ligne. Seules les commandes et les réceptions (et, si vous les configurez, la
-production réelle et le PDP) viennent des extractions ERP.
+consommation réelle par composant et le PDP) viennent des extractions ERP.
 
 ---
 
@@ -192,7 +192,7 @@ a déjà accordé l'écriture sur ses tables `erp_*` (et rien d'autre).
 SELECT table_name, string_agg(privilege_type, ', ' ORDER BY privilege_type) AS droits
 FROM information_schema.role_table_grants
 WHERE grantee = 'prenom.nom@exemple.com' AND table_schema = 'appro' GROUP BY table_name ORDER BY table_name;
--- attendu : erp_production_actual, erp_production_plan, erp_purchase_orders, erp_receipts, erp_sync_log : DELETE, INSERT, SELECT, TRUNCATE, UPDATE
+-- attendu : erp_consumption_actual, erp_production_plan, erp_purchase_orders, erp_receipts, erp_sync_log : DELETE, INSERT, SELECT, TRUNCATE, UPDATE
 -- vide ? vérifier d'abord que les tables existent : SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'appro';
 -- puis que le rôle existe :                     SELECT rolname FROM pg_roles WHERE rolname = 'prenom.nom@exemple.com';
 ```

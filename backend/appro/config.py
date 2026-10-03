@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     uc_schema: str = Field("silver_erp_ye")
     erp_orders_table: str = Field("commandes_edi")
     erp_receipts_table: str = Field("recep_edi")
-    erp_production_table: str | None = Field(None, description="daily actual production table (program_id, date, qty) ; empty = none")
+    erp_consumption_table: str | None = Field(None, description="daily actual consumption table per component (article_id, date, qty) ; empty = none")
     erp_pdp_table: str | None = Field(None, description="weekly PDP table (program_id, week_start, qty, version) ; empty = none")
     cache_ttl_seconds: float = Field(300.0)
 
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     app_title: str = Field("Ma Routine Appro – Cockpit approvisionnement")
     log_level: str = Field("INFO")
 
-    @field_validator("seed_reference", "erp_production_table", "erp_pdp_table", "db_url", "lakebase_branch", "sync_role",
+    @field_validator("seed_reference", "erp_consumption_table", "erp_pdp_table", "db_url", "lakebase_branch", "sync_role",
                      "as_of", "default_planner", mode="before")
     @classmethod
     def _empty_is_none(cls, v):

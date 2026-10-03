@@ -356,7 +356,17 @@ def main() -> None:
     write_csv(out / "ref_programs.csv", programs, list(programs[0].keys()))
     write_csv(out / "ref_bom.csv", bom, list(bom[0].keys()))
     write_csv(out / "fct_production_plan.csv", plan, list(plan[0].keys()))
-    write_csv(out / "fct_production_actual.csv", prod_actual, list(prod_actual[0].keys()))
+    # the application receives the consumption PER COMPONENT (already exploded) : explode the
+    # workbook's actual production through the bill of material (quantity per unit, scrap)
+    factors = {}
+    for b in bom:
+        factors.setdefault(b["program_id"], []).append((b["article_id"], float(b["qty_per"]) * (1 + float(b["scrap_pct"] or 0) / 100)))
+    conso = {}
+    for r in prod_actual:
+        for aid, f in factors.get(r["program_id"], []):
+            conso[(aid, r["date"])] = conso.get((aid, r["date"]), 0.0) + float(r["qty"]) * f
+    conso_rows = [{"article_id": a, "date": d, "qty": round(q, 3)} for (a, d), q in sorted(conso.items())]
+    write_csv(out / "fct_consumption_actual.csv", conso_rows, ["article_id", "date", "qty"])
     write_csv(out / "fct_purchase_orders.csv", orders, list(orders[0].keys()))
     write_csv(out / "fct_receipts.csv", receipts, list(receipts[0].keys()))
     write_csv(out / "fct_stock_movements.csv", movements, list(movements[0].keys()))

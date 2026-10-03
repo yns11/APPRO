@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 def erp_tables(settings: Settings) -> ErpTables:
     return ErpTables(settings.uc_catalog, settings.uc_schema, settings.erp_orders_table, settings.erp_receipts_table,
-                     settings.erp_production_table or "", settings.erp_pdp_table or "")
+                     settings.erp_consumption_table or "", settings.erp_pdp_table or "")
 
 
 def build_source(settings: Settings, engine) -> FactSource:

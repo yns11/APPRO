@@ -13,7 +13,7 @@ donne la vue d'ensemble.
   Clics             │ app_cell_flags (commande ferme ignorée, proposition CBN refusée)       │
                      │ app_pdp_versions / app_pdp_lines   app_param_overrides   app_audit_log │
                      │                                                                       │
-  Faits ERP          │ erp_purchase_orders  erp_receipts  erp_production_actual              │
+  Faits ERP          │ erp_purchase_orders  erp_receipts  erp_consumption_actual             │
   (miroir, job)      │ erp_production_plan  erp_sync_log                                     │
                      └───────────────────────────────────────────────────────────────────────┘
                                           ▲ job appro_sync_erp (SQL de erp_sql.py)
@@ -48,7 +48,7 @@ un SQL warehouse (`uc`).
 |---|---|---|---|
 | `fct_purchase_orders` | order_id | `commandes_edi` | créneau `fournisseur|article|date|ferme`, FIRM / FORECAST, restant ERP |
 | `fct_receipts` | receipt_id | `recep_edi` | réception par fournisseur / commande / BL / article / jour |
-| `fct_production_actual` | program_id, date | table à configurer (facultatif) | production réelle |
+| `fct_consumption_actual` | article_id, date | table UC à configurer (facultatif) | consommation réelle par composant, déjà éclatée |
 | `fct_production_plan` | program_id, week_start, version | table à configurer (facultatif) | PDP ERP ; le PDP importé le remplace |
 
 ## 3. Saisies

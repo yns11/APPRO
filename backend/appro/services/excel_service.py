@@ -629,7 +629,7 @@ def pdp_template_workbook(programs: list[tuple[str, str]], first_monday: dt.date
         "En-têtes de semaine acceptés : 2026-W40, S40-26, 2026W40, W40-2026 ou une date de la semaine.",
         "Cellules : quantité à produire dans la semaine (vide = 0 / inchangé). Les programmes inconnus sont ignorés et signalés dans le rapport d'import.",
         "Une version importée et activée remplace le PDP ERP pour les programmes qu'elle contient ; les versions précédentes restent consultables.",
-        "Le PDP de la semaine en cours n'est utilisé que pour son reliquat : PDP − production réelle déjà déclarée, réparti sur les jours ouvrés restants.",
+        "Le PDP de la semaine en cours n'est utilisé que pour son reliquat : PDP éclaté − consommation réelle déjà déclarée, réparti sur les jours ouvrés restants.",
     ]
     for i, t in enumerate(lines, start=1):
         notice.cell(i, 1, t)

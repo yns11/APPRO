@@ -9,8 +9,10 @@ Sources (schema ``emotors_data_champions.silver_erp_ye`` by default) :
 * ``commandes_edi`` – firm and forecast schedule lines aggregated by supplier / purchase order /
   article / delivery date (``ID`` = ``vendaccount|itemid|yyyyMMdd|silfirmorder``) ;
 * ``recep_edi`` – physical receipts by supplier / purchase order / packing slip / article / day ;
-* an optional daily production table (``APPRO_ERP_PRODUCTION_TABLE``) with the canonical columns
-  ``program_id, date, qty`` ; an optional weekly PDP table (``APPRO_ERP_PDP_TABLE``).
+* an optional daily **actual consumption** table (``APPRO_ERP_CONSUMPTION_TABLE``) with the canonical
+  columns ``article_id, date, qty`` – the consumption is given **per component, already exploded**
+  through the bill of material (unlike the PDP, exploded by the engine) ; an optional weekly PDP
+  table (``APPRO_ERP_PDP_TABLE``).
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ class ErpTables:
     schema: str = "silver_erp_ye"
     orders: str = "commandes_edi"
     receipts: str = "recep_edi"
-    production: str = ""          # empty: no actual production read from the ERP
+    consumption: str = ""         # empty: no actual consumption read from the ERP
     pdp: str = ""                 # empty: the PDP comes from the file imported in the application
 
     def fqn(self, table: str) -> str:
@@ -66,11 +68,15 @@ WHERE r.Quantite_recue IS NOT NULL AND r.Quantite_recue <> 0
 """.strip()
 
 
-def production_actual_sql(t: ErpTables) -> str:
+def consumption_actual_sql(t: ErpTables) -> str:
+    """Actual consumption per component and day.  The source table carries the canonical columns
+    ``article_id`` (the component, as in ``ref_articles``), ``date`` and ``qty`` (stock unit of the
+    article) ; several rows of a day (several programmes, several movements) are summed."""
     return f"""
-SELECT p.program_id AS program_id, CAST(p.date AS DATE) AS date, CAST(SUM(p.qty) AS DOUBLE) AS qty
-FROM {t.fqn(t.production)} p
-GROUP BY p.program_id, CAST(p.date AS DATE)
+SELECT c.article_id AS article_id, CAST(c.date AS DATE) AS date, CAST(SUM(c.qty) AS DOUBLE) AS qty
+FROM {t.fqn(t.consumption)} c
+WHERE c.article_id IS NOT NULL AND c.date IS NOT NULL AND c.qty IS NOT NULL
+GROUP BY c.article_id, CAST(c.date AS DATE)
 """.strip()
 
 
@@ -85,8 +91,8 @@ FROM {t.fqn(t.pdp)} p
 def fact_queries(t: ErpTables) -> dict[str, str]:
     """Canonical fact table → SQL (only the tables that are configured)."""
     out = {"fct_purchase_orders": purchase_orders_sql(t), "fct_receipts": receipts_sql(t)}
-    if t.production:
-        out["fct_production_actual"] = production_actual_sql(t)
+    if t.consumption:
+        out["fct_consumption_actual"] = consumption_actual_sql(t)
     if t.pdp:
         out["fct_production_plan"] = production_plan_sql(t)
     return out

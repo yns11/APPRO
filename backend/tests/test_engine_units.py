@@ -10,11 +10,11 @@ from appro.engine import run_mrp
 from appro.engine.calendar import WorkCalendar
 from appro.engine.demand import DayIndex, ceil_to_multiple, spread_week
 from appro.engine.models import (
-    ActualLine,
     AdjustCell,
     AlertType,
     Article,
     BomLine,
+    ConsumptionLine,
     Dataset,
     EngineParams,
     OrderLine,
@@ -43,7 +43,7 @@ def make_dataset(**over) -> Dataset:
         programs=[Program("P1", "Line 1")],
         bom=[BomLine("P1", "A1", qty_per=2.0)],
         pdp=[PdpLine("P1", MON + D(weeks=k), 500.0) for k in range(-2, 8)],
-        actuals=[],
+        consumption=[],
         orders=[],
         receipts=[],
         stock=[StockSnapshot("A1", MON - D(days=1), 1000.0)],
@@ -89,10 +89,11 @@ def test_ceil_to_multiple():
 
 # ------------------------------------------------------------------ demand
 def test_demand_actual_then_remainder():
-    """Past days = actual production ; current week = remainder of the PDP over the remaining open
-    days (reference day included) ; later weeks = PDP.  BOM: 2 components per unit."""
+    """Past days = reported component consumption ; current week = remainder of the exploded PDP over
+    the remaining open days (today included) ; later weeks = PDP.  BOM: 2 components per unit, the
+    consumption arrives already exploded (500 = 250 units × 2)."""
     wed = MON + D(days=2)
-    ds = make_dataset(actuals=[ActualLine("P1", MON, 250.0), ActualLine("P1", MON + D(days=1), 300.0)])
+    ds = make_dataset(consumption=[ConsumptionLine("A1", MON, 500.0), ConsumptionLine("A1", MON + D(days=1), 600.0)])
     r = run(ds, as_of=wed)
     i = r.dates.index(MON)
     assert r.consumed[i] == 500 and r.consumed[i + 1] == 600 and r.required[i] == 0
@@ -103,13 +104,13 @@ def test_demand_actual_then_remainder():
     assert r.demand[i] == 500 and r.demand[i + 7] == 200
     # example 1: 500 + 600 done out of a 2 000 PDP on Wednesday → (2000 − 1100) / 3 = 300 units per remaining day
     ds2 = make_dataset(pdp=[PdpLine("P1", MON + D(weeks=k), 2000.0) for k in range(-2, 8)],
-                       actuals=[ActualLine("P1", MON, 500.0), ActualLine("P1", MON + D(days=1), 600.0)])
+                       consumption=[ConsumptionLine("A1", MON, 1000.0), ConsumptionLine("A1", MON + D(days=1), 1200.0)])
     r2 = run(ds2, as_of=wed)
     assert r2.required[i + 2] == 600 and r2.required[i + 3] == 600 and r2.required[i + 4] == 600   # 300 × 2
     # example 2: PDP already exceeded on Monday–Tuesday, and a consumption reported on Wednesday
     ds3 = make_dataset(pdp=[PdpLine("P1", MON + D(weeks=k), 2000.0) for k in range(-2, 8)],
-                       actuals=[ActualLine("P1", MON, 1200.0), ActualLine("P1", MON + D(days=1), 1000.0),
-                                ActualLine("P1", wed, 200.0)])
+                       consumption=[ConsumptionLine("A1", MON, 2400.0), ConsumptionLine("A1", MON + D(days=1), 2000.0),
+                                    ConsumptionLine("A1", wed, 400.0)])
     r3 = run(ds3, as_of=wed + D(days=1))
     i3 = r3.dates.index(MON)
     assert list(r3.consumed[i3:i3 + 3]) == [2400, 2000, 400] and r3.required[i3 + 3] == 0 and r3.required[i3 + 4] == 0
@@ -227,7 +228,7 @@ def test_adjustments_correct_the_reference_stock_and_the_past_is_projected_forwa
     """The initialisation day is the point zero: its stock (corrected by the adjustments dated up to it)
     is projected forward with the receipts, the actual consumption and the later adjustments."""
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=5), 2000.0)],
-                      actuals=[ActualLine("P1", MON - D(days=k), 100.0) for k in (1, 2, 3, 4)],   # 200 components / day
+                      consumption=[ConsumptionLine("A1", MON - D(days=k), 200.0) for k in (1, 2, 3, 4)],   # 200 components / day
                       receipts=[Receipt("R1", "A1", MON - D(days=2), 500)],
                       adjustments=[AdjustCell("A1", MON - D(days=6), -300.0),                     # before the point zero: correction
                                    AdjustCell("A1", MON + D(days=2), 40.0)])                      # known future movement
@@ -244,7 +245,7 @@ def test_adjustments_correct_the_reference_stock_and_the_past_is_projected_forwa
 
 def test_past_movements_are_projected_forward_from_the_init_day():
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=3), 1000.0)],
-                      actuals=[ActualLine("P1", MON - D(days=2), 50.0)],
+                      consumption=[ConsumptionLine("A1", MON - D(days=2), 100.0)],
                       receipts=[Receipt("R1", "A1", MON - D(days=1), 500)],
                       adjustments=[AdjustCell("A1", MON - D(days=2), -30.0)])   # after the point zero: a movement
     r = run(ds, horizon_days=3)

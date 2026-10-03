@@ -69,8 +69,11 @@ variables:
     default: commandes_edi
   erp_receipts_table:
     default: recep_edi
-  erp_production_table:
-    description: Table de production réelle journalière (program_id, date, qty). Vide = aucune.
+  erp_consumption_table:
+    description: >-
+      Table UC de consommation réelle journalière PAR COMPOSANT, déjà éclatée (colonnes article_id,
+      date, qty dans l'unité de stock de l'article). Vide = aucune : le besoin passé suit
+      missing_actual_policy. Voir docs/dictionnaire_donnees.md § 2.3.
     default: ""
   erp_pdp_table:
     description: Table de PDP hebdomadaire (program_id, week_start, qty, version). Vide = aucune (PDP importé par fichier).

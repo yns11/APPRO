@@ -7,9 +7,9 @@ from typing import Callable, Iterable
 import pandas as pd
 
 from ..engine.models import (
-    ActualLine,
     Article,
     BomLine,
+    ConsumptionLine,
     Dataset,
     OrderLine,
     OrderType,
@@ -79,8 +79,8 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
 
     pdp = [PdpLine(r["program_id"], as_date(r["week_start"]), float(r["qty"]), r["version"])
            for r in _records(t("fct_production_plan")) if r["program_id"] in needed_programs and r["week_start"]]
-    actuals = [ActualLine(r["program_id"], as_date(r["date"]), float(r["qty"]))
-               for r in _records(t("fct_production_actual")) if r["program_id"] in needed_programs and r["date"]]
+    consumption = [ConsumptionLine(r["article_id"], as_date(r["date"]), float(r["qty"]))
+                   for r in _records(t("fct_consumption_actual")) if r["article_id"] in ids and r["date"]]
 
     orders = [OrderLine(order_id=r["order_id"], article_id=r["article_id"], supplier_id=r["supplier_id"] or None,
                         expected_date=as_date(r["expected_date"]), qty_ordered=float(r["qty_ordered"]),
@@ -102,5 +102,5 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
             cur.qty_blocked += float(r["qty_blocked"] or 0)
 
     return Dataset(articles=articles, suppliers=suppliers, links=links, programs=programs, bom=bom, pdp=pdp,
-                   actuals=actuals, orders=orders, receipts=receipts, stock=list(stock.values()),
+                   consumption=consumption, orders=orders, receipts=receipts, stock=list(stock.values()),
                    holidays=list(holidays or []))

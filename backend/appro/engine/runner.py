@@ -7,8 +7,8 @@ from collections import defaultdict
 import numpy as np
 
 from .alerts import classify_alerts, worst_severity
-from .calendar import WorkCalendar
-from .demand import DayIndex, actual_share, build_program_daily, explode_demand
+from .calendar import WorkCalendar, iso_week_monday
+from .demand import DayIndex, actual_share, build_article_demand, build_program_daily, explode_demand
 from .models import Alert, ArticleResult, Dataset, DatasetError, EngineParams, MrpResult, OrderType
 from .programs import program_impact
 from .projection import Projection, coverage_days, first_shortage, project_stock, target_stock
@@ -50,16 +50,18 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     # the window opens on the initialisation day (stock known at its end) ; the past of the engine is
     # [init, today) ; what is displayed before today is a presentation choice (history_weeks)
     start = init_date
-    end = as_of + dt.timedelta(days=int(params.horizon_days))
+    # the window always covers the whole current ISO week: the remainder of its PDP is spread over it
+    end = max(as_of + dt.timedelta(days=int(params.horizon_days)), iso_week_monday(as_of) + dt.timedelta(days=6))
     index = DayIndex(start, end)
     diagnostics: list[str] = []
 
     # ---------------------------------------------------------------- demand
-    program_eff, program_plan, actual_mask, diag = build_program_daily(
-        dataset.pdp, dataset.actuals, calendar, index, params, as_of)
+    # PDP → daily production per programme → exploded component demand ; then the reported actual
+    # consumption (already per component) replaces the past days and drives the current-week remainder
+    program_plan, diag = build_program_daily(dataset.pdp, calendar, index, params)
     diagnostics.extend(diag)
-    demand_eff = explode_demand(program_eff, dataset.bom, index, params.consumption_offset_days)
     demand_plan = explode_demand(program_plan, dataset.bom, index, params.consumption_offset_days)
+    demand_eff, actual_mask = build_article_demand(demand_plan, dataset.consumption, calendar, index, params, as_of)
 
     # ---------------------------------------------------------------- lookups
     links_by_article: dict[str, list] = defaultdict(list)
@@ -97,7 +99,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         notes: list[str] = []
         demand = demand_eff.get(aid, np.zeros(n))
         dplan = demand_plan.get(aid, np.zeros(n))
-        share = actual_share(program_eff, actual_mask, dataset.bom, aid, index)
+        share = actual_share(actual_mask, aid, index)
         consumed = np.where(day_idx < i_as_of, demand, 0.0)
         required = np.where(day_idx >= i_as_of, demand, 0.0)
 
@@ -233,9 +235,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         )
 
     program_daily = {pid: {index.dates[i]: float(v) for i, v in enumerate(arr) if v}
-                     for pid, arr in program_eff.items()}
+                     for pid, arr in program_plan.items()}
     names = {p.program_id: p.name for p in dataset.programs}
-    impact = program_impact(results, dataset.bom, program_eff, names, index, as_of, params.shortage_policy)
+    impact = program_impact(results, dataset.bom, program_plan, names, index, as_of, params.shortage_policy)
     return MrpResult(as_of=as_of, init_date=init_date, start_date=start, end_date=end, params=params, articles=results,
                      program_daily=program_daily, diagnostics=diagnostics, program_impact=impact)
 

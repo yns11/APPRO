@@ -33,14 +33,16 @@ se lit.
 1. **Lissage du PDP hebdomadaire** sur les jours ouverts de la semaine ISO (`spread_rounding`) : `exact`
    [défaut] quantités entières dont la somme égale le PDP ; `none` quotient réel ; `per_day` `ROUND(qté / n)`
    (classeur historique).
-2. **Production effective** (`production_mode`, `actual_then_remainder` [défaut]) : **jours passés** =
-   production réelle déclarée (jour sans déclaration = 0, `missing_actual_policy` [`zero`]) ; **semaine en
-   cours** = reliquat `max(PDP − réel déjà déclaré, 0)` réparti sur les jours ouvrés restants, jour de référence
-   compris ; **semaines suivantes** = PDP. Exemple : PDP 2 000, mercredi, 500 lundi et 600 mardi → 300 par jour
-   mercredi, jeudi, vendredi ; PDP déjà dépassé → 0. Autres modes : `actual_then_plan`, `plan_only`,
-   `actual_only`.
-3. **Éclatement nomenclature (1 niveau)** : besoin composant = Σ production × `qty_per` × (1 + `scrap_pct` %) ;
-   `consumption_offset_days` [0] décale la consommation.
+2. **Éclatement nomenclature (1 niveau)** du PDP : besoin composant = Σ production × `qty_per` ×
+   (1 + `scrap_pct` %) ; `consumption_offset_days` [0] décale la consommation.
+3. **Besoin effectif par composant** (`production_mode`, `actual_then_remainder` [défaut]) : **jours passés** =
+   consommation réelle déclarée du composant (`fct_consumption_actual`, **déjà éclatée en amont** ; jour sans
+   déclaration = 0, `missing_actual_policy` [`zero`]) ; **semaine en cours** = reliquat `max(PDP éclaté de la
+   semaine − consommation déjà déclarée cette semaine, 0)` réparti sur les jours ouvrés restants, aujourd'hui
+   compris ; **semaines suivantes** = PDP éclaté. Exemple (2 composants par unité) : PDP 2 000 unités, mercredi,
+   1 000 et 1 200 composants consommés lundi et mardi → (4 000 − 2 200) / 3 = 600 par jour mercredi, jeudi,
+   vendredi ; PDP déjà dépassé → 0. Autres modes : `actual_then_plan` (réel du jour s'il existe, 0 déclaré
+   compris, sinon plan), `plan_only`, `actual_only`.
 4. Un PDP importé et **actif** remplace le PDP ERP pour les programmes qu'il contient.
 
 La ligne *Besoin* affiche le consommé (passé, réel) puis le requis (futur, PDP) ; le classeur exporté les
@@ -292,7 +294,7 @@ proposé par défaut en haut de page est le carnet de l'utilisateur connecté.
 ## 13. Données de démonstration
 
 `data/seed` (16 articles, 11 fournisseurs, 20 liens, 25 programmes, 28 lignes de nomenclature, PDP et
-production réelle, 772 créneaux de commande, 477 réceptions, 16 stocks de référence au 18/09/2026), extrait
+consommation réelle par composant (éclatée depuis la production réelle du classeur), 772 créneaux de commande, 477 réceptions, 16 stocks de référence au 18/09/2026), extrait
 du classeur historique par `scripts/extract_seed_from_excel.py`. Le référentiel du seed est chargé dans la
 base locale au premier démarrage (`APPRO_SEED_REFERENCE`, oui en local seulement). Délais, conditionnements
 et quotas n'existent pas dans le classeur : valeurs indicatives, à remplacer dans le référentiel.

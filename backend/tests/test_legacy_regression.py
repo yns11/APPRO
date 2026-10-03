@@ -48,7 +48,36 @@ def legacy_result(seed_source, legacy, fixtures_dir):
                           backlog_days=0, spread_rounding="per_day", coverage_unit="calendar", coverage_tie_rule="not_covered",
                           firm_sources=("FIRM", "FORECAST"), generate_proposals=False, production_mode="actual_then_plan",
                           missing_actual_policy="plan")
+    # The workbook reported the actual production PER PROGRAMME ; the application now receives the
+    # consumption PER COMPONENT, already exploded.  Rebuild it the way the workbook did: on a day with a
+    # report, every programme counts its report (or its plan), exploded through the bill of material.
+    ds.consumption = legacy_consumption(ds, params, fixtures_dir / "legacy_production_actual.csv")
     return run_mrp(ds, params), start
+
+
+def legacy_consumption(ds, params, actual_csv):
+    from collections import defaultdict
+
+    from appro.engine.calendar import WorkCalendar
+    from appro.engine.demand import DayIndex, build_program_daily
+    from appro.engine.models import ConsumptionLine
+    with actual_csv.open() as f:
+        reported = {(r["program_id"], dt.date.fromisoformat(r["date"])): float(r["qty"]) for r in csv.DictReader(f)}
+    days = sorted({d for _, d in reported})
+    index = DayIndex(min(days), max(days))
+    planned, _ = build_program_daily(ds.pdp, WorkCalendar.from_spec(params.working_weekdays), index, params)
+    factors = defaultdict(list)
+    for b in ds.bom:
+        factors[b.program_id].append((b.article_id, b.qty_per * (1.0 + (b.scrap_pct or 0.0) / 100.0)))
+    out: dict[tuple[str, dt.date], float] = defaultdict(float)
+    programs = {pid for pid, _ in reported}
+    for d in days:
+        i = index.offset(d)
+        for pid in programs:
+            qty = reported.get((pid, d), planned[pid][i] if pid in planned else 0.0)
+            for aid, factor in factors.get(pid, []):
+                out[(aid, d)] += qty * factor
+    return [ConsumptionLine(aid, d, q) for (aid, d), q in sorted(out.items())]
 
 
 def test_daily_demand_matches_excel(legacy, legacy_result):
