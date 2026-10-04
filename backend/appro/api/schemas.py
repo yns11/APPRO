@@ -137,6 +137,17 @@ class SeriesOut(BaseModel):
     values: list[float]
 
 
+class ReceiptInfoOut(BaseModel):
+    """One ERP receipt line: delivery note (BL) for the tooltips of the Reçu row ; empty = « ACR non validé »."""
+
+    receipt_id: str
+    receipt_date: dt.date
+    qty: float
+    packing_slip: str
+    purch_id: str
+    processed: bool
+
+
 class LaneOut(BaseModel):
     """One supplier of the article: its own Ferme / Prévisionnel / Reçu / Plan rows."""
 
@@ -152,6 +163,7 @@ class LaneOut(BaseModel):
     backlog_qty: float
     orders: list[OrderInfoOut] = Field(default_factory=list)
     desadv: list[DesadvInfoOut] = Field(default_factory=list)
+    receipt_lines: list[ReceiptInfoOut] = Field(default_factory=list)
 
 
 class ArticleSummary(BaseModel):

@@ -560,6 +560,27 @@ def test_desadv_shown_in_the_receipt_row_until_received_or_hidden():
     assert s1b.desadv_open[i - 5] == 0 and [d.hidden for d in s1b.desadv][1:3] == [True, True]
 
 
+def test_receipt_lines_carry_the_delivery_note_and_a_missing_bl_is_never_matched():
+    """Each receipt is listed on its lane with its BL (tooltip) ; a receipt or a DESADV without BL
+    (« ACR non validé » in the ERP) is shown but can never be matched : red dot on both sides."""
+    tue1, wed1 = MON - D(days=6), MON - D(days=5)
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
+                      receipts=[Receipt("R1", "A1", tue1, 300, supplier_id="S1", ref="PO-1", packing_slip="BL-1"),
+                                Receipt("R2", "A1", tue1, 50, supplier_id="S1", ref="PO-2", packing_slip=""),
+                                Receipt("R3", "A1", wed1, 10, supplier_id="S1", packing_slip="   ")])
+    ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", tue1, 300, state="Traité", final_processing="OK"),
+                 DesadvLine("D2|1", "A1", "S1", "", wed1, 40, state="Traité", final_processing="OK")]   # no BL yet
+    r = run(ds, horizon_days=5)
+    i = r.dates.index(MON)
+    s1 = {l.supplier_id: l for l in r.lanes}["S1"]
+    assert [(x.receipt_id, x.packing_slip, x.purch_id, x.processed) for x in s1.receipt_lines] == [
+        ("R1", "BL-1", "PO-1", True), ("R2", "", "PO-2", False), ("R3", "", "", False)]
+    assert bool(s1.receipts_ko[i - 6]) and bool(s1.receipts_ko[i - 5])     # R2 / R3 without BL → red
+    # the DESADV without BL stays announced (nothing can receive it) and does not « process » the empty BLs
+    assert [(d.packing_slip, d.received) for d in s1.desadv] == [("BL-1", True), ("", False)]
+    assert s1.desadv_open[i - 5] == 40 and not bool(s1.desadv_ko[i - 5])
+
+
 def test_refused_proposal_is_per_supplier():
     """A refusal on a supplier's CBN row blocks that supplier only ; a refusal without supplier blocks all."""
     from appro.engine.models import CellFlag

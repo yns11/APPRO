@@ -392,6 +392,7 @@ class Lane:
     desadv_ko: np.ndarray | None = None     # bool: an unreceived DESADV of the day is not « Traité / OK »
     receipts_ko: np.ndarray | None = None   # bool: a receipt of the day has no processed DESADV for its BL
     desadv: list["DesadvInfo"] = field(default_factory=list)
+    receipt_lines: list["ReceiptInfo"] = field(default_factory=list)   # the receipts of the lane, one per ERP line (tooltips)
 
 
 @dataclass
@@ -406,6 +407,20 @@ class DesadvInfo:
     received: bool
     hidden: bool
     purch_id: str = ""
+
+
+@dataclass
+class ReceiptInfo:
+    """One ERP receipt line as displayed in the tooltips of the Reçu row.  ``packing_slip`` is empty
+    when the ERP has no delivery note yet (shown as « ACR non validé ») ; ``processed`` tells whether
+    the delivery note matches a processed DESADV (green dot)."""
+
+    receipt_id: str
+    receipt_date: dt.date
+    qty: float
+    packing_slip: str
+    purch_id: str
+    processed: bool
 
 
 @dataclass

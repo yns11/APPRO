@@ -98,7 +98,7 @@ SELECT
   d.Etat_message                                                  AS state,
   d.Traitement_final                                              AS final_processing
 FROM {t.fqn(t.desadv)} d
-WHERE d.Code_article IS NOT NULL AND d.BL IS NOT NULL AND d.Date_emission IS NOT NULL
+WHERE d.Code_article IS NOT NULL AND d.Date_emission IS NOT NULL
 """.strip()
 
 

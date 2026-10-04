@@ -40,6 +40,7 @@ from .models import (
     OrderLine,
     PlanCell,
     Receipt,
+    ReceiptInfo,
     SupplierLink,
 )
 
@@ -66,6 +67,7 @@ class _LaneAcc:
     backlog_received: float = 0.0
     orders: list[OrderInfo] = field(default_factory=list)
     desadv: list[DesadvInfo] = field(default_factory=list)
+    receipt_lines: list[ReceiptInfo] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         n = self.n
@@ -166,7 +168,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         ln = lane_of(d.supplier_id)
         received = bl in received_bls
         hidden = (ln.supplier_id, d.issue_date) in hidden_days
-        if d.processed:
+        if d.processed and bl:
             processed_bls.add(bl)
         ln.desadv.append(DesadvInfo(d.desadv_id, bl, d.issue_date, float(d.qty), d.state, d.final_processing,
                                     d.processed, received, hidden, d.purch_id))
@@ -177,10 +179,16 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
             ln.desadv_open[i] += float(d.qty)
             if not d.processed:
                 ln.desadv_ko[i] = True
-    for r in receipts:
+    for r in sorted(receipts, key=lambda r: (r.receipt_date, r.receipt_id)):
+        if not r.qty:
+            continue
+        bl = (r.packing_slip or "").strip()
+        processed = bool(bl) and bl in processed_bls         # an empty BL (« ACR non validé ») never matches
+        ln = lane_of(r.supplier_id)
+        ln.receipt_lines.append(ReceiptInfo(r.receipt_id, r.receipt_date, float(r.qty), bl, r.ref or "", processed))
         i = index.offset(r.receipt_date)
-        if i is not None and r.qty and (r.packing_slip or "").strip() not in processed_bls:
-            lane_of(r.supplier_id).receipts_ko[i] = True
+        if i is not None and not processed:
+            ln.receipts_ko[i] = True
     # ---- plan: typed cells, else the ERP
     for ln in acc.values():
         ln.plan[:] = ln.orders_firm
@@ -196,7 +204,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     return [Lane(supplier_id=ln.supplier_id, name=supplier_names.get(ln.supplier_id or "", ln.supplier_id or ""),
                  orders_firm=ln.orders_firm, orders_firm_hist=ln.orders_firm_hist, orders_forecast=ln.orders_forecast,
                  receipts=ln.receipts, plan=ln.plan, supply_proposed=np.zeros(n), plan_typed=ln.plan_typed,
-                 desadv_open=ln.desadv_open, desadv_ko=ln.desadv_ko, receipts_ko=ln.receipts_ko, desadv=ln.desadv,
+                 desadv_open=ln.desadv_open, desadv_ko=ln.desadv_ko, receipts_ko=ln.receipts_ko, desadv=ln.desadv, receipt_lines=ln.receipt_lines,
                  orders_firm_ordered=ln.ordered, orders_firm_open=ln.open, orders_ignored=ln.ignored,
                  backlog_ordered=ln.backlog_ordered, backlog_received=ln.backlog_received,
                  backlog_qty=max(0.0, ln.backlog_ordered - ln.backlog_received), orders=ln.orders)

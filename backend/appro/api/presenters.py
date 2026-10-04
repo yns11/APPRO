@@ -243,6 +243,7 @@ def lane_out(l: Lane, cols: Columns, with_orders: bool = True) -> dict[str, Any]
         "backlog_ordered": l.backlog_ordered, "backlog_received": l.backlog_received, "backlog_qty": l.backlog_qty,
         "orders": [o.__dict__ for o in l.orders] if with_orders else [],
         "desadv": [d.__dict__ for d in l.desadv] if with_orders else [],
+        "receipt_lines": [r.__dict__ for r in l.receipt_lines] if with_orders else [],
     }
 
 

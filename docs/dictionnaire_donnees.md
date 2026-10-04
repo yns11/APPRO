@@ -162,7 +162,7 @@ elle entre dans le **backlog** du fournisseur (§ 3.3 des règles métier).
 | receipt_date | date | `Date_reception` | |
 | qty | nombre | `Quantite_recue` | lignes à quantité nulle ignorées |
 | purch_id | texte | `Commande` | information |
-| packing_slip | texte | `BL` | information |
+| packing_slip | texte | `BL` | numéro de BL en info-bulle de la ligne *Reçu* ; vide (`BL` nul) = « ACR non validé », jamais rapproché d'un DESADV |
 
 Historique souhaité : au moins la fenêtre de backlog (28 jours par défaut, `backlog_days`).
 
@@ -234,7 +234,7 @@ Une ligne par ligne d'article d'un message.
 | article_id | texte | `Code_article` | |
 | supplier_id | texte | `Code_fournisseur` | voie du tableau |
 | supplier_name | texte | `Nom_fournisseur` | |
-| packing_slip | texte | `BL` | **clé de rapprochement** avec `fct_receipts.packing_slip` (`recep_edi.BL`) |
+| packing_slip | texte | `BL` | **clé de rapprochement** avec `fct_receipts.packing_slip` (`recep_edi.BL`) ; vide (`BL` nul) = « ACR non validé » : le DESADV est affiché mais ne peut être rapproché |
 | purch_id | texte | `Commande_ouverte` | information |
 | issue_date | date | `Date_emission` | jour affiché dans la ligne *Reçu* |
 | qty | nombre | `Quantite_achat` | quantité annoncée, **jamais comptée** dans un stock |

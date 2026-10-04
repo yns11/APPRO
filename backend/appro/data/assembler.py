@@ -93,7 +93,7 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
     desadv = [DesadvLine(r["desadv_id"], r["article_id"], r["supplier_id"] or None, str(r["packing_slip"] or ""),
                          as_date(r["issue_date"]), float(r["qty"] or 0.0), str(r.get("purch_id") or ""),
                          str(r.get("state") or ""), str(r.get("final_processing") or ""))
-              for r in _records(t("fct_desadv")) if r["article_id"] in ids and r["issue_date"] and r["packing_slip"]]
+              for r in _records(t("fct_desadv")) if r["article_id"] in ids and r["issue_date"]]   # no BL yet (« ACR non validé ») : still shown
     stock: dict[str, StockSnapshot] = {}
     for r in _records(t("fct_stock")):
         if r["article_id"] not in ids or not r["snapshot_date"]:

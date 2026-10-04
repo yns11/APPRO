@@ -30,7 +30,8 @@ export interface SeriesOut { key: string; label: string; values: number[]; }
 /** One supplier of the article: its own Ferme / Prévisionnel / Reçu / Plan rows. */
 /** One despatch advice (DESADV) line of the supplier ; shown in the Reçu row while not received. */
 export interface DesadvInfo { desadv_id: string; packing_slip: string; issue_date: string; qty: number; state: string; final_processing: string; processed: boolean; received: boolean; hidden: boolean; purch_id: string; }
-export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; desadv_ko: boolean[]; receipts_ko: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; desadv: DesadvInfo[]; }
+export interface ReceiptInfo { receipt_id: string; receipt_date: string; qty: number; packing_slip: string; purch_id: string; processed: boolean; }
+export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; desadv_ko: boolean[]; receipts_ko: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; desadv: DesadvInfo[]; receipt_lines: ReceiptInfo[]; }
 
 export interface ArticleKpis {
   stock_on_hand: number; reference_correction: number; stock_reference: number; init_date: string; shortage_policy: "backlog" | "lost";

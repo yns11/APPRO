@@ -124,6 +124,12 @@ est réceptionné, ou si l'approvisionneur **double-clique** la cellule et confi
 listé et rétablissable dans *Saisies & journal*). Les messages annulés ne sont jamais affichés. Les réceptions
 portent elles aussi un point : vert si leur BL correspond à un DESADV traité, rouge sinon.
 
+L'**info-bulle** de chaque cellule *Reçu* détaille les lignes du jour (ou de la semaine) : pour chaque réception
+et chaque DESADV, son **numéro de BL**, sa quantité et sa commande. Quand l'ERP n'a pas encore de BL (colonne
+`BL` nulle), l'info-bulle affiche **« ACR non validé »** à la place du numéro. Une ligne sans BL ne peut être
+rapprochée d'aucune autre : la réception porte alors un point rouge, et le DESADV reste annoncé jusqu'à ce que
+l'ERP lui donne un BL réceptionné ou que l'approvisionneur le masque.
+
 ### 3.4 Backlog fournisseur
 
 Les commandes fermes **passées** ne comptent dans aucun stock (leur restant ERP n'est pas fiable). Par
