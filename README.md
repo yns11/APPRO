@@ -18,8 +18,9 @@ du tableau se saisissent, *Plan* (une par fournisseur) et *Ajustement* ; deux li
 | Propositions CBN | une proposition par fournisseur et par jour de livraison |
 | Saisies & journal | cellules du plan, ajustements, journal nominatif |
 | Référentiel | articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures, stock de référence, **approvisionneurs (rôles) et délégations** : CRUD et **modèle Excel par table** ; paramètres par semaine édités comme une feuille |
+| Plan de production (PDP) | PDP effectif en feuille (programmes × semaines) : saisie directe des semaines à venir par les managers et administrateurs, import d'un classeur, versions |
 | Impact programmes | production réalisable par programme et semaine |
-| Imports / exports | PDP hebdomadaire (modèle), classeur de simulation à formules (export, réimport), alertes, plan |
+| Imports / exports | classeur de simulation à formules (export, réimport), alertes, plan |
 | Paramètres | règles d'approvisionnement du moteur, affichage (polices, tailles), administration (droits) |
 
 ## Démarrage rapide (local)

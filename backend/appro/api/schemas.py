@@ -452,6 +452,59 @@ class PdpVersionOut(ORM):
     last_week: dt.date | None = None
 
 
+class PerimeterItem(BaseModel):
+    id: str
+    name: str = ""
+
+
+class PerimeterOut(BaseModel):
+    """Programmes and suppliers reachable from the articles of a planner (filters of the supply table)."""
+
+    planner: str | None = None
+    articles: int = 0
+    programs: list[PerimeterItem] = Field(default_factory=list)
+    suppliers: list[PerimeterItem] = Field(default_factory=list)
+
+
+class PdpSheetWeek(BaseModel):
+    week: str
+    week_start: dt.date
+    editable: bool          # strictly after the current week, for managers and administrators
+
+
+class PdpSheetProgram(BaseModel):
+    program_id: str
+    name: str
+    active: bool = True
+    source: Literal["app", "erp", "none"]   # where the displayed quantities come from
+    values: list[float]
+
+
+class PdpSheetOut(BaseModel):
+    """The effective weekly PDP as one sheet: programmes in rows, ISO weeks in columns."""
+
+    as_of: dt.date
+    current_week: str
+    active_version: PdpVersionOut | None = None
+    erp_available: bool = False
+    weeks: list[PdpSheetWeek]
+    programs: list[PdpSheetProgram]
+
+
+class PdpCellIn(BaseModel):
+    program_id: str
+    week_start: dt.date
+    qty: float = Field(ge=0)
+
+
+class PdpSheetIn(BaseModel):
+    """Direct entry of the PDP: the changed cells only ; saved as a new active version."""
+
+    name: str = ""
+    note: str = ""
+    cells: list[PdpCellIn] = Field(min_length=1)
+
+
 class ImportReport(BaseModel):
     created: int
     ignored: int

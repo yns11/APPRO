@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
-import { useAdjustments, useFlags, useGrid, usePlanCells, usePrograms, useRefRows } from "@/lib/queries";
+import { useAdjustments, useFlags, useGrid, usePlanCells, usePerimeterLists } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
 import { Card, Empty, ErrorBox, Segmented, SkeletonBlock } from "@/components/ui";
 import { SimulationGrid } from "@/components/SimulationGrid";
+import { SearchSelect } from "@/components/SearchSelect";
 
 const PAGE_SIZES = [10, 20, 50, 100];
 
@@ -29,8 +30,15 @@ export default function SupplyTablePage() {
   const q = useDebounced(search.trim(), 300);
   useEffect(() => { setPage(1); }, [program, supplier, q, pageSize, perimeter.planner]);
   useEffect(() => { try { localStorage.setItem("appro.grid.pageSize", String(pageSize)); } catch { /* private mode */ } }, [pageSize]);
-  const programs = usePrograms();
-  const suppliers = useRefRows("ref_suppliers");
+  // the lists follow the planner chosen at the top of the page: his programmes and suppliers only
+  const lists = usePerimeterLists(perimeter.planner);
+  const programOptions = useMemo(() => (lists.data?.programs ?? []).map((p) => ({ id: p.id, label: p.name || p.id, hint: p.name ? p.id : undefined })), [lists.data]);
+  const supplierOptions = useMemo(() => (lists.data?.suppliers ?? []).map((s) => ({ id: s.id, label: s.name || s.id, hint: s.id })), [lists.data]);
+  useEffect(() => {   // a choice outside the new perimeter is dropped
+    if (!lists.data) return;
+    if (program && !lists.data.programs.some((p) => p.id === program)) setProgram("");
+    if (supplier && !lists.data.suppliers.some((s) => s.id === supplier)) setSupplier("");
+  }, [lists.data, program, supplier]);
   const grid = useGrid({ program_id: program || undefined, supplier_id: supplier || undefined, q: q || undefined, page, page_size: pageSize });
   const planCells = usePlanCells();
   const adjustments = useAdjustments();
@@ -52,14 +60,8 @@ export default function SupplyTablePage() {
       <Card tight>
         <div className="row wrap">
           <div className="search" style={{ minWidth: 260 }}><Search /><input className="input sm" placeholder="Article ou désignation…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-          <select className="select sm" style={{ width: 240 }} value={program} onChange={(e) => setProgram(e.target.value)}>
-            <option value="">Tous les programmes</option>
-            {(programs.data ?? []).map((p) => <option key={p.program_id} value={p.program_id}>{p.name || p.program_id}</option>)}
-          </select>
-          <select className="select sm" style={{ width: 240 }} value={supplier} onChange={(e) => setSupplier(e.target.value)}>
-            <option value="">Tous les fournisseurs</option>
-            {(suppliers.data ?? []).map((s) => <option key={String(s.supplier_id)} value={String(s.supplier_id)}>{String(s.supplier_id)} · {String(s.name ?? "")}</option>)}
-          </select>
+          <SearchSelect value={program} onChange={setProgram} options={programOptions} placeholder="Tous les programmes" ariaLabel="Programme" loading={lists.isLoading} />
+          <SearchSelect value={supplier} onChange={setSupplier} options={supplierOptions} placeholder="Tous les fournisseurs" ariaLabel="Fournisseur" loading={lists.isLoading} />
           <div className="pager" style={{ marginLeft: "auto" }}>
             <span>{total === 0 ? "Aucun article" : `Articles ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} sur ${total}`}</span>
             <button className="btn xs" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} aria-label="Page précédente"><ChevronLeft /></button>

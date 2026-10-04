@@ -218,6 +218,28 @@ def programs(ctx: AppContext = Depends(ctx_dep)):
                          components=int(counts.get(r["program_id"], 0))) for r in df.to_dict("records")]
 
 
+@router.get("/reference/perimeter", response_model=S.PerimeterOut)
+def perimeter(planner: str | None = None, ctx: AppContext = Depends(ctx_dep)):
+    """The programmes and suppliers of the articles of one planner (all articles without planner):
+    the choices offered by the filters of the supply table."""
+    arts = ctx.table("ref_articles")
+    if planner:
+        arts = arts[arts["planner"].astype(str).str.upper() == planner.upper()]
+    ids = set(arts["article_id"])
+    bom = ctx.table("ref_bom")
+    prog_ids = set(bom[bom["article_id"].isin(ids)]["program_id"])
+    programs = ctx.table("ref_programs")
+    programs = programs[programs["program_id"].isin(prog_ids)].sort_values("name")
+    links = ctx.table("ref_article_suppliers")
+    sup_ids = set(links[links["article_id"].isin(ids)]["supplier_id"])
+    suppliers = ctx.table("ref_suppliers")
+    suppliers = suppliers[suppliers["supplier_id"].isin(sup_ids)].sort_values("name")
+    return S.PerimeterOut(
+        planner=planner, articles=len(ids),
+        programs=[S.PerimeterItem(id=str(r["program_id"]), name=str(r["name"] or "")) for r in programs.to_dict("records")],
+        suppliers=[S.PerimeterItem(id=str(r["supplier_id"]), name=str(r["name"] or "")) for r in suppliers.to_dict("records")])
+
+
 @router.get("/reference/pdp")
 def pdp(program_id: str | None = None, ctx: AppContext = Depends(ctx_dep)):
     df = ctx.table("fct_production_plan")
@@ -335,12 +357,20 @@ def upsert_overrides(body: S.ParamOverrideBatchIn, ctx: AppContext = Depends(ctx
     _authorize_override(access, body.scope, body.key1)
     for it in body.items:
         _check_override(body.scope, it.key2, it.field, it.value)
-    out = []
-    for it in body.items:
-        row = _write_override(session, user, body.scope, body.key1, it.key2, it.field, it.value)
-        if row is not None:
-            out.append(row)
-    session.commit()
+    from sqlalchemy.exc import IntegrityError
+    for attempt in range(2):     # two clients writing the same week at once: the second pass finds the rows
+        out = []
+        try:
+            for it in body.items:
+                row = _write_override(session, user, body.scope, body.key1, it.key2, it.field, it.value)
+                if row is not None:
+                    out.append(row)
+            session.commit()
+            break
+        except IntegrityError:
+            session.rollback()
+            if attempt:
+                raise
     ctx.bump()
     return out
 

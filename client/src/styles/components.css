@@ -344,3 +344,24 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .pivot td .dot, .legend .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 4px; vertical-align: 1px; }
 .pivot td .dot.ok, .legend .dot.ok { background: var(--ok); }
 .pivot td .dot.ko, .legend .dot.ko { background: var(--critical); }
+
+/* ---- searchable list (combobox) */
+.combo { position: relative; }
+.combo .input { width: 100%; padding-right: 28px; }
+.combo-x, .combo-chev { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: inline-flex; color: var(--fg-subtle); background: transparent; border: 0; padding: 2px; cursor: pointer; }
+.combo-chev { pointer-events: none; }
+.combo-x:hover { color: var(--fg); }
+.combo-x svg, .combo-chev svg { width: 14px; height: 14px; }
+.combo-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 40; max-height: 320px; overflow: auto; margin: 0; padding: 4px; list-style: none; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
+.combo-list li { padding: 6px 8px; border-radius: var(--r-sm); cursor: pointer; display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs--1); }
+.combo-list li.hover { background: var(--brand-soft); }
+.combo-list li.chosen .lbl { font-weight: var(--fw-semibold); color: var(--brand-fg); }
+.combo-list li .hint { color: var(--fg-subtle); font-size: var(--fs--2); white-space: nowrap; }
+.combo-list li.subtle { cursor: default; }
+.dgrid td.rowno.rowhead { text-align: left; white-space: nowrap; }
+.dgrid th.rowno.corner { text-align: left; }
+.pdp-sheet { max-height: calc(100vh - 300px); }
+.pdp-sheet td.rowno.rowhead { position: sticky; left: 0; z-index: 1; }
+.pdp-sheet th.rowno.corner { left: 0; z-index: 3; }
+.pdp-sheet th.current-week, .pdp-sheet td.current-week { background: var(--cell-today); }
+.pdp-sheet td.from-app { color: var(--brand-fg); }

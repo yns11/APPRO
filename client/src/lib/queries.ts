@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, type Params } from "./api";
 import type {
   AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, DeliveryPlanResponse, FlagOut, GridResponse, LinkRef, ParamDoc, ParamOverrideOut, PdpErpLine,
-  PdpVersionOut, PlanCellOut, ProgramImpactResponse, ProgramRef, ProjectionResponse, ProposalOut, RefRow, RefTableInfo, WeeklyParamsResponse,
+  PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, ProgramImpactResponse, ProgramRef, ProjectionResponse, ProposalOut, RefRow, RefTableInfo, WeeklyParamsResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
@@ -82,6 +82,8 @@ export const useRefRows = (name: string | null) => useQuery({ queryKey: ["ref-ro
 export const useParamSchema = () => useQuery({ queryKey: ["param-schema"], queryFn: () => api.get<ParamDoc[]>("/api/params/schema"), staleTime: Infinity });
 export const useParamEffective = () => useQuery({ queryKey: ["param-effective"], queryFn: () => api.get<Record<string, unknown>>("/api/params/effective") });
 export const useOverrides = (params?: Params) => useQuery({ queryKey: ["overrides", params], queryFn: () => api.get<ParamOverrideOut[]>("/api/params/overrides", params) });
+export const usePerimeterLists = (planner: string | null | undefined) => useQuery({ queryKey: ["perimeter", planner ?? null], queryFn: () => api.get<PerimeterOut>("/api/reference/perimeter", { planner: planner ?? undefined }), staleTime: 300_000 });
+export const usePdpSheet = (weeks?: number) => useQuery({ queryKey: ["pdp-sheet", weeks], queryFn: () => api.get<PdpSheetOut>("/api/pdp/sheet", { weeks }), placeholderData: keepPreviousData });
 export const usePdpVersions = () => useQuery({ queryKey: ["pdp-versions"], queryFn: () => api.get<PdpVersionOut[]>("/api/pdp/versions") });
 export const useAudit = (params?: Params) => useQuery({ queryKey: ["audit", params], queryFn: () => api.get<AuditOut[]>("/api/entries/audit", params) });
 

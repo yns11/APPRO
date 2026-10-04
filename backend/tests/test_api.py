@@ -557,3 +557,65 @@ def test_configured_admins_can_never_be_locked_out(client, seed_source, tmp_path
     assert resolve_access("Boss@Example.com", planners, empty, arts).role == "reader"
     assert resolve_access("Boss@Example.com", planners, empty, arts, admins={"boss@example.com"}).role == "admin"
     assert resolve_access("quentin@example.com", planners, empty, arts, admins={"quentin@example.com"}).name == "QUENTIN"
+
+
+def test_grid_lanes_carry_the_same_details_as_the_article_page(client):
+    """The multi-article table shows the Ferme / Reçu tooltips, dots and DESADV cells of the article
+    page: the lanes carry the order, receipt and DESADV lines of the displayed window."""
+    grid = client.get("/api/grid", params={"planner": "QUENTIN", "page_size": 50}).json()
+    art = next(a for a in grid["articles"] if a["article"]["article_id"] == AID)
+    lane = next(l for l in art["lanes"] if l["supplier_id"] == "S-000545")
+    assert lane["orders"] and all(o["expected_date"] >= grid["period_start"][0] for o in lane["orders"])
+    assert {d["packing_slip"] for d in lane["desadv"]} == {"BL-990000", "BL-990001", "BL-990002"}
+    assert [(r["packing_slip"], r["processed"]) for r in lane["receipt_lines"]] == [("BL-990000", True)]
+    proj = client.get(f"/api/articles/{AID}/projection").json()
+    plane = next(l for l in proj["lanes"] if l["supplier_id"] == "S-000545")
+    assert plane["receipt_lines"] == lane["receipt_lines"] and plane["desadv"] == lane["desadv"]
+
+
+def test_perimeter_lists_the_programs_and_suppliers_of_the_planner(client):
+    per = client.get("/api/reference/perimeter", params={"planner": "QUENTIN"}).json()
+    assert per["articles"] == 16 and "mass-00040633" in {p["id"] for p in per["programs"]}
+    assert "S-000545" in {s["id"] for s in per["suppliers"]} and all(s["name"] for s in per["suppliers"])
+    assert client.get("/api/reference/perimeter", params={"planner": "NOBODY"}).json() == {"planner": "NOBODY", "articles": 0, "programs": [], "suppliers": []}
+    assert client.get("/api/reference/perimeter").json()["programs"] == per["programs"]
+
+
+def test_pdp_sheet_direct_entry(client):
+    """The PDP sheet: programmes × ISO weeks from the current week ; a manager types future weeks,
+    saved as a new active version holding the touched programmes (copied from the ERP plan)."""
+    sh = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
+    assert sh["current_week"] == "2026-W38" and sh["weeks"][0]["week_start"] == "2026-09-14" and sh["active_version"] is None
+    assert sh["weeks"][0]["editable"] is False and all(w["editable"] for w in sh["weeks"][1:]) and sh["erp_available"] is True
+    prog = next(p for p in sh["programs"] if p["program_id"] == "mass-00037796")
+    assert prog["source"] == "erp" and len(prog["values"]) == len(sh["weeks"])
+    before = prog["values"]
+    other = next(p for p in sh["programs"] if p["program_id"] != "mass-00037796" and p["source"] == "erp")
+    r = client.put("/api/pdp/sheet", json={"name": "Saisie test", "cells": [{"program_id": "mass-00037796", "week_start": "2026-09-28", "qty": 123}]})
+    assert r.status_code == 201, r.text
+    v = r.json()
+    assert v["active"] is True and v["programs"] == 1 and v["source_file"] == "saisie directe"
+    sh2 = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
+    prog2 = next(p for p in sh2["programs"] if p["program_id"] == "mass-00037796")
+    assert sh2["active_version"]["id"] == v["id"] and prog2["source"] == "app"
+    assert prog2["values"][2] == 123 and prog2["values"][:2] == before[:2] and prog2["values"][3:] == before[3:]
+    assert next(p for p in sh2["programs"] if p["program_id"] == other["program_id"])["source"] == "erp"
+    # a second entry stacks on the active version (its lines are kept), the name is generated
+    r2 = client.put("/api/pdp/sheet", json={"cells": [{"program_id": other["program_id"], "week_start": "2026-10-05", "qty": 0}]})
+    assert r2.status_code == 201 and r2.json()["programs"] == 2 and r2.json()["name"].startswith("Saisie du ")
+    sh3 = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
+    assert next(p for p in sh3["programs"] if p["program_id"] == "mass-00037796")["values"][2] == 123
+    assert next(p for p in sh3["programs"] if p["program_id"] == other["program_id"])["values"][3] == 0
+    assert len(client.get("/api/pdp/versions").json()) == 2
+    # the engine follows: the demand of the touched week changes with the plan
+    assert client.get(f"/api/articles/{AID}/projection").json()["as_of"] == AS_OF
+    # guards: current / past week, not a Monday, unknown programme, negative
+    bad = [{"program_id": "mass-00037796", "week_start": "2026-09-14", "qty": 1}]
+    assert client.put("/api/pdp/sheet", json={"cells": bad}).status_code == 422
+    assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "week_start": "2026-09-29"}]}).status_code == 422
+    assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "program_id": "nope", "week_start": "2026-09-28"}]}).status_code == 422
+    assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "week_start": "2026-09-28", "qty": -1}]}).status_code == 422
+    assert client.put("/api/pdp/sheet", json={"cells": []}).status_code == 422
+    # once an administrator is declared, quentin is a reader: no entry
+    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC0", "name": "ROOT", "email": "root@example.com", "role": "admin", "active": True}}).status_code == 200
+    assert client.put("/api/pdp/sheet", json={"cells": [{"program_id": "mass-00037796", "week_start": "2026-09-28", "qty": 5}]}).status_code == 403

@@ -6,6 +6,7 @@ import ArticlePage from "@/pages/ArticlePage";
 import ProposalsPage from "@/pages/ProposalsPage";
 import SupplyTablePage from "@/pages/SupplyTablePage";
 import ProgramsPage from "@/pages/ProgramsPage";
+import PdpPage from "@/pages/PdpPage";
 import EntriesPage from "@/pages/EntriesPage";
 import ImportsPage from "@/pages/ImportsPage";
 import ReferencePage from "@/pages/ReferencePage";
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/tableau" element={<SupplyTablePage />} />
         <Route path="/propositions" element={<ProposalsPage />} />
         <Route path="/programmes" element={<ProgramsPage />} />
+        <Route path="/pdp" element={<PdpPage />} />
         <Route path="/saisies" element={<EntriesPage />} />
         <Route path="/imports" element={<ImportsPage />} />
         <Route path="/referentiel" element={<ReferencePage />} />

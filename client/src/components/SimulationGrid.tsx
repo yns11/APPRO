@@ -346,6 +346,11 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         const openOf = (i: number) => l.desadv.filter((d) => inCol(d, i) && !d.received && !d.hidden);
         const receiptsOf = (i: number) => (l.receipt_lines ?? []).filter((x: ReceiptInfo) => columnOf(cols, x.receipt_date) === i);
         const bl = (x: { packing_slip: string }) => (x.packing_slip ? `BL ${x.packing_slip}` : NO_BL);
+        // why a receipt carries a red dot: no BL yet (the ACR is not validated : nothing to match, by construction) or a BL unknown to the processed DESADV
+        const recKoReason = (xs: ReceiptInfo[]) => {
+          const noBl = xs.some((x) => !x.packing_slip), unknown = xs.some((x) => x.packing_slip && !x.processed);
+          return [noBl ? NO_BL : "", unknown ? "BL reçu sans DESADV traité" : ""].filter(Boolean).join(" ; ") || "BL reçu sans DESADV traité";
+        };
         return (
           <tr key={r.key} style={{ height: r.h }}>
             <td>Reçu</td>
@@ -358,8 +363,8 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const openList = open > 0 ? openOf(i) : [];
               const recList = v > 0 ? receiptsOf(i) : [];
               const title = [
-                v > 0 ? `Reçu ${fmtQty(v, unit)}${recList.length ? ` : ${recList.map((x) => `${bl(x)} ${fmtQty(x.qty, unit)}${x.purch_id ? ` · ${x.purch_id}` : ""}`).join(" ; ")}` : ""}${hasDesadvData ? (recKo ? " – point rouge : un BL reçu sans DESADV traité" : " – point vert : BL annoncé par un DESADV traité") : ""}` : "",
-                open > 0 ? `DESADV non reçu ${fmtQty(open, unit)} (annoncé, hors calculs) : ${openList.map((d) => `${bl(d)} ${fmtQty(d.qty, unit)} · ${d.state}${d.final_processing ? ` / ${d.final_processing}` : ""}${d.purch_id ? ` · ${d.purch_id}` : ""}`).join(" ; ")}${ro ? " – semaine agrégée : cliquer l'en-tête pour le détail" : locked ? "" : " – double-clic pour le masquer"}` : "",
+                v > 0 ? `Reçu ${fmtQty(v, unit)}${recList.length ? ` : ${recList.map((x) => `${bl(x)} ${fmtQty(x.qty, unit)}`).join(" ; ")}` : ""}${hasDesadvData ? (recKo ? ` – point rouge : ${recKoReason(recList)}` : " – point vert : BL annoncé par un DESADV traité") : ""}` : "",
+                open > 0 ? `DESADV non reçu ${fmtQty(open, unit)} (annoncé, hors calculs) : ${openList.map((d) => `${bl(d)} ${fmtQty(d.qty, unit)} · ${d.state}${d.final_processing ? ` / ${d.final_processing}` : ""}`).join(" ; ")}${ro ? " – semaine agrégée : cliquer l'en-tête pour le détail" : locked ? "" : " – double-clic pour le masquer"}` : "",
               ].filter(Boolean).join("\n");
               const cls = [...cellBase(i), open > 0 ? "desadv" : "", open > 0 && !ro && !locked ? "clickable" : ""].filter(Boolean).join(" ");
               const onDouble = open <= 0 || locked ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i])
@@ -469,7 +474,8 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const cov = series(k === "stock_erp" ? "coverage_erp" : "coverage_plan", i);
               const short = series(k === "stock_erp" ? "shortage_erp" : "shortage_plan", i);
               const cls = [...cellBase(i), "stock", past ? "" : coverageClass(cov, a.article), short > 0 ? "short" : ""].filter(Boolean).join(" ");
-              const title = past ? `stock reconstitué ${fmtQty(v, unit)}` : `stock ${fmtQty(v, unit)} · couverture ${cov} j${short > 0 ? ` · manque ${fmtQty(short, unit)} (besoin non servi)` : ""}`;
+              const target = k === "stock_plan" ? series("target_stock", i) : 0;
+              const title = past ? `stock reconstitué ${fmtQty(v, unit)}` : `stock ${fmtQty(v, unit)} · couverture ${cov} j${k === "stock_plan" ? ` · stock cible ${fmtQty(target, unit)}` : ""}${short > 0 ? ` · manque ${fmtQty(short, unit)} (besoin non servi)` : ""}`;
               return <td key={i} className={cls} title={title}>
                 {!past && <span className="cov">{cov} j</span>}
                 <span className="val">{fmtQty(v, unit)}</span>

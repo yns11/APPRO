@@ -43,7 +43,7 @@ se lit.
    1 000 et 1 200 composants consommés lundi et mardi → (4 000 − 2 200) / 3 = 600 par jour mercredi, jeudi,
    vendredi ; PDP déjà dépassé → 0. Autres modes : `actual_then_plan` (réel du jour s'il existe, 0 déclaré
    compris, sinon plan), `plan_only`, `actual_only`.
-4. Un PDP importé et **actif** remplace le PDP ERP pour les programmes qu'il contient.
+4. Un PDP importé ou saisi et **actif** remplace le PDP ERP pour les programmes qu'il contient (§ 11 bis).
 
 La ligne *Besoin* affiche le consommé (passé, réel) puis le requis (futur, PDP) ; le classeur exporté les
 distingue par la date de référence.
@@ -125,10 +125,14 @@ listé et rétablissable dans *Saisies & journal*). Les messages annulés ne son
 portent elles aussi un point : vert si leur BL correspond à un DESADV traité, rouge sinon.
 
 L'**info-bulle** de chaque cellule *Reçu* détaille les lignes du jour (ou de la semaine) : pour chaque réception
-et chaque DESADV, son **numéro de BL**, sa quantité et sa commande. Quand l'ERP n'a pas encore de BL (colonne
+et chaque DESADV, son **numéro de BL** et sa quantité (le DESADV ajoute son état et son traitement final). Quand l'ERP n'a pas encore de BL (colonne
 `BL` nulle), l'info-bulle affiche **« ACR non validé »** à la place du numéro. Une ligne sans BL ne peut être
-rapprochée d'aucune autre : la réception porte alors un point rouge, et le DESADV reste annoncé jusqu'à ce que
-l'ERP lui donne un BL réceptionné ou que l'approvisionneur le masque.
+rapprochée d'aucune autre : la réception porte alors un point rouge expliqué « ACR non validé » (et non « BL reçu
+sans DESADV traité » : le DESADV correspondant peut très bien être traité, c'est l'accusé de réception qui n'est
+pas encore validé), et le DESADV reste annoncé jusqu'à ce que l'ERP lui donne un BL réceptionné ou que
+l'approvisionneur le masque. Ces règles valent à l'identique dans la fiche article et dans le tableau
+d'approvisionnement global (mêmes info-bulles, points et cellules DESADV ; la ligne *Scenario Plan* y affiche
+aussi le **stock cible** du jour).
 
 ### 3.4 Backlog fournisseur
 
@@ -290,8 +294,22 @@ classeur avec LibreOffice et le compare au moteur.
 fournisseur devient une cellule saisie, une valeur égale vaut « ERP » ; chaque valeur d'*Ajustement* devient
 une cellule. Les cellules des articles présents dans le classeur remplacent celles de l'application.
 
+### 11 bis. Plan de production : saisie directe
+
+La page *Plan de production (PDP)* montre le **PDP effectif** (ERP, remplacé programme par programme par la
+version active) en une feuille : programmes actifs porteurs d'une nomenclature (plus tout programme planifié) en
+lignes, semaines ISO en colonnes, de la semaine en cours à 26 semaines (choix 26 à 104) ou à la dernière semaine
+planifiée. Les **managers et administrateurs** saisissent les **semaines à venir** (la semaine en cours est
+grisée, non modifiable) comme dans Excel (saisie, flèches, Ctrl+C / Ctrl+V d'un bloc, recopie par le carré,
+Suppr = 0), puis **enregistrent** : les cellules modifiées sont appliquées au plan effectif et forment une
+**nouvelle version active** (`source_file` = « saisie directe », nom libre ou « Saisie du jj/mm/aaaa hh:mm »).
+Cette version reprend les programmes de la version active précédente et y ajoute les programmes modifiés
+(copiés depuis l'ERP puis corrigés) ; les autres programmes continuent de suivre l'ERP. Désactiver la version
+revient à l'état précédent. L'import d'un classeur et la liste des versions (activer, désactiver, supprimer)
+sont sur la même page.
+
 Le **modèle du fichier PDP** (onglet `SOP - PDP`, une ligne par programme, une colonne par semaine ISO)
-se télécharge dans *Imports / exports* ; les **modèles du référentiel** (un par table) dans *Référentiel*.
+se télécharge dans *Plan de production (PDP)* ; les **modèles du référentiel** (un par table) dans *Référentiel*.
 
 ## 12. Approvisionneurs, délégations et droits
 
@@ -303,7 +321,7 @@ verrouille ce qui n'est pas permis (cellules non éditables, cadenas sur l'artic
 |---|---|
 | utilisateur non déclaré, ou inactif (**lecteur**) | rien : lecture seule partout |
 | **appro** | les cellules Plan / Ajustement / Ferme / CBN, les paramètres hebdomadaires et les lignes du référentiel (articles, article ↔ fournisseur, nomenclatures, stock) **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations |
-| **manager** | comme un appro sur son carnet, **plus** les règles globales du moteur, les paramètres hebdomadaires de tout article, l'import et l'activation des PDP, l'import des tables du référentiel (sauf celle des approvisionneurs) |
+| **manager** | comme un appro sur son carnet, **plus** les règles globales du moteur, les paramètres hebdomadaires de tout article, la saisie, l'import et l'activation des PDP, l'import des tables du référentiel (sauf celle des approvisionneurs) |
 | **admin** | tout, y compris la table des approvisionneurs |
 
 L'identité est l'e-mail transmis par Databricks Apps (`x-forwarded-email`), comparé sans tenir compte de la

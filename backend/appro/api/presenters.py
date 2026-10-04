@@ -233,7 +233,11 @@ def series_out(ar: ArticleResult, cols: Columns, lost: bool, keys: set[str] | No
             for key, label in SERIES_LABELS if keys is None or key in keys]
 
 
-def lane_out(l: Lane, cols: Columns, with_orders: bool = True) -> dict[str, Any]:
+def lane_out(l: Lane, cols: Columns, with_orders: bool = True, since: dt.date | None = None) -> dict[str, Any]:
+    """One lane.  ``since`` keeps only the order / receipt / DESADV lines dated inside the displayed
+    window (the multi-article table, page after page, must stay light) ; ``None`` keeps them all."""
+    def shown(day: dt.date) -> bool:
+        return since is None or day >= since
     return {
         "supplier_id": l.supplier_id, "name": l.name,
         "series": [{"key": key, "label": label, "values": _agg(key, getattr(l, key), cols, False)} for key, label in LANE_SERIES],
@@ -241,9 +245,9 @@ def lane_out(l: Lane, cols: Columns, with_orders: bool = True) -> dict[str, Any]
         "desadv_ko": cols.any(l.desadv_ko) if l.desadv_ko is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
         "receipts_ko": cols.any(l.receipts_ko) if l.receipts_ko is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
         "backlog_ordered": l.backlog_ordered, "backlog_received": l.backlog_received, "backlog_qty": l.backlog_qty,
-        "orders": [o.__dict__ for o in l.orders] if with_orders else [],
-        "desadv": [d.__dict__ for d in l.desadv] if with_orders else [],
-        "receipt_lines": [r.__dict__ for r in l.receipt_lines] if with_orders else [],
+        "orders": [o.__dict__ for o in l.orders if shown(o.expected_date)] if with_orders else [],
+        "desadv": [d.__dict__ for d in l.desadv if shown(d.issue_date)] if with_orders else [],
+        "receipt_lines": [r.__dict__ for r in l.receipt_lines if shown(r.receipt_date)] if with_orders else [],
     }
 
 
@@ -262,7 +266,7 @@ def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, suppl
     return {
         "article": article_ref(ar).model_dump(mode="json"), "as_of": result.as_of.isoformat(), "init_date": result.init_date.isoformat(), "granularity": granularity,
         **cols.meta(ar.dates),
-        "series": series_out(ar, cols, lost), "lanes": [lane_out(l, cols) for l in ar.lanes],
+        "series": series_out(ar, cols, lost), "lanes": [lane_out(l, cols, since=start) for l in ar.lanes],
         "proposals": [proposal_out(p, ar, supplier_names).model_dump(mode="json") for p in ar.proposals],
         "alerts": [alert_out(a, ar.article.designation).model_dump(mode="json") for a in ar.alerts],
         "kpis": ar.kpis, "suppliers": [link_out(l, supplier_names).model_dump(mode="json") for l in ar.suppliers],
@@ -287,7 +291,7 @@ def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str]
     return {
         **base, **cols.meta(dates),
         "articles": [{"article": article_ref(ar).model_dump(mode="json"), "series": series_out(ar, cols, lost, GRID_SERIES),
-                      "lanes": [lane_out(l, cols, with_orders=False) for l in ar.lanes], "kpis": ar.kpis,
+                      "lanes": [lane_out(l, cols, since=start) for l in ar.lanes], "kpis": ar.kpis,
                       "suppliers": [link_out(l, supplier_names).model_dump(mode="json") for l in ar.suppliers],
                       "programs": programs_of.get(ar.article.article_id, [])}
                      for ar in arts],

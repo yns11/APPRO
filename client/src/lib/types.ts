@@ -100,3 +100,9 @@ export interface AccessOut {
 }
 /** ``as_of`` = today (the real date, or the simulated one) ; ``init_date`` = stock initialisation day, point zero of the application. */
 export interface ConfigOut { title: string; data_source: Record<string, unknown>; as_of: string; init_date: string; horizon_days: number; planners: string[]; default_planner: string | null; user: string; version: string; reference_empty: boolean; access: AccessOut; }
+
+export interface PerimeterItem { id: string; name: string; }
+export interface PerimeterOut { planner: string | null; articles: number; programs: PerimeterItem[]; suppliers: PerimeterItem[]; }
+export interface PdpSheetWeek { week: string; week_start: string; editable: boolean; }
+export interface PdpSheetProgram { program_id: string; name: string; active: boolean; source: "app" | "erp" | "none"; values: number[]; }
+export interface PdpSheetOut { as_of: string; current_week: string; active_version: PdpVersionOut | null; erp_available: boolean; weeks: PdpSheetWeek[]; programs: PdpSheetProgram[]; }

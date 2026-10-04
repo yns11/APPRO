@@ -180,14 +180,14 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
             if not d.processed:
                 ln.desadv_ko[i] = True
     for r in sorted(receipts, key=lambda r: (r.receipt_date, r.receipt_id)):
-        if not r.qty:
+        i = index.offset(r.receipt_date)
+        if not r.qty or i is None:                           # nothing exists before the point zero
             continue
         bl = (r.packing_slip or "").strip()
         processed = bool(bl) and bl in processed_bls         # an empty BL (« ACR non validé ») never matches
         ln = lane_of(r.supplier_id)
         ln.receipt_lines.append(ReceiptInfo(r.receipt_id, r.receipt_date, float(r.qty), bl, r.ref or "", processed))
-        i = index.offset(r.receipt_date)
-        if i is not None and not processed:
+        if not processed:
             ln.receipts_ko[i] = True
     # ---- plan: typed cells, else the ERP
     for ln in acc.values():
