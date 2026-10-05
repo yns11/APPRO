@@ -70,8 +70,9 @@ SELECT c.ID AS order_id, c.Article AS article_id, c.Code_fournisseur AS supplier
   CONCAT_WS(', ', SORT_ARRAY(COLLECT_SET(c.Commande))) AS purch_id, MAX(c.Niveau_engagement) AS commitment
 FROM {fqn(W['orders_table'])} c WHERE c.ID IS NOT NULL GROUP BY c.ID, c.Article, c.Code_fournisseur"""),
     "erp_receipts": (["receipt_id", "article_id", "supplier_id", "receipt_date", "qty", "purch_id", "packing_slip", "status"], f"""
-SELECT CONCAT_WS('|', r.Code_fournisseur, r.Commande, COALESCE(r.BL, ''), r.Article, DATE_FORMAT(r.Date_reception, 'yyyyMMdd'),
-                 COALESCE(r.Statut_reception, '')) AS receipt_id,
+SELECT CONCAT_WS('|', r.Code_fournisseur, r.Commande,
+                 CASE WHEN LENGTH(COALESCE(r.BL, '')) > 60 THEN LEFT(SHA2(r.BL, 256), 16) ELSE COALESCE(r.BL, '') END,
+                 r.Article, DATE_FORMAT(r.Date_reception, 'yyyyMMdd'), COALESCE(r.Statut_reception, '')) AS receipt_id,
   r.Article AS article_id, r.Code_fournisseur AS supplier_id, CAST(r.Date_reception AS DATE) AS receipt_date,
   CAST(r.Quantite_recue AS DOUBLE) AS qty, r.Commande AS purch_id, r.BL AS packing_slip, COALESCE(r.Statut_reception, 'Reçu') AS status
 FROM {fqn(W['receipts_table'])} r WHERE r.Quantite_recue IS NOT NULL AND r.Quantite_recue <> 0"""),
@@ -95,7 +96,8 @@ SELECT a.itemid AS article_id, CAST(MAX(a.std_cost_price) AS DOUBLE) AS price FR
 WHERE a.itemid IS NOT NULL AND a.std_cost_price IS NOT NULL AND a.itemid LIKE 'P-00%' GROUP BY a.itemid""")
 if W["bl_pending_table"]:
     QUERIES["erp_bl_pending"] = (["pending_id", "supplier_id", "purch_id", "packing_slip", "article_id", "qty", "registered_date", "days_pending"], f"""
-SELECT CONCAT_WS('|', b.Fournisseur, b.Commande, COALESCE(b.BL_DESADV, ''), b.Article, DATE_FORMAT(b.Date_enregistrement, 'yyyyMMdd')) AS pending_id,
+SELECT CONCAT_WS('|', b.Fournisseur, b.Commande, CASE WHEN LENGTH(COALESCE(b.BL_DESADV, '')) > 60 THEN LEFT(SHA2(b.BL_DESADV, 256), 16) ELSE COALESCE(b.BL_DESADV, '') END,
+                 b.Article, DATE_FORMAT(b.Date_enregistrement, 'yyyyMMdd')) AS pending_id,
        b.Fournisseur AS supplier_id, b.Commande AS purch_id, b.BL_DESADV AS packing_slip, b.Article AS article_id,
        CAST(b.Quantite AS DOUBLE) AS qty, CAST(b.Date_enregistrement AS DATE) AS registered_date, CAST(b.Jours_en_attente AS INT) AS days_pending
 FROM {fqn(W['bl_pending_table'])} b WHERE b.Article IS NOT NULL AND b.Date_enregistrement IS NOT NULL""")

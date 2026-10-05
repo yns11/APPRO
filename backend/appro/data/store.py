@@ -56,7 +56,9 @@ class Base(DeclarativeBase):
 # =============================================================================
 # Reference tables and ERP mirror: one ORM class per canonical schema
 # =============================================================================
-_SQL_TYPES = {"str": String(200), "float": Float, "int": Integer, "bool": Boolean, "date": Date}
+# text columns are unbounded : a registered receipt lists every BL of its DESADV, an order slot every
+# purchase order number ; a VARCHAR(200) once broke the COPY of the synchronisation job
+_SQL_TYPES = {"str": Text, "float": Float, "int": Integer, "bool": Boolean, "date": Date}
 
 
 def _model(schema: TableSchema, table_name: str, audited: bool) -> type[Base]:
@@ -398,8 +400,9 @@ def ensure_schema(engine, schema: str | None) -> None:
 
 def ensure_columns(engine) -> list[str]:
     """Add the columns a newer version of the application declares on tables that already exist
-    (``create_all`` never alters a table) : the ERP mirror and the reference tables keep their rows,
-    the job and the screens find the new columns.  Returns the ``table.column`` added."""
+    (``create_all`` never alters a table) and widen the bounded text columns of an earlier version :
+    the ERP mirror and the reference tables keep their rows, the job and the screens find the new
+    columns.  Returns the ``table.column`` added or widened."""
     from sqlalchemy import inspect
     inspector = inspect(engine)
     added: list[str] = []
@@ -407,13 +410,17 @@ def ensure_columns(engine) -> list[str]:
         for table in Base.metadata.sorted_tables:
             if not inspector.has_table(table.name):
                 continue
-            present = {c["name"] for c in inspector.get_columns(table.name)}
+            present = {c["name"]: c for c in inspector.get_columns(table.name)}
             for col in table.columns:
-                if col.name in present:
-                    continue
-                typ = col.type.compile(engine.dialect)
-                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {typ}'))
-                added.append(f"{table.name}.{col.name}")
+                if col.name not in present:
+                    typ = col.type.compile(engine.dialect)
+                    conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {typ}'))
+                    added.append(f"{table.name}.{col.name}")
+                elif (engine.dialect.name == "postgresql" and isinstance(col.type, Text)
+                      and isinstance(present[col.name]["type"], String) and present[col.name]["type"].length):
+                    # a bounded VARCHAR of an earlier version : widen it (SQLite never enforces the length)
+                    conn.execute(text(f'ALTER TABLE "{table.name}" ALTER COLUMN "{col.name}" TYPE TEXT'))
+                    added.append(f"{table.name}.{col.name} (TEXT)")
     if added:
         log.info("Colonnes ajoutées aux tables existantes : %s", ", ".join(added))
     return added

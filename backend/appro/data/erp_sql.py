@@ -63,11 +63,14 @@ GROUP BY c.ID, c.Article, c.Code_fournisseur
 
 
 def receipts_sql(t: ErpTables) -> str:
-    """One row per supplier / order / BL / article / day / status (``Reçu`` or ``Enregistré``)."""
+    """One row per supplier / order / BL / article / day / status (``Reçu`` or ``Enregistré``).  A registered
+    receipt lists every BL of its DESADV (dozens, sometimes) : the identifier keeps a 16-character hash of
+    the list instead of the list itself, the ``packing_slip`` column keeps it whole."""
     return f"""
 SELECT
-  CONCAT_WS('|', r.Code_fournisseur, r.Commande, COALESCE(r.BL, ''), r.Article,
-            DATE_FORMAT(r.Date_reception, 'yyyyMMdd'), COALESCE(r.Statut_reception, '')) AS receipt_id,
+  CONCAT_WS('|', r.Code_fournisseur, r.Commande,
+            CASE WHEN LENGTH(COALESCE(r.BL, '')) > 60 THEN LEFT(SHA2(r.BL, 256), 16) ELSE COALESCE(r.BL, '') END,
+            r.Article, DATE_FORMAT(r.Date_reception, 'yyyyMMdd'), COALESCE(r.Statut_reception, '')) AS receipt_id,
   r.Article                                                       AS article_id,
   r.Code_fournisseur                                              AS supplier_id,
   CAST(r.Date_reception AS DATE)                                  AS receipt_date,
@@ -136,8 +139,9 @@ def bl_pending_sql(t: ErpTables) -> str:
     BL / article / registration day."""
     return f"""
 SELECT
-  CONCAT_WS('|', b.Fournisseur, b.Commande, COALESCE(b.BL_DESADV, ''), b.Article,
-            DATE_FORMAT(b.Date_enregistrement, 'yyyyMMdd'))       AS pending_id,
+  CONCAT_WS('|', b.Fournisseur, b.Commande,
+            CASE WHEN LENGTH(COALESCE(b.BL_DESADV, '')) > 60 THEN LEFT(SHA2(b.BL_DESADV, 256), 16) ELSE COALESCE(b.BL_DESADV, '') END,
+            b.Article, DATE_FORMAT(b.Date_enregistrement, 'yyyyMMdd')) AS pending_id,
   b.Fournisseur                                                   AS supplier_id,
   b.Commande                                                      AS purch_id,
   b.BL_DESADV                                                     AS packing_slip,
