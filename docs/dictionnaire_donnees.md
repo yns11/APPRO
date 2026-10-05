@@ -266,12 +266,12 @@ vendredi) ; une version importée et active remplace cette table pour ses progra
 
 Prix de revient standard, en euros, par article (`APPRO_ERP_PRICES_TABLE`, variable `erp_prices_table`,
 défaut `silver_base_article`). La table source contient bien plus d'articles que le référentiel : le job copie
-les `itemid` en `P-00…`, et **seuls les articles du référentiel sont valorisés** ; un article présent dans
+les `item_id` en `P-00…`, et **seuls les articles du référentiel sont valorisés** ; un article présent dans
 les prix et absent du référentiel n'y est **jamais ajouté**.
 
 | Colonne | Type | Source | Règle |
 |---|---|---|---|
-| article_id | texte **clé** | `itemid` | |
+| article_id | texte **clé** | `item_id` | |
 | price | nombre | `std_cost_price` | euros par unité de stock ; `MAX` si plusieurs lignes |
 
 Usage : **valeur du stock** = Σ prix × stock à date (stock de la veille), **valeur cible** = Σ prix × stock

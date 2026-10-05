@@ -189,7 +189,7 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
     _t("fct_prices", "Prix des articles", "Prix de revient standard par article (silver_base_article.std_cost_price, en euros). "
        "Sert à valoriser les stocks ; un article absent n'est pas valorisé, un article présent n'est pas ajouté au référentiel.",
        ("article_id",), [
-           Column("article_id", "str", "Article", "itemid", True),
+           Column("article_id", "str", "Article", "item_id", True),
            Column("price", "float", "Prix (€)", "std_cost_price, euros par unité de stock", True),
        ], reference=False),
     _t("fct_bl_pending", "BL en attente de validation", "Réceptions enregistrées depuis au moins 7 jours dont l'accusé de réception "

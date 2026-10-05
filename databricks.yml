@@ -82,7 +82,7 @@ variables:
     description: Table de PDP hebdomadaire (program_id, week_start, qty, version). Vide = aucune (PDP importé par fichier).
     default: ""
   erp_prices_table:
-    description: Table UC des articles avec le prix standard (itemid, std_cost_price en euros), pour valoriser les stocks. Vide = aucune.
+    description: Table UC des articles avec le prix standard (item_id, std_cost_price en euros), pour valoriser les stocks. Vide = aucune.
     default: silver_base_article
   erp_bl_pending_table:
     description: Table UC des BL enregistrés en attente de validation (accusé de réception non validé depuis 7 jours). Vide = aucune.

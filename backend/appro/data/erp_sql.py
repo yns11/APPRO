@@ -127,10 +127,10 @@ def prices_sql(t: ErpTables) -> str:
     """Standard cost price per article (euros).  The item master holds far more items than the
     application : the engine only values the articles of its reference table."""
     return f"""
-SELECT a.itemid AS article_id, CAST(MAX(a.std_cost_price) AS DOUBLE) AS price
+SELECT a.item_id AS article_id, CAST(MAX(a.std_cost_price) AS DOUBLE) AS price
 FROM {t.fqn(t.prices)} a
-WHERE a.itemid IS NOT NULL AND a.std_cost_price IS NOT NULL AND a.itemid LIKE 'P-00%'
-GROUP BY a.itemid
+WHERE a.item_id IS NOT NULL AND a.std_cost_price IS NOT NULL AND a.item_id LIKE 'P-00%'
+GROUP BY a.item_id
 """.strip()
 
 

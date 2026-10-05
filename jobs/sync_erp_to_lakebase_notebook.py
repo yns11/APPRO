@@ -92,8 +92,8 @@ SELECT CONCAT_WS('|', CAST(d.Document_ID AS STRING), CAST(d.ID_Ligne AS STRING))
 FROM {fqn(W['desadv_table'])} d WHERE d.Code_article IS NOT NULL AND d.Date_emission IS NOT NULL""")
 if W["prices_table"]:
     QUERIES["erp_prices"] = (["article_id", "price"], f"""
-SELECT a.itemid AS article_id, CAST(MAX(a.std_cost_price) AS DOUBLE) AS price FROM {fqn(W['prices_table'])} a
-WHERE a.itemid IS NOT NULL AND a.std_cost_price IS NOT NULL AND a.itemid LIKE 'P-00%' GROUP BY a.itemid""")
+SELECT a.item_id AS article_id, CAST(MAX(a.std_cost_price) AS DOUBLE) AS price FROM {fqn(W['prices_table'])} a
+WHERE a.item_id IS NOT NULL AND a.std_cost_price IS NOT NULL AND a.item_id LIKE 'P-00%' GROUP BY a.item_id""")
 if W["bl_pending_table"]:
     QUERIES["erp_bl_pending"] = (["pending_id", "supplier_id", "purch_id", "packing_slip", "article_id", "qty", "registered_date", "days_pending"], f"""
 SELECT CONCAT_WS('|', b.Fournisseur, b.Commande, CASE WHEN LENGTH(COALESCE(b.BL_DESADV, '')) > 60 THEN LEFT(SHA2(b.BL_DESADV, 256), 16) ELSE COALESCE(b.BL_DESADV, '') END,
