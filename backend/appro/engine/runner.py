@@ -12,7 +12,7 @@ from .demand import DayIndex, actual_share, build_article_demand, build_program_
 from .models import Alert, ArticleResult, Dataset, DatasetError, EngineParams, MrpResult, OrderType
 from .programs import program_impact
 from .projection import Projection, coverage_days, first_shortage, project_stock, target_stock
-from .proposals import generate_proposals
+from .proposals import generate_proposals, in_blocked_window
 from .supply import blocked_windows, build_lanes, lane_totals
 
 
@@ -156,14 +156,25 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         target = target_stock(demand, article, index, calendar, params)
 
         proposals, supply_proposed = [], np.zeros(n)
+        proposals_ignored: list = []
         if params.generate_proposals:
             # the re-projection is only needed by the ``lost`` policy (a receipt after a lost day does
             # not serve that day) ; with ``backlog`` adding the proposal from its day on is exact
+            blocked = blocked_windows(flags_by_article.get(aid), aid)
+            reproject = (lambda extra: project(inflow_plan + extra)) if params.shortage_policy == "lost" else None
             proposals, supply_proposed, _ = generate_proposals(
                 article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand, target,
                 index, calendar, as_of, params, supply_planned=lane_totals(lanes, "orders_forecast"),
-                reproject=(lambda extra: project(inflow_plan + extra)) if params.shortage_policy == "lost" else None,
-                blocked=blocked_windows(flags_by_article.get(aid), aid))
+                reproject=reproject, blocked=blocked)
+            if blocked:
+                # what the engine would have proposed without the refusals : the refused ones stay listed
+                # (« ignorée ») in the ordering flow, outside every calculation
+                free, _, _ = generate_proposals(article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand,
+                                                target, index, calendar, as_of, params, reproject=reproject)
+                for p in free:
+                    if in_blocked_window(blocked, p.supplier_id, p.delivery_date):
+                        p.ignored = True
+                        proposals_ignored.append(p)
             if params.include_proposals_in_plan:
                 plan_proj = project(inflow_plan + supply_proposed)
             by_lane = {l.supplier_id: l for l in lanes}
@@ -184,10 +195,20 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         typed = int(sum(int(l.plan_typed[i_as_of:].sum()) for l in lanes))
         ignored_days = int(sum(int(l.orders_ignored[i_as_of:].sum()) for l in lanes))
         refused = sum(1 for f in flags_by_article.get(aid, []) if f.kind == "proposal_refused")
+        price = dataset.prices.get(aid)
+        # stock « à date » = the stock at the end of yesterday (the reference day itself is not over) ;
+        # identical in both scenarios before today, so read on the ERP one
+        stock_at_date = float(erp.stock[i_as_of - 1]) if i_as_of > 0 else float(max(stock_start, 0.0))
+        plan_stockout = next((a for a in alerts if a.alert_type.value == "STOCKOUT" and a.scope == "plan"), None)
         kpis = {
             "stock_on_hand": float(stock_snapshot),
             "reference_correction": reference_correction,
             "stock_reference": float(stock_start),
+            "stock_at_date": stock_at_date,
+            "price": price,
+            "stock_value": (stock_at_date * price) if price is not None else None,
+            "target_value": (float(target[i_as_of]) * price) if price is not None else None,
+            "stockout_plan_severity": plan_stockout.severity.value if plan_stockout else None,
             "init_date": snap_date.isoformat(),
             "shortage_policy": params.shortage_policy,
             "stock_as_of_erp": float(erp.stock[i_as_of]),
@@ -235,7 +256,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             stock_erp_net=erp.net, stock_plan_net=plan_proj.net,
             coverage_erp=cov["erp"], coverage_plan=cov["plan"], target_stock=target,
             lanes=lanes, alerts=alerts, proposals=proposals, kpis=kpis, suppliers=links_by_article.get(aid, []),
-            diagnostics=notes,
+            diagnostics=notes, proposals_ignored=proposals_ignored, price=price,
         )
 
     program_daily = {pid: {index.dates[i]: float(v) for i, v in enumerate(arr) if v}

@@ -43,3 +43,11 @@ export const ALERT_LABELS: Record<string, string> = {
 export const SEVERITY_LABELS: Record<string, string> = { critical: "Critique", warning: "À surveiller", info: "Info" };
 export const SCOPE_LABELS: Record<string, string> = { erp: "ERP", plan: "plan", data: "données" };
 export const ORDER_TYPE_LABELS: Record<string, string> = { FIRM: "Ferme", FORECAST: "Prévisionnelle" };
+
+const eur0 = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const eurCompact = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", notation: "compact", maximumFractionDigits: 1 });
+/** Euros, full (``12 345 €``) or compact (``1,2 M€``) for the KPI tiles and chart axes. */
+export function fmtEur(v: number | null | undefined, compactForm = false): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "–";
+  return compactForm ? eurCompact.format(v) : eur0.format(v);
+}

@@ -143,16 +143,20 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("qty_open", "float", "Quantité restante", "restant ERP (non fiable une fois la date passée)", True),
            Column("purch_id", "str", "N° commande", "numéros de commande d'achat (information)", False),
            Column("commitment", "str", "Niveau d'engagement", "Ferme / Prévisionnel (information)", False),
+           Column("first_seen", "date", "Première apparition", "jour où le créneau est apparu dans l'ERP (posé par le job de synchronisation, "
+                  "conservé d'une exécution à l'autre ; vide = inconnu)", False),
        ], reference=False),
-    _t("fct_receipts", "Réceptions ERP", "Réceptions physiques par fournisseur / commande / BL / article / jour (recep_edi).",
+    _t("fct_receipts", "Réceptions ERP", "Réceptions par fournisseur / commande / BL / article / jour et statut (recep_edi) : "
+       "Reçu (statuts ERP 1-2) ou Enregistré (3 : BL enregistré, accusé de réception non validé, BL repris du DESADV).",
        ("receipt_id",), [
-           Column("receipt_id", "str", "Identifiant", "", True),
+           Column("receipt_id", "str", "Identifiant", "fournisseur|commande|BL|article|jour|statut", True),
            Column("article_id", "str", "Article", "", True),
            Column("supplier_id", "str", "Fournisseur", "", True),
-           Column("receipt_date", "date", "Date de réception", "", True),
+           Column("receipt_date", "date", "Date de réception", "date physique (Reçu) ou d'enregistrement (Enregistré)", True),
            Column("qty", "float", "Quantité reçue", "", True),
            Column("purch_id", "str", "N° commande", "", False),
-           Column("packing_slip", "str", "N° BL", "", False),
+           Column("packing_slip", "str", "N° BL", "plusieurs BL séparés par « | » pour une réception enregistrée (repris du DESADV)", False),
+           Column("status", "str", "Statut", "Reçu ou Enregistré (accusé de réception non validé)", False),
        ], reference=False),
     _t("fct_consumption_actual", "Consommation réelle", "Consommation réelle journalière par composant (déjà éclatée : "
        "quantité d'article consommée, dans son unité de stock). Alimente le besoin des jours passés et le reliquat de la "
@@ -173,6 +177,7 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("qty", "float", "Quantité annoncée", "", True),
            Column("state", "str", "État du message", "Créé, Traité, Erreur, En attente, Annulé", False),
            Column("final_processing", "str", "Traitement final", "Non traité, OK", False),
+           Column("stock_trans_id", "str", "Transaction de stock", "ID_transaction_stock : vide pour un message traité = aucun journal de saisie créé", False),
        ], reference=False),
     _t("fct_production_plan", "PDP ERP", "Plan de production hebdomadaire (facultatif : le PDP est importé par fichier).",
        ("program_id", "week_start", "version"), [
@@ -180,6 +185,23 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("week_start", "date", "Lundi", "lundi de la semaine ISO", True),
            Column("qty", "float", "Quantité", "", True),
            Column("version", "str", "Version", "la plus récente gagne", False),
+       ], reference=False),
+    _t("fct_prices", "Prix des articles", "Prix de revient standard par article (silver_base_article.std_cost_price, en euros). "
+       "Sert à valoriser les stocks ; un article absent n'est pas valorisé, un article présent n'est pas ajouté au référentiel.",
+       ("article_id",), [
+           Column("article_id", "str", "Article", "itemid", True),
+           Column("price", "float", "Prix (€)", "std_cost_price, euros par unité de stock", True),
+       ], reference=False),
+    _t("fct_bl_pending", "BL en attente de validation", "Réceptions enregistrées depuis au moins 7 jours dont l'accusé de réception "
+       "n'est pas validé (bl_en_attente).", ("pending_id",), [
+           Column("pending_id", "str", "Identifiant", "fournisseur|commande|BL|article|date", True),
+           Column("supplier_id", "str", "Fournisseur", "", True),
+           Column("purch_id", "str", "N° commande", "", False),
+           Column("packing_slip", "str", "N° BL (DESADV)", "BL repris du DESADV ; plusieurs séparés par « | »", False),
+           Column("article_id", "str", "Article", "", True),
+           Column("qty", "float", "Quantité", "", True),
+           Column("registered_date", "date", "Enregistré le", "", True),
+           Column("days_pending", "int", "Jours en attente", "", False),
        ], reference=False),
 ]}
 

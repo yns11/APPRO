@@ -35,15 +35,25 @@ export function matchNumber(value: number | null | undefined, expr: string): boo
   }
 }
 
+/** Alternatives of a filter : ``123;456`` keeps the rows matching 123 **or** 456. */
+export function filterTerms(expr: string): string[] {
+  const terms = expr.split(";").map((t) => t.trim()).filter(Boolean);
+  return terms.length ? terms : [expr];
+}
+
 export function applyFilters<T>(rows: T[], columns: Column<T>[], filters: Record<string, string>): T[] {
   const active = columns.filter((c) => (filters[c.key] ?? "") !== "");
   if (!active.length) return rows;
   return rows.filter((r) => active.every((c) => {
     const f = filters[c.key];
     const v = c.get(r);
-    if (c.filter === "number" || (c.num && c.filter !== "text" && c.filter !== "select")) return matchNumber(typeof v === "number" ? v : v == null ? null : Number(v), f);
+    if (c.filter === "number" || (c.num && c.filter !== "text" && c.filter !== "select")) {
+      const n = typeof v === "number" ? v : v == null ? null : Number(v);
+      return filterTerms(f).some((t) => matchNumber(n, t));
+    }
     if (c.filter === "select") return String(v ?? "") === f;
-    return String(v ?? "").toLowerCase().includes(f.toLowerCase());
+    const hay = String(v ?? "").toLowerCase();
+    return filterTerms(f).some((t) => hay.includes(t.toLowerCase()));
   }));
 }
 
@@ -102,7 +112,7 @@ export function DataTable<T>({ rows, columns, rowKey, onRowClick, rowClass, empt
                     {(options[c.key] ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
                 ) : (
-                  <input className="input xs" value={filters[c.key] ?? ""} placeholder={c.filter === "number" || c.num ? "= > < a-b" : "filtrer"} aria-label={`Filtre ${typeof c.label === "string" ? c.label : c.key}`}
+                  <input className="input xs" value={filters[c.key] ?? ""} placeholder={c.filter === "number" || c.num ? "= > < a-b ; ou" : "filtrer ; ou"} title="Plusieurs valeurs séparées par « ; » : l'une ou l'autre" aria-label={`Filtre ${typeof c.label === "string" ? c.label : c.key}`}
                     onChange={(e) => setFilters({ ...filters, [c.key]: e.target.value })} />
                 )}
               </th>

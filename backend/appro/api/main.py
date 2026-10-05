@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__
 from ..config import get_settings
 from ..engine.models import DatasetError
-from .routers import entries, files, mrp, pdp, reference
+from .routers import entries, files, flows, mrp, pdp, reference
 
 
 @asynccontextmanager
@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
             out["database_status"] = f"{type(exc).__name__}: {exc}"
         return out
 
-    for r in (reference.router, mrp.router, entries.router, pdp.router, files.router):
+    for r in (reference.router, mrp.router, entries.router, pdp.router, files.router, flows.router):
         app.include_router(r)
 
     @app.middleware("http")

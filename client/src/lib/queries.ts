@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, type Params } from "./api";
 import type {
   AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, DeliveryPlanResponse, FlagOut, GridResponse, LinkRef, ParamDoc, ParamOverrideOut, PdpErpLine,
-  PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, ProgramImpactResponse, ProgramRef, ProjectionResponse, ProposalOut, RefRow, RefTableInfo, WeeklyParamsResponse,
+  FlowsResponse, PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, SearchResponse, ProgramImpactResponse, ProgramRef, ProjectionResponse, RefRow, RefTableInfo, WeeklyParamsResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
@@ -29,11 +29,11 @@ export function useProjection(articleId: string | undefined, extra?: Params) {
   });
 }
 
-export function useProposals() {
+export function useFlows() {
   const { engineParams } = usePerimeter();
-  const params = { planner: engineParams.planner };
-  return useQuery({ queryKey: ["proposals", params], queryFn: () => api.get<ProposalOut[]>("/api/proposals", params), staleTime: 30_000 });
+  return useQuery({ queryKey: ["flows", engineParams.planner], queryFn: () => api.get<FlowsResponse>("/api/flows", { planner: engineParams.planner }), staleTime: 30_000, placeholderData: keepPreviousData });
 }
+export const useSearch = (params: Params, enabled = true) => useQuery({ queryKey: ["search", params], queryFn: () => api.get<SearchResponse>("/api/search", params), enabled, placeholderData: keepPreviousData });
 
 export function useBacklog() {
   const { engineParams } = usePerimeter();

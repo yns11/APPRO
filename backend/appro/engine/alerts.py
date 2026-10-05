@@ -12,7 +12,8 @@ from .projection import Projection, first_shortage
 
 def _severity_by_horizon(days_ahead: int, lead: int, params: EngineParams) -> Severity:
     """Inside the lead time nothing can be done any more; inside the firm horizon the planner
-    must act (confirm / order); beyond it the alert is informational."""
+    must act (confirm / order); beyond it the alert is informational.  Same grading for the ERP
+    and the plan stockouts : a plan stockout at D+177 is not the emergency of one at D+3."""
     if days_ahead <= lead:
         return Severity.CRITICAL
     if days_ahead <= params.firm_horizon_days:
@@ -67,7 +68,7 @@ def classify_alerts(
     k_erp = first_shortage(erp.shortage, i0, last)
     if k_plan is not None:
         worst = float(np.max(plan.shortage[k_plan:]))
-        alerts.append(Alert(aid, AlertType.STOCKOUT, Severity.CRITICAL,
+        alerts.append(Alert(aid, AlertType.STOCKOUT, _severity_by_horizon(k_plan - i0, lead, params),
                             f"Rupture du plan le {index.dates[k_plan].isoformat()} (J+{k_plan - i0}) malgré le plan de "
                             f"livraison et le complément CBN, manque max {worst:,.0f}", date=index.dates[k_plan], value=worst,
                             scope="plan", details={"days_ahead": k_plan - i0, "lead_time_days": lead}))

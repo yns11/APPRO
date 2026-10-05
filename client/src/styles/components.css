@@ -365,3 +365,7 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .pdp-sheet th.rowno.corner { left: 0; z-index: 3; }
 .pdp-sheet th.current-week, .pdp-sheet td.current-week { background: var(--cell-today); }
 .pdp-sheet td.from-app { color: var(--brand-fg); }
+
+.grid.kpis.flows { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.tbl tr.muted td { color: var(--fg-subtle); }
+.tbl tr.muted td b, .tbl tr.muted td a { color: var(--fg-subtle); }

@@ -14,10 +14,10 @@ export default function ArticlesPage() {
   const cols = useMemo<Column<ArticleSummary>[]>(() => [
     { key: "article", label: "Article", get: (a) => `${a.article_id} ${a.designation}`, render: (a) => <><b>{a.article_id}</b><span className="sub">{a.designation}</span></> },
     { key: "unit", label: "Unité", get: (a) => a.unit, filter: "select" },
-    { key: "planner", label: "Appro", get: (a) => a.planner, filter: "select" },
     { key: "suppliers", label: "Fournisseurs", get: (a) => a.suppliers.join(" / ") },
+    { key: "planner", label: "Approvisionneur", get: (a) => a.planner, filter: "select" },
     { key: "severity", label: "Statut", get: (a) => a.severity ?? "ok", filter: "select", render: (a) => <SeverityBadge severity={a.severity} /> },
-    { key: "stock", label: "Stock référence", get: (a) => a.kpis.stock_reference, num: true, render: (a) => fmtQty(a.kpis.stock_reference, a.unit) },
+    { key: "stock", label: "Stock à date", get: (a) => a.kpis.stock_at_date, num: true, title: "Stock projeté à la fin de la veille", render: (a) => fmtQty(a.kpis.stock_at_date, a.unit) },
     { key: "cov", label: "Couverture plan", get: (a) => a.kpis.coverage_plan_days, num: true, render: (a) => <CoverageCell days={a.kpis.coverage_plan_days} a={a} /> },
     { key: "backlog", label: "Backlog", get: (a) => a.kpis.backlog_qty, num: true, render: (a) => a.kpis.backlog_qty ? fmtQty(a.kpis.backlog_qty, a.unit) : <span className="subtle">–</span> },
     { key: "snap", label: "Stock initialisé le", get: (a) => a.kpis.init_date, render: (a) => <span className="subtle">{fmtDate(a.kpis.init_date)}</span> },

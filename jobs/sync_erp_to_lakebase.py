@@ -1,6 +1,7 @@
 """Job Databricks : copie des faits ERP (Unity Catalog) vers les tables ``erp_*`` de Lakebase.
 
-Pour chaque table de faits configurée (commandes, réceptions, consommation réelle, PDP) :
+Pour chaque table de faits configurée (commandes, réceptions, consommation réelle, DESADV, PDP, prix,
+BL en attente) :
 
 1. le SQL de correspondance de ``backend/appro/data/erp_sql.py`` est exécuté par Spark sur les
    extractions (``commandes_edi``, ``recep_edi``…) ;
@@ -62,7 +63,7 @@ RACINE = _amorcer_chemin_projet()
 
 from lakebase import conninfo  # noqa: E402
 
-from appro.data.erp_sql import ErpTables, fact_queries  # noqa: E402
+from appro.data.erp_sql import ErpTables, carry_first_seen, fact_queries, source_of  # noqa: E402
 from appro.data.schemas import TABLES  # noqa: E402
 
 LOGGER = logging.getLogger("appro.sync")
@@ -78,6 +79,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--consumption-table", default="", help="table UC de consommation réelle par composant (article_id, date, qty) ; vide = aucune")
     p.add_argument("--pdp-table", default="")
     p.add_argument("--desadv-table", default="desadv_edi", help="table UC des avis d'expédition (DESADV) ; vide = aucune")
+    p.add_argument("--prices-table", default="silver_base_article", help="table UC des articles avec std_cost_price (prix en euros) ; vide = aucune")
+    p.add_argument("--bl-pending-table", default="bl_en_attente", help="table UC des BL enregistrés en attente de validation ; vide = aucune")
     p.add_argument("--branch", default="", help="projects/<projet>/branches/<branche>")
     p.add_argument("--endpoint", default="", help="projects/<projet>/branches/<branche>/endpoints/<endpoint>")
     p.add_argument("--pg-host", default="", help="hôte Lakebase si la découverte est impossible")
@@ -108,7 +111,7 @@ def _table_exists(spark, fqn: str) -> bool:
 def _check_sources(spark, tables: ErpTables) -> None:
     """Fail once, naming every missing source, rather than one table per run."""
     missing = [fqn for fqn in (tables.fqn(tables.orders), tables.fqn(tables.receipts)) if not _table_exists(spark, fqn)]
-    for opt in (tables.consumption, tables.pdp, tables.desadv):
+    for opt in (tables.consumption, tables.pdp, tables.desadv, tables.prices, tables.bl_pending):
         if opt and not _table_exists(spark, tables.fqn(opt)):
             missing.append(tables.fqn(opt))
     if missing:
@@ -135,16 +138,29 @@ def publish(conn, spark, query: str, name: str, pg_schema: str, run_id: str, sou
     columns = list(TABLES[name].column_names)
     target = f"erp_{name[4:]}"
     LOGGER.info("[%s] lecture (%s)", target, source)
-    df = spark.sql(query).select(*columns)
+    df = spark.sql(query)
+    # columns the SQL does not produce are filled by the job (today : ``first_seen`` of the orders)
+    missing = [c for c in columns if c not in df.columns]
+    df = df.select(*[c for c in columns if c not in missing])
     started = dt.datetime.now(dt.timezone.utc)
     written = 0
+    today = dt.date.today()
     with conn.transaction(), conn.cursor() as cur:
+        previous: dict[str, dt.date | None] = {}
+        if name == "fct_purchase_orders" and "first_seen" in missing:
+            # the day a slot first appeared is carried over from the copy being replaced
+            cur.execute(sql.SQL("SELECT order_id, first_seen FROM {}.{} WHERE first_seen IS NOT NULL")
+                        .format(sql.Identifier(pg_schema), sql.Identifier(target)))
+            previous = dict(cur.fetchall())
         cur.execute(sql.SQL("DELETE FROM {}.{}").format(sql.Identifier(pg_schema), sql.Identifier(target)))
         stmt = sql.SQL("COPY {}.{} ({}) FROM STDIN").format(sql.Identifier(pg_schema), sql.Identifier(target),
                                                             sql.SQL(", ").join(sql.Identifier(c) for c in columns))
         with cur.copy(stmt) as copy:
             for row in df.toLocalIterator():
-                copy.write_row(tuple(row))
+                d = row.asDict()
+                if "first_seen" in missing:
+                    d["first_seen"] = carry_first_seen(previous, d.get("order_id", ""), today)
+                copy.write_row(tuple(d.get(c) for c in columns))
                 written += 1
                 if written % LOG_EVERY == 0:
                     LOGGER.info("[%s] %d lignes…", target, written)
@@ -160,7 +176,8 @@ def publish(conn, spark, query: str, name: str, pg_schema: str, run_id: str, sou
 def run(args: argparse.Namespace) -> dict[str, int]:
     import psycopg
     tables = ErpTables(catalog=args.catalog, schema=args.schema, orders=args.orders_table, receipts=args.receipts_table,
-                       consumption=args.consumption_table or "", desadv=args.desadv_table or "", pdp=args.pdp_table or "")
+                       consumption=args.consumption_table or "", desadv=args.desadv_table or "", pdp=args.pdp_table or "",
+                       prices=args.prices_table or "", bl_pending=args.bl_pending_table or "")
     queries = fact_queries(tables)
     wanted = {t.strip() for t in args.tables.split(",") if t.strip()}
     if wanted:
@@ -175,10 +192,7 @@ def run(args: argparse.Namespace) -> dict[str, int]:
     with psycopg.connect(info, autocommit=False) as conn:
         _check_targets(conn, args.pg_schema, [f"erp_{n[4:]}" for n in queries])
         for name, query in queries.items():
-            src = {"fct_purchase_orders": tables.fqn(tables.orders), "fct_receipts": tables.fqn(tables.receipts),
-                   "fct_consumption_actual": tables.fqn(tables.consumption), "fct_production_plan": tables.fqn(tables.pdp),
-                   "fct_desadv": tables.fqn(tables.desadv)}[name]
-            results[name] = publish(conn, spark, query, name, args.pg_schema, args.run_id, src.replace("`", ""))
+            results[name] = publish(conn, spark, query, name, args.pg_schema, args.run_id, source_of(tables, name).replace("`", ""))
     return results
 
 

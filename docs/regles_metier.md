@@ -130,8 +130,10 @@ et chaque DESADV, son **numéro de BL** et sa quantité (le DESADV ajoute son é
 rapprochée d'aucune autre : la réception porte alors un point rouge expliqué « ACR non validé » (et non « BL reçu
 sans DESADV traité » : le DESADV correspondant peut très bien être traité, c'est l'accusé de réception qui n'est
 pas encore validé), et le DESADV reste annoncé jusqu'à ce que l'ERP lui donne un BL réceptionné ou que
-l'approvisionneur le masque. Ces règles valent à l'identique dans la fiche article et dans le tableau
-d'approvisionnement global (mêmes info-bulles, points et cellules DESADV ; la ligne *Scenario Plan* y affiche
+l'approvisionneur le masque. Depuis la version `recep_edi` à statut, une réception **Enregistrée** (statut ERP 3 :
+BL enregistré, accusé de réception non validé) arrive avec le BL de son DESADV : elle **compte dans le stock**, marque
+ce DESADV comme reçu, et porte le point rouge « ACR non validé » jusqu'à sa validation (statut *Reçu*). Ces règles
+valent à l'identique dans la fiche article et dans le tableau d'approvisionnement global (mêmes info-bulles, points et cellules DESADV ; la ligne *Scenario Plan* y affiche
 aussi le **stock cible** du jour).
 
 ### 3.4 Backlog fournisseur
@@ -202,7 +204,7 @@ servi est reporté (solde net négatif, les réceptions suivantes le servent d'a
 
 | Type | Sévérité | Règle |
 |---|---|---|
-| `STOCKOUT` (plan) | critique | premier manque sur le Scenario Plan malgré le plan et les propositions |
+| `STOCKOUT` (plan) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au-delà | premier manque sur le Scenario Plan malgré le plan et les propositions (même gradation que l'ERP : une rupture à J+177 n'est pas l'urgence d'une rupture à J+3) |
 | `STOCKOUT` (ERP) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au-delà | premier manque sur le Scenario ERP |
 | `LOW_COVERAGE` | critique / avertissement | épuisement des commandes ERP ≤ seuil rouge / orange |
 | `OVERSTOCK` | info | couverture ≥ `overstock_days` |
@@ -220,7 +222,9 @@ toléré, `shortfall_tolerance_days` [0] : retour au-dessus de la cible en n jou
 servi**, jugé sur la série des manques quelle que soit la politique de manque), quantité = max(besoin net jusqu'au niveau de recomplètement, MOQ)
 arrondie à l'UM (unité de manutention) ; fournisseur par quota [défaut] ou priorité ; livraison le premier jour ouvré autorisé du
 fournisseur (`delivery_shift` [`earlier`]), ou le **lundi** (`proposal_placement = monday`) ; date de
-commande = livraison − délai ouvré, **urgente** si déjà passée ; re-projection puis itération.
+commande = livraison − délai ouvré, **urgente** si déjà passée ; re-projection puis itération. La date de commande
+d'une proposition urgente est la **date réelle** à laquelle il fallait commander (dans le passé), affichée telle
+quelle (« à commander le »).
 
 **Une proposition par fournisseur et par jour de livraison**, partout (tableau, listes, infobulles,
 exports) : les besoins d'une même semaine ramenés au même lundi sont fusionnés. Dans le tableau, la ligne
@@ -234,7 +238,7 @@ recalcule sans elle.
 par une proposition placée après cette fenêtre (jamais avant : l'approvisionneur a dit « pas de livraison de ce
 fournisseur cette semaine »), au prix d'un manque éventuel entre-temps, affiché dans le Scenario Plan. Un refus
 enregistré sans fournisseur (anciennes données) vaut pour tous. La quantité refusée reste
-affichée barrée ; un nouveau clic rétablit la proposition. Les refus sont listés dans *Saisies & journal*.
+affichée barrée ; un nouveau clic rétablit la proposition. Les refus sont listés dans *Saisies & journal*. Une proposition refusée **urgente** reste listée dans le flux *À commander* du cockpit, marquée « ignorée », hors de tout calcul.
 
 **Planning de livraison** (onglet de la fiche article) : la ligne *Plan* est présentée comme des lignes de
 planning ERP, **une par fournisseur et par semaine ISO** à quantité non nulle, à partir de la date de
@@ -265,6 +269,37 @@ par semaine de l'article (`DELETE /api/params/overrides?scope=article_week&key1=
 
 Production **réalisable** par programme et semaine = PDP × part servable du composant le plus contraint,
 pour trois stocks : à date, Scenario ERP, Scenario Plan (page *Impact programmes*).
+
+## 9 bis. Cockpit du jour : deux onglets, et la page Recherche
+
+**Couvertures et stocks** : cartes *Critiques*, *À surveiller*, *Ruptures plan*, *Couverture médiane* (médiane
+des couvertures Scenario Plan des articles avec besoin ; la moyenne, tirée par les extrêmes, est rappelée en
+sous-ligne), **Valeur du stock** (Σ prix × stock à date ; sous-ligne « +x % de la valeur cible » en rouge au-dessus
+de la cible, « −x % » neutre en dessous ; cible = Σ prix × stock cible du jour), *En-cours ERP*, *Surstock* ;
+graphique **projection de la valeur du stock** (Scenario Plan, fin de chaque semaine ISO, pointillé = valeur du
+stock cible) ; alertes prioritaires ; portefeuille (colonnes *Fournisseurs*, **Approvisionneur**, *Statut*,
+**Stock à date** = stock projeté à la fin de la veille, réceptions et consommations réelles comprises, et non le
+stock d'initialisation). Les champs de filtre acceptent des alternatives séparées par « ; » (`123;456` = contient
+123 ou 456), partout (cockpit, fiches, tableau, recherche).
+
+**Flux d'approvisionnement** : huit cartes, un clic affiche les lignes correspondantes en dessous.
+
+| Flux | Contenu |
+|---|---|
+| À commander | propositions CBN **urgentes** (date réelle « à commander le » dans le passé) ; une proposition refusée d'un clic reste listée, marquée *ignorée*, hors calculs |
+| Commandé | commandes fermes **apparues aujourd'hui** dans la copie ERP (`first_seen` posé par le job de synchronisation), quelle que soit la date de livraison |
+| En transit | DESADV non annulés dont le BL n'est pas encore réceptionné |
+| À traiter | DESADV en **erreur**, ou **traités sans journal de saisie** (`ID_transaction_stock` vide) |
+| À réceptionner | commandes fermes dont la livraison est attendue aujourd'hui |
+| Reçu | réceptions datées d'aujourd'hui |
+| En retard | commandes en souffrance (backlog fournisseur, § 3.4) |
+| À valider | accusés de réception non validés depuis 7 jours (table `bl_en_attente`, toutes les lignes du périmètre) |
+
+L'ancienne page *Propositions CBN* est remplacée par le flux *À commander* (`/propositions` y redirige).
+
+**Recherche** : réceptions (par défaut), commandes, DESADV ou BL en attente du périmètre ; texte libre sur tous
+les champs (« ; » = ou), période, fournisseur ; résultat en tableau filtrable par colonne (5 000 lignes au plus,
+affiner au-delà).
 
 ## 10. Traçabilité et règles de date
 

@@ -78,6 +78,13 @@ def _blocked_until(day: dt.date, blocked: list[tuple[dt.date, dt.date]]) -> dt.d
     return None
 
 
+def in_blocked_window(blocked: dict[str | None, list[tuple[dt.date, dt.date]]] | None, supplier_id: str | None,
+                      day: dt.date) -> bool:
+    """Is a delivery to ``supplier_id`` on ``day`` inside a window the planner refused ?"""
+    windows = (blocked or {}).get(None, []) + ((blocked or {}).get(supplier_id, []) if supplier_id else [])
+    return _blocked_until(day, windows) is not None
+
+
 def _delivery_day(candidate: dt.date, earliest: dt.date, latest: dt.date, calendar: WorkCalendar,
                   weekdays: frozenset[int] | None, shift: str,
                   blocked: list[tuple[dt.date, dt.date]] | None = None) -> dt.date | None:
@@ -235,7 +242,7 @@ def generate_proposals(
                 article_id=article.article_id,
                 supplier_id=link.supplier_id if link else None,
                 delivery_date=delivery,
-                order_date=max(order_date, as_of) if urgent else order_date,
+                order_date=order_date,       # the real day the order had to be placed, even in the past (urgent)
                 qty=float(qty),
                 net_requirement=float(max(need, 0.0)),
                 reason=reason,

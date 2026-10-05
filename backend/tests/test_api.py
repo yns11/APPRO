@@ -619,3 +619,79 @@ def test_pdp_sheet_direct_entry(client):
     # once an administrator is declared, quentin is a reader: no entry
     assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC0", "name": "ROOT", "email": "root@example.com", "role": "admin", "active": True}}).status_code == 200
     assert client.put("/api/pdp/sheet", json={"cells": [{"program_id": "mass-00037796", "week_start": "2026-09-28", "qty": 5}]}).status_code == 403
+
+
+def test_cockpit_value_median_and_weekly_value(client):
+    """Stock value (price × stock at date), target value, median coverage, weekly projected value."""
+    body = client.get("/api/cockpit", params={"planner": "QUENTIN"}).json()
+    k = body["kpis"]
+    assert k["priced_articles"] == 16 and k["unpriced_articles"] == 0
+    assert k["stock_value"] > 0 and k["target_value"] > 0 and k["median_coverage_days"] is not None
+    arts = body["articles"]
+    assert all(a["kpis"]["stock_at_date"] >= 0 and a["kpis"]["price"] > 0 for a in arts)
+    assert k["stock_value"] == pytest.approx(sum(a["kpis"]["stock_value"] for a in arts))
+    wk = body["weekly_stock_value"]
+    assert wk and wk[0]["week"] == "2026-W38" and wk[0]["week_start"] == "2026-09-14" and wk[0]["value_plan"] >= 0 and wk[0]["value_target"] >= 0
+    assert len(wk) >= 12
+
+
+def test_flows_of_the_day(client):
+    f = client.get("/api/flows", params={"planner": "QUENTIN"}).json()
+    k = f["kpis"]
+    assert set(k) == {"to_order", "ordered", "in_transit", "to_process", "to_receive", "received", "late", "to_validate"}
+    assert f["first_seen_available"] is False and k["ordered"] == 0        # the seed carries no first_seen stamp
+    assert k["to_validate"] == 2 and {r["packing_slip"] for r in f["to_validate"]} == {"BL-990005", "BL-980001"}
+    transit = {d["packing_slip"] for d in f["in_transit"]}
+    assert {"BL-990001", "BL-990002", "BL-990006"} <= transit and "BL-990005" not in transit and "BL-990000" not in transit
+    issues = {d["packing_slip"]: d["issue"] for d in f["to_process"]}
+    assert issues["BL-990002"] == "message en erreur" and issues["BL-990005"] == "traité sans journal de saisie"
+    assert all(p["urgent"] for p in f["to_order"]) and k["to_order"] == len(f["to_order"])
+    assert all(not p["ignored"] for p in f["to_order"])
+    assert k["late"] == len(client.get("/api/backlog", params={"planner": "QUENTIN"}).json())
+    # a refused urgent proposal stays listed, flagged « ignorée », and leaves the calculations
+    if f["to_order"]:
+        p = f["to_order"][0]
+        assert client.post("/api/entries/flags/toggle", json={"article_id": p["article_id"], "supplier_id": p["supplier_id"], "date": p["delivery_date"], "kind": "proposal_refused", "qty": p["qty"]}).status_code == 200
+        f2 = client.get("/api/flows", params={"planner": "QUENTIN"}).json()
+        ign = [x for x in f2["to_order"] if x["ignored"] and x["article_id"] == p["article_id"]]
+        assert ign and ign[0]["order_date"] == p["order_date"]
+
+
+def test_search_page_queries(client):
+    r = client.get("/api/search", params={"kind": "receipts", "q": "BL-990000;BL-990005", "planner": "QUENTIN"}).json()
+    assert r["total"] == 2 and {x["packing_slip"] for x in r["rows"]} == {"BL-990000", "BL-990005"} and r["truncated"] is False
+    assert {x["status"] for x in r["rows"]} == {"Reçu", "Enregistré"}
+    r = client.get("/api/search", params={"kind": "receipts", "date_from": "2026-09-01", "date_to": "2026-09-30"}).json()
+    assert r["total"] >= 2 and all("2026-09-01" <= x["date"] <= "2026-09-30" for x in r["rows"])
+    assert client.get("/api/search", params={"kind": "pending"}).json()["total"] == 2
+    d = client.get("/api/search", params={"kind": "desadv", "q": "ennovi"}).json()
+    assert d["total"] == 2 and all(x["journal"] is False for x in d["rows"])
+    o = client.get("/api/search", params={"kind": "orders", "supplier_id": "S-000545", "limit": 3}).json()
+    assert o["truncated"] is True and len(o["rows"]) == 3
+    assert client.get("/api/search", params={"kind": "nope"}).status_code == 422
+    # « ; » also in the supply table free text : 123;456 = one or the other
+    g = client.get("/api/grid", params={"planner": "QUENTIN", "q": "P-00001046 ; P-00003751"}).json()
+    assert {a["article"]["article_id"] for a in g["articles"]} == {"P-00001046", "P-00003751"}
+
+
+def test_existing_tables_receive_the_new_columns(tmp_path):
+    """A table created by an older version (no ``status`` on erp_receipts) gets the column at start-up."""
+    from sqlalchemy import create_engine, inspect, text
+    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE erp_receipts (receipt_id VARCHAR(200) PRIMARY KEY, article_id VARCHAR(200), supplier_id VARCHAR(200), "
+                          "receipt_date DATE, qty FLOAT, purch_id VARCHAR(200), packing_slip VARCHAR(200))"))
+        conn.execute(text("INSERT INTO erp_receipts (receipt_id, article_id, qty) VALUES ('R1', 'A1', 5)"))
+    init_store(engine)
+    cols = {c["name"] for c in inspect(engine).get_columns("erp_receipts")}
+    assert "status" in cols
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT receipt_id, status FROM erp_receipts")).all() == [("R1", None)]
+
+
+def test_first_seen_is_carried_over_between_two_copies():
+    from appro.data.erp_sql import carry_first_seen
+    today = dt.date(2026, 10, 5)
+    previous = {"A": dt.date(2026, 9, 1), "B": None}
+    assert carry_first_seen(previous, "A", today) == dt.date(2026, 9, 1)
+    assert carry_first_seen(previous, "B", today) == today and carry_first_seen(previous, "NEW", today) == today

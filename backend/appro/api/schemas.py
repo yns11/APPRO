@@ -104,6 +104,7 @@ class ProposalOut(BaseModel):
     pack_qty: float
     projected_stock_before: float
     projected_stock_after: float
+    ignored: bool = False          # refused by a click : listed in the ordering flow, out of the calculations
 
 
 class OrderInfoOut(BaseModel):
@@ -207,7 +208,19 @@ class CockpitKpis(BaseModel):
     open_firm_qty: float
     open_forecast_qty: float
     avg_coverage_days: float | None
+    median_coverage_days: float | None = None     # the median reads better : the mean is pulled by a few extreme articles
     demand_next_30d: float
+    stock_value: float | None = None              # Σ price × stock at date (yesterday's closing stock), euros
+    target_value: float | None = None             # Σ price × target stock of the day
+    priced_articles: int = 0
+    unpriced_articles: int = 0
+
+
+class WeeklyStockValue(BaseModel):
+    week: str
+    week_start: dt.date
+    value_plan: float          # Σ price × Scenario Plan stock at the end of the week
+    value_target: float        # Σ price × target stock at the end of the week
 
 
 class CockpitResponse(BaseModel):
@@ -224,6 +237,108 @@ class CockpitResponse(BaseModel):
     backlog: list[BacklogRow]
     diagnostics: list[str]
     weekly_supply_demand: list[dict[str, Any]]
+    weekly_stock_value: list[WeeklyStockValue] = Field(default_factory=list)
+
+
+# ------------------------------------------------------------------ supply flows (cockpit tab 2) and search
+class OrderRow(BaseModel):
+    order_id: str
+    article_id: str
+    designation: str = ""
+    unit: str = ""
+    planner: str = ""
+    supplier_id: str | None
+    supplier_name: str = ""
+    order_type: str
+    expected_date: dt.date
+    qty_ordered: float
+    qty_open: float
+    purch_id: str = ""
+    first_seen: dt.date | None = None
+
+
+class ReceiptRow(BaseModel):
+    receipt_id: str
+    article_id: str
+    designation: str = ""
+    unit: str = ""
+    planner: str = ""
+    supplier_id: str | None
+    supplier_name: str = ""
+    receipt_date: dt.date
+    qty: float
+    purch_id: str = ""
+    packing_slip: str = ""
+    status: str = ""
+
+
+class DesadvRow(BaseModel):
+    desadv_id: str
+    article_id: str
+    designation: str = ""
+    unit: str = ""
+    planner: str = ""
+    supplier_id: str | None
+    supplier_name: str = ""
+    packing_slip: str = ""
+    purch_id: str = ""
+    issue_date: dt.date
+    qty: float
+    state: str = ""
+    final_processing: str = ""
+    received: bool = False
+    journal: bool = True        # False : processed message without any stock transaction (entry journal missing)
+    issue: str = ""             # why it is listed in « à traiter »
+
+
+class PendingRow(BaseModel):
+    pending_id: str
+    article_id: str
+    designation: str = ""
+    unit: str = ""
+    planner: str = ""
+    supplier_id: str | None
+    supplier_name: str = ""
+    purch_id: str = ""
+    packing_slip: str = ""
+    qty: float
+    registered_date: dt.date
+    days_pending: int = 0
+
+
+class FlowsKpis(BaseModel):
+    to_order: int
+    ordered: int
+    in_transit: int
+    to_process: int
+    to_receive: int
+    received: int
+    late: int
+    to_validate: int
+
+
+class FlowsResponse(BaseModel):
+    """The « Flux d'approvisionnement » tab of the cockpit : one counter and one table per flow."""
+
+    as_of: dt.date
+    planner: str | None
+    first_seen_available: bool          # False until the synchronisation job has stamped the orders
+    kpis: FlowsKpis
+    to_order: list[ProposalOut]
+    ordered: list[OrderRow]
+    in_transit: list[DesadvRow]
+    to_process: list[DesadvRow]
+    to_receive: list[OrderRow]
+    received: list[ReceiptRow]
+    late: list[BacklogRow]
+    to_validate: list[PendingRow]
+
+
+class SearchResponse(BaseModel):
+    kind: Literal["receipts", "orders", "desadv", "pending"]
+    total: int
+    truncated: bool
+    rows: list[dict[str, Any]]
 
 
 class ProjectionResponse(BaseModel):

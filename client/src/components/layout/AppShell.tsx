@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, BookOpen, CalendarRange, Factory, FileSpreadsheet, LayoutDashboard, Menu, Moon, PanelLeftClose, PanelLeftOpen, PenLine, Settings, ShoppingCart, Sun, Monitor, RefreshCw, Table } from "lucide-react";
+import { Activity, BookOpen, CalendarRange, Factory, FileSpreadsheet, LayoutDashboard, Menu, Moon, PanelLeftClose, PanelLeftOpen, PenLine, Search, Settings, Sun, Monitor, RefreshCw, Table } from "lucide-react";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useInvalidateAll } from "@/lib/queries";
 import { Button } from "@/components/ui";
@@ -14,7 +14,7 @@ const NAV = [
   { to: "/", label: "Cockpit du jour", icon: LayoutDashboard, end: true },
   { to: "/tableau", label: "Tableau d'approvisionnement", icon: Table },
   { to: "/articles", label: "Fiches articles", icon: Activity },
-  { to: "/propositions", label: "Propositions CBN", icon: ShoppingCart },
+  { to: "/recherche", label: "Recherche", icon: Search },
   { to: "/saisies", label: "Saisies & journal", icon: PenLine },
 ];
 const MORE = [

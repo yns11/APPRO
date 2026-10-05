@@ -147,6 +147,7 @@ de commande d'achat peuvent partager un créneau : sommés).
 | qty_open | nombre | Σ `Quantite_restante` (≥ 0) | restant ERP ; non fiable une fois la date passée |
 | purch_id | texte | `Commande` (liste) | information |
 | commitment | texte | `Niveau_engagement` | information |
+| first_seen | date | — (posée par le job) | jour où le créneau est apparu dans la copie Lakebase : conservé d'une exécution à l'autre, un créneau inconnu reçoit la date du jour ; alimente le flux **Commandé** du cockpit ; vide tant que le job n'a pas tourné |
 
 Exploitation : les commandes fermes sont conservées depuis le début de l'année, les prévisionnelles à
 partir du lundi suivant (règles du job amont). Une commande ferme **passée** ne compte dans aucun stock :
@@ -156,13 +157,14 @@ elle entre dans le **backlog** du fournisseur (§ 3.3 des règles métier).
 
 | Colonne | Type | `recep_edi` | Règle |
 |---|---|---|---|
-| receipt_id | texte **clé** | `Code_fournisseur|Commande|BL|Article|yyyyMMdd` | construit |
+| receipt_id | texte **clé** | `Code_fournisseur|Commande|BL|Article|yyyyMMdd|Statut_reception` | construit |
 | article_id | texte | `Article` | |
 | supplier_id | texte | `Code_fournisseur` | affecte la réception à la voie du fournisseur |
-| receipt_date | date | `Date_reception` | |
-| qty | nombre | `Quantite_recue` | lignes à quantité nulle ignorées |
+| receipt_date | date | `Date_reception` | date physique (statuts ERP 1-2) ou date d'enregistrement (statut 3) |
+| qty | nombre | `Quantite_recue` | lignes à quantité nulle ignorées ; **comptée dans le stock quel que soit le statut** |
 | purch_id | texte | `Commande` | information |
-| packing_slip | texte | `BL` | numéro de BL en info-bulle de la ligne *Reçu* ; vide (`BL` nul) = « ACR non validé », jamais rapproché d'un DESADV |
+| packing_slip | texte | `BL` | numéro de BL en info-bulle de la ligne *Reçu* ; pour une réception enregistrée, BL repris du DESADV d'origine (plusieurs séparés par « \| ») ; chaque BL listé marque le DESADV correspondant comme reçu |
+| status | texte | `Statut_reception` | `Reçu` (statuts 1-2) ou `Enregistré` (statut 3 : BL enregistré, **accusé de réception non validé**) ; une réception enregistrée porte un point rouge « ACR non validé » |
 
 Historique souhaité : au moins la fenêtre de backlog (28 jours par défaut, `backlog_days`).
 
@@ -234,12 +236,13 @@ Une ligne par ligne d'article d'un message.
 | article_id | texte | `Code_article` | |
 | supplier_id | texte | `Code_fournisseur` | voie du tableau |
 | supplier_name | texte | `Nom_fournisseur` | |
-| packing_slip | texte | `BL` | **clé de rapprochement** avec `fct_receipts.packing_slip` (`recep_edi.BL`) ; vide (`BL` nul) = « ACR non validé » : le DESADV est affiché mais ne peut être rapproché |
+| packing_slip | texte | `BL` | **clé de rapprochement** avec `fct_receipts.packing_slip` (`recep_edi.BL`, un ou plusieurs BL) ; vide (`BL` nul) : le DESADV est affiché mais ne peut être rapproché |
 | purch_id | texte | `Commande_ouverte` | information |
 | issue_date | date | `Date_emission` | jour affiché dans la ligne *Reçu* |
 | qty | nombre | `Quantite_achat` | quantité annoncée, **jamais comptée** dans un stock |
 | state | texte | `Etat_message` | Créé, Traité, Erreur, En attente, Annulé (un message annulé est ignoré) |
 | final_processing | texte | `Traitement_final` | Non traité, OK |
+| stock_trans_id | texte | `ID_transaction_stock` | vide sur un message *Traité* = aucun **journal de saisie** créé : listé dans le flux **À traiter** du cockpit |
 
 Un DESADV est **non reçu** tant que son BL n'apparaît pas dans `recep_edi` ; il est alors affiché, en italique
 sur fond orange, dans la ligne *Reçu* du fournisseur au jour d'émission, avec un point vert s'il est *Traité* et
@@ -258,6 +261,42 @@ vendredi) ; une version importée et active remplace cette table pour ses progra
 | week_start | date **clé** | lundi de la semaine ISO |
 | qty | nombre | |
 | version | texte **clé** | la plus récente gagne |
+
+### 2.6 `fct_prices` ← `silver_erp_ye.silver_base_article` — prix des articles
+
+Prix de revient standard, en euros, par article (`APPRO_ERP_PRICES_TABLE`, variable `erp_prices_table`,
+défaut `silver_base_article`). La table source contient bien plus d'articles que le référentiel : le job copie
+les `itemid` en `P-00…`, et **seuls les articles du référentiel sont valorisés** ; un article présent dans
+les prix et absent du référentiel n'y est **jamais ajouté**.
+
+| Colonne | Type | Source | Règle |
+|---|---|---|---|
+| article_id | texte **clé** | `itemid` | |
+| price | nombre | `std_cost_price` | euros par unité de stock ; `MAX` si plusieurs lignes |
+
+Usage : **valeur du stock** = Σ prix × stock à date (stock de la veille), **valeur cible** = Σ prix × stock
+cible du jour (KPI *Valeur du stock*, sous-ligne +x % / −x % de la cible, rouge au-dessus) ; **projection de la
+valeur du stock** (Scenario Plan, fin de chaque semaine ISO) dans le cockpit. Un article sans prix n'entre dans
+aucune valeur (compté « sans prix » sur la carte).
+
+### 2.7 `fct_bl_pending` ← `silver_erp_ye.bl_en_attente` — accusés de réception non validés
+
+Réceptions en statut *Enregistré* depuis au moins 7 jours, dont le BL est repris du DESADV
+(`APPRO_ERP_BL_PENDING_TABLE`, variable `erp_bl_pending_table`, défaut `bl_en_attente`).
+
+| Colonne | Type | Source | Règle |
+|---|---|---|---|
+| pending_id | texte **clé** | `Fournisseur|Commande|BL_DESADV|Article|yyyyMMdd` | construit |
+| supplier_id | texte | `Fournisseur` | |
+| purch_id | texte | `Commande` | |
+| packing_slip | texte | `BL_DESADV` | un ou plusieurs BL séparés par « \| » |
+| article_id | texte | `Article` | |
+| qty | nombre | `Quantite` | |
+| registered_date | date | `Date_enregistrement` | |
+| days_pending | entier | `Jours_en_attente` | |
+
+Usage : flux **À valider** du cockpit et page *Recherche* (« BL en attente »). Toutes les lignes sont listées,
+restreintes aux articles du périmètre.
 
 ## 3. Base applicative (écrite par l'application)
 

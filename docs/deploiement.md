@@ -241,9 +241,11 @@ Deux voies équivalentes ; la première est celle du bundle.
 databricks bundle run appro_sync_erp -t dev --profile PROD
 ```
 
-Le job lit `commandes_edi` et `recep_edi` avec le SQL de correspondance de
-`backend/appro/data/erp_sql.py`, remplace `erp_purchase_orders` et `erp_receipts` dans une transaction par
-table, puis écrit `erp_sync_log`. Environnement serverless, dépendance `psycopg` ; l'hôte et le jeton
+Le job lit `commandes_edi`, `recep_edi`, `desadv_edi`, `conso_composants`, `silver_base_article` (prix) et
+`bl_en_attente` avec le SQL de correspondance de `backend/appro/data/erp_sql.py`, remplace chaque table `erp_*`
+dans une transaction, puis écrit `erp_sync_log`. Pour les commandes, il pose `first_seen` (jour de première
+apparition d'un créneau), conservé d'une exécution à l'autre : le flux *Commandé* du cockpit n'a de sens
+qu'après deux exécutions au moins (à la première, tout est « apparu aujourd'hui »). Environnement serverless, dépendance `psycopg` ; l'hôte et le jeton
 Lakebase sont déduits de `--endpoint` / `--branch` (appels REST directs si le SDK du runtime est ancien).
 
 **Vérifier** : la tâche est verte, et
@@ -307,6 +309,7 @@ groupe). Leur identité arrive à l'application par l'en-tête `x-forwarded-emai
 | `permission denied for schema public` au premier `CREATE TABLE` (rôle de l'App sans `CREATE` sur `public`) | l'App crée et possède son propre schéma `appro` (`APPRO_DB_SCHEMA`), placé en tête du `search_path` de chaque connexion ; le job écrit dans ce schéma (`--pg-schema`) |
 | `Scheduled — Paused` sans qu'aucune commande n'échoue | `pause_status` posé sur la ressource, déclaré par chaque cible, avec `timezone_id` |
 | `permission denied for schema public` **en prod alors que dev fonctionne** : les deux cibles partagent le projet Lakebase ; le schéma `appro` a été créé par l'App de dev (son principal de service), l'App de prod ne peut pas y créer de tables et PostgreSQL retombe sur `public` | un schéma par cible (`app_schema` : `appro` en dev, `appro_preprod`, `appro_prod`) ; au démarrage l'App vérifie `has_schema_privilege(schema, 'CREATE')` et nomme la cause (schéma possédé par un autre rôle) au lieu de laisser PostgreSQL retomber sur `public` |
+| Une nouvelle version déclare une colonne de plus sur une table `erp_*` ou `ref_*` déjà créée (ici `status`, `first_seen`, `stock_trans_id`) : `create_all` ne modifie jamais une table existante, le job échoue au `COPY` | au démarrage l'App ajoute les colonnes manquantes (`ALTER TABLE … ADD COLUMN`, `ensure_columns`) avant de créer les tables absentes ; redéployer l'App **avant** de relancer le job |
 | Le tableau ne se rafraîchit pas après une saisie (il faut Ctrl+Maj+R) : l'App tourne avec **plusieurs workers** uvicorn (`APPRO_WORKERS`, 2 par défaut), chacun avec son cache mémoire ; l'écriture servie par l'un n'invalidait pas le cache de l'autre | compteur `data_version` dans la table `app_meta`, incrémenté à chaque écriture et relu à chaque calcul : tout worker jette son cache dès qu'un autre a écrit ; réponses `/api/*` en `Cache-Control: no-store` |
 
 ---

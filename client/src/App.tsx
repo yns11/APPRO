@@ -3,7 +3,7 @@ import AppShell from "@/components/layout/AppShell";
 import CockpitPage from "@/pages/CockpitPage";
 import ArticlesPage from "@/pages/ArticlesPage";
 import ArticlePage from "@/pages/ArticlePage";
-import ProposalsPage from "@/pages/ProposalsPage";
+import SearchPage from "@/pages/SearchPage";
 import SupplyTablePage from "@/pages/SupplyTablePage";
 import ProgramsPage from "@/pages/ProgramsPage";
 import PdpPage from "@/pages/PdpPage";
@@ -20,7 +20,8 @@ export default function App() {
         <Route path="/articles" element={<ArticlesPage />} />
         <Route path="/articles/:articleId" element={<ArticlePage />} />
         <Route path="/tableau" element={<SupplyTablePage />} />
-        <Route path="/propositions" element={<ProposalsPage />} />
+        <Route path="/propositions" element={<Navigate to="/?tab=flux" replace />} />
+        <Route path="/recherche" element={<SearchPage />} />
         <Route path="/programmes" element={<ProgramsPage />} />
         <Route path="/pdp" element={<PdpPage />} />
         <Route path="/saisies" element={<EntriesPage />} />

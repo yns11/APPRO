@@ -396,8 +396,32 @@ def ensure_schema(engine, schema: str | None) -> None:
                                                     db=engine.url.database or "?"))
 
 
+def ensure_columns(engine) -> list[str]:
+    """Add the columns a newer version of the application declares on tables that already exist
+    (``create_all`` never alters a table) : the ERP mirror and the reference tables keep their rows,
+    the job and the screens find the new columns.  Returns the ``table.column`` added."""
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    added: list[str] = []
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            present = {c["name"] for c in inspector.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in present:
+                    continue
+                typ = col.type.compile(engine.dialect)
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {typ}'))
+                added.append(f"{table.name}.{col.name}")
+    if added:
+        log.info("Colonnes ajoutées aux tables existantes : %s", ", ".join(added))
+    return added
+
+
 def init_store(engine, schema: str | None = None) -> sessionmaker[Session]:
     ensure_schema(engine, schema)
+    ensure_columns(engine)
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     with factory() as session:

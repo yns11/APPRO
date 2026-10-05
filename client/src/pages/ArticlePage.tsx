@@ -126,7 +126,7 @@ export default function ArticlePage() {
       {tab === "proposals" && (q.isLoading || !d ? <SkeletonBlock /> : d.proposals.length === 0 ? <Empty title="Aucune proposition CBN" hint="Le Scenario Plan reste au-dessus de la cible sur tout l'horizon." /> : (
         <Card flush title="Propositions CBN" hint="une par fournisseur et par jour de livraison ; pour la reprendre, taper la quantité dans la ligne Plan (la cellule grisée la prérempli)">
           <table className="tbl compact">
-            <thead><tr><th>Commander le</th><th>Livraison</th><th>Fournisseur</th><th className="num">Quantité</th><th className="num">Besoin net</th><th className="num">Stock avant → après</th><th>Motif</th></tr></thead>
+            <thead><tr><th>À commander le</th><th>Livraison</th><th>Fournisseur</th><th className="num">Quantité</th><th className="num">Besoin net</th><th className="num">Stock avant → après</th><th>Motif</th></tr></thead>
             <tbody>
               {d.proposals.map((p) => (
                 <tr key={p.proposal_id}>

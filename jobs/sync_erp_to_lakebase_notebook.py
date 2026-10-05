@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # APPRO — synchronisation des faits ERP vers Lakebase
 # MAGIC
-# MAGIC Copie `commandes_edi` et `recep_edi` (et, si configurées, la consommation réelle par composant et le PDP ERP)
+# MAGIC Copie `commandes_edi`, `recep_edi`, `desadv_edi`, les prix (`silver_base_article`), `bl_en_attente` (et, si configurées, la consommation réelle par composant et le PDP ERP)
 # MAGIC dans les tables `erp_*` de la base Lakebase de l'application APPRO, avec le même SQL de
 # MAGIC correspondance que l'application (`backend/appro/data/erp_sql.py`).
 # MAGIC
@@ -38,6 +38,8 @@ dbutils.widgets.text("receipts_table", "recep_edi", "8. Table réceptions")
 dbutils.widgets.text("consumption_table", "conso_composants", "9. Table consommation réelle par composant (vide = aucune)")
 dbutils.widgets.text("desadv_table", "desadv_edi", "9b. Table des avis d'expédition DESADV (vide = aucune)")
 dbutils.widgets.text("pdp_table", "", "10. Table PDP ERP (vide = aucune)")
+dbutils.widgets.text("prices_table", "silver_base_article", "11. Table des articles avec std_cost_price (vide = aucune)")
+dbutils.widgets.text("bl_pending_table", "bl_en_attente", "12. Table des BL enregistrés en attente de validation (vide = aucune)")
 
 # COMMAND ----------
 
@@ -51,7 +53,8 @@ from psycopg import sql
 logging.basicConfig(level=logging.INFO)
 LOG = logging.getLogger("appro.sync")
 W = {k: dbutils.widgets.get(k).strip() for k in ("lakebase_endpoint", "pg_host", "pg_database", "pg_schema", "erp_catalog",
-                                                  "erp_schema", "orders_table", "receipts_table", "consumption_table", "pdp_table", "desadv_table")}
+                                                  "erp_schema", "orders_table", "receipts_table", "consumption_table", "pdp_table", "desadv_table",
+                                                  "prices_table", "bl_pending_table")}
 
 # --- SQL de correspondance (copie de backend/appro/data/erp_sql.py : à tenir identique) ----------
 def fqn(t):
@@ -59,17 +62,18 @@ def fqn(t):
 
 QUERIES = {
     "erp_purchase_orders": (["order_id", "article_id", "supplier_id", "supplier_name", "order_type", "expected_date",
-                             "qty_ordered", "qty_open", "purch_id", "commitment"], f"""
+                             "qty_ordered", "qty_open", "purch_id", "commitment", "first_seen"], f"""
 SELECT c.ID AS order_id, c.Article AS article_id, c.Code_fournisseur AS supplier_id, MAX(c.Nom_fournisseur) AS supplier_name,
   CASE WHEN MAX(c.Ordre_ferme) = 'Oui' THEN 'FIRM' ELSE 'FORECAST' END AS order_type,
   CAST(MIN(c.Date_de_debut) AS DATE) AS expected_date, CAST(SUM(c.Quantite) AS DOUBLE) AS qty_ordered,
   CAST(SUM(GREATEST(c.Quantite_restante, 0)) AS DOUBLE) AS qty_open,
   CONCAT_WS(', ', SORT_ARRAY(COLLECT_SET(c.Commande))) AS purch_id, MAX(c.Niveau_engagement) AS commitment
 FROM {fqn(W['orders_table'])} c WHERE c.ID IS NOT NULL GROUP BY c.ID, c.Article, c.Code_fournisseur"""),
-    "erp_receipts": (["receipt_id", "article_id", "supplier_id", "receipt_date", "qty", "purch_id", "packing_slip"], f"""
-SELECT CONCAT_WS('|', r.Code_fournisseur, r.Commande, COALESCE(r.BL, ''), r.Article, DATE_FORMAT(r.Date_reception, 'yyyyMMdd')) AS receipt_id,
+    "erp_receipts": (["receipt_id", "article_id", "supplier_id", "receipt_date", "qty", "purch_id", "packing_slip", "status"], f"""
+SELECT CONCAT_WS('|', r.Code_fournisseur, r.Commande, COALESCE(r.BL, ''), r.Article, DATE_FORMAT(r.Date_reception, 'yyyyMMdd'),
+                 COALESCE(r.Statut_reception, '')) AS receipt_id,
   r.Article AS article_id, r.Code_fournisseur AS supplier_id, CAST(r.Date_reception AS DATE) AS receipt_date,
-  CAST(r.Quantite_recue AS DOUBLE) AS qty, r.Commande AS purch_id, r.BL AS packing_slip
+  CAST(r.Quantite_recue AS DOUBLE) AS qty, r.Commande AS purch_id, r.BL AS packing_slip, COALESCE(r.Statut_reception, 'Reçu') AS status
 FROM {fqn(W['receipts_table'])} r WHERE r.Quantite_recue IS NOT NULL AND r.Quantite_recue <> 0"""),
 }
 if W["consumption_table"]:
@@ -78,12 +82,23 @@ SELECT c.article_id AS article_id, CAST(c.date AS DATE) AS date, CAST(SUM(c.qty)
 FROM {fqn(W['consumption_table'])} c WHERE c.article_id IS NOT NULL AND c.date IS NOT NULL AND c.qty IS NOT NULL
 GROUP BY c.article_id, CAST(c.date AS DATE)""")
 if W["desadv_table"]:
-    QUERIES["erp_desadv"] = (["desadv_id", "article_id", "supplier_id", "supplier_name", "packing_slip", "purch_id", "issue_date", "qty", "state", "final_processing"], f"""
+    QUERIES["erp_desadv"] = (["desadv_id", "article_id", "supplier_id", "supplier_name", "packing_slip", "purch_id", "issue_date", "qty", "state", "final_processing", "stock_trans_id"], f"""
 SELECT CONCAT_WS('|', CAST(d.Document_ID AS STRING), CAST(d.ID_Ligne AS STRING)) AS desadv_id, d.Code_article AS article_id,
        d.Code_fournisseur AS supplier_id, d.Nom_fournisseur AS supplier_name, CAST(d.BL AS STRING) AS packing_slip,
        CAST(d.Commande_ouverte AS STRING) AS purch_id, CAST(d.Date_emission AS DATE) AS issue_date,
-       CAST(d.Quantite_achat AS DOUBLE) AS qty, d.Etat_message AS state, d.Traitement_final AS final_processing
-FROM {fqn(W['desadv_table'])} d WHERE d.Code_article IS NOT NULL AND d.BL IS NOT NULL AND d.Date_emission IS NOT NULL""")
+       CAST(d.Quantite_achat AS DOUBLE) AS qty, d.Etat_message AS state, d.Traitement_final AS final_processing,
+       CAST(d.ID_transaction_stock AS STRING) AS stock_trans_id
+FROM {fqn(W['desadv_table'])} d WHERE d.Code_article IS NOT NULL AND d.Date_emission IS NOT NULL""")
+if W["prices_table"]:
+    QUERIES["erp_prices"] = (["article_id", "price"], f"""
+SELECT a.itemid AS article_id, CAST(MAX(a.std_cost_price) AS DOUBLE) AS price FROM {fqn(W['prices_table'])} a
+WHERE a.itemid IS NOT NULL AND a.std_cost_price IS NOT NULL AND a.itemid LIKE 'P-00%' GROUP BY a.itemid""")
+if W["bl_pending_table"]:
+    QUERIES["erp_bl_pending"] = (["pending_id", "supplier_id", "purch_id", "packing_slip", "article_id", "qty", "registered_date", "days_pending"], f"""
+SELECT CONCAT_WS('|', b.Fournisseur, b.Commande, COALESCE(b.BL_DESADV, ''), b.Article, DATE_FORMAT(b.Date_enregistrement, 'yyyyMMdd')) AS pending_id,
+       b.Fournisseur AS supplier_id, b.Commande AS purch_id, b.BL_DESADV AS packing_slip, b.Article AS article_id,
+       CAST(b.Quantite AS DOUBLE) AS qty, CAST(b.Date_enregistrement AS DATE) AS registered_date, CAST(b.Jours_en_attente AS INT) AS days_pending
+FROM {fqn(W['bl_pending_table'])} b WHERE b.Article IS NOT NULL AND b.Date_enregistrement IS NOT NULL""")
 if W["pdp_table"]:
     QUERIES["erp_production_plan"] = (["program_id", "week_start", "qty", "version"], f"""
 SELECT p.program_id AS program_id, CAST(p.week_start AS DATE) AS week_start, CAST(p.qty AS DOUBLE) AS qty,
@@ -122,7 +137,7 @@ with conn.cursor() as cur:
 missing = [t for t in list(QUERIES) + ["erp_sync_log"] if t not in present]
 if missing:
     raise RuntimeError(f"Tables absentes de Lakebase : {missing}. Déployer et démarrer l'application APPRO d'abord.")
-for t in (W["orders_table"], W["receipts_table"], W["consumption_table"], W["pdp_table"], W["desadv_table"]):
+for t in (W["orders_table"], W["receipts_table"], W["consumption_table"], W["pdp_table"], W["desadv_table"], W["prices_table"], W["bl_pending_table"]):
     if t and not spark.catalog.tableExists(f"{W['erp_catalog']}.{W['erp_schema']}.{t}"):
         raise RuntimeError(f"Table source introuvable : {W['erp_catalog']}.{W['erp_schema']}.{t}")
 print("Contrôles OK")
@@ -132,16 +147,26 @@ print("Contrôles OK")
 # --- Publication : DELETE + COPY dans une transaction par table, puis journal ---------------------
 results = {}
 run_id = json.loads(ctx.toJson()).get("tags", {}).get("jobRunId", "notebook")
+today = dt.date.today()
 for target, (columns, query) in QUERIES.items():
-    df = spark.sql(query).select(*columns)
+    df = spark.sql(query)
+    missing = [c for c in columns if c not in df.columns]          # first_seen des commandes : posé par le job
+    df = df.select(*[c for c in columns if c not in missing])
     n = 0
     with conn.transaction(), conn.cursor() as cur:
+        previous = {}
+        if target == "erp_purchase_orders" and "first_seen" in missing:
+            cur.execute(sql.SQL("SELECT order_id, first_seen FROM {}.{} WHERE first_seen IS NOT NULL").format(sql.Identifier(W["pg_schema"]), sql.Identifier(target)))
+            previous = dict(cur.fetchall())
         cur.execute(sql.SQL("DELETE FROM {}.{}").format(sql.Identifier(W["pg_schema"]), sql.Identifier(target)))
         stmt = sql.SQL("COPY {}.{} ({}) FROM STDIN").format(sql.Identifier(W["pg_schema"]), sql.Identifier(target),
                                                             sql.SQL(", ").join(sql.Identifier(c) for c in columns))
         with cur.copy(stmt) as copy:
             for row in df.toLocalIterator():
-                copy.write_row(tuple(row))
+                d = row.asDict()
+                if "first_seen" in missing:
+                    d["first_seen"] = previous.get(d.get("order_id")) or today    # conservé d'une copie à l'autre, sinon apparu aujourd'hui
+                copy.write_row(tuple(d.get(c) for c in columns))
                 n += 1
         cur.execute(sql.SQL("INSERT INTO {}.erp_sync_log (table_name, row_count, synced_at, source, run_id) VALUES (%s, %s, %s, %s, %s) "
                             "ON CONFLICT (table_name) DO UPDATE SET row_count = EXCLUDED.row_count, synced_at = EXCLUDED.synced_at, "

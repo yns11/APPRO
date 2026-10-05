@@ -159,7 +159,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
             ln.orders_firm[i0] = max(0.0, ln.orders_firm[i0] - received_today.get(ln.supplier_id, 0.0))
     # ---- despatch advices (DESADV): announced, matched to the receipts by delivery note (BL)
     hidden_days = {(f.supplier_id or None, f.date) for f in (flags or ()) if f.kind == "desadv_hidden"}
-    received_bls = {r.packing_slip.strip() for r in receipts if r.packing_slip and r.packing_slip.strip()}
+    received_bls = {bl for r in receipts for bl in r.packing_slips}      # a registered receipt lists the BL of its DESADV
     processed_bls: set[str] = set()
     for d in desadv or ():
         if d.state.strip().lower() == "annulé":
@@ -171,7 +171,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         if d.processed and bl:
             processed_bls.add(bl)
         ln.desadv.append(DesadvInfo(d.desadv_id, bl, d.issue_date, float(d.qty), d.state, d.final_processing,
-                                    d.processed, received, hidden, d.purch_id))
+                                    d.processed, received, hidden, d.purch_id, d.stock_trans_id))
         if received or hidden:
             continue
         i = index.offset(d.issue_date)
@@ -184,9 +184,11 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         if not r.qty or i is None:                           # nothing exists before the point zero
             continue
         bl = (r.packing_slip or "").strip()
-        processed = bool(bl) and bl in processed_bls         # an empty BL (« ACR non validé ») never matches
+        # green only when validated (« Reçu ») and announced by a processed DESADV ; a registered receipt
+        # (« Enregistré » : acknowledgement of receipt not validated) or an empty BL is red
+        processed = (not r.registered) and any(x in processed_bls for x in r.packing_slips)
         ln = lane_of(r.supplier_id)
-        ln.receipt_lines.append(ReceiptInfo(r.receipt_id, r.receipt_date, float(r.qty), bl, r.ref or "", processed))
+        ln.receipt_lines.append(ReceiptInfo(r.receipt_id, r.receipt_date, float(r.qty), bl, r.ref or "", processed, r.status))
         if not processed:
             ln.receipts_ko[i] = True
     # ---- plan: typed cells, else the ERP

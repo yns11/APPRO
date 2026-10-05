@@ -139,6 +139,7 @@ class OrderLine:
     qty_open: float | None = None          # ERP remaining quantity (None = qty_ordered)
     order_type: OrderType = OrderType.FIRM
     ref: str = ""                          # purchase order numbers, information only
+    first_seen: dt.date | None = None      # day the slot first appeared in the ERP copy (synchronisation job)
 
     def __post_init__(self) -> None:
         if self.qty_open is None:
@@ -153,7 +154,31 @@ class Receipt:
     qty: float
     supplier_id: str | None = None
     ref: str = ""
-    packing_slip: str = ""         # delivery note number (BL) : matched with the despatch advices
+    packing_slip: str = ""         # delivery note number(s) (BL, several joined by " | ") : matched with the despatch advices
+    status: str = ""               # Reçu (ERP statuses 1-2) or Enregistré (3 : acknowledgement of receipt not validated)
+
+    @property
+    def registered(self) -> bool:
+        """Registered, not validated yet (« ACR non validé ») : counted as a receipt, flagged red."""
+        return self.status.strip().lower().startswith("enregistr")
+
+    @property
+    def packing_slips(self) -> list[str]:
+        return [x.strip() for x in (self.packing_slip or "").split("|") if x.strip()]
+
+
+@dataclass
+class BlPending:
+    """A registered receipt waiting for its acknowledgement of receipt for 7 days or more (``bl_en_attente``)."""
+
+    pending_id: str
+    supplier_id: str | None
+    purch_id: str
+    packing_slip: str
+    article_id: str
+    qty: float
+    registered_date: dt.date
+    days_pending: int = 0
 
 
 @dataclass
@@ -170,6 +195,7 @@ class DesadvLine:
     purch_id: str = ""
     state: str = ""                # Créé, Traité, Erreur, En attente, Annulé
     final_processing: str = ""     # Non traité, OK
+    stock_trans_id: str = ""       # ID_transaction_stock : empty on a processed message = no entry journal created
 
     @property
     def processed(self) -> bool:
@@ -259,6 +285,8 @@ class Dataset:
     plan: list[PlanCell] = field(default_factory=list)
     flags: list[CellFlag] = field(default_factory=list)
     desadv: list[DesadvLine] = field(default_factory=list)
+    prices: dict[str, float] = field(default_factory=dict)        # article → standard cost price (euros)
+    bl_pending: list[BlPending] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -366,6 +394,7 @@ class Proposal:
     pack_qty: float = 0.0
     projected_stock_before: float = 0.0
     projected_stock_after: float = 0.0
+    ignored: bool = False          # refused by the planner (click) : listed for information, out of every calculation
 
 
 @dataclass
@@ -407,6 +436,7 @@ class DesadvInfo:
     received: bool
     hidden: bool
     purch_id: str = ""
+    stock_trans_id: str = ""
 
 
 @dataclass
@@ -421,6 +451,7 @@ class ReceiptInfo:
     packing_slip: str
     purch_id: str
     processed: bool
+    status: str = ""               # Reçu / Enregistré
 
 
 @dataclass
@@ -475,6 +506,8 @@ class ArticleResult:
     kpis: dict[str, Any]
     suppliers: list[SupplierLink]
     diagnostics: list[str] = field(default_factory=list)
+    proposals_ignored: list[Proposal] = field(default_factory=list)   # refused urgent / normal proposals, information only
+    price: float | None = None                                         # standard cost price (euros), None = unknown
 
 
 @dataclass

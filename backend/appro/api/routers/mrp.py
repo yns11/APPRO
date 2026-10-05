@@ -66,7 +66,8 @@ def cockpit(planner: str | None = None, article_ids: list[str] | None = Query(No
         as_of=result.as_of, init_date=result.init_date, horizon_days=result.params.horizon_days, planner=planner, data_source=ctx.source.name,
         pdp_version=None, kpis=P.cockpit_kpis(result), articles=[P.article_summary(r) for r in arts],
         alerts=alerts, proposals=props, backlog=P.backlog_rows(result),
-        diagnostics=result.diagnostics, weekly_supply_demand=P.weekly_supply_demand(result))
+        diagnostics=result.diagnostics, weekly_supply_demand=P.weekly_supply_demand(result),
+        weekly_stock_value=P.weekly_stock_value(result))
 
 
 @router.get("/articles/{article_id}/projection", response_model=S.ProjectionResponse)
@@ -120,9 +121,8 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
     result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
                                  **_kw(horizon_days=horizon_days, history_weeks=history_weeks))
     arts = sorted(result.articles.values(), key=lambda r: r.article.article_id)
-    if q and q.strip():
-        needle = q.strip().lower()
-        arts = [r for r in arts if needle in f"{r.article.article_id} {r.article.designation}".lower()]
+    if q and q.strip():   # « ; » separates alternatives : 123;456 = contains 123 or 456
+        arts = [r for r in arts if P.match_any(f"{r.article.article_id} {r.article.designation}", q)]
     total = len(arts)
     page_arts = arts[(page - 1) * page_size: page * page_size]
     return json_response(P.grid_out(result, granularity, _supplier_names(ctx), _programs_of(ctx), articles=page_arts,

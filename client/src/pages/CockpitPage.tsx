@@ -1,21 +1,26 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { AlertOctagon, AlertTriangle, ArrowDownToLine, Download, Layers, PackageSearch, Truck } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { AlertOctagon, AlertTriangle, ArrowDownToLine, Coins, Download, Layers, PackageSearch, Truck } from "lucide-react";
 import { useCockpit } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
-import { ALERT_LABELS, SCOPE_LABELS, fmtDate, fmtInt, fmtQty, daysFrom } from "@/lib/format";
-import { Badge, Card, Empty, ErrorBox, Kpi, SeverityBadge, Skeleton, SkeletonBlock } from "@/components/ui";
+import { ALERT_LABELS, SCOPE_LABELS, fmtDate, fmtEur, fmtInt, fmtPct, fmtQty, daysFrom } from "@/lib/format";
+import { Badge, Card, Empty, ErrorBox, Kpi, SeverityBadge, Skeleton, SkeletonBlock, Tabs } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
-import { OutlookChart } from "@/components/charts/OutlookChart";
+import { StockValueChart } from "@/components/charts/StockValueChart";
+import { FlowsPanel } from "@/components/FlowsPanel";
 import type { ArticleSummary, Severity } from "@/lib/types";
 
 type Filter = "all" | "critical" | "warning" | "stockout" | "proposals" | "overstock" | "ok";
+type CockpitTab = "stocks" | "flux";
 
 export default function CockpitPage() {
   const { perimeter, engineParams, config } = usePerimeter();
   const q = useCockpit();
   const nav = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const tab: CockpitTab = params.get("tab") === "flux" ? "flux" : "stocks";
+  const setTab = (t: CockpitTab) => setParams(t === "stocks" ? {} : { tab: t }, { replace: true });
   const [filter, setFilter] = useState<Filter>("all");
   const asOf = q.data?.as_of;
 
@@ -34,12 +39,13 @@ export default function CockpitPage() {
   const cols = useMemo<Column<ArticleSummary>[]>(() => [
     { key: "article", label: "Article", get: (a) => `${a.article_id} ${a.designation}`, render: (a) => <><b>{a.article_id}</b><span className="sub" title={a.designation}>{a.designation.length > 30 ? `${a.designation.slice(0, 30)}…` : a.designation}</span></> },
     { key: "suppliers", label: "Fournisseurs", get: (a) => a.suppliers.join(" / "), render: (a) => <span className="subtle">{a.suppliers.map((sid) => <span key={sid} style={{ display: "block" }}>{sid}</span>)}</span> },
+    { key: "planner", label: "Approvisionneur", get: (a) => a.planner, filter: "select" },
     { key: "severity", label: "Statut", get: (a) => a.severity ?? "ok", filter: "select", render: (a) => <SeverityBadge severity={a.severity} /> },
-    { key: "stock", label: "Stock référence", get: (a) => a.kpis.stock_reference, num: true, render: (a) => <>{fmtQty(a.kpis.stock_reference, a.unit)} <span className="subtle">{a.unit}</span></> },
+    { key: "stock", label: "Stock à date", get: (a) => a.kpis.stock_at_date, num: true, title: "Stock projeté à la fin de la veille (réceptions et consommations réelles comprises)", render: (a) => <>{fmtQty(a.kpis.stock_at_date, a.unit)} <span className="subtle">{a.unit}</span>{a.kpis.stock_value !== null && <span className="sub">{fmtEur(a.kpis.stock_value)}</span>}</> },
     { key: "cov", label: "Couverture plan", get: (a) => a.kpis.coverage_plan_days, num: true, render: (a) => <CoverageCell days={a.kpis.coverage_plan_days} a={a} /> },
     { key: "target", label: "Cible", get: (a) => a.kpis.coverage_target_days, num: true, render: (a) => <span className="subtle">{a.kpis.coverage_target_days} j</span> },
     { key: "stockout", label: "Rupture ERP", get: (a) => a.kpis.first_stockout_erp ?? "", render: (a) => { const d = daysFrom(a.kpis.first_stockout_erp, asOf ?? a.kpis.init_date); return a.kpis.first_stockout_erp ? <Badge tone={d !== null && d <= 7 ? "critical" : "warning"}>{fmtDate(a.kpis.first_stockout_erp)} · J+{d}</Badge> : <span className="subtle">–</span>; } },
-    { key: "stockout_plan", label: "Rupture plan", get: (a) => a.kpis.first_stockout_plan ?? "", render: (a) => a.kpis.first_stockout_plan ? <Badge tone="critical">{fmtDate(a.kpis.first_stockout_plan)}</Badge> : <span className="subtle">–</span> },
+    { key: "stockout_plan", label: "Rupture plan", get: (a) => a.kpis.first_stockout_plan ?? "", render: (a) => { const d = daysFrom(a.kpis.first_stockout_plan, asOf ?? a.kpis.init_date); return a.kpis.first_stockout_plan ? <Badge tone={a.kpis.stockout_plan_severity ?? "critical"}>{fmtDate(a.kpis.first_stockout_plan)} · J+{d}</Badge> : <span className="subtle">–</span>; } },
     { key: "open", label: "En-cours ERP", get: (a) => a.kpis.open_firm_qty, num: true, render: (a) => <>{fmtQty(a.kpis.open_firm_qty, a.unit)}{a.kpis.open_forecast_qty > 0 && <span className="sub">+ {fmtQty(a.kpis.open_forecast_qty, a.unit)} prév.</span>}</> },
     { key: "backlog", label: "Backlog", get: (a) => a.kpis.backlog_qty, num: true, render: (a) => a.kpis.backlog_qty > 0 ? <span style={{ color: "var(--warning-fg)" }}>{fmtQty(a.kpis.backlog_qty, a.unit)}</span> : <span className="subtle">–</span> },
     { key: "plan", label: "Plan", get: (a) => a.kpis.plan_qty, num: true, render: (a) => <>{fmtQty(a.kpis.plan_qty, a.unit)}{a.kpis.plan_cell_count > 0 && <span className="sub">{a.kpis.plan_cell_count} cellule(s)</span>}</> },
@@ -63,22 +69,26 @@ export default function CockpitPage() {
           <a className="btn primary" href={exportUrl}><Download />Simulation (xlsx)</a>
         </div>
       </div>
+      <Tabs<CockpitTab> tabs={[{ id: "stocks", label: "Couvertures et stocks" }, { id: "flux", label: "Flux d'approvisionnement" }]} value={tab} onChange={setTab} />
+      {tab === "flux" && <FlowsPanel />}
+      {tab === "stocks" && <>
       {config?.reference_empty && <div className="note">Le référentiel est vide : chargez d'abord les articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures et le stock de référence dans la page <Link to="/referentiel">Référentiel</Link> (modèles Excel à télécharger).</div>}
 
       <div className="grid kpis sticky-kpis">
         <Kpi label="Critiques" icon={<AlertOctagon size={14} />} tone="critical" value={k ? fmtInt(k.critical) : <Skeleton w={40} h={28} />} meta="rupture ou couverture rouge" onClick={() => setFilter(filter === "critical" ? "all" : "critical")} active={filter === "critical"} />
         <Kpi label="À surveiller" icon={<AlertTriangle size={14} />} tone="warning" value={k ? fmtInt(k.warning) : <Skeleton w={40} h={28} />} meta="couverture orange, données manquantes" onClick={() => setFilter(filter === "warning" ? "all" : "warning")} active={filter === "warning"} />
         <Kpi label="Ruptures plan" icon={<PackageSearch size={14} />} tone={k && k.stockouts_7d > 0 ? "critical" : "info"} value={k ? fmtInt(k.stockouts) : <Skeleton w={40} h={28} />} meta={k ? `${k.stockouts_7d} sous 7 jours` : ""} onClick={() => setFilter(filter === "stockout" ? "all" : "stockout")} active={filter === "stockout"} />
-        <Kpi label="Couverture moyenne" icon={<Layers size={14} />} value={k ? (k.avg_coverage_days ?? "–") : <Skeleton w={40} h={28} />} unit="jours" meta="Scenario Plan, articles avec besoin" />
+        <Kpi label="Couverture médiane" icon={<Layers size={14} />} value={k ? (k.median_coverage_days ?? "–") : <Skeleton w={40} h={28} />} unit="jours" meta={k ? `Scenario Plan, articles avec besoin · moyenne ${k.avg_coverage_days ?? "–"} j` : ""} />
+        <Kpi label="Valeur du stock" icon={<Coins size={14} />} tone="brand" value={k ? fmtEur(k.stock_value, true) : <Skeleton w={60} h={28} />} meta={k ? <StockValueMeta value={k.stock_value} target={k.target_value} unpriced={k.unpriced_articles} /> : ""} />
         <Kpi label="En-cours ERP" icon={<Truck size={14} />} value={k ? fmtQty(k.open_firm_qty) : <Skeleton w={40} h={28} />} meta={k ? `+ ${fmtQty(k.open_forecast_qty)} prévisionnel · plan ${fmtQty(k.plan_qty)} (${k.plan_articles} article(s) avec saisie)` : ""} />
         <Kpi label="Surstock" icon={<ArrowDownToLine size={14} />} tone="info" value={k ? fmtInt(k.overstock) : <Skeleton w={40} h={28} />} meta="articles au-dessus du seuil" onClick={() => setFilter(filter === "overstock" ? "all" : "overstock")} active={filter === "overstock"} />
       </div>
 
       <div className="grid cols-3">
-        <Card title="Perspective 12 semaines" hint="articles en rupture / sous cible en fin de semaine, Scenario Plan" className="span-2">
-          {q.isLoading ? <Skeleton h={220} /> : q.data?.weekly_supply_demand.length ? <OutlookChart data={q.data.weekly_supply_demand} /> : <Empty title="Aucune donnée" />}
+        <Card title="Projection de la valeur du stock" hint="Σ prix × stock en fin de semaine, Scenario Plan, articles valorisés ; pointillé : valeur du stock cible" className="span-2">
+          {q.isLoading ? <Skeleton h={220} /> : q.data?.weekly_stock_value.length ? <StockValueChart data={q.data.weekly_stock_value} /> : <Empty title="Aucun article valorisé" hint="Les prix viennent de la table des prix synchronisée depuis l'ERP (std_cost_price)." />}
         </Card>
-        <Card title="Alertes prioritaires" hint={q.data ? `${q.data.alerts.length} alertes` : ""} actions={<Link className="btn sm" to="/propositions">Propositions</Link>}>
+        <Card title="Alertes prioritaires" hint={q.data ? `${q.data.alerts.length} alertes` : ""} actions={<button className="btn sm" onClick={() => setTab("flux")}>À commander</button>}>
           {q.isLoading ? <SkeletonBlock /> : <AlertList alerts={(q.data?.alerts ?? []).filter((a) => a.severity !== "info" && a.alert_type !== "BACKLOG").slice(0, 8)} asOf={asOf} />}
         </Card>
       </div>
@@ -94,7 +104,21 @@ export default function CockpitPage() {
         )}
       </Card>
       {q.data?.diagnostics?.length ? <p className="small subtle">{q.data.diagnostics.slice(-1)[0]}</p> : null}
+      </>}
     </div>
+  );
+}
+
+/** Sub-line of the « Valeur du stock » tile : gap to the target value, red when above it. */
+function StockValueMeta({ value, target, unpriced }: { value: number | null; target: number | null; unpriced: number }) {
+  if (value === null || target === null) return <>aucun article valorisé</>;
+  const gap = target > 0 ? (value - target) / target : null;
+  const above = gap !== null && gap > 0;
+  return (
+    <>
+      {gap === null ? <>cible {fmtEur(target, true)}</> : <span style={above ? { color: "var(--critical-fg)", fontWeight: 600 } : undefined}>{above ? "+" : "−"}{fmtPct(Math.abs(gap))} de la valeur cible ({fmtEur(target, true)})</span>}
+      {unpriced > 0 && <span className="sub">{unpriced} article(s) sans prix</span>}
+    </>
   );
 }
 

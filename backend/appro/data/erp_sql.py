@@ -8,7 +8,11 @@ Sources (schema ``emotors_data_champions.silver_erp_ye`` by default) :
 
 * ``commandes_edi`` – firm and forecast schedule lines aggregated by supplier / purchase order /
   article / delivery date (``ID`` = ``vendaccount|itemid|yyyyMMdd|silfirmorder``) ;
-* ``recep_edi`` – physical receipts by supplier / purchase order / packing slip / article / day ;
+* ``recep_edi`` – receipts by supplier / purchase order / packing slip / article / day and **status** :
+  ``Reçu`` (ERP receipt statuses 1-2) or ``Enregistré`` (3 : packing slip registered, acknowledgement
+  of receipt not validated yet ; its BL is taken from the DESADV, several joined by `` | ``) ;
+* ``bl_en_attente`` – registered receipts older than 7 days still waiting for validation ;
+* ``silver_base_article`` – item master : ``std_cost_price`` (euros) values the stocks ;
 * an optional daily **actual consumption** table (``APPRO_ERP_CONSUMPTION_TABLE``) with the canonical
   columns ``article_id, date, qty`` – the consumption is given **per component, already exploded**
   through the bill of material (unlike the PDP, exploded by the engine) ; an optional weekly PDP
@@ -16,6 +20,7 @@ Sources (schema ``emotors_data_champions.silver_erp_ye`` by default) :
 """
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 
 
@@ -30,6 +35,8 @@ class ErpTables:
     consumption: str = ""         # empty: no actual consumption read from the ERP
     desadv: str = ""              # empty: no despatch advices (DESADV) read from the ERP
     pdp: str = ""                 # empty: the PDP comes from the file imported in the application
+    prices: str = ""              # empty: no article prices (no stock valuation)
+    bl_pending: str = ""          # empty: no « BL en attente » table
 
     def fqn(self, table: str) -> str:
         return f"`{self.catalog}`.`{self.schema}`.`{table}`"
@@ -56,16 +63,18 @@ GROUP BY c.ID, c.Article, c.Code_fournisseur
 
 
 def receipts_sql(t: ErpTables) -> str:
+    """One row per supplier / order / BL / article / day / status (``Reçu`` or ``Enregistré``)."""
     return f"""
 SELECT
   CONCAT_WS('|', r.Code_fournisseur, r.Commande, COALESCE(r.BL, ''), r.Article,
-            DATE_FORMAT(r.Date_reception, 'yyyyMMdd'))            AS receipt_id,
+            DATE_FORMAT(r.Date_reception, 'yyyyMMdd'), COALESCE(r.Statut_reception, '')) AS receipt_id,
   r.Article                                                       AS article_id,
   r.Code_fournisseur                                              AS supplier_id,
   CAST(r.Date_reception AS DATE)                                  AS receipt_date,
   CAST(r.Quantite_recue AS DOUBLE)                                AS qty,
   r.Commande                                                      AS purch_id,
-  r.BL                                                            AS packing_slip
+  r.BL                                                            AS packing_slip,
+  COALESCE(r.Statut_reception, 'Reçu')                            AS status
 FROM {t.fqn(t.receipts)} r
 WHERE r.Quantite_recue IS NOT NULL AND r.Quantite_recue <> 0
 """.strip()
@@ -96,7 +105,8 @@ SELECT
   CAST(d.Date_emission AS DATE)                                   AS issue_date,
   CAST(d.Quantite_achat AS DOUBLE)                                AS qty,
   d.Etat_message                                                  AS state,
-  d.Traitement_final                                              AS final_processing
+  d.Traitement_final                                              AS final_processing,
+  CAST(d.ID_transaction_stock AS STRING)                          AS stock_trans_id
 FROM {t.fqn(t.desadv)} d
 WHERE d.Code_article IS NOT NULL AND d.Date_emission IS NOT NULL
 """.strip()
@@ -110,6 +120,43 @@ FROM {t.fqn(t.pdp)} p
 """.strip()
 
 
+def prices_sql(t: ErpTables) -> str:
+    """Standard cost price per article (euros).  The item master holds far more items than the
+    application : the engine only values the articles of its reference table."""
+    return f"""
+SELECT a.itemid AS article_id, CAST(MAX(a.std_cost_price) AS DOUBLE) AS price
+FROM {t.fqn(t.prices)} a
+WHERE a.itemid IS NOT NULL AND a.std_cost_price IS NOT NULL AND a.itemid LIKE 'P-00%'
+GROUP BY a.itemid
+""".strip()
+
+
+def bl_pending_sql(t: ErpTables) -> str:
+    """Registered receipts waiting for validation (``bl_en_attente``) : one row per supplier / order /
+    BL / article / registration day."""
+    return f"""
+SELECT
+  CONCAT_WS('|', b.Fournisseur, b.Commande, COALESCE(b.BL_DESADV, ''), b.Article,
+            DATE_FORMAT(b.Date_enregistrement, 'yyyyMMdd'))       AS pending_id,
+  b.Fournisseur                                                   AS supplier_id,
+  b.Commande                                                      AS purch_id,
+  b.BL_DESADV                                                     AS packing_slip,
+  b.Article                                                       AS article_id,
+  CAST(b.Quantite AS DOUBLE)                                      AS qty,
+  CAST(b.Date_enregistrement AS DATE)                             AS registered_date,
+  CAST(b.Jours_en_attente AS INT)                                 AS days_pending
+FROM {t.fqn(t.bl_pending)} b
+WHERE b.Article IS NOT NULL AND b.Date_enregistrement IS NOT NULL
+""".strip()
+
+
+def carry_first_seen(previous: dict[str, dt.date | None], order_id: str, today: dt.date) -> dt.date:
+    """``first_seen`` of a delivery slot : the day it was first copied by the synchronisation job,
+    kept from the previous copy ; a slot unknown so far appeared today."""
+    prev = previous.get(order_id)
+    return prev if prev else today
+
+
 def fact_queries(t: ErpTables) -> dict[str, str]:
     """Canonical fact table → SQL (only the tables that are configured)."""
     out = {"fct_purchase_orders": purchase_orders_sql(t), "fct_receipts": receipts_sql(t)}
@@ -119,4 +166,15 @@ def fact_queries(t: ErpTables) -> dict[str, str]:
         out["fct_desadv"] = desadv_sql(t)
     if t.pdp:
         out["fct_production_plan"] = production_plan_sql(t)
+    if t.prices:
+        out["fct_prices"] = prices_sql(t)
+    if t.bl_pending:
+        out["fct_bl_pending"] = bl_pending_sql(t)
     return out
+
+
+def source_of(t: ErpTables, name: str) -> str:
+    """Fully qualified source table of a canonical fact table."""
+    return {"fct_purchase_orders": t.fqn(t.orders), "fct_receipts": t.fqn(t.receipts),
+            "fct_consumption_actual": t.fqn(t.consumption), "fct_production_plan": t.fqn(t.pdp),
+            "fct_desadv": t.fqn(t.desadv), "fct_prices": t.fqn(t.prices), "fct_bl_pending": t.fqn(t.bl_pending)}[name]

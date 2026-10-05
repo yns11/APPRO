@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from ..engine.calendar import iso_week_label, iso_week_monday
-from ..engine.models import Alert, ArticleResult, Lane, MrpResult, Proposal, SupplierLink
+from ..engine.models import Alert, ArticleResult, Dataset, Lane, MrpResult, Proposal, SupplierLink
 from . import schemas as S
 
 SERIES_LABELS = [
@@ -56,7 +56,7 @@ def proposal_out(p: Proposal, ar: ArticleResult, supplier_names: dict[str, str])
         delivery_date=p.delivery_date, order_date=p.order_date, qty=p.qty, net_requirement=p.net_requirement,
         reason=p.reason, urgent=p.urgent, lead_time_days=p.lead_time_days, moq=p.moq,
         pack_qty=p.pack_qty, projected_stock_before=p.projected_stock_before,
-        projected_stock_after=p.projected_stock_after)
+        projected_stock_after=p.projected_stock_after, ignored=p.ignored)
 
 
 def link_out(l: SupplierLink, supplier_names: dict[str, str]) -> S.LinkRef:
@@ -104,6 +104,8 @@ def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
     alerts = [a for r in arts for a in r.alerts]
     props = [p for r in arts for p in r.proposals]
     cov = [r.kpis["coverage_plan_days"] for r in arts if r.kpis["demand_horizon"] > 0]
+    values = [r.kpis["stock_value"] for r in arts if r.kpis.get("stock_value") is not None]
+    targets = [r.kpis["target_value"] for r in arts if r.kpis.get("target_value") is not None]
     stockouts_7d = 0
     for r in arts:
         d = r.kpis.get("first_stockout_plan")
@@ -127,7 +129,11 @@ def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
         open_firm_qty=float(sum(r.kpis["open_firm_qty"] for r in arts)),
         open_forecast_qty=float(sum(r.kpis["open_forecast_qty"] for r in arts)),
         avg_coverage_days=(round(sum(cov) / len(cov), 1) if cov else None),
+        median_coverage_days=(float(np.median(cov)) if cov else None),
         demand_next_30d=float(sum(r.kpis["demand_next_30d"] for r in arts)),
+        stock_value=(sum(v for v in values) if values else None),
+        target_value=(sum(t for t in targets) if values else None),
+        priced_articles=len(values), unpriced_articles=len(arts) - len(values),
     )
 
 
@@ -161,6 +167,137 @@ def weekly_supply_demand(result: MrpResult, weeks: int = 12) -> list[dict[str, A
                 buckets[wk]["proposals"] += 1
                 buckets[wk]["proposed_qty"] += p.qty
     return [{k: v for k, v in b.items() if not k.startswith("_")} for b in buckets.values()]
+
+
+def weekly_stock_value(result: MrpResult, weeks: int = 52) -> list[S.WeeklyStockValue]:
+    """Projected value of the portfolio stock (Scenario Plan) and of its target, at the end of each
+    ISO week from the current one : Σ price × stock over the articles that have a price."""
+    arts = [r for r in result.articles.values() if r.price is not None]
+    if not arts:
+        return []
+    ref = arts[0]
+    i0 = ref.dates.index(result.as_of)
+    last_of_week: dict[str, int] = {}
+    for i in range(i0, len(ref.dates)):
+        wk = iso_week_label(ref.dates[i])
+        if wk not in last_of_week and len(last_of_week) >= weeks:
+            break
+        last_of_week[wk] = i
+    out = []
+    for wk, i in last_of_week.items():
+        out.append(S.WeeklyStockValue(week=wk, week_start=iso_week_monday(ref.dates[i]),
+                                      value_plan=float(sum(r.price * r.stock_plan[i] for r in arts)),
+                                      value_target=float(sum(r.price * r.target_stock[i] for r in arts))))
+    return out
+
+
+def _desadv_received(ds: Dataset) -> set[str]:
+    return {bl for r in ds.receipts for bl in r.packing_slips}
+
+
+def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], planner: str | None) -> S.FlowsResponse:
+    """The supply flows of the day (cockpit, tab « Flux d'approvisionnement »)."""
+    as_of = result.as_of
+    arts = {a.article_id: a for a in ds.articles}
+    res = result.articles
+
+    def art(aid: str) -> dict[str, str]:
+        a = arts.get(aid)
+        return {"designation": a.designation if a else "", "unit": a.unit if a else "", "planner": a.planner if a else ""}
+
+    def order_row(o) -> S.OrderRow:
+        return S.OrderRow(order_id=o.order_id, article_id=o.article_id, **art(o.article_id), supplier_id=o.supplier_id,
+                          supplier_name=supplier_names.get(o.supplier_id or "", ""), order_type=o.order_type.value,
+                          expected_date=o.expected_date, qty_ordered=o.qty_ordered, qty_open=float(o.qty_open or 0.0),
+                          purch_id=o.ref, first_seen=o.first_seen)
+
+    def receipt_row(r) -> S.ReceiptRow:
+        return S.ReceiptRow(receipt_id=r.receipt_id, article_id=r.article_id, **art(r.article_id), supplier_id=r.supplier_id,
+                            supplier_name=supplier_names.get(r.supplier_id or "", ""), receipt_date=r.receipt_date, qty=r.qty,
+                            purch_id=r.ref, packing_slip=r.packing_slip, status=r.status)
+
+    received_bls = _desadv_received(ds)
+
+    def desadv_row(d, issue: str = "") -> S.DesadvRow:
+        return S.DesadvRow(desadv_id=d.desadv_id, article_id=d.article_id, **art(d.article_id), supplier_id=d.supplier_id,
+                           supplier_name=supplier_names.get(d.supplier_id or "", ""), packing_slip=d.packing_slip, purch_id=d.purch_id,
+                           issue_date=d.issue_date, qty=d.qty, state=d.state, final_processing=d.final_processing,
+                           received=d.packing_slip.strip() in received_bls, journal=bool(d.stock_trans_id.strip()), issue=issue)
+
+    def pending_row(b) -> S.PendingRow:
+        return S.PendingRow(pending_id=b.pending_id, article_id=b.article_id, **art(b.article_id), supplier_id=b.supplier_id,
+                            supplier_name=supplier_names.get(b.supplier_id or "", ""), purch_id=b.purch_id, packing_slip=b.packing_slip,
+                            qty=b.qty, registered_date=b.registered_date, days_pending=b.days_pending)
+
+    # 1. à commander : urgent proposals, the refused ones included (flagged « ignorée »)
+    to_order = [proposal_out(p, r, supplier_names) for r in res.values() for p in (*r.proposals, *r.proposals_ignored) if p.urgent]
+    to_order.sort(key=lambda p: (p.order_date, p.article_id, p.supplier_id or ""))
+    firm = [o for o in ds.orders if o.order_type.value == "FIRM" and o.article_id in res]
+    # 2. commandé : firm slots that appeared in the ERP today, whatever their delivery date
+    ordered = sorted((order_row(o) for o in firm if o.first_seen == as_of), key=lambda o: (o.expected_date, o.article_id))
+    live = [d for d in ds.desadv if d.article_id in res and d.state.strip().lower() != "annulé"]
+    # 3. en transit : announced, not received yet
+    in_transit = sorted((desadv_row(d) for d in live if d.packing_slip.strip() not in received_bls), key=lambda d: (d.issue_date, d.article_id))
+    # 4. à traiter : in error, or processed without any stock transaction (no entry journal)
+    to_process = []
+    for d in live:
+        if d.state.strip().lower() == "erreur":
+            to_process.append(desadv_row(d, "message en erreur"))
+        elif d.processed and not d.stock_trans_id.strip():
+            to_process.append(desadv_row(d, "traité sans journal de saisie"))
+    to_process.sort(key=lambda d: (d.issue_date, d.article_id))
+    # 5. à réceptionner : firm slots due today
+    to_receive = sorted((order_row(o) for o in firm if o.expected_date == as_of), key=lambda o: (o.supplier_id or "", o.article_id))
+    # 6. reçu : receipts dated today
+    received = sorted((receipt_row(r) for r in ds.receipts if r.article_id in res and r.receipt_date == as_of), key=lambda r: (r.supplier_id or "", r.article_id))
+    # 7. en retard : supplier backlog
+    late = backlog_rows(result)
+    # 8. à valider : registered receipts waiting for their acknowledgement
+    to_validate = sorted((pending_row(b) for b in ds.bl_pending if b.article_id in res), key=lambda b: (-b.days_pending, b.article_id))
+    return S.FlowsResponse(
+        as_of=as_of, planner=planner, first_seen_available=any(o.first_seen is not None for o in ds.orders),
+        kpis=S.FlowsKpis(to_order=len(to_order), ordered=len(ordered), in_transit=len(in_transit), to_process=len(to_process),
+                         to_receive=len(to_receive), received=len(received), late=len(late), to_validate=len(to_validate)),
+        to_order=to_order, ordered=ordered, in_transit=in_transit, to_process=to_process, to_receive=to_receive,
+        received=received, late=late, to_validate=to_validate)
+
+
+def search_rows(ds: Dataset, supplier_names: dict[str, str], kind: str) -> list[dict[str, Any]]:
+    """Every line of one kind (receipts, orders, DESADV, pending BL) of the dataset, as flat rows."""
+    arts = {a.article_id: a for a in ds.articles}
+
+    def art(aid: str) -> dict[str, str]:
+        a = arts.get(aid)
+        return {"designation": a.designation if a else "", "unit": a.unit if a else "", "planner": a.planner if a else ""}
+
+    def sup(sid: str | None) -> dict[str, Any]:
+        return {"supplier_id": sid, "supplier_name": supplier_names.get(sid or "", "")}
+
+    if kind == "receipts":
+        return [{"receipt_id": r.receipt_id, "article_id": r.article_id, **art(r.article_id), **sup(r.supplier_id), "date": r.receipt_date,
+                 "qty": r.qty, "purch_id": r.ref, "packing_slip": r.packing_slip, "status": r.status} for r in ds.receipts]
+    if kind == "orders":
+        return [{"order_id": o.order_id, "article_id": o.article_id, **art(o.article_id), **sup(o.supplier_id), "date": o.expected_date,
+                 "order_type": o.order_type.value, "qty_ordered": o.qty_ordered, "qty_open": float(o.qty_open or 0.0), "purch_id": o.ref,
+                 "first_seen": o.first_seen} for o in ds.orders]
+    if kind == "desadv":
+        received = _desadv_received(ds)
+        return [{"desadv_id": d.desadv_id, "article_id": d.article_id, **art(d.article_id), **sup(d.supplier_id), "date": d.issue_date,
+                 "qty": d.qty, "purch_id": d.purch_id, "packing_slip": d.packing_slip, "state": d.state, "final_processing": d.final_processing,
+                 "received": d.packing_slip.strip() in received, "journal": bool(d.stock_trans_id.strip())} for d in ds.desadv]
+    if kind == "pending":
+        return [{"pending_id": b.pending_id, "article_id": b.article_id, **art(b.article_id), **sup(b.supplier_id), "date": b.registered_date,
+                 "qty": b.qty, "purch_id": b.purch_id, "packing_slip": b.packing_slip, "days_pending": b.days_pending} for b in ds.bl_pending]
+    raise ValueError(kind)
+
+
+def match_any(text: str, q: str | None) -> bool:
+    """Free-text filter : terms separated by « ; » are alternatives (``123;456`` = contains 123 or 456)."""
+    terms = [t.strip().lower() for t in (q or "").split(";") if t.strip()]
+    if not terms:
+        return True
+    hay = text.lower()
+    return any(t in hay for t in terms)
 
 
 def period_groups(dates: list[dt.date], as_of: dt.date, granularity: str, focus_weeks: int,

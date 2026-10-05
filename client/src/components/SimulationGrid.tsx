@@ -345,10 +345,11 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         const inCol = (d: DesadvInfo, i: number) => columnOf(cols, d.issue_date) === i;
         const openOf = (i: number) => l.desadv.filter((d) => inCol(d, i) && !d.received && !d.hidden);
         const receiptsOf = (i: number) => (l.receipt_lines ?? []).filter((x: ReceiptInfo) => columnOf(cols, x.receipt_date) === i);
-        const bl = (x: { packing_slip: string }) => (x.packing_slip ? `BL ${x.packing_slip}` : NO_BL);
+        const registered = (x: { status?: string }) => (x.status ?? "").toLowerCase().startsWith("enregistr");
+        const bl = (x: { packing_slip: string; status?: string }) => `${x.packing_slip ? `BL ${x.packing_slip}` : NO_BL}${x.packing_slip && registered(x) ? ` (${NO_BL})` : ""}`;
         // why a receipt carries a red dot: no BL yet (the ACR is not validated : nothing to match, by construction) or a BL unknown to the processed DESADV
         const recKoReason = (xs: ReceiptInfo[]) => {
-          const noBl = xs.some((x) => !x.packing_slip), unknown = xs.some((x) => x.packing_slip && !x.processed);
+          const noBl = xs.some((x) => !x.packing_slip || registered(x)), unknown = xs.some((x) => x.packing_slip && !registered(x) && !x.processed);
           return [noBl ? NO_BL : "", unknown ? "BL reçu sans DESADV traité" : ""].filter(Boolean).join(" ; ") || "BL reçu sans DESADV traité";
         };
         return (

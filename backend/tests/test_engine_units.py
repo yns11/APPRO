@@ -596,3 +596,71 @@ def test_refused_proposal_is_per_supplier():
     ds.flags = [CellFlag("A1", "S1", first.delivery_date, "proposal_refused", qty=first.qty)]
     blocked = run(ds, horizon_days=21, generate_proposals=True, sourcing_policy="priority", proposal_placement="monday")
     assert all(not (first.delivery_date <= p.delivery_date <= end) for p in blocked.proposals if p.supplier_id == "S1")
+
+
+def test_registered_receipt_and_multi_bl_matching():
+    """A receipt « Enregistré » (acknowledgement not validated) counts in the stock but is red whatever
+    its BL ; its BL list (« BL-1 | BL-2 », taken from the DESADV) still marks those DESADV as received."""
+    tue1 = MON - D(days=6)
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
+                      receipts=[Receipt("R1", "A1", tue1, 300, supplier_id="S1", packing_slip="BL-1 | BL-2", status="Enregistré"),
+                                Receipt("R2", "A1", tue1, 50, supplier_id="S1", packing_slip="BL-3", status="Reçu")])
+    ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", tue1, 150, state="Traité", final_processing="OK"),
+                 DesadvLine("D2|1", "A1", "S1", "BL-2", tue1, 150, state="Traité", final_processing="OK"),
+                 DesadvLine("D3|1", "A1", "S1", "BL-3", tue1, 50, state="Traité", final_processing="OK")]
+    r = run(ds, horizon_days=5)
+    i = r.dates.index(MON)
+    s1 = {l.supplier_id: l for l in r.lanes}["S1"]
+    assert [d.received for d in s1.desadv] == [True, True, True] and s1.desadv_open[i - 6] == 0
+    assert [(x.receipt_id, x.processed, x.status) for x in s1.receipt_lines] == [("R1", False, "Enregistré"), ("R2", True, "Reçu")]
+    assert bool(s1.receipts_ko[i - 6]) and r.receipts[i - 6] == 350
+
+
+def test_plan_stockout_severity_is_graded_like_the_erp_one():
+    """A plan stockout far away is informational, inside the firm horizon a warning, inside the lead time critical."""
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 10000.0)],
+                      links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3)],
+                      pdp=[PdpLine("P1", MON + D(weeks=k), 500.0) for k in range(0, 30)])
+    from appro.engine.models import Severity
+    r = run(ds, horizon_days=200, firm_horizon_days=28)
+    plan = [a for a in r.alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
+    assert plan and plan[0].details["days_ahead"] > 28 and plan[0].severity == Severity.INFO
+    r2 = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1400.0)],
+                          links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3)]), horizon_days=60, firm_horizon_days=28)
+    plan2 = [a for a in r2.alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
+    assert plan2 and 3 < plan2[0].details["days_ahead"] <= 28 and plan2[0].severity == Severity.WARNING
+    r3 = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 150.0)],
+                          links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3)]), horizon_days=60)
+    plan3 = [a for a in r3.alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
+    assert plan3 and plan3[0].severity == Severity.CRITICAL and r3.kpis["stockout_plan_severity"] == "critical"
+
+
+def test_refused_proposals_stay_listed_as_ignored_with_their_real_order_date():
+    """A refused (clicked) proposal leaves the calculations but is kept in ``proposals_ignored`` ; an
+    urgent proposal keeps the real day the order had to be placed, even in the past."""
+    from appro.engine.models import CellFlag
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100.0)],
+                      links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=15)])
+    base = run(ds, horizon_days=40, generate_proposals=True)
+    first = base.proposals[0]
+    assert first.urgent and first.order_date < MON and not base.proposals_ignored
+    ds.flags = [CellFlag("A1", "S1", first.delivery_date, "proposal_refused", qty=first.qty)]
+    r = run(ds, horizon_days=40, generate_proposals=True)
+    end = first.delivery_date - D(days=first.delivery_date.weekday()) + D(days=6)
+    assert all(not (first.delivery_date <= p.delivery_date <= end) for p in r.proposals)
+    ign = r.proposals_ignored
+    assert ign and all(p.ignored and first.delivery_date <= p.delivery_date <= end for p in ign)
+    assert any(p.urgent and p.order_date == first.order_date for p in ign)
+
+
+def test_stock_at_date_and_value_kpis():
+    """Stock « à date » = closing stock of yesterday ; valued with the article price ; target value likewise."""
+    tue = MON - D(days=6)
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=8), 1000.0)], receipts=[Receipt("R1", "A1", tue, 200)])
+    ds.prices = {"A1": 2.5}
+    r = run(ds, horizon_days=10)
+    i = r.dates.index(MON)
+    assert r.kpis["stock_at_date"] == pytest.approx(float(r.stock_erp[i - 1])) and r.price == 2.5
+    assert r.kpis["stock_value"] == pytest.approx(2.5 * r.stock_erp[i - 1]) and r.kpis["target_value"] == pytest.approx(2.5 * r.target_stock[i])
+    r2 = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=8), 1000.0)]), horizon_days=10)
+    assert r2.kpis["price"] is None and r2.kpis["stock_value"] is None
