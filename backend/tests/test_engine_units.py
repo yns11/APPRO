@@ -664,3 +664,17 @@ def test_stock_at_date_and_value_kpis():
     assert r.kpis["stock_value"] == pytest.approx(2.5 * r.stock_erp[i - 1]) and r.kpis["target_value"] == pytest.approx(2.5 * r.target_stock[i])
     r2 = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=8), 1000.0)]), horizon_days=10)
     assert r2.kpis["price"] is None and r2.kpis["stock_value"] is None
+
+
+def test_daily_average_over_working_days_and_backlog_window_start():
+    """« Besoin 30 j » stays a 30-calendar-day sum ; its daily average divides by the working days of
+    that window only ; the backlog KPI tells the first day of its window."""
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 5000.0)])
+    r = run(ds, horizon_days=60, backlog_days=28)
+    i = r.dates.index(MON)
+    total = float(r.demand[i + 1:i + 31].sum())
+    cal = WorkCalendar()
+    open_days = sum(1 for d in r.dates[i + 1:i + 31] if cal.is_working_day(d))
+    assert r.kpis["demand_next_30d"] == pytest.approx(total) and r.kpis["working_days_30d"] == open_days == 22
+    assert r.kpis["avg_daily_demand_30d"] == pytest.approx(total / open_days) and r.kpis["avg_daily_demand_30d"] > total / 30
+    assert r.kpis["backlog_window_start"] == max(MON - D(days=28), MON - D(days=1)).isoformat()

@@ -209,6 +209,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         # identical in both scenarios before today, so read on the ERP one
         stock_at_date = float(erp.stock[i_as_of - 1]) if i_as_of > 0 else float(max(stock_start, 0.0))
         plan_stockout = next((a for a in alerts if a.alert_type.value == "STOCKOUT" and a.scope == "plan"), None)
+        working_days_30d = sum(1 for i in range(i_as_of + 1, min(n, i_as_of + 31)) if calendar.is_working_day(index.dates[i]))
         kpis = {
             "stock_on_hand": float(stock_snapshot),
             "reference_correction": reference_correction,
@@ -235,7 +236,10 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "demand_next_7d": float(demand[i_as_of + 1:i_as_of + 8].sum()),
             "demand_next_30d": float(demand[i_as_of + 1:i_as_of + 31].sum()),
             "demand_horizon": float(demand[horizon_slice].sum()),
-            "avg_daily_demand_30d": float(demand[i_as_of + 1:i_as_of + 31].sum() / max(1, min(30, n - i_as_of - 1))),
+            # 30 calendar days of requirement, averaged over the working days of that window only
+            "avg_daily_demand_30d": float(demand[i_as_of + 1:i_as_of + 31].sum() / max(1, working_days_30d)),
+            "working_days_30d": working_days_30d,
+            "backlog_window_start": max(as_of - dt.timedelta(days=max(int(params.backlog_days), 0)), index.start).isoformat(),
             "open_firm_qty": float(orders_firm[horizon_slice].sum()),
             "open_forecast_qty": float(lane_totals(lanes, "orders_forecast")[horizon_slice].sum()),
             "plan_qty": float(plan[horizon_slice].sum()),

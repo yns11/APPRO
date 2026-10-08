@@ -37,7 +37,7 @@ export interface ArticleKpis {
   stock_on_hand: number; reference_correction: number; stock_reference: number; stock_at_date: number; price: number | null; stock_value: number | null; target_value: number | null; stockout_plan_severity: Severity | null; init_date: string; shortage_policy: "backlog" | "lost";
   stock_as_of_erp: number; stock_as_of_plan: number; coverage_erp_days: number; coverage_plan_days: number; coverage_target_days: number; target_stock: number;
   first_stockout_erp: string | null; first_stockout_plan: string | null; min_stock_erp: number; min_stock_plan: number; max_shortage_erp: number; max_shortage_plan: number;
-  demand_next_7d: number; demand_next_30d: number; demand_horizon: number; avg_daily_demand_30d: number;
+  demand_next_7d: number; demand_next_30d: number; demand_horizon: number; avg_daily_demand_30d: number; working_days_30d: number; backlog_window_start: string;
   open_firm_qty: number; open_forecast_qty: number; plan_qty: number; plan_cell_count: number; ignored_order_days: number; refused_proposals: number;
   backlog_qty: number; backlog_ordered: number; backlog_received: number;
   proposed_qty: number; proposal_count: number; urgent_proposal_count: number; alert_count: number; severity: Severity | null; actual_share_30d: number; lanes: number;
