@@ -59,8 +59,7 @@ def _sheet_frame(ctx: AppContext, session: Session):
 
 @router.get("/sheet", response_model=S.PdpSheetOut)
 def sheet(weeks: int = Query(26, ge=4, le=160), ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """The effective weekly PDP as a sheet: every active programme with a bill of material (plus any
-    programme planned), one column per ISO week from the current week to ``weeks`` weeks ahead or to
+    """The effective weekly PDP as a sheet: every active programme (plus any programme planned), one column per ISO week from the current week to ``weeks`` weeks ahead or to
     the last planned week.  Weeks strictly after the current one are editable (managers, admins)."""
     from ...engine.calendar import iso_week_label
     ds, erp_lines, as_of, monday = _sheet_frame(ctx, session)
@@ -75,7 +74,9 @@ def sheet(weeks: int = Query(26, ge=4, le=160), ctx: AppContext = Depends(ctx_de
         weeks_of[p.week_start] = weeks_of.get(p.week_start, 0.0) + p.qty
         src[p.program_id] = "app" if p.version.startswith("APP:") else "erp"
     names = {p.program_id: p for p in ds.programs}
-    listed = sorted({p.program_id for p in ds.programs if p.active and p.program_id in with_bom} | set(by_program),
+    # every active programme (a programme just added in the Référentiel appears at once, even before its
+    # bill of material) plus any programme planned
+    listed = sorted({p.program_id for p in ds.programs if p.active} | set(by_program),
                     key=lambda pid: (names[pid].name if pid in names else pid).lower())
     active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
     return S.PdpSheetOut(
@@ -84,6 +85,7 @@ def sheet(weeks: int = Query(26, ge=4, le=160), ctx: AppContext = Depends(ctx_de
         weeks=[S.PdpSheetWeek(week=iso_week_label(d), week_start=d, editable=d > monday) for d in week_starts],
         programs=[S.PdpSheetProgram(program_id=pid, name=names[pid].name if pid in names else pid,
                                     active=names[pid].active if pid in names else True, source=src.get(pid, "none"),
+                                    has_bom=pid in with_bom,
                                     values=[float(by_program.get(pid, {}).get(d, 0.0)) for d in week_starts])
                   for pid in listed])
 

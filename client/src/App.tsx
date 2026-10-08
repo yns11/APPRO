@@ -12,6 +12,9 @@ import ImportsPage from "@/pages/ImportsPage";
 import ReferencePage from "@/pages/ReferencePage";
 import SettingsPage from "@/pages/SettingsPage";
 
+/** The search page is built but hidden for now (no menu entry, no route). */
+const SEARCH_ENABLED = false;
+
 export default function App() {
   return (
     <Routes>
@@ -21,7 +24,7 @@ export default function App() {
         <Route path="/articles/:articleId" element={<ArticlePage />} />
         <Route path="/tableau" element={<SupplyTablePage />} />
         <Route path="/propositions" element={<Navigate to="/?tab=flux" replace />} />
-        <Route path="/recherche" element={<SearchPage />} />
+        {SEARCH_ENABLED && <Route path="/recherche" element={<SearchPage />} />}
         <Route path="/programmes" element={<ProgramsPage />} />
         <Route path="/pdp" element={<PdpPage />} />
         <Route path="/saisies" element={<EntriesPage />} />

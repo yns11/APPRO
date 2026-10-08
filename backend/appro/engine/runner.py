@@ -183,6 +183,15 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
                 j = index.offset(p.delivery_date)
                 if j is not None:
                     lane.supply_proposed[j] += p.qty
+        # next expected delivery (Plan row + CBN complement, every supplier) : its day, quantity and nature
+        next_delivery = None
+        for i in range(i_as_of, n):
+            qty = sum(float(l.plan[i]) + float(l.supply_proposed[i]) for l in lanes)
+            if qty > 1e-9:
+                typed = any(bool(l.plan_typed[i]) and l.plan[i] > 0 for l in lanes)
+                firm = any(not bool(l.plan_typed[i]) and l.plan[i] > 0 for l in lanes)
+                next_delivery = (index.dates[i], qty, "saisie" if typed else "ferme" if firm else "cbn")
+                break
         cov = {name: coverage_days(layer.net, demand, index, calendar, params.coverage_unit, params.coverage_tie_rule)
                for name, layer in (("erp", erp), ("plan", plan_proj))}
 
@@ -243,6 +252,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "severity": (worst_severity(alerts).value if alerts else None),
             "actual_share_30d": float(share[i_as_of - 30 if i_as_of >= 30 else 0:i_as_of + 1].mean()) if i_as_of > 0 else 0.0,
             "lanes": len(lanes),
+            "next_delivery_date": next_delivery[0].isoformat() if next_delivery else None,
+            "next_delivery_qty": next_delivery[1] if next_delivery else None,
+            "next_delivery_type": next_delivery[2] if next_delivery else None,
         }
         results[aid] = ArticleResult(
             article=article, start_date=start, as_of=as_of, dates=index.dates,

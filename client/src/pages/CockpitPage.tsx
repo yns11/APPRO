@@ -85,10 +85,10 @@ export default function CockpitPage() {
       </div>
 
       <div className="grid cols-3">
-        <Card title="Projection de la valeur du stock" hint="Σ prix × stock en fin de semaine, Scenario Plan, articles valorisés ; pointillé : valeur du stock cible" className="span-2">
+        <Card title="Projection de la valeur du stock" hint="Σ prix × stock en fin de semaine, Scenario Plan, articles valorisés ; pointillé : valeur du stock cible" className="span-2" collapsible storageKey="cockpit.value">
           {q.isLoading ? <Skeleton h={220} /> : q.data?.weekly_stock_value.length ? <StockValueChart data={q.data.weekly_stock_value} /> : <Empty title="Aucun article valorisé" hint="Les prix viennent de la table des prix synchronisée depuis l'ERP (std_cost_price)." />}
         </Card>
-        <Card title="Alertes prioritaires" hint={q.data ? `${q.data.alerts.length} alertes` : ""} actions={<button className="btn sm" onClick={() => setTab("flux")}>À commander</button>}>
+        <Card title="Alertes prioritaires" hint={q.data ? `${q.data.alerts.length} alertes` : ""} actions={<button className="btn sm" onClick={() => setTab("flux")}>À commander</button>} collapsible storageKey="cockpit.alerts">
           {q.isLoading ? <SkeletonBlock /> : <AlertList alerts={(q.data?.alerts ?? []).filter((a) => a.severity !== "info" && a.alert_type !== "BACKLOG").slice(0, 8)} asOf={asOf} />}
         </Card>
       </div>

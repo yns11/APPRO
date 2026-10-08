@@ -5,7 +5,8 @@ import { api } from "@/lib/api";
 import { useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
-import { ORDER_TYPE_LABELS, fmtDate, fmtQty, isSaturday, isSunday, isWeekKey, isWeekend, isoWeekOf, periodLabel } from "@/lib/format";
+import { ORDER_TYPE_LABELS, fmtDate, fmtQty, isSaturday, isSunday, isWeekKey, isWeekend, isoWeekKey, isoWeekOf, periodLabel } from "@/lib/format";
+import { WeekRangeBar, type WeekChip } from "@/components/WeekRangeBar";
 import type { DesadvInfo, ReceiptInfo, AdjustmentOut, ArticleRef, FlagIn, FlagOut, LaneOut, PlanCellOut, SeriesOut } from "@/lib/types";
 
 /** Rows of the grid that can be hidden (for every article) ; lane rows are repeated per supplier. */
@@ -128,18 +129,38 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
     return m;
   }, [flags, cols]);
   const readOnlyCol = useCallback((i: number) => isWeekKey(cols.periods[i]), [cols]);
-  /** displayed columns → original column indexes (Saturdays / Sundays can be hidden in day mode) */
+  /** ISO week of every column ("2026-W40") : the key of the week range picker */
+  const weekOf = useCallback((i: number) => (isWeekKey(cols.periods[i]) ? cols.periods[i] : isoWeekKey(cols.period_start[i])), [cols]);
+  const weeks = useMemo<WeekChip[]>(() => {
+    const out: WeekChip[] = [];
+    const todayWeek = isoWeekKey(cols.as_of);
+    cols.periods.forEach((_p, i) => { const k = weekOf(i); if (!out.length || out[out.length - 1].key !== k) out.push({ key: k, label: k.replace(/^\d{4}-W/, "S"), start: fmtDate(cols.period_start[i]), current: k === todayWeek }); });
+    return out;
+  }, [cols, weekOf]);
+  /** the stored range applies only when it overlaps the loaded window (otherwise the whole window) */
+  const range = useMemo(() => {
+    const r = perimeter.weekRange;
+    if (!r) return null;
+    const keys = weeks.map((w) => w.key);
+    const a = keys.indexOf(r.from), b = keys.indexOf(r.to);
+    if (a < 0 && b < 0) return null;
+    return { from: a < 0 ? keys[0] : r.from, to: b < 0 ? keys[keys.length - 1] : r.to };
+  }, [perimeter.weekRange, weeks]);
+  /** displayed columns → original column indexes (Saturdays / Sundays can be hidden in day mode ; weeks outside the chosen range are hidden) */
   const shown = useMemo(() => {
     const out: number[] = [];
+    const keys = weeks.map((w) => w.key);
+    const lo = range ? keys.indexOf(range.from) : -1, hi = range ? keys.indexOf(range.to) : Infinity;
     cols.periods.forEach((p, i) => {
       if (!isWeekKey(p)) {
         if (!perimeter.showSaturday && isSaturday(p)) return;
         if (!perimeter.showSunday && isSunday(p)) return;
       }
+      if (range) { const w = keys.indexOf(weekOf(i)); if (w < lo || w > hi) return; }
       out.push(i);
     });
     return out;
-  }, [cols, perimeter.showSaturday, perimeter.showSunday]);
+  }, [cols, perimeter.showSaturday, perimeter.showSunday, range, weeks, weekOf]);
   const m = shown.length;
   const hasDayCols = useMemo(() => cols.periods.some((p) => !isWeekKey(p)), [cols]);
   /** next displayed column from ``i`` in direction ``dir`` (Tab navigation skips hidden days) */
@@ -508,6 +529,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         </>}
         <span className="subtle small" style={{ marginLeft: "auto" }}>{articles.length} article{articles.length > 1 ? "s" : ""} · {m} colonnes</span>
       </div>
+      {weeks.length > 1 && <WeekRangeBar weeks={weeks} range={range} onChange={(r) => set({ weekRange: r })} />}
       <div className="pivot virtual" ref={wrap} onScroll={onScroll}>
         <table style={{ width: LABEL_W + m * COL_W }}>
           <thead>

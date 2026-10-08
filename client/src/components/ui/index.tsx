@@ -1,5 +1,5 @@
 import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { AlertTriangle, Inbox, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Inbox, X } from "lucide-react";
 import type { Severity } from "@/lib/types";
 import { SEVERITY_LABELS } from "@/lib/format";
 
@@ -11,17 +11,24 @@ export function Button({ variant = "default", size, icon, className = "", childr
 }
 
 /* ---------------------------------------------------------------- Card */
-export function Card({ title, hint, actions, children, className = "", tight, flush, style }:
-  { title?: ReactNode; hint?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; tight?: boolean; flush?: boolean; style?: React.CSSProperties }) {
+export function Card({ title, hint, actions, children, className = "", tight, flush, style, collapsible, storageKey }:
+  { title?: ReactNode; hint?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; tight?: boolean; flush?: boolean; style?: React.CSSProperties;
+    /** a chevron folds the body ; the state is remembered per ``storageKey`` */
+    collapsible?: boolean; storageKey?: string }) {
+  const [open, setOpen] = useState(() => { if (!collapsible || !storageKey) return true; try { return localStorage.getItem(`appro.card.${storageKey}`) !== "closed"; } catch { return true; } });
+  const toggle = () => { const next = !open; setOpen(next); if (storageKey) { try { localStorage.setItem(`appro.card.${storageKey}`, next ? "open" : "closed"); } catch { /* private mode */ } } };
   return (
-    <section className={["card", tight ? "tight" : "", flush ? "flush" : "", className].filter(Boolean).join(" ")} style={style}>
-      {(title || actions) && (
+    <section className={["card", tight ? "tight" : "", flush ? "flush" : "", collapsible && !open ? "collapsed" : "", className].filter(Boolean).join(" ")} style={style}>
+      {(title || actions || collapsible) && (
         <div className="card-header" style={flush ? { padding: "var(--sp-4) var(--sp-5) 0" } : undefined}>
-          <div>{typeof title === "string" ? <h3>{title}</h3> : title}{hint && <div className="hint">{hint}</div>}</div>
-          {actions && <div className="actions">{actions}</div>}
+          <div className={collapsible ? "card-title-toggle" : undefined} onClick={collapsible ? toggle : undefined} role={collapsible ? "button" : undefined} aria-expanded={collapsible ? open : undefined}>
+            {collapsible && (open ? <ChevronDown className="card-chevron" /> : <ChevronRight className="card-chevron" />)}
+            {typeof title === "string" ? <h3>{title}</h3> : title}{hint && open && <div className="hint">{hint}</div>}
+          </div>
+          {actions && open && <div className="actions">{actions}</div>}
         </div>
       )}
-      {children}
+      {(!collapsible || open) && children}
     </section>
   );
 }

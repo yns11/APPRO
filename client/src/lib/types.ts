@@ -41,6 +41,7 @@ export interface ArticleKpis {
   open_firm_qty: number; open_forecast_qty: number; plan_qty: number; plan_cell_count: number; ignored_order_days: number; refused_proposals: number;
   backlog_qty: number; backlog_ordered: number; backlog_received: number;
   proposed_qty: number; proposal_count: number; urgent_proposal_count: number; alert_count: number; severity: Severity | null; actual_share_30d: number; lanes: number;
+  next_delivery_date: string | null; next_delivery_qty: number | null; next_delivery_type: "ferme" | "cbn" | "saisie" | null;
 }
 export interface ArticleSummary {
   article_id: string; designation: string; unit: string; planner: string; suppliers: string[]; severity: Severity | null;
@@ -106,7 +107,7 @@ export interface ConfigOut { title: string; data_source: Record<string, unknown>
 export interface PerimeterItem { id: string; name: string; }
 export interface PerimeterOut { planner: string | null; articles: number; programs: PerimeterItem[]; suppliers: PerimeterItem[]; }
 export interface PdpSheetWeek { week: string; week_start: string; editable: boolean; }
-export interface PdpSheetProgram { program_id: string; name: string; active: boolean; source: "app" | "erp" | "none"; values: number[]; }
+export interface PdpSheetProgram { program_id: string; name: string; active: boolean; source: "app" | "erp" | "none"; has_bom: boolean; values: number[]; }
 export interface PdpSheetOut { as_of: string; current_week: string; active_version: PdpVersionOut | null; erp_available: boolean; weeks: PdpSheetWeek[]; programs: PdpSheetProgram[]; }
 
 // ---- supply flows (cockpit tab 2) and search page

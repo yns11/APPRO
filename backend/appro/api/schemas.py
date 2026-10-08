@@ -592,6 +592,7 @@ class PdpSheetProgram(BaseModel):
     name: str
     active: bool = True
     source: Literal["app", "erp", "none"]   # where the displayed quantities come from
+    has_bom: bool = True                    # without a bill of material the plan explodes into nothing
     values: list[float]
 
 

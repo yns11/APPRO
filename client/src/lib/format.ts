@@ -30,6 +30,8 @@ export function isSaturday(iso: string): boolean { return parseISO(iso).getDay()
 export function isSunday(iso: string): boolean { return parseISO(iso).getDay() === 0; }
 /** ISO week of a date, as the week columns are labelled ("2026 S40"). */
 export function isoWeekOf(iso: string): string { const d = parseISO(iso); return `${getISOWeekYear(d)} S${String(getISOWeek(d)).padStart(2, "0")}`; }
+/** ISO week key of a date, as the week columns are keyed ("2026-W40"). */
+export function isoWeekKey(iso: string): string { const d = parseISO(iso); return `${getISOWeekYear(d)}-W${String(getISOWeek(d)).padStart(2, "0")}`; }
 /** A column key is either an ISO week label ("2026-W38") or an ISO date. */
 export const isWeekKey = (p: string) => p.includes("-W");
 export function periodLabel(p: string): string {

@@ -98,7 +98,7 @@ export default function PdpPage() {
             <SheetGrid ariaLabel="Plan de production" className="pdp-sheet" canEdit={canEdit} cells={cells} onCommit={apply} onClear={clear} fillAxis="both" colWidth={78}
               corner="Programme" colClass={(c) => (cols[c].editable ? "" : "current-week")}
               colHeaders={cols.map((w) => <>{w.week.replace("-W", " S")}<span className="sub">{fmtDate(w.week_start, "dd/MM")}</span></>)}
-              rowHeaders={programs.map((p) => <><b>{p.name}</b> <span className="subtle mono small">{p.program_id}</span> <Badge tone={SOURCE[p.source].tone} title="Origine des quantités affichées">{SOURCE[p.source].label}</Badge>{!p.active && <Badge tone="outline">inactif</Badge>}</>)} />
+              rowHeaders={programs.map((p) => <><b>{p.name}</b> <span className="subtle mono small">{p.program_id}</span> <Badge tone={SOURCE[p.source].tone} title="Origine des quantités affichées">{SOURCE[p.source].label}</Badge>{!p.active && <Badge tone="outline">inactif</Badge>}{!p.has_bom && <Badge tone="warning" title="Aucune nomenclature : ce plan n'éclate en aucun besoin de composant (Référentiel › Nomenclatures)">sans nomenclature</Badge>}</>)} />
           )}
         {save.error && <div className="error-box" style={{ margin: 12 }}>{(save.error as Error).message}</div>}
         <p className="small subtle" style={{ padding: "8px 12px" }}>Une version active remplace le PDP ERP pour les programmes qu'elle contient ; les autres programmes suivent l'ERP. Une saisie reprend les programmes de la version active et y ajoute ceux modifiés (copiés depuis l'ERP puis corrigés). Désactiver la version revient à l'état précédent.</p>

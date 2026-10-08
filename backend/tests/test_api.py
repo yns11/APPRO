@@ -695,3 +695,22 @@ def test_first_seen_is_carried_over_between_two_copies():
     previous = {"A": dt.date(2026, 9, 1), "B": None}
     assert carry_first_seen(previous, "A", today) == dt.date(2026, 9, 1)
     assert carry_first_seen(previous, "B", today) == today and carry_first_seen(previous, "NEW", today) == today
+
+
+def test_next_expected_delivery_and_new_programme_in_the_sheet(client):
+    """Fiches articles: the next expected delivery (day, quantity, nature) ; a programme added in the
+    Référentiel is listed in the PDP sheet at once, without any bill of material."""
+    arts = client.get("/api/cockpit", params={"planner": "QUENTIN"}).json()["articles"]
+    a = next(x for x in arts if x["article_id"] == AID)
+    k = a["kpis"]
+    assert k["next_delivery_date"] and k["next_delivery_date"] >= AS_OF and k["next_delivery_qty"] > 0
+    assert k["next_delivery_type"] in ("ferme", "cbn", "saisie")
+    day = (dt.date.fromisoformat(AS_OF) + dt.timedelta(days=1)).isoformat()
+    assert client.put("/api/entries/plan", json={"article_id": AID, "date": day, "expression": "77"}).status_code == 200
+    k2 = next(x for x in client.get("/api/cockpit", params={"planner": "QUENTIN"}).json()["articles"] if x["article_id"] == AID)["kpis"]
+    assert k2["next_delivery_date"] == day and k2["next_delivery_qty"] == 77 and k2["next_delivery_type"] == "saisie"
+    r = client.put("/api/reference/ref_programs/rows", json={"values": {"program_id": "mass-NEW", "name": "Nouveau programme", "family": "", "active": True}})
+    assert r.status_code == 200, r.text
+    sh = client.get("/api/pdp/sheet", params={"weeks": 6}).json()
+    new = next(p for p in sh["programs"] if p["program_id"] == "mass-NEW")
+    assert new["has_bom"] is False and new["source"] == "none" and all(v == 0 for v in new["values"])

@@ -17,6 +17,8 @@ export interface Perimeter {
   /** day columns of the grid: show Saturdays / Sundays */
   showSaturday: boolean;
   showSunday: boolean;
+  /** ISO weeks displayed by the supply tables ("2026-W40" → "2026-W45") ; null = the whole window */
+  weekRange: { from: string; to: string } | null;
   /** navigation panel reduced to its icons */
   sidebarCollapsed: boolean;
   /** fonts and sizes (Paramètres › Affichage) */
@@ -49,7 +51,7 @@ interface Ctx {
 }
 
 const KEY = "appro.perimeter.v2";
-const defaults: Perimeter = { planner: null, horizonDays: 120, granularity: "default", theme: "system", hiddenRows: [], showSaturday: true, showSunday: true, sidebarCollapsed: false, display: DISPLAY_DEFAULTS };
+const defaults: Perimeter = { planner: null, horizonDays: 120, granularity: "default", theme: "system", hiddenRows: [], showSaturday: true, showSunday: true, weekRange: null, sidebarCollapsed: false, display: DISPLAY_DEFAULTS };
 
 function load(): Perimeter {
   try {

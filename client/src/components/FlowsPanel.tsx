@@ -7,6 +7,8 @@ import { DataTable, type Column } from "@/components/DataTable";
 import { fmtDate, fmtInt, fmtQty, ORDER_TYPE_LABELS } from "@/lib/format";
 import type { BacklogRow, DesadvRow, FlowKey, OrderRow, PendingRow, ProposalOut, ReceiptRow } from "@/lib/types";
 
+const FLOW_H = "calc(100vh - 330px)";   // the table scrolls under its sticky header, the tiles stay in view
+
 const FLOWS: { key: FlowKey; label: string; hint: string; icon: typeof Truck; tone?: "critical" | "warning" | "ok" | "info" | "brand" }[] = [
   { key: "to_order", label: "À commander", hint: "propositions CBN urgentes (refusées comprises, marquées ignorées)", icon: ShoppingCart, tone: "critical" },
   { key: "ordered", label: "Commandé", hint: "commandes fermes apparues aujourd'hui dans l'ERP", icon: ClipboardList, tone: "brand" },
@@ -84,19 +86,19 @@ export function FlowsPanel() {
   const table = () => {
     if (!d) return <div style={{ padding: 20 }}><SkeletonBlock rows={6} /></div>;
     switch (flow) {
-      case "to_order": return <div className="scroll-x"><DataTable rows={d.to_order} columns={proposalCols} rowKey={(p) => `${p.proposal_id}-${p.ignored}`} rowClass={(p) => (p.ignored ? "muted" : "")} emptyTitle="Aucune proposition urgente" emptyHint="Toutes les propositions CBN respectent le délai fournisseur." /></div>;
-      case "ordered": return <DataTable rows={d.ordered} columns={orderCols} rowKey={(o) => o.order_id} emptyTitle="Aucune nouvelle commande ferme aujourd'hui" emptyHint={d.first_seen_available ? undefined : "La date d'apparition des commandes est posée par le job de synchronisation : elle sera disponible après sa prochaine exécution."} />;
-      case "in_transit": return <DataTable rows={d.in_transit} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Aucun DESADV en transit" />;
-      case "to_process": return <DataTable rows={d.to_process} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Aucun DESADV à traiter" />;
-      case "to_receive": return <DataTable rows={d.to_receive} columns={orderCols} rowKey={(o) => o.order_id} emptyTitle="Aucune commande ferme attendue aujourd'hui" />;
-      case "received": return <DataTable rows={d.received} columns={receiptCols} rowKey={(r) => r.receipt_id} emptyTitle="Aucune réception aujourd'hui" />;
-      case "late": return <DataTable rows={d.late} columns={backlogCols} rowKey={(b) => `${b.article_id}-${b.supplier_id}`} emptyTitle="Aucune commande en souffrance" />;
-      case "to_validate": return <DataTable rows={d.to_validate} columns={pendingCols} rowKey={(b) => b.pending_id} emptyTitle="Aucun accusé de réception en attente" />;
+      case "to_order": return <div className="scroll-x"><DataTable rows={d.to_order} columns={proposalCols} rowKey={(p) => `${p.proposal_id}-${p.ignored}`} rowClass={(p) => (p.ignored ? "muted" : "")} emptyTitle="Aucune proposition urgente" emptyHint="Toutes les propositions CBN respectent le délai fournisseur." maxHeight={FLOW_H} /></div>;
+      case "ordered": return <DataTable rows={d.ordered} columns={orderCols} rowKey={(o) => o.order_id} emptyTitle="Aucune nouvelle commande ferme aujourd'hui" emptyHint={d.first_seen_available ? undefined : "La date d'apparition des commandes est posée par le job de synchronisation : elle sera disponible après sa prochaine exécution."} maxHeight={FLOW_H} />;
+      case "in_transit": return <DataTable rows={d.in_transit} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Aucun DESADV en transit" maxHeight={FLOW_H} />;
+      case "to_process": return <DataTable rows={d.to_process} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Aucun DESADV à traiter" maxHeight={FLOW_H} />;
+      case "to_receive": return <DataTable rows={d.to_receive} columns={orderCols} rowKey={(o) => o.order_id} emptyTitle="Aucune commande ferme attendue aujourd'hui" maxHeight={FLOW_H} />;
+      case "received": return <DataTable rows={d.received} columns={receiptCols} rowKey={(r) => r.receipt_id} emptyTitle="Aucune réception aujourd'hui" maxHeight={FLOW_H} />;
+      case "late": return <DataTable rows={d.late} columns={backlogCols} rowKey={(b) => `${b.article_id}-${b.supplier_id}`} emptyTitle="Aucune commande en souffrance" maxHeight={FLOW_H} />;
+      case "to_validate": return <DataTable rows={d.to_validate} columns={pendingCols} rowKey={(b) => b.pending_id} emptyTitle="Aucun accusé de réception en attente" maxHeight={FLOW_H} />;
     }
   };
   return (
     <>
-      <div className="grid kpis flows">
+      <div className="grid kpis flows sticky-kpis">
         {FLOWS.map((f) => (
           <Kpi key={f.key} label={f.label} icon={<f.icon size={14} />} tone={d && d.kpis[f.key] > 0 ? f.tone : undefined} value={d ? fmtInt(d.kpis[f.key]) : <Skeleton w={40} h={28} />} meta={f.hint} onClick={() => setFlow(f.key)} active={flow === f.key} />
         ))}

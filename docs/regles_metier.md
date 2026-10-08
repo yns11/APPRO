@@ -280,9 +280,11 @@ graphique **projection de la valeur du stock** (Scenario Plan, fin de chaque sem
 stock cible) ; alertes prioritaires ; portefeuille (colonnes *Fournisseurs*, **Approvisionneur**, *Statut*,
 **Stock à date** = stock projeté à la fin de la veille, réceptions et consommations réelles comprises, et non le
 stock d'initialisation). Les champs de filtre acceptent des alternatives séparées par « ; » (`123;456` = contient
-123 ou 456), partout (cockpit, fiches, tableau, recherche).
+123 ou 456), partout (cockpit, fiches, tableau, recherche). Les blocs *Projection de la valeur du stock* et
+*Alertes prioritaires* se plient d'un clic sur leur titre (état mémorisé dans le navigateur).
 
-**Flux d'approvisionnement** : huit cartes, un clic affiche les lignes correspondantes en dessous.
+**Flux d'approvisionnement** : huit cartes, un clic affiche les lignes correspondantes en dessous ; les cartes et
+l'en-tête de la table restent visibles pendant le défilement.
 
 | Flux | Contenu |
 |---|---|
@@ -300,6 +302,15 @@ L'ancienne page *Propositions CBN* est remplacée par le flux *À commander* (`/
 **Recherche** : réceptions (par défaut), commandes, DESADV ou BL en attente du périmètre ; texte libre sur tous
 les champs (« ; » = ou), période, fournisseur ; résultat en tableau filtrable par colonne (5 000 lignes au plus,
 affiner au-delà).
+
+**Fiches articles** (liste) : en-tête fixe ; colonnes *Prochaine livraison* (quantité), *Attendue le* et *Nature*
+(**Ferme ERP**, **CBN** ou **Saisie**) = première quantité attendue à partir d'aujourd'hui sur la ligne *Plan* et le
+complément CBN, tous fournisseurs confondus.
+
+**Période affichée** : sous la barre d'outils des tableaux d'approvisionnement (global et fiche article), une
+rangée de semaines ISO ; cliquer une semaine, ou glisser d'une semaine à une autre, n'affiche que ces colonnes
+(Maj+clic étend, « Tout » rétablit la fenêtre entière). Le choix est commun aux deux tableaux et mémorisé ; il ne
+change **ni la fenêtre ni les dates du calcul**, seulement les colonnes montrées.
 
 ## 10. Traçabilité et règles de date
 
@@ -332,8 +343,8 @@ une cellule. Les cellules des articles présents dans le classeur remplacent cel
 ### 11 bis. Plan de production : saisie directe
 
 La page *Plan de production (PDP)* montre le **PDP effectif** (ERP, remplacé programme par programme par la
-version active) en une feuille : programmes actifs porteurs d'une nomenclature (plus tout programme planifié) en
-lignes, semaines ISO en colonnes, de la semaine en cours à 26 semaines (choix 26 à 104) ou à la dernière semaine
+version active) en une feuille : tous les programmes actifs du Référentiel (un programme ajouté y figure aussitôt,
+badge « sans nomenclature » tant qu'il n'en a pas, plus tout programme planifié) en lignes, semaines ISO en colonnes, de la semaine en cours à 26 semaines (choix 26 à 104) ou à la dernière semaine
 planifiée. Les **managers et administrateurs** saisissent les **semaines à venir** (la semaine en cours est
 grisée, non modifiable) comme dans Excel (saisie, flèches, Ctrl+C / Ctrl+V d'un bloc, recopie par le carré,
 Suppr = 0), puis **enregistrent** : les cellules modifiées sont appliquées au plan effectif et forment une

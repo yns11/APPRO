@@ -369,3 +369,20 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .grid.kpis.flows { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .tbl tr.muted td { color: var(--fg-subtle); }
 .tbl tr.muted td b, .tbl tr.muted td a { color: var(--fg-subtle); }
+
+/* ---- collapsible cards */
+.card-title-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.card-title-toggle .card-chevron { width: 16px; height: 16px; color: var(--fg-subtle); flex: none; }
+.card-title-toggle .hint { margin-left: 22px; }
+.card.collapsed .card-header { padding-bottom: var(--sp-4); }
+
+/* ---- week range picker of the supply tables */
+.weekbar { display: flex; align-items: center; gap: var(--sp-3); padding: 4px var(--sp-3) 6px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
+.weekbar-chips { display: flex; gap: 0; overflow-x: auto; flex: 1; padding: 3px 0; scrollbar-width: thin; }
+.chip-week { flex: none; min-width: 44px; padding: 3px 6px; margin: 0 1px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-subtle); color: var(--fg-muted); font: inherit; font-size: var(--fs--2); font-variant-numeric: tabular-nums; cursor: pointer; user-select: none; }
+.chip-week:hover { border-color: var(--brand); color: var(--brand-fg); }
+.chip-week.current { font-weight: var(--fw-semibold); color: var(--fg); box-shadow: inset 0 -2px 0 var(--brand); }
+.chip-week.sel { background: var(--brand-soft); color: var(--brand-fg); border-color: var(--brand); margin: 0; border-radius: 0; border-left-width: 0; }
+.chip-week.sel.first { border-left-width: 2px; border-top-left-radius: var(--r-sm); border-bottom-left-radius: var(--r-sm); }
+.chip-week.sel.last { border-right-width: 2px; border-top-right-radius: var(--r-sm); border-bottom-right-radius: var(--r-sm); }
+.weekbar-info { flex: none; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }

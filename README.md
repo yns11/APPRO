@@ -13,9 +13,8 @@ du tableau se saisissent, *Plan* (une par fournisseur) et *Ajustement* ; deux li
 | Page | Contenu |
 |---|---|
 | Cockpit du jour | onglet *Couvertures et stocks* (KPI dont valeur du stock et couverture médiane, projection de la valeur du stock, alertes, portefeuille) et onglet *Flux d'approvisionnement* (à commander, commandé, en transit, à traiter, à réceptionner, reçu, en retard, à valider) |
-| Tableau d'approvisionnement | le tableau des articles du périmètre, **par pages** (filtres programme / fournisseur / recherche), grille virtualisée : 500 articles × 1 000 jours restent fluides |
+| Tableau d'approvisionnement | le tableau des articles du périmètre, **par pages** (filtres programme / fournisseur / recherche, **période affichée** par semaines), grille virtualisée : 500 articles × 1 000 jours restent fluides |
 | Fiche article | tableau (Besoin ; par fournisseur : Ferme **cliquable** (commandé / restant, en cours / soldée / ignorée), Prévisionnel, Reçu, **Plan** ; Proposition CBN **cliquable** (refus, semaine bloquée) ; **Ajustement** ; Scenario ERP ; Scenario Plan avec couverture et manque dans les cellules ; poignée de **recopie** sur Plan et Ajustement), KPI, courbes, **planning de livraison** (lignes ERP copiables, FR / EN), commandes ERP, propositions, alertes |
-| Recherche | réceptions, commandes, DESADV, BL en attente : texte libre (« ; » = ou), période, fournisseur |
 | Saisies & journal | cellules du plan, ajustements, journal nominatif |
 | Référentiel | articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures, stock de référence, **approvisionneurs (rôles) et délégations** : CRUD et **modèle Excel par table** ; paramètres par semaine édités comme une feuille |
 | Plan de production (PDP) | PDP effectif en feuille (programmes × semaines) : saisie directe des semaines à venir par les managers et administrateurs, import d'un classeur, versions |
