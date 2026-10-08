@@ -300,21 +300,21 @@ def test_exports_and_reimport(client):
     assert set(wb.sheetnames) == {"PARAMETRES", "ARTICLES", "SIMULATION", "ALERTES"}
     ws = wb["SIMULATION"]
     labels = [ws.cell(r, 3).value for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == AID]
-    assert list(labels[:5]) == ["Besoin", "Ferme", "Prévisionnel", "Reçu", "Plan"] and "Scenario Plan" in labels
+    assert list(labels[:5]) == ["Besoin", "Ferme", "Prévisionnel", "Reçu", "Appro."] and "Projeté Appro." in labels
     labels2 = [ws.cell(r, 3).value for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == "P-00005775"]
-    assert "Plan · S-000032" in labels2 and "Plan · S-001033" in labels2         # two supplier lanes
+    assert "Appro. · S-000032" in labels2 and "Appro. · S-001033" in labels2         # two supplier lanes
     assert ws.cell(1, 5).value == AS_OF
     rows = {ws.cell(r, 3).value: r for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == AID}
-    assert str(ws.cell(rows["Scenario ERP"], 5).value).startswith("=IF(PARAMETRES!$B$5")
-    assert "OFFSET" in str(ws.cell(rows["Stock cible"], 5).value) and "COUNTIF" in str(ws.cell(rows["Couverture plan (périodes)"], 5).value)
+    assert str(ws.cell(rows["Projeté ERP"], 5).value).startswith("=IF(PARAMETRES!$B$5")
+    assert "OFFSET" in str(ws.cell(rows["Stock cible"], 5).value) and "COUNTIF" in str(ws.cell(rows["Couverture Appro. (périodes)"], 5).value)
     assert wb["ARTICLES"]["A2"].value == AID and wb["ARTICLES"]["I2"].value > 0
     assert client.get("/api/exports/alerts.xlsx").status_code == 200
     assert client.get("/api/exports/plan.xlsx", params={"planner": "QUENTIN"}).status_code == 200
     # planner edits in Excel: delay the 30/09 order (1600) to 06/10, an adjustment on 22/09
     cols = {ws.cell(1, c).value: c for c in range(5, ws.max_column + 1)}
-    assert ws.cell(rows["Ferme"], cols["2026-09-30"]).value == 1600 and ws.cell(rows["Plan"], cols["2026-09-30"]).value == 1600
-    ws.cell(rows["Plan"], cols["2026-09-30"], 0)
-    ws.cell(rows["Plan"], cols["2026-10-06"], 1600)
+    assert ws.cell(rows["Ferme"], cols["2026-09-30"]).value == 1600 and ws.cell(rows["Appro."], cols["2026-09-30"]).value == 1600
+    ws.cell(rows["Appro."], cols["2026-09-30"], 0)
+    ws.cell(rows["Appro."], cols["2026-10-06"], 1600)
     ws.cell(rows["Ajustement"], cols["2026-09-22"], -50)
     buf = io.BytesIO()
     wb.save(buf)

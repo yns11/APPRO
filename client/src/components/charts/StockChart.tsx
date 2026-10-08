@@ -4,8 +4,8 @@ import { fmtQty, periodLabel } from "@/lib/format";
 
 /**
  * Article projection chart – IBCS-inspired notation:
- *  - Scenario ERP: solid dark line (ERP orders as is)
- *  - Scenario Plan: dotted line (plan cells + CBN proposals)
+ *  - Projeté ERP: solid dark line (ERP orders as is)
+ *  - Projeté Appro.: dotted line (plan cells + CBN proposals)
  *  - unserved demand (shortage) of the plan: red bars below the axis
  *  - target stock: thin grey dashed reference
  *  - supply bars: ERP flows (firm / forecast / receipts) in one stack, plan (hatched) + CBN in another,
@@ -43,13 +43,13 @@ export function StockChart({ data, height = 300 }: { data: ProjectionResponse; h
         <Bar yAxisId="qty" dataKey="receipts" name="Reçu" stackId="flow" fill="var(--s-receipt)" />
         <Bar yAxisId="qty" dataKey="firm" name="Ferme (ERP)" stackId="flow" fill="var(--s-firm)" />
         <Bar yAxisId="qty" dataKey="forecast" name="Prévisionnel (ERP)" stackId="flow" fill="var(--s-forecast)" fillOpacity={0.5} />
-        <Bar yAxisId="qty" dataKey="plan" name="Plan" stackId="plan" fill="url(#hatch)" stroke="var(--s-stock-sim)" />
+        <Bar yAxisId="qty" dataKey="plan" name="Appro." stackId="plan" fill="url(#hatch)" stroke="var(--s-stock-sim)" />
         <Bar yAxisId="qty" dataKey="proposed" name="Proposition CBN" stackId="plan" fill="var(--s-proposal)" fillOpacity={0.45} />
         <Bar yAxisId="qty" dataKey="adjustments" name="Ajustement" stackId="flow" fill="var(--s-adjust)" fillOpacity={0.8} />
-        <Bar yAxisId="qty" dataKey="shortage" name="Manque plan" stackId="short" fill="var(--s-shortage)" fillOpacity={0.7} />
+        <Bar yAxisId="qty" dataKey="shortage" name="Manque Appro." stackId="short" fill="var(--s-shortage)" fillOpacity={0.7} />
         <Area yAxisId="qty" type="monotone" dataKey="target" name="Stock cible" stroke="var(--s-target)" strokeDasharray="2 3" fill="var(--s-target)" fillOpacity={0.06} dot={false} />
-        <Line yAxisId="qty" type="monotone" dataKey="stock_erp" name="Scenario ERP" stroke="var(--s-stock-firm)" strokeWidth={2.2} dot={false} />
-        <Line yAxisId="qty" type="monotone" dataKey="stock_plan" name="Scenario Plan" stroke="var(--s-stock-sim)" strokeWidth={2} strokeDasharray="2 3" dot={false} />
+        <Line yAxisId="qty" type="monotone" dataKey="stock_erp" name="Projeté ERP" stroke="var(--s-stock-firm)" strokeWidth={2.2} dot={false} />
+        <Line yAxisId="qty" type="monotone" dataKey="stock_plan" name="Projeté Appro." stroke="var(--s-stock-sim)" strokeWidth={2} strokeDasharray="2 3" dot={false} />
       </ComposedChart>
     </ResponsiveContainer>
   );
@@ -60,7 +60,7 @@ function ChartTooltip({ active, payload, label, unit }: { active?: boolean; payl
   return (
     <div className="tooltip-box">
       <div className="t">{periodLabel(String(label))}</div>
-      {payload.filter((p) => p.value !== 0 || p.name.startsWith("Scenario")).map((p) => (
+      {payload.filter((p) => p.value !== 0 || p.name.startsWith("Projeté")).map((p) => (
         <div key={p.name} className="r"><span style={{ color: p.color }}>{p.name}</span><b>{p.name === "Ajustement" ? (p.value < 0 ? "−" : "") + fmtQty(Math.abs(p.value), unit) : fmtQty(Math.abs(p.value), unit)}</b></div>
       ))}
     </div>
@@ -83,7 +83,7 @@ export function CoverageChart({ data, height = 120 }: { data: ProjectionResponse
         <ReferenceLine y={a.alert_yellow_days} stroke="var(--warning)" strokeDasharray="3 3" label={{ value: "orange", fontSize: 9, fill: "var(--warning)", position: "insideTopLeft" }} />
         <ReferenceLine y={a.overstock_days} stroke="var(--ok)" strokeDasharray="3 3" label={{ value: "surstock", fontSize: 9, fill: "var(--ok)", position: "insideTopLeft" }} />
         <Line type="stepAfter" dataKey="firm" name="Couverture ERP" stroke="var(--s-stock-firm)" strokeWidth={1.6} dot={false} />
-        <Line type="stepAfter" dataKey="sim" name="Couverture plan" stroke="var(--s-stock-sim)" strokeWidth={1.6} strokeDasharray="2 3" dot={false} />
+        <Line type="stepAfter" dataKey="sim" name="Couverture Appro." stroke="var(--s-stock-sim)" strokeWidth={1.6} strokeDasharray="2 3" dot={false} />
       </ComposedChart>
     </ResponsiveContainer>
   );

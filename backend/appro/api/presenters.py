@@ -20,19 +20,19 @@ SERIES_LABELS = [
     ("orders_firm_hist", "Ferme (passé)"),
     ("orders_forecast", "Prévisionnel"),
     ("receipts", "Reçu"),
-    ("plan", "Plan"),
+    ("plan", "Appro."),
     ("supply_proposed", "Proposition CBN"),
     ("adjustments", "Ajustement"),
-    ("stock_erp", "Scenario ERP"),
-    ("stock_plan", "Scenario Plan"),
+    ("stock_erp", "Projeté ERP"),
+    ("stock_plan", "Projeté Appro."),
     ("shortage_erp", "Manque ERP"),
     ("shortage_plan", "Manque Plan"),
     ("target_stock", "Stock cible"),
     ("coverage_erp", "Couverture ERP (j)"),
-    ("coverage_plan", "Couverture Plan (j)"),
+    ("coverage_plan", "Couverture Appro. (j)"),
 ]
 LANE_SERIES = [("orders_firm", "Ferme"), ("orders_firm_hist", "Ferme (passé)"), ("orders_forecast", "Prévisionnel"),
-               ("receipts", "Reçu"), ("plan", "Plan"), ("supply_proposed", "Proposition CBN"),
+               ("receipts", "Reçu"), ("plan", "Appro."), ("supply_proposed", "Proposition CBN"),
                ("orders_firm_ordered", "Ferme commandé"), ("orders_firm_open", "Ferme restant ERP"),
                ("desadv_open", "DESADV non reçu")]
 #: series of the multi-article table (the article page gets every series)
@@ -170,7 +170,7 @@ def weekly_supply_demand(result: MrpResult, weeks: int = 12) -> list[dict[str, A
 
 
 def weekly_stock_value(result: MrpResult, weeks: int = 52) -> list[S.WeeklyStockValue]:
-    """Projected value of the portfolio stock (Scenario Plan) and of its target, at the end of each
+    """Projected value of the portfolio stock (Projeté Appro.) and of its target, at the end of each
     ISO week from the current one : Σ price × stock over the articles that have a price."""
     arts = [r for r in result.articles.values() if r.price is not None]
     if not arts:

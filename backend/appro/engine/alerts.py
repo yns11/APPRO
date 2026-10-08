@@ -69,7 +69,7 @@ def classify_alerts(
     if k_plan is not None:
         worst = float(np.max(plan.shortage[k_plan:]))
         alerts.append(Alert(aid, AlertType.STOCKOUT, _severity_by_horizon(k_plan - i0, lead, params),
-                            f"Rupture du plan le {index.dates[k_plan].isoformat()} (J+{k_plan - i0}) malgré le plan de "
+                            f"Rupture Projeté Appro. le {index.dates[k_plan].isoformat()} (J+{k_plan - i0}) malgré le plan de "
                             f"livraison et le complément CBN, manque max {worst:,.0f}", date=index.dates[k_plan], value=worst,
                             scope="plan", details={"days_ahead": k_plan - i0, "lead_time_days": lead}))
     if k_erp is not None:

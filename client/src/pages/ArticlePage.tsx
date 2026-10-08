@@ -80,12 +80,12 @@ export default function ArticlePage() {
 
       <div className="grid kpis">
         <Kpi label="Stock de référence" value={k ? fmtQty(k.stock_reference, unit) : <Skeleton w={60} h={28} />} unit={unit} meta={k ? `ERP ${fmtQty(k.stock_on_hand, unit)} initialisé le ${fmtDate(k.init_date)}${k.reference_correction ? ` · corrigé de ${k.reference_correction > 0 ? "+" : ""}${fmtQty(k.reference_correction, unit)}` : ""}` : ""} tone={k?.reference_correction ? "warning" : undefined} onClick={() => setTab("adjustments")} />
-        <Kpi label="Couverture plan" value={k ? k.coverage_plan_days : <Skeleton w={40} h={28} />} unit="j" tone={k ? (k.coverage_plan_days <= (a?.alert_red_days ?? 3) ? "critical" : k.coverage_plan_days <= (a?.alert_yellow_days ?? 7) ? "warning" : "ok") : undefined} meta={k ? `ERP : ${k.coverage_erp_days} j · cible ${k.coverage_target_days} j` : ""} />
+        <Kpi label="Couverture Appro." value={k ? k.coverage_plan_days : <Skeleton w={40} h={28} />} unit="j" tone={k ? (k.coverage_plan_days <= (a?.alert_red_days ?? 3) ? "critical" : k.coverage_plan_days <= (a?.alert_yellow_days ?? 7) ? "warning" : "ok") : undefined} meta={k ? `ERP : ${k.coverage_erp_days} j · cible ${k.coverage_target_days} j` : ""} />
         <Kpi label="Rupture ERP" value={k ? (k.first_stockout_erp ? fmtDate(k.first_stockout_erp) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_erp ? "critical" : "ok"} meta={k ? (k.first_stockout_erp ? `manque max ${fmtQty(k.max_shortage_erp, unit)}` : `stock mini ${fmtQty(k.min_stock_erp, unit)}`) : ""} />
-        <Kpi label="Rupture plan" value={k ? (k.first_stockout_plan ? fmtDate(k.first_stockout_plan) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_plan ? "critical" : "ok"} meta={k ? (k.first_stockout_plan ? `manque max ${fmtQty(k.max_shortage_plan, unit)}` : `stock mini ${fmtQty(k.min_stock_plan, unit)}`) : ""} />
+        <Kpi label="Rupture Appro." value={k ? (k.first_stockout_plan ? fmtDate(k.first_stockout_plan) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_plan ? "critical" : "ok"} meta={k ? (k.first_stockout_plan ? `manque max ${fmtQty(k.max_shortage_plan, unit)}` : `stock mini ${fmtQty(k.min_stock_plan, unit)}`) : ""} />
         <Kpi label="Backlog" value={k ? fmtQty(k.backlog_qty, unit) : <Skeleton w={60} h={28} />} unit={unit} tone={k && k.backlog_qty > 0 ? "warning" : "ok"} meta={k ? `commandé ${fmtQty(k.backlog_ordered, unit)} − reçu ${fmtQty(k.backlog_received, unit)} (fermes passées, hors stocks)` : ""} onClick={() => setTab("orders")} />
         <Kpi label="En-cours ERP" value={k ? fmtQty(k.open_firm_qty, unit) : <Skeleton w={60} h={28} />} meta={k ? `ferme · + ${fmtQty(k.open_forecast_qty, unit)} prévisionnel` : ""} onClick={() => setTab("orders")} />
-        <Kpi label="Plan" value={k ? fmtQty(k.plan_qty, unit) : <Skeleton w={60} h={28} />} tone="brand" meta={k ? `${k.plan_cell_count} cellule(s) saisie(s) · CBN ${fmtQty(k.proposed_qty, unit)}${k.urgent_proposal_count ? ` (${k.urgent_proposal_count} urgent)` : ""}${k.ignored_order_days ? ` · ${k.ignored_order_days} j ferme ignoré(s)` : ""}${k.refused_proposals ? ` · ${k.refused_proposals} CBN refusée(s)` : ""}` : ""} onClick={() => setTab("delivery")} />
+        <Kpi label="Appro." value={k ? fmtQty(k.plan_qty, unit) : <Skeleton w={60} h={28} />} tone="brand" meta={k ? `${k.plan_cell_count} cellule(s) saisie(s) · CBN ${fmtQty(k.proposed_qty, unit)}${k.urgent_proposal_count ? ` (${k.urgent_proposal_count} urgent)` : ""}${k.ignored_order_days ? ` · ${k.ignored_order_days} j ferme ignoré(s)` : ""}${k.refused_proposals ? ` · ${k.refused_proposals} CBN refusée(s)` : ""}` : ""} onClick={() => setTab("delivery")} />
         <Kpi label="Besoin 30 j" value={k ? fmtQty(k.demand_next_30d, unit) : <Skeleton w={60} h={28} />} meta={k ? `${fmtQty(k.avg_daily_demand_30d, unit)} / jour` : ""} />
       </div>
 
@@ -112,8 +112,8 @@ export default function ArticlePage() {
       {tab === "delivery" && <DeliveryPlan articleId={articleId} />}
 
       {tab === "plan" && (
-        <Card flush title="Cellules saisies dans la ligne Plan" hint="tout ce qui n'est pas ici vient de l'ERP ; supprimer une cellule rend la journée à l'ERP">
-          <DataTable rows={planCells.data ?? []} columns={planCols} rowKey={(c) => c.id} compact emptyTitle="Aucune cellule saisie : le plan suit l'ERP" emptyHint="Taper une quantité dans la ligne Plan du tableau." />
+        <Card flush title="Cellules saisies dans la ligne Appro." hint="tout ce qui n'est pas ici vient de l'ERP ; supprimer une cellule rend la journée à l'ERP">
+          <DataTable rows={planCells.data ?? []} columns={planCols} rowKey={(c) => c.id} compact emptyTitle="Aucune cellule saisie : le plan suit l'ERP" emptyHint="Taper une quantité dans la ligne Appro. du tableau." />
         </Card>
       )}
 
@@ -123,8 +123,8 @@ export default function ArticlePage() {
         </Card>
       )}
 
-      {tab === "proposals" && (q.isLoading || !d ? <SkeletonBlock /> : d.proposals.length === 0 ? <Empty title="Aucune proposition CBN" hint="Le Scenario Plan reste au-dessus de la cible sur tout l'horizon." /> : (
-        <Card flush title="Propositions CBN" hint="une par fournisseur et par jour de livraison ; pour la reprendre, taper la quantité dans la ligne Plan (la cellule grisée la prérempli)">
+      {tab === "proposals" && (q.isLoading || !d ? <SkeletonBlock /> : d.proposals.length === 0 ? <Empty title="Aucune proposition CBN" hint="Le Projeté Appro. reste au-dessus de la cible sur tout l'horizon." /> : (
+        <Card flush title="Propositions CBN" hint="une par fournisseur et par jour de livraison ; pour la reprendre, taper la quantité dans la ligne Appro. (la cellule grisée la prérempli)">
           <table className="tbl compact">
             <thead><tr><th>À commander le</th><th>Livraison</th><th>Fournisseur</th><th className="num">Quantité</th><th className="num">Besoin net</th><th className="num">Stock avant → après</th><th>Motif</th></tr></thead>
             <tbody>

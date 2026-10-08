@@ -24,10 +24,10 @@ export default function ImportsPage() {
 
   return (
     <div className="page">
-      <div className="page-header"><div className="title"><h1>Imports / exports</h1><p>Classeur de simulation à formules (export, puis réimport des lignes Plan et Ajustement). Le PDP se saisit et s'importe depuis la page <Link to="/pdp">Plan de production</Link> ; le référentiel depuis la page Référentiel.</p></div></div>
+      <div className="page-header"><div className="title"><h1>Imports / exports</h1><p>Classeur de simulation à formules (export, puis réimport des lignes Appro. et Ajustement). Le PDP se saisit et s'importe depuis la page <Link to="/pdp">Plan de production</Link> ; le référentiel depuis la page Référentiel.</p></div></div>
 
       <div className="grid cols-2">
-        <Card title="Classeur de simulation" hint="Excel à formules : PARAMETRES, ARTICLES, SIMULATION (le tableau, une ligne Plan par fournisseur), ALERTES">
+        <Card title="Classeur de simulation" hint="Excel à formules : PARAMETRES, ARTICLES, SIMULATION (le tableau, une ligne Appro. par fournisseur), ALERTES">
           <div className="form-grid">
             <Field label="Granularité"><select className="select" value={granularity} onChange={(e) => setGranularity(e.target.value as "day" | "week")}><option value="day">Jour (réimportable)</option><option value="week">Semaine (lecture)</option></select></Field>
             <Field label="Périmètre"><input className="input" readOnly value={`${perimeter.planner ?? "tous"} · ${engineParams.horizon_days} j`} /></Field>
@@ -40,13 +40,13 @@ export default function ImportsPage() {
           <div className="row wrap" style={{ marginTop: 12 }}>
             <a className="btn primary" href={exportUrl}><Download />Simulation (xlsx)</a>
             <a className="btn" href={api.downloadUrl("/api/exports/alerts.xlsx", { planner: engineParams.planner })}><Download />Alertes</a>
-            <a className="btn" href={api.downloadUrl("/api/exports/plan.xlsx", { planner: engineParams.planner })}><Download />Plan (liste)</a>
+            <a className="btn" href={api.downloadUrl("/api/exports/plan.xlsx", { planner: engineParams.planner })}><Download />Appro. (liste)</a>
           </div>
           <div className="divider" style={{ margin: "16px 0" }} />
           <h4>Réimporter un classeur de simulation (jour)</h4>
-          <p className="small subtle">Les lignes Plan et Ajustement des articles du classeur remplacent les cellules de l'application : une valeur Plan égale au Ferme vaut « ERP », une valeur différente devient une cellule saisie.</p>
+          <p className="small subtle">Les lignes Appro. et Ajustement des articles du classeur remplacent les cellules de l'application : une valeur Appro. égale au Ferme vaut « ERP », une valeur différente devient une cellule saisie.</p>
           <input ref={simInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importSim.mutate(f); e.target.value = ""; }} />
-          <Button style={{ marginTop: 8 }} onClick={() => simInput.current?.click()} disabled={importSim.isPending || !rights.canWrite} title={rights.canWrite ? "Les lignes Plan et Ajustement des articles de votre carnet sont reprises" : "Lecture seule"}><Upload />{importSim.isPending ? "Import…" : "Choisir le classeur"}</Button>
+          <Button style={{ marginTop: 8 }} onClick={() => simInput.current?.click()} disabled={importSim.isPending || !rights.canWrite} title={rights.canWrite ? "Les lignes Appro. et Ajustement des articles de votre carnet sont reprises" : "Lecture seule"}><Upload />{importSim.isPending ? "Import…" : "Choisir le classeur"}</Button>
           {importSim.error && <div className="error-box" style={{ marginTop: 12 }}>{(importSim.error as Error).message}</div>}
         </Card>
       </div>

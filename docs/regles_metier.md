@@ -5,7 +5,7 @@ globalement (`EngineParams`, page *Paramètres & règles*), par article (référ
 ou par lien article-fournisseur (référentiel). Les valeurs par défaut sont entre crochets.
 
 **Le mode d'emploi tient en une phrase : vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se
-recalcule.** L'approvisionneur ne saisit que deux lignes du tableau, *Plan* et *Ajustement*. Tout le reste
+recalcule.** L'approvisionneur ne saisit que deux lignes du tableau, *Appro.* et *Ajustement*. Tout le reste
 se lit.
 
 ## 1. Temps et calendrier
@@ -52,8 +52,8 @@ distingue par la date de référence.
 
 Le tableau montre, **par fournisseur de l'article** (les liens actifs, par priorité, puis tout fournisseur
 présent dans les commandes ou réceptions), quatre lignes : *Ferme*, *Prévisionnel*, *Reçu* (ERP, lecture) et
-*Plan* (saisie). Les lignes suivantes sont à la maille article : *Proposition CBN*, *Ajustement*, *Scenario
-ERP*, *Scenario Plan*. Les stocks somment les voies.
+*Appro.* (saisie). Les lignes suivantes sont à la maille article : *Proposition CBN*, *Ajustement*, *Projeté
+ERP*, *Projeté Appro.*. Les stocks somment les voies.
 
 ### 3.1 La commande = un créneau de livraison
 
@@ -64,7 +64,7 @@ prévisionnelle. Le restant ERP (`Quantite_restante`) est la quantité ouverte.
 
 ### 3.2 Les deux scenarios
 
-| Jour calculé | Scenario ERP | Scenario Plan |
+| Jour calculé | Projeté ERP | Projeté Appro. |
 |---|---|---|
 | Avant la référence | historique reconstitué (§ 4) | idem |
 | À partir de la référence | R + Ferme + A − besoin | R + Plan + CBN + A − besoin |
@@ -105,13 +105,13 @@ fermes de ce jour, quelle que soit la quantité restant à livrer :
 | livraisons partielles, restant > 0 | `restant / commandé` | orange (en cours) |
 | commande **ignorée** (clic) | quantité commandée barrée | rouge |
 
-L'affichage ne change pas le calcul : le Scenario ERP et le pré-remplissage du plan comptent le **restant ERP**
+L'affichage ne change pas le calcul : le Projeté ERP et le pré-remplissage du plan comptent le **restant ERP**
 des commandes à partir de la référence, et rien pour le passé (§ 3.2).
 
 Un **clic** sur une cellule Ferme à partir de la date de référence **ignore** les commandes fermes de ce
-fournisseur et de ce jour : elles sortent du Scenario ERP et ne pré-remplissent plus le Plan (cellule vide =
+fournisseur et de ce jour : elles sortent du Projeté ERP et ne pré-remplissent plus le Plan (cellule vide =
 0 ; une cellule saisie garde sa valeur). Un nouveau clic les rétablit. Le passé ne s'ignore pas (il ne compte
-dans aucun stock). Ces jours ignorés sont listés dans *Saisies & journal* et comptés dans le KPI *Plan*.
+dans aucun stock). Ces jours ignorés sont listés dans *Saisies & journal* et comptés dans le KPI *Appro.*.
 
 ### 3.3 ter La ligne Reçu : réceptions et avis d'expédition (DESADV)
 
@@ -133,7 +133,7 @@ pas encore validé), et le DESADV reste annoncé jusqu'à ce que l'ERP lui donne
 l'approvisionneur le masque. Depuis la version `recep_edi` à statut, une réception **Enregistrée** (statut ERP 3 :
 BL enregistré, accusé de réception non validé) arrive avec le BL de son DESADV : elle **compte dans le stock**, marque
 ce DESADV comme reçu, et porte le point rouge « ACR non validé » jusqu'à sa validation (statut *Reçu*). Ces règles
-valent à l'identique dans la fiche article et dans le tableau d'approvisionnement global (mêmes info-bulles, points et cellules DESADV ; la ligne *Scenario Plan* y affiche
+valent à l'identique dans la fiche article et dans le tableau d'approvisionnement global (mêmes info-bulles, points et cellules DESADV ; la ligne *Projeté Appro.* y affiche
 aussi le **stock cible** du jour).
 
 ### 3.4 Backlog fournisseur
@@ -160,7 +160,7 @@ persiste jusqu'à sa suppression ; rappelé dans le KPI *Stock de référence*. 
 (casse, transfert, inventaire) compté à sa date, passé ou futur. Les ajustements comptent dans les deux
 scenarios.
 
-| Élément | Scenario ERP | Scenario Plan | Règle |
+| Élément | Projeté ERP | Projeté Appro. | Règle |
 |---|---|---|---|
 | Commande ERP ferme future | ✔ | ✔ sauf cellule saisie | restant ERP |
 | Commande ERP ferme passée | – | – | backlog fournisseur |
@@ -204,8 +204,8 @@ servi est reporté (solde net négatif, les réceptions suivantes le servent d'a
 
 | Type | Sévérité | Règle |
 |---|---|---|
-| `STOCKOUT` (plan) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au-delà | premier manque sur le Scenario Plan malgré le plan et les propositions (même gradation que l'ERP : une rupture à J+177 n'est pas l'urgence d'une rupture à J+3) |
-| `STOCKOUT` (ERP) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au-delà | premier manque sur le Scenario ERP |
+| `STOCKOUT` (plan) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au-delà | premier manque sur le Projeté Appro. malgré le plan et les propositions (même gradation que l'ERP : une rupture à J+177 n'est pas l'urgence d'une rupture à J+3) |
+| `STOCKOUT` (ERP) | critique si ≤ délai fournisseur, avertissement si ≤ `firm_horizon_days` [28], info au-delà | premier manque sur le Projeté ERP |
 | `LOW_COVERAGE` | critique / avertissement | épuisement des commandes ERP ≤ seuil rouge / orange |
 | `OVERSTOCK` | info | couverture ≥ `overstock_days` |
 | `NEGATIVE_STOCK` | critique | stock de référence négatif |
@@ -216,7 +216,7 @@ servi est reporté (solde net négatif, les réceptions suivantes le servent d'a
 
 ## 7. Propositions CBN
 
-Recalculées à chaque calcul (`generate_proposals` [oui]) sur le Scenario Plan, **après** le plan : elles ne
+Recalculées à chaque calcul (`generate_proposals` [oui]) sur le Projeté Appro., **après** le plan : elles ne
 proposent que ce que ni l'ERP ni le plan ne couvrent. Algorithme : dès que `stock[d] < cible[d]` (sauf creux
 toléré, `shortfall_tolerance_days` [0] : retour au-dessus de la cible en n jours ouvrés **sans aucun besoin non
 servi**, jugé sur la série des manques quelle que soit la politique de manque), quantité = max(besoin net jusqu'au niveau de recomplètement, MOQ)
@@ -228,21 +228,21 @@ quelle (« à commander le »).
 
 **Une proposition par fournisseur et par jour de livraison**, partout (tableau, listes, infobulles,
 exports) : les besoins d'une même semaine ramenés au même lundi sont fusionnés. Dans le tableau, la ligne
-*Proposition CBN* est **à la maille fournisseur** (une par voie, sous la ligne *Plan*), comme dans l'export Excel.
+*Proposition CBN* est **à la maille fournisseur** (une par voie, sous la ligne *Appro.*), comme dans l'export Excel.
 
-Pour la reprendre : taper la quantité dans la cellule *Plan* (la cellule grisée la prérempli). Le CBN se
+Pour la reprendre : taper la quantité dans la cellule *Appro.* (la cellule grisée la prérempli). Le CBN se
 recalcule sans elle.
 
 **Refuser une proposition** : un clic sur une cellule *Proposition CBN* la barre, la retire du plan et
 **interdit toute proposition à ce fournisseur entre sa date et le dimanche de sa semaine** : le besoin est servi
 par une proposition placée après cette fenêtre (jamais avant : l'approvisionneur a dit « pas de livraison de ce
-fournisseur cette semaine »), au prix d'un manque éventuel entre-temps, affiché dans le Scenario Plan. Un refus
+fournisseur cette semaine »), au prix d'un manque éventuel entre-temps, affiché dans le Projeté Appro.. Un refus
 enregistré sans fournisseur (anciennes données) vaut pour tous. La quantité refusée reste
 affichée barrée ; un nouveau clic rétablit la proposition. Les refus sont listés dans *Saisies & journal*. Une proposition refusée **urgente** reste listée dans le flux *À commander* du cockpit, marquée « ignorée », hors de tout calcul.
 
-**Planning de livraison** (onglet de la fiche article) : la ligne *Plan* est présentée comme des lignes de
+**Planning de livraison** (onglet de la fiche article) : la ligne *Appro.* est présentée comme des lignes de
 planning ERP, **une par fournisseur et par semaine ISO** à quantité non nulle, à partir de la date de
-référence. La quantité de la semaine additionne **tout ce que porte la ligne Plan** : cellules saisies,
+référence. La quantité de la semaine additionne **tout ce que porte la ligne Appro.** : cellules saisies,
 commandes fermes ERP reprises (cellules vides) et propositions CBN (cellules grisées) ; l'infobulle de la
 quantité en donne la décomposition. Colonnes : *Quantité livrée*, *Unité*, *Date de début de livraison* (le
 lundi), *Heure de début* (11:59:00 PM), *Date de fin* (le dimanche), *Heure de fin* (11:59:00 PM). Le bouton
@@ -268,15 +268,15 @@ par semaine de l'article (`DELETE /api/params/overrides?scope=article_week&key1=
 ## 9. Impact sur les programmes
 
 Production **réalisable** par programme et semaine = PDP × part servable du composant le plus contraint,
-pour trois stocks : à date, Scenario ERP, Scenario Plan (page *Impact programmes*).
+pour trois stocks : à date, Projeté ERP, Projeté Appro. (page *Impact programmes*).
 
 ## 9 bis. Cockpit du jour : deux onglets, et la page Recherche
 
 **Couvertures et stocks** : cartes *Critiques*, *À surveiller*, *Ruptures plan*, *Couverture médiane* (médiane
-des couvertures Scenario Plan des articles avec besoin ; la moyenne, tirée par les extrêmes, est rappelée en
+des couvertures Projeté Appro. des articles avec besoin ; la moyenne, tirée par les extrêmes, est rappelée en
 sous-ligne), **Valeur du stock** (Σ prix × stock à date ; sous-ligne « +x % de la valeur cible » en rouge au-dessus
 de la cible, « −x % » neutre en dessous ; cible = Σ prix × stock cible du jour), *En-cours ERP*, *Surstock* ;
-graphique **projection de la valeur du stock** (Scenario Plan, fin de chaque semaine ISO, pointillé = valeur du
+graphique **projection de la valeur du stock** (Projeté Appro., fin de chaque semaine ISO, pointillé = valeur du
 stock cible) ; alertes prioritaires ; portefeuille (colonnes *Fournisseurs*, **Approvisionneur**, *Statut*,
 **Stock à date** = stock projeté à la fin de la veille, réceptions et consommations réelles comprises, et non le
 stock d'initialisation). Les champs de filtre acceptent des alternatives séparées par « ; » (`123;456` = contient
@@ -304,7 +304,7 @@ les champs (« ; » = ou), période, fournisseur ; résultat en tableau filtrabl
 affiner au-delà).
 
 **Fiches articles** (liste) : en-tête fixe ; colonnes *Prochaine livraison* (quantité), *Attendue le* et *Nature*
-(**Ferme ERP**, **CBN** ou **Saisie**) = première quantité attendue à partir d'aujourd'hui sur la ligne *Plan* et le
+(**Ferme ERP**, **CBN** ou **Saisie**) = première quantité attendue à partir d'aujourd'hui sur la ligne *Appro.* et le
 complément CBN, tous fournisseurs confondus.
 
 **Période affichée** : sous la barre d'outils des tableaux d'approvisionnement (global et fiche article), une
@@ -330,13 +330,13 @@ Chaque écriture (cellule, référentiel, import, paramètre) est journalisée a
 ## 11. Classeur Excel « vivant »
 
 L'export *Simulation* reproduit le tableau : par article, *Besoin*, puis *Ferme / Prévisionnel / Reçu /
-Plan* par fournisseur, *Proposition CBN*, *Ajustement*, *Scenario ERP*, *Scenario Plan*, manque, cible,
-couverture. Les lignes *Plan* et *Ajustement* sont des saisies (fond jaune, bleu = déjà saisi dans
+Plan* par fournisseur, *Proposition CBN*, *Ajustement*, *Projeté ERP*, *Projeté Appro.*, manque, cible,
+couverture. Les lignes *Appro.* et *Ajustement* sont des saisies (fond jaune, bleu = déjà saisi dans
 l'application) ; les stocks sont des **formules** : `x = stock précédent + Σ Reçu + Σ Plan (ou Σ Ferme) +
 CBN + Ajustement − Besoin`, `stock = SI(politique = "lost" ; MAX(0 ; x) ; x)`. Un test automatisé recalcule le
 classeur avec LibreOffice et le compare au moteur.
 
-**Réimport** (granularité jour) : dans chaque ligne *Plan*, une valeur différente de la ligne *Ferme* du même
+**Réimport** (granularité jour) : dans chaque ligne *Appro.*, une valeur différente de la ligne *Ferme* du même
 fournisseur devient une cellule saisie, une valeur égale vaut « ERP » ; chaque valeur d'*Ajustement* devient
 une cellule. Les cellules des articles présents dans le classeur remplacent celles de l'application.
 

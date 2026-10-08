@@ -70,7 +70,7 @@ export default function EntriesPage() {
 
   return (
     <div className="page">
-      <div className="page-header"><div className="title"><h1>Saisies & journal</h1><p>Les saisies se font dans le tableau (lignes Plan et Ajustement) ; cette page les liste et les journalise.</p></div></div>
+      <div className="page-header"><div className="title"><h1>Saisies & journal</h1><p>Les saisies se font dans le tableau (lignes Appro. et Ajustement) ; cette page les liste et les journalise.</p></div></div>
       <Tabs value={tab} onChange={setTab} tabs={[
         { id: "plan", label: "Cellules du plan", count: plan.data?.length }, { id: "adjustments", label: "Ajustements", count: adjustments.data?.length },
         { id: "flags", label: "Commandes ignorées & CBN refusées", count: flags.data?.length }, { id: "audit", label: "Journal", count: audit.data?.length },

@@ -15,11 +15,11 @@ export const ROW_LABELS: { key: string; label: string; lane?: boolean }[] = [
   { key: "orders_firm", label: "Ferme", lane: true },
   { key: "orders_forecast", label: "Prévisionnel", lane: true },
   { key: "receipts", label: "Reçu", lane: true },
-  { key: "plan", label: "Plan", lane: true },
+  { key: "plan", label: "Appro.", lane: true },
   { key: "supply_proposed", label: "Proposition CBN", lane: true },
   { key: "adjustments", label: "Ajustement" },
-  { key: "stock_erp", label: "Scenario ERP" },
-  { key: "stock_plan", label: "Scenario Plan" },
+  { key: "stock_erp", label: "Projeté ERP" },
+  { key: "stock_plan", label: "Projeté Appro." },
 ];
 
 export interface GridColumns { as_of: string; init_date: string; periods: string[]; period_start: string[]; period_end: string[]; }
@@ -101,9 +101,9 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   const saveAdj = useWrite((c: { article_id: string; date: string; expression?: string; note?: string }) => api.put<AdjustmentOut | null>("/api/entries/adjustments", c),
     (out) => toast.push(out ? `Ajustement ${fmtDate(out.date)} = ${fmtQty(out.qty)}` : "Ajustement effacé", "success"));
   const savePlan = useWrite((c: { article_id: string; supplier_id: string | null; date: string; expression?: string; note?: string }) => api.put<PlanCellOut | null>("/api/entries/plan", c),
-    (out) => toast.push(out ? `Plan ${fmtDate(out.date)} = ${fmtQty(out.qty)}` : "Retour à l'ERP", "success"));
+    (out) => toast.push(out ? `Appro. ${fmtDate(out.date)} = ${fmtQty(out.qty)}` : "Retour à l'ERP", "success"));
   const savePlanBatch = useWrite((cells: { article_id: string; supplier_id: string | null; date: string; expression: string }[]) => api.put<PlanCellOut[]>("/api/entries/plan/batch", { cells }),
-    (out) => toast.push(`${out.length} cellule(s) du plan recopiée(s)`, "success"));
+    (out) => toast.push(`${out.length} cellule(s) Appro. recopiée(s)`, "success"));
   const saveAdjBatch = useWrite((cells: { article_id: string; date: string; expression: string }[]) => api.put<AdjustmentOut[]>("/api/entries/adjustments/batch", { cells }),
     (out) => toast.push(`${out.length} ajustement(s) recopié(s)`, "success"));
   const toggleFlag = useWrite((f: FlagIn) => api.post<FlagOut | null>("/api/entries/flags/toggle", f),
@@ -319,7 +319,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         );
       case "group": {
         const l = a.lanes[r.li], several = a.lanes.length > 1, g = `${aid}-lane-${r.li}`;
-        const label = several ? `${l.supplier_id ?? "Sans fournisseur"}${l.name ? ` · ${l.name}` : ""}` : `ERP & plan${l.supplier_id ? ` · ${l.supplier_id}` : ""}`;
+        const label = several ? `${l.supplier_id ?? "Sans fournisseur"}${l.name ? ` · ${l.name}` : ""}` : `ERP & Appro.${l.supplier_id ? ` · ${l.supplier_id}` : ""}`;
         return (
           <tr key={r.key} className="group-head" style={{ height: r.h }} onClick={() => toggleGroup(g)} title={collapsed[g] ? "Afficher le bloc" : "Masquer le bloc"}>
             <td>{collapsed[g] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}{label}{l.backlog_qty > 0 ? ` · backlog ${fmtQty(l.backlog_qty, unit)}` : ""}</td>
@@ -346,7 +346,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const clickable = qo > 0 && !past && !locked;
               const cls = [...cellBase(i), qo > 0 ? (ignored ? "ignored" : qr > 0 ? "firm-open" : "firm-settled") : "", clickable ? "clickable" : "", l.orders.length && ordersTitle(i) ? "event" : ""].filter(Boolean).join(" ");
               const text = qo === 0 ? "·" : partial ? <span className="partial">{fmtQty(qr, unit)} / {fmtQty(qo, unit)}</span> : fmtQty(qo, unit);
-              const state = qo === 0 ? "" : ignored ? "Commande ignorée : hors Scenario ERP et hors Plan (cliquer pour la rétablir)" : qr > 0 ? `En cours : ${fmtQty(qr, unit)} restant à livrer sur ${fmtQty(qo, unit)} commandé${clickable ? (ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – cliquer pour l'ignorer") : ""}` : `Soldée : ${fmtQty(qo, unit)} commandé, tout reçu`;
+              const state = qo === 0 ? "" : ignored ? "Commande ignorée : hors Projeté ERP et hors Appro. (cliquer pour la rétablir)" : qr > 0 ? `En cours : ${fmtQty(qr, unit)} restant à livrer sur ${fmtQty(qo, unit)} commandé${clickable ? (ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – cliquer pour l'ignorer") : ""}` : `Soldée : ${fmtQty(qo, unit)} commandé, tout reçu`;
               const title = [state, ordersTitle(i)].filter(Boolean).join("\n");
               const onClick = !clickable ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => toggleFlag.mutate({ article_id: aid, supplier_id: l.supplier_id, date: cols.period_start[i], kind: "order_ignored" });
               return <td key={i} className={cls} title={title} onClick={onClick}>{ignored ? <s>{text}</s> : text}</td>;
@@ -410,7 +410,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         const shownOf = (ni: number) => { const c = planBy.get(`${aid}|${l.supplier_id ?? ""}|${ni}`); const pv = pl?.[ni] ?? 0; return l.plan_typed[ni] ? (c?.expression || String(pv)) : pv ? String(pv) : ""; };
         return (
           <tr key={r.key} style={{ height: r.h }}>
-            <td>Plan</td>
+            <td>Appro.</td>
             {spacerL}
             {visibleCols.map((i) => {
               const past = i < asOfIdx, ro = readOnlyCol(i);
@@ -428,7 +428,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const onClick = past || isEd || locked ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => { setActive({ aid, key: "plan", lane: li, i }); setEditing({ aid, key: "plan", lane: li, i, value: initial, initial: shown }); };
               return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined}
                 onContextMenu={past || ro || locked ? undefined : (e) => { e.preventDefault(); comment(aid, "plan", l, i, cell?.note ?? "", initial); }}>
-                {isEd ? input(editing!, `Plan ${l.supplier_id ?? ""} ${periodLabel(cols.periods[i])}`, shownOf, (ni) => ni >= asOfIdx && !readOnlyCol(ni))
+                {isEd ? input(editing!, `Appro. ${l.supplier_id ?? ""} ${periodLabel(cols.periods[i])}`, shownOf, (ni) => ni >= asOfIdx && !readOnlyCol(ni))
                   : past ? "" : ghost ? <span className="ghostv">{fmtQty(cbn, unit)}</span> : <>{v === 0 && !typed ? "·" : fmtQty(v, unit)}{cbn > 0 && !ghost && <span className="ghostv small"> +{fmtQty(cbn, unit)}</span>}</>}
                 {(isEd || isActive) && !past && !ro && handle(aid, "plan", li, i, isEd ? editing!.value : shown)}
               </td>;
@@ -450,7 +450,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const clickable = !past && !locked && (v > 0 || !!flag);
               const cls = [...cellBase(i), "cbn", flag ? "refused" : "", clickable ? "clickable" : ""].filter(Boolean).join(" ");
               const title = flag ? `Proposition refusée (${fmtQty(flag.qty, unit)}) : aucune proposition à ce fournisseur jusqu'à la fin de sa semaine – cliquer pour la rétablir`
-                : v > 0 ? `Besoin net calculé sur le Scenario Plan : ${fmtQty(v, unit)}${ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – reprise dans le Plan (cellule grisée) ; cliquer pour la refuser"}` : "";
+                : v > 0 ? `Besoin net calculé sur le Projeté Appro. : ${fmtQty(v, unit)}${ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – reprise dans l'Appro. (cellule grisée) ; cliquer pour la refuser"}` : "";
               const onClick = !clickable ? undefined : ro && !flag ? () => onSwitchDay?.(cols.period_start[i]) : () => toggleFlag.mutate({ article_id: aid, supplier_id: flag ? (flag.supplier_id || null) : (sid || null), date: flag ? flag.date : cols.period_start[i], kind: "proposal_refused", qty: v });
               return <td key={i} className={cls} title={title} onClick={onClick}>{flag ? <s>{fmtQty(flag.qty, unit)}</s> : v === 0 ? "·" : fmtQty(v, unit)}</td>;
             })}
@@ -488,7 +488,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         const k = r.sk!;
         return (
           <tr key={r.key} style={{ height: r.h }}>
-            <td>{k === "stock_erp" ? "Scenario ERP" : "Scenario Plan"}</td>
+            <td>{k === "stock_erp" ? "Projeté ERP" : "Projeté Appro."}</td>
             {spacerL}
             {visibleCols.map((i) => {
               const past = i < asOfIdx;
@@ -551,7 +551,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
       <div className="legend small" style={{ padding: "6px 10px" }}>
         <span><span className="sw bar" style={{ background: "var(--bg-subtle)", border: "1px solid var(--border-strong)" }} />vide = ERP</span>
         <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} /><i>DESADV non reçu</i> (annoncé, hors calculs ; double-clic pour masquer) · <span className="dot ok" style={{ verticalAlign: "middle" }} /> traité OK · <span className="dot ko" style={{ verticalAlign: "middle" }} /> non traité / BL sans DESADV</span>
-        <span><span className="sw bar" style={{ background: "var(--brand-soft)", boxShadow: "inset 0 -2px 0 var(--brand)" }} />chiffre = votre plan (0 = rien attendu, vider = retour ERP) · carré = recopier en tirant</span>
+        <span><span className="sw bar" style={{ background: "var(--brand-soft)", boxShadow: "inset 0 -2px 0 var(--brand)" }} />chiffre = votre Appro. (0 = rien attendu, vider = retour ERP) · carré = recopier en tirant</span>
         <span><span className="sw bar" style={{ background: "transparent", border: "1px dashed var(--warning)" }} />grisé = proposition CBN, cliquer puis Entrée pour la reprendre · cliquer la ligne CBN pour la refuser</span>
         <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} />ferme en cours · <span className="sw bar" style={{ background: "var(--cell-green)" }} />ferme soldée · <span className="sw bar" style={{ background: "var(--cell-red)" }} />ferme ignorée (clic)</span>
         <span>clic droit = commentaire · <EyeOff size={11} style={{ verticalAlign: "middle" }} /> masquer des lignes</span>

@@ -276,7 +276,7 @@ les prix et absent du référentiel n'y est **jamais ajouté**.
 
 Usage : **valeur du stock** = Σ prix × stock à date (stock de la veille), **valeur cible** = Σ prix × stock
 cible du jour (KPI *Valeur du stock*, sous-ligne +x % / −x % de la cible, rouge au-dessus) ; **projection de la
-valeur du stock** (Scenario Plan, fin de chaque semaine ISO) dans le cockpit. Un article sans prix n'entre dans
+valeur du stock** (Projeté Appro., fin de chaque semaine ISO) dans le cockpit. Un article sans prix n'entre dans
 aucune valeur (compté « sans prix » sur la carte).
 
 ### 2.7 `fct_bl_pending` ← `silver_erp_ye.bl_en_attente` — accusés de réception non validés

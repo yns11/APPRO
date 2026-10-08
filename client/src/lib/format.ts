@@ -43,7 +43,7 @@ export const ALERT_LABELS: Record<string, string> = {
   URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock de départ négatif",
 };
 export const SEVERITY_LABELS: Record<string, string> = { critical: "Critique", warning: "À surveiller", info: "Info" };
-export const SCOPE_LABELS: Record<string, string> = { erp: "ERP", plan: "plan", data: "données" };
+export const SCOPE_LABELS: Record<string, string> = { erp: "ERP", plan: "Appro.", data: "données" };
 export const ORDER_TYPE_LABELS: Record<string, string> = { FIRM: "Ferme", FORECAST: "Prévisionnelle" };
 
 const eur0 = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });

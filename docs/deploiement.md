@@ -281,10 +281,10 @@ databricks bundle validate -t prod -o json --profile PROD | jq '.resources.jobs.
 |---|---|---|
 | `/api/health` | terminal | `status ok`, `database_status ok`, `reference_rows` > 0, `source.sync` renseigné |
 | Cockpit | App | date de référence = aujourd'hui ; KPI et portefeuille du périmètre |
-| Fiche article | App | ligne Ferme avec les commandes ERP, Reçu avec les réceptions, Scenario ERP = Scenario Plan |
-| Saisie du plan | App | taper une quantité dans une cellule Plan → cellule bleue, Scenario Plan recalculé ; recharger la page : la valeur est conservée (persistance Lakebase) |
+| Fiche article | App | ligne Ferme avec les commandes ERP, Reçu avec les réceptions, Projeté ERP = Projeté Appro. |
+| Saisie du plan | App | taper une quantité dans une cellule Appro. → cellule bleue, Projeté Appro. recalculé ; recharger la page : la valeur est conservée (persistance Lakebase) |
 | Journal | App, *Saisies & journal* | l'utilisateur est votre e-mail Databricks |
-| Export / réimport | App, *Imports / exports* | le classeur exporté se rouvre ; ses lignes Plan modifiées reviennent dans l'App |
+| Export / réimport | App, *Imports / exports* | le classeur exporté se rouvre ; ses lignes Appro. modifiées reviennent dans l'App |
 | Job | *Workflows* | `[dev] Ma Routine Appro — synchronisation ERP → Lakebase` vert ; `erp_sync_log` à jour |
 
 Ouvrir l'App aux approvisionneurs : *Compute → Apps → appro-dev → Permissions → Can use* (utilisateurs ou

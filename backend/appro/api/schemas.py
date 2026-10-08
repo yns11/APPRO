@@ -219,7 +219,7 @@ class CockpitKpis(BaseModel):
 class WeeklyStockValue(BaseModel):
     week: str
     week_start: dt.date
-    value_plan: float          # Σ price × Scenario Plan stock at the end of the week
+    value_plan: float          # Σ price × Projeté Appro. stock at the end of the week
     value_target: float        # Σ price × target stock at the end of the week
 
 

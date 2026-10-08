@@ -42,7 +42,7 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "coverage_tie_rule": ("Un jour dont le besoin cumulé égale le stock est-il couvert ?", ["covered", "not_covered"]),
     "target_policy": ("Stock cible : couverture, stock de sécurité fixe, ou le max des deux", ["coverage_days", "safety_qty", "max"]),
     "generate_proposals": ("Calculer les propositions CBN à chaque calcul", None),
-    "include_proposals_in_plan": ("Inclure les propositions CBN dans le Scenario Plan", None),
+    "include_proposals_in_plan": ("Inclure les propositions CBN dans le Projeté Appro.", None),
     "proposal_placement": ("Livraisons proposées : tout jour ouvré (et jour de livraison fournisseur) ou lundis seulement ; une proposition par fournisseur et par jour", ["working_days", "monday"]),
     "forecast_date_policy": ("Commandes prévisionnelles : à leur date réelle ou ramenées au lundi de leur semaine", ["actual", "week_monday"]),
     "focus_weeks": ("Calendrier « Par défaut » : nombre de semaines détaillées jour par jour après la semaine en cours", None),
@@ -54,7 +54,7 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "stockout_lookahead_days": ("Limiter la détection de rupture à J + n (vide = tout l'horizon)", None),
     "firm_horizon_days": ("Horizon ferme : une rupture sur les commandes ERP au-delà est informative", None),
     "shortage_policy": ("Besoin non servi : reporté (backlog, stock net négatif) ou perdu (stock borné à 0)", ["backlog", "lost"]),
-    "firm_sources": ("Types de commandes comptés dans le Scenario ERP (FIRM = ordre ferme)", None),
+    "firm_sources": ("Types de commandes comptés dans le Projeté ERP (FIRM = ordre ferme)", None),
 }
 
 

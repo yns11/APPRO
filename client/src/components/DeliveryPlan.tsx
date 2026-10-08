@@ -92,7 +92,7 @@ export function DeliveryPlan({ articleId }: { articleId: string }) {
   const several = q.data.suppliers.length > 1;
   const total = q.data.rows.length, hiddenPast = total - q.data.rows.filter((r) => r.date > asOf).length;
   return (
-    <Card flush title="Planning de livraison" hint="une ligne par semaine ISO et par fournisseur : tout ce que porte la ligne Plan (saisies, fermes ERP reprises, propositions CBN) du lundi au dimanche ; sélectionner une plage à la souris puis Ctrl+C, ou « Copier »"
+    <Card flush title="Planning de livraison" hint="une ligne par semaine ISO et par fournisseur : tout ce que porte la ligne Appro. (saisies, fermes ERP reprises, propositions CBN) du lundi au dimanche ; sélectionner une plage à la souris puis Ctrl+C, ou « Copier »"
       actions={<>
         {several && <select className="select sm" value={supplier} onChange={(e) => setSupplier(e.target.value)} aria-label="Fournisseur"><option value="">Tous les fournisseurs</option>{q.data.suppliers.map((s) => <option key={s.supplier_id ?? ""} value={s.supplier_id ?? ""}>{s.supplier_id} · {s.name}</option>)}</select>}
         <button className={`btn sm ${futureOnly ? "primary" : ""}`} onClick={() => setFutureOnly((v) => !v)} aria-pressed={futureOnly} aria-label="Semaines à venir seulement"
@@ -101,7 +101,7 @@ export function DeliveryPlan({ articleId }: { articleId: string }) {
         <button className="btn sm" onClick={() => copy(false)} disabled={!range} title="Copier la sélection (Ctrl+C)">{copied ? <CopyCheck /> : <Copy />}Copier la sélection</button>
         <button className="btn sm" onClick={() => copy(true)} disabled={!cells.length}>Tout copier</button>
       </>}>
-      {rows.length === 0 ? <Empty title="Aucune livraison planifiée" hint={futureOnly && total ? "Aucune semaine après aujourd'hui : désactiver le filtre pour voir la semaine en cours." : "La ligne Plan ne contient aucune quantité sur l'horizon."} /> : (
+      {rows.length === 0 ? <Empty title="Aucune livraison planifiée" hint={futureOnly && total ? "Aucune semaine après aujourd'hui : désactiver le filtre pour voir la semaine en cours." : "La ligne Appro. ne contient aucune quantité sur l'horizon."} /> : (
         <div className="dgrid-wrap" ref={wrap} tabIndex={0} onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") { e.preventDefault(); copy(false); } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") { e.preventDefault(); selectAll(); } }}
           onCopy={(e) => { const t = selectionText(false); if (t) { e.clipboardData.setData("text/plain", t); e.preventDefault(); } }}>
           <table className="dgrid" aria-label="Planning de livraison">
