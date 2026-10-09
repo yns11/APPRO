@@ -7,7 +7,7 @@ import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
 import { ORDER_TYPE_LABELS, fmtDate, fmtQty, isSaturday, isSunday, isWeekKey, isWeekend, isoWeekKey, isoWeekOf, periodLabel } from "@/lib/format";
 import { WeekRangeBar, type WeekChip } from "@/components/WeekRangeBar";
-import type { DesadvInfo, ReceiptInfo, AdjustmentOut, ArticleRef, FlagIn, FlagOut, LaneOut, PlanCellOut, SeriesOut } from "@/lib/types";
+import type { DesadvInfo, ReceiptInfo, AdjustmentOut, ArticleRef, FlagIn, FlagOut, LaneOut, LinkRef, PlanCellOut, SeriesOut } from "@/lib/types";
 
 /** Rows of the grid that can be hidden (for every article) ; lane rows are repeated per supplier. */
 export const ROW_LABELS: { key: string; label: string; lane?: boolean }[] = [
@@ -23,11 +23,11 @@ export const ROW_LABELS: { key: string; label: string; lane?: boolean }[] = [
 ];
 
 export interface GridColumns { as_of: string; init_date: string; periods: string[]; period_start: string[]; period_end: string[]; }
-export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis?: { severity?: string | null }; }
+export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis?: { severity?: string | null }; suppliers?: LinkRef[]; }
 
 /* ---------------------------------------------------------------- geometry (virtualisation) */
 const COL_W = 72;          // every data column has the same width: the visible range is arithmetic
-const LABEL_W = 150;       // sticky first column
+const LABEL_W = 285;       // sticky first column (matches the CSS min-width of the first cell)
 const ROW_H = 26;
 const STOCK_H = 36;        // stock cells carry the coverage above the value
 const HEAD_H = 30;
@@ -318,11 +318,13 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
           </tr>
         );
       case "group": {
-        const l = a.lanes[r.li], several = a.lanes.length > 1, g = `${aid}-lane-${r.li}`;
-        const label = several ? `${l.supplier_id ?? "Sans fournisseur"}${l.name ? ` · ${l.name}` : ""}` : `ERP & Appro.${l.supplier_id ? ` · ${l.supplier_id}` : ""}`;
+        const l = a.lanes[r.li], g = `${aid}-lane-${r.li}`;
+        const label = l.supplier_id ? `${l.supplier_id}${l.name ? ` · ${l.name}` : ""}` : "Sans fournisseur";
+        const link = a.suppliers?.find((x) => x.supplier_id === l.supplier_id);
+        const rules = link ? `MOQ ${fmtQty(link.moq, unit)} · UM ${fmtQty(link.pack_qty, unit)} · délai ${link.lead_time_days} j ouvrés` : "";
         return (
-          <tr key={r.key} className="group-head" style={{ height: r.h }} onClick={() => toggleGroup(g)} title={collapsed[g] ? "Afficher le bloc" : "Masquer le bloc"}>
-            <td>{collapsed[g] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}{label}{l.backlog_qty > 0 ? ` · backlog ${fmtQty(l.backlog_qty, unit)}` : ""}</td>
+          <tr key={r.key} className="group-head" style={{ height: r.h }} onClick={() => toggleGroup(g)} title={[rules, collapsed[g] ? "Afficher le bloc" : "Masquer le bloc"].filter(Boolean).join("\n")}>
+            <td>{collapsed[g] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<span className="lane-name">{label}</span></td>
             <td colSpan={colCount - 1} />
           </tr>
         );

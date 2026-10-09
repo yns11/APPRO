@@ -104,11 +104,12 @@ def _programs_of(ctx: AppContext) -> dict[str, list[str]]:
 def grid(planner: str | None = None, article_ids: list[str] | None = Query(None), program_id: str | None = None,
          supplier_id: str | None = None, q: str | None = None, granularity: Literal["default", "day", "week"] = "default",
          horizon_days: int | None = HORIZON, history_weeks: int | None = HISTORY,
-         page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=200),
+         page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=200), sort: Literal["article", "supplier"] = "article",
          ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """One page of the supply table (same columns for every article).  Filters: articles, programme,
-    supplier, free text ``q`` on the identifier / designation.  The whole perimeter is computed once
-    (cached) ; only the requested page is serialised."""
+    supplier, free text ``q`` on the identifier / designation ; ``sort`` by article identifier or by
+    the name of the (first) supplier.  The whole perimeter is computed once (cached) ; only the
+    requested page is serialised."""
     ids = set(article_ids or [])
     if program_id:
         bom = ctx.table("ref_bom")
@@ -120,12 +121,19 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
         ids = (ids & sup_ids if ids else sup_ids) or {"__none__"}
     result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
                                  **_kw(horizon_days=horizon_days, history_weeks=history_weeks))
-    arts = sorted(result.articles.values(), key=lambda r: r.article.article_id)
+    names = _supplier_names(ctx)
+    if sort == "supplier":
+        def first_supplier(r) -> str:
+            sids = [l.supplier_id for l in r.lanes if l.supplier_id]
+            return min((names.get(sid, sid) or sid).lower() for sid in sids) if sids else "~"
+        arts = sorted(result.articles.values(), key=lambda r: (first_supplier(r), r.article.article_id))
+    else:
+        arts = sorted(result.articles.values(), key=lambda r: r.article.article_id)
     if q and q.strip():   # « ; » separates alternatives : 123;456 = contains 123 or 456
         arts = [r for r in arts if P.match_any(f"{r.article.article_id} {r.article.designation}", q)]
     total = len(arts)
     page_arts = arts[(page - 1) * page_size: page * page_size]
-    return json_response(P.grid_out(result, granularity, _supplier_names(ctx), _programs_of(ctx), articles=page_arts,
+    return json_response(P.grid_out(result, granularity, names, _programs_of(ctx), articles=page_arts,
                                     total=total, page=page, page_size=page_size))
 
 

@@ -714,3 +714,10 @@ def test_next_expected_delivery_and_new_programme_in_the_sheet(client):
     sh = client.get("/api/pdp/sheet", params={"weeks": 6}).json()
     new = next(p for p in sh["programs"] if p["program_id"] == "mass-NEW")
     assert new["has_bom"] is False and new["source"] == "none" and all(v == 0 for v in new["values"])
+
+
+def test_grid_sorted_by_supplier_name(client):
+    g = client.get("/api/grid", params={"planner": "QUENTIN", "sort": "supplier", "page_size": 50}).json()
+    names = [min((l["name"] or l["supplier_id"] or "").lower() for l in a["lanes"] if l["supplier_id"]) for a in g["articles"]]
+    assert names == sorted(names) and names[0] < names[-1]
+    assert client.get("/api/grid", params={"planner": "QUENTIN", "sort": "nope"}).status_code == 422

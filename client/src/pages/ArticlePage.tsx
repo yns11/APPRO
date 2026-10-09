@@ -91,7 +91,7 @@ export default function ArticlePage() {
 
       {q.isLoading || !d ? <SkeletonBlock rows={10} /> : (
         <Card flush tight>
-          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, lanes: d.lanes, kpis: d.kpis }]} planCells={planCells.data ?? []} adjustments={adjustments.data ?? []} flags={flags.data ?? []}
+          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, lanes: d.lanes, kpis: d.kpis, suppliers: d.suppliers }]} planCells={planCells.data ?? []} adjustments={adjustments.data ?? []} flags={flags.data ?? []}
             onSwitchDay={() => set({ granularity: "day" })} />
         </Card>
       )}
