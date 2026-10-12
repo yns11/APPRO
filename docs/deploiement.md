@@ -265,9 +265,10 @@ du SDK.
 
 ### 5.3 Cadence
 
-Le job du bundle est planifié `0 20 5-20 ? * MON-FRI` (Europe/Paris). En cible `dev` la planification est
-**suspendue** (`schedule_pause_status: PAUSED`) ; en `preprod` / `prod` elle est active. Vérifier avant
-de conclure qu'un job « ne tourne pas » :
+Le job du bundle est planifié **toutes les heures à H:20**, tous les jours (`0 20 * * * ?`, Europe/Paris),
+après le job amont qui reconstruit les tables EDI à H:00. La planification est active dans **toutes les
+cibles**, `dev` compris (`schedule_pause_status: UNPAUSED`) ; pour la suspendre sur une cible, passer la
+variable à `PAUSED` puis redéployer. Vérifier avant de conclure qu'un job « ne tourne pas » :
 
 ```bash
 databricks bundle validate -t prod -o json --profile PROD | jq '.resources.jobs.appro_sync_erp.schedule'
@@ -384,7 +385,7 @@ référentiel et les saisies.
 | Le cockpit est vide | référentiel non chargé | § 4 (`reference_rows` dans `/api/health`) |
 | Ferme / Reçu vides alors que le job est vert | `planner` des articles ne correspond à aucun périmètre, ou identifiants article différents entre référentiel et ERP | comparer `article_id` du référentiel et `Article` de `commandes_edi` |
 | Interface absente, `/api/docs` répond | frontend non compilé avant le déploiement | `scripts/deploy.sh` (recompile) |
-| Job « Scheduled — Paused » | cible en mode `development` ou variable `PAUSED` | § 5.3 |
+| Job « Scheduled — Paused » | variable `schedule_pause_status` à `PAUSED` sur la cible | § 5.3 |
 | `Invalid update mask … forward_user_access_token` au `apps deploy` | CLI 1.14.1 | passer en 1.15+ |
 | `unknown field: postgres` au `bundle validate` | CLI antérieure à 0.294 | mettre la CLI à jour |
 

@@ -9,8 +9,9 @@
 # et un identifiant OAuth de la branche / de l'endpoint Lakebase, construits
 # depuis les mêmes variables que la ressource `postgres` de l'App.
 #
-# Planification : toutes les heures, décalée après le job amont qui reconstruit
-# commandes_edi / recep_edi (toutes les heures à H:00 → ici H:20).
+# Planification : toutes les heures, tous les jours, décalée après le job amont qui
+# reconstruit commandes_edi / recep_edi (toutes les heures à H:00 → ici H:20), en dev
+# comme en préproduction et en production (schedule_pause_status: UNPAUSED).
 # =============================================================================
 resources:
   jobs:
@@ -21,7 +22,7 @@ resources:
         l'ERP dans les tables erp_* de l'application APPRO.
 
       schedule:
-        quartz_cron_expression: "0 20 5-20 ? * MON-FRI"
+        quartz_cron_expression: "0 20 * * * ?"
         timezone_id: Europe/Paris
         pause_status: ${var.schedule_pause_status}
 

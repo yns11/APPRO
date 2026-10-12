@@ -105,7 +105,7 @@ variables:
     description: Destinataire des alertes d'échec du job.
     default: ""
   schedule_pause_status:
-    description: PAUSED ou UNPAUSED ; chaque cible DOIT déclarer sa valeur (le défaut est suspendu).
+    description: PAUSED ou UNPAUSED ; chaque cible DOIT déclarer sa valeur (le défaut est suspendu ; dev, preprod et prod déclarent UNPAUSED).
     default: PAUSED
 
 include:
@@ -118,7 +118,7 @@ targets:
     workspace:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
-      schedule_pause_status: PAUSED
+      schedule_pause_status: UNPAUSED     # la synchronisation tourne aussi en dev (toutes les heures)
       # sync_role: "prenom.nom@exemple.com"
 
   preprod:
