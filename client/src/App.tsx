@@ -12,8 +12,8 @@ import ImportsPage from "@/pages/ImportsPage";
 import ReferencePage from "@/pages/ReferencePage";
 import SettingsPage from "@/pages/SettingsPage";
 
-/** The search page is built but hidden for now (no menu entry, no route). */
-const SEARCH_ENABLED = false;
+/** The search page can be hidden again by turning this off (no menu entry, no route). */
+const SEARCH_ENABLED = true;
 
 export default function App() {
   return (

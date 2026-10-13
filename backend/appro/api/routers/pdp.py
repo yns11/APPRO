@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ...data.store import PdpLine, PdpVersion, audit
+from ...data.store import AppMeta, PdpLine, PdpVersion, audit
 from ...services import excel_service
 from ...services.access import Access
 from ...services.context import AppContext
@@ -57,10 +58,26 @@ def _sheet_frame(ctx: AppContext, session: Session):
     return ds, erp_lines, as_of, iso_week_monday(as_of)
 
 
+PROGRAM_ORDER_KEY = "pdp_program_order"
+
+
+def read_program_order(session: Session) -> list[str]:
+    row = session.get(AppMeta, PROGRAM_ORDER_KEY)
+    try:
+        order = json.loads(row.value) if row and row.value else []
+    except ValueError:
+        order = []
+    return [str(x) for x in order] if isinstance(order, list) else []
+
+
 @router.get("/sheet", response_model=S.PdpSheetOut)
-def sheet(weeks: int = Query(26, ge=4, le=160), ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """The effective weekly PDP as a sheet: every active programme (plus any programme planned), one column per ISO week from the current week to ``weeks`` weeks ahead or to
-    the last planned week.  Weeks strictly after the current one are editable (managers, admins)."""
+def sheet(weeks: int = Query(26, ge=4, le=160), planner: str | None = None, ctx: AppContext = Depends(ctx_dep),
+          session: Session = Depends(session_dep)):
+    """The effective weekly PDP as a sheet: every active programme (plus any programme planned), one
+    column per ISO week from the current week to ``weeks`` weeks ahead or to the last planned week.
+    The current week and the weeks after it are editable (managers, admins).  ``planner`` keeps the
+    programmes whose bill of material reaches that planner's articles.  Rows follow the order the
+    managers stored (drag and drop), then the alphabetical order."""
     from ...engine.calendar import iso_week_label
     ds, erp_lines, as_of, monday = _sheet_frame(ctx, session)
     last = max([p.week_start for p in ds.pdp] + [monday])
@@ -78,11 +95,17 @@ def sheet(weeks: int = Query(26, ge=4, le=160), ctx: AppContext = Depends(ctx_de
     # bill of material) plus any programme planned
     listed = sorted({p.program_id for p in ds.programs if p.active} | set(by_program),
                     key=lambda pid: (names[pid].name if pid in names else pid).lower())
+    if planner:
+        mine = {a.article_id for a in ds.articles if (a.planner or "").upper() == planner.upper()}
+        reach = {b.program_id for b in ds.bom if b.article_id in mine}
+        listed = [pid for pid in listed if pid in reach]
+    order = {pid: i for i, pid in enumerate(read_program_order(session))}
+    listed.sort(key=lambda pid: (order.get(pid, len(order)), 0))   # stable : the alphabetical order remains inside each group
     active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
     return S.PdpSheetOut(
         as_of=as_of, current_week=iso_week_label(monday), active_version=_out(session, active) if active else None,
         erp_available=bool(erp_lines),
-        weeks=[S.PdpSheetWeek(week=iso_week_label(d), week_start=d, editable=d > monday) for d in week_starts],
+        weeks=[S.PdpSheetWeek(week=iso_week_label(d), week_start=d, editable=d >= monday) for d in week_starts],
         programs=[S.PdpSheetProgram(program_id=pid, name=names[pid].name if pid in names else pid,
                                     active=names[pid].active if pid in names else True, source=src.get(pid, "none"),
                                     has_bom=pid in with_bom,
@@ -93,7 +116,7 @@ def sheet(weeks: int = Query(26, ge=4, le=160), ctx: AppContext = Depends(ctx_de
 @router.put("/sheet", response_model=S.PdpVersionOut, status_code=201)
 def save_sheet(body: S.PdpSheetIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                user: str = Depends(current_user), access: Access = Depends(access_dep)):
-    """Direct entry of the PDP.  The changed cells (future weeks only) are applied on the effective
+    """Direct entry of the PDP.  The changed cells (current and future weeks) are applied on the effective
     plan and saved as a **new active version** that holds the programmes of the previous active
     version plus the programmes touched (copied from the ERP plan, then edited) ; the other programmes
     keep following the ERP plan.  Deactivating the version restores the previous state."""
@@ -105,8 +128,8 @@ def save_sheet(body: S.PdpSheetIn, ctx: AppContext = Depends(ctx_dep), session: 
             raise HTTPException(422, f"Programme inconnu : {c.program_id}")
         if c.week_start.isoweekday() != 1:
             raise HTTPException(422, f"{c.week_start.isoformat()} n'est pas un lundi")
-        if c.week_start <= monday:
-            raise HTTPException(422, f"Semaine {c.week_start.isoformat()} : seules les semaines à venir sont modifiables")
+        if c.week_start < monday:
+            raise HTTPException(422, f"Semaine {c.week_start.isoformat()} : seules la semaine en cours et les semaines à venir sont modifiables")
     active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
     lines: dict[str, dict[dt.date, float]] = {}
     if active:
@@ -132,6 +155,27 @@ def save_sheet(body: S.PdpSheetIn, ctx: AppContext = Depends(ctx_dep), session: 
     session.commit()
     ctx.bump()
     return _out(session, version)
+
+
+@router.put("/order", response_model=list[str])
+def save_order(body: S.PdpOrderIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+               user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """Row order of the PDP sheet (drag and drop), shared by every user ; programmes absent from the
+    list follow, in alphabetical order."""
+    access.require_pdp()
+    seen: list[str] = []
+    for pid in body.program_ids:
+        if pid not in seen:
+            seen.append(pid)
+    row = session.get(AppMeta, PROGRAM_ORDER_KEY)
+    if row is None:
+        row = AppMeta(key=PROGRAM_ORDER_KEY, value="[]")
+        session.add(row)
+    row.value = json.dumps(seen)
+    audit(session, user, "reorder", "pdp_sheet", PROGRAM_ORDER_KEY, None, {"programs": len(seen)})
+    session.commit()
+    ctx.bump()
+    return seen
 
 
 @router.get("/versions", response_model=list[S.PdpVersionOut])

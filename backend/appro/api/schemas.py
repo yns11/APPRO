@@ -584,7 +584,7 @@ class PerimeterOut(BaseModel):
 class PdpSheetWeek(BaseModel):
     week: str
     week_start: dt.date
-    editable: bool          # strictly after the current week, for managers and administrators
+    editable: bool          # the current week and the weeks after it, for managers and administrators
 
 
 class PdpSheetProgram(BaseModel):
@@ -611,6 +611,10 @@ class PdpCellIn(BaseModel):
     program_id: str
     week_start: dt.date
     qty: float = Field(ge=0)
+
+
+class PdpOrderIn(BaseModel):
+    program_ids: list[str] = Field(default_factory=list)
 
 
 class PdpSheetIn(BaseModel):

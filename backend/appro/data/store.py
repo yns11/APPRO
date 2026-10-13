@@ -88,7 +88,7 @@ class AppMeta(Base):
 
     __tablename__ = "app_meta"
     key: Mapped[str] = mapped_column(String(60), primary_key=True)
-    value: Mapped[str] = mapped_column(String(200), default="")
+    value: Mapped[str] = mapped_column(Text, default="")
 
 
 class ErpSyncLog(Base):

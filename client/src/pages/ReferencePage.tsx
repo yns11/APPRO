@@ -15,7 +15,7 @@ const fmtCell = (c: RefColumn, v: RefValue) => v === null || v === undefined || 
 /** Reference data managed in the application: one CRUD table per reference table, Excel template / import / export. */
 export default function ReferencePage() {
   const tables = useRefTables();
-  const { rights } = usePerimeter();
+  const { rights, perimeter } = usePerimeter();
   const [tab, setTab] = useState<string>("ref_articles");
   const [editing, setEditing] = useState<RefRow | null>(null);
   const [weeklyOf, setWeeklyOf] = useState<{ id: string; planner: string | null } | null>(null);
@@ -23,7 +23,7 @@ export default function ReferencePage() {
   const [program, setProgram] = useState("");
   const toast = useToast();
   const table = tables.data?.find((t) => t.name === tab);
-  const rows = useRefRows(tab);
+  const rows = useRefRows(tab, perimeter.planner);   // the global planner filter applies here too
   const fileInput = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"replace" | "merge">("merge");
   const del = useWrite(({ name, key }: { name: string; key: Record<string, RefValue> }) => api.post(`/api/reference/${name}/delete`, { key }), () => toast.push("Ligne supprimée"));

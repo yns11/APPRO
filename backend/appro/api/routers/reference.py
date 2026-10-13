@@ -112,9 +112,27 @@ def tables(session: Session = Depends(session_dep)):
 
 
 @router.get("/reference/{name}/rows")
-def rows(name: str, session: Session = Depends(session_dep)):
+def rows(name: str, planner: str | None = None, session: Session = Depends(session_dep)):
+    """Rows of one reference table ; ``planner`` keeps what concerns that planner's articles (the
+    articles themselves, their supplier links, bills of material and stock, the suppliers and the
+    programmes they reach) ; planners and delegations are never filtered."""
     _schema(name)
-    return reference.rows_out(session, name)
+    out = reference.rows_out(session, name)
+    if not planner or name in ("ref_planners", "ref_delegations"):
+        return out
+    want = planner.upper()
+    ids = {r["article_id"] for r in reference.rows_out(session, "ref_articles") if str(r.get("planner") or "").upper() == want}
+    if name == "ref_articles":
+        return [r for r in out if str(r.get("planner") or "").upper() == want]
+    if name in ("ref_article_suppliers", "ref_bom", "fct_stock"):
+        return [r for r in out if r.get("article_id") in ids]
+    if name == "ref_suppliers":
+        sids = {r["supplier_id"] for r in reference.rows_out(session, "ref_article_suppliers") if r.get("article_id") in ids}
+        return [r for r in out if r.get("supplier_id") in sids]
+    if name == "ref_programs":
+        pids = {r["program_id"] for r in reference.rows_out(session, "ref_bom") if r.get("article_id") in ids}
+        return [r for r in out if r.get("program_id") in pids]
+    return out
 
 
 @router.put("/reference/{name}/rows")

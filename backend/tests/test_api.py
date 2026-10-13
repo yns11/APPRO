@@ -586,7 +586,7 @@ def test_pdp_sheet_direct_entry(client):
     saved as a new active version holding the touched programmes (copied from the ERP plan)."""
     sh = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
     assert sh["current_week"] == "2026-W38" and sh["weeks"][0]["week_start"] == "2026-09-14" and sh["active_version"] is None
-    assert sh["weeks"][0]["editable"] is False and all(w["editable"] for w in sh["weeks"][1:]) and sh["erp_available"] is True
+    assert all(w["editable"] for w in sh["weeks"]) and sh["erp_available"] is True      # the current week is editable too
     prog = next(p for p in sh["programs"] if p["program_id"] == "mass-00037796")
     assert prog["source"] == "erp" and len(prog["values"]) == len(sh["weeks"])
     before = prog["values"]
@@ -609,9 +609,11 @@ def test_pdp_sheet_direct_entry(client):
     assert len(client.get("/api/pdp/versions").json()) == 2
     # the engine follows: the demand of the touched week changes with the plan
     assert client.get(f"/api/articles/{AID}/projection").json()["as_of"] == AS_OF
-    # guards: current / past week, not a Monday, unknown programme, negative
-    bad = [{"program_id": "mass-00037796", "week_start": "2026-09-14", "qty": 1}]
+    # the current week is accepted, a past week is not ; not a Monday, unknown programme, negative
+    bad = [{"program_id": "mass-00037796", "week_start": "2026-09-07", "qty": 1}]
     assert client.put("/api/pdp/sheet", json={"cells": bad}).status_code == 422
+    assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "week_start": "2026-09-14", "qty": 9}]}).status_code == 201
+    assert next(p for p in client.get("/api/pdp/sheet", params={"weeks": 8}).json()["programs"] if p["program_id"] == "mass-00037796")["values"][0] == 9
     assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "week_start": "2026-09-29"}]}).status_code == 422
     assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "program_id": "nope", "week_start": "2026-09-28"}]}).status_code == 422
     assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "week_start": "2026-09-28", "qty": -1}]}).status_code == 422
@@ -721,3 +723,35 @@ def test_grid_sorted_by_supplier_name(client):
     names = [min((l["name"] or l["supplier_id"] or "").lower() for l in a["lanes"] if l["supplier_id"]) for a in g["articles"]]
     assert names == sorted(names) and names[0] < names[-1]
     assert client.get("/api/grid", params={"planner": "QUENTIN", "sort": "nope"}).status_code == 422
+
+
+def test_planner_filter_on_reference_tables_and_pdp_sheet_and_row_order(client):
+    """The global planner filter reaches the Référentiel (articles, links, BOM, stock, suppliers,
+    programmes), the PDP sheet (programmes reaching the planner's articles) ; the sheet keeps the
+    row order stored by the managers."""
+    arts = client.get("/api/reference/ref_articles/rows").json()
+    other = next(a for a in arts if a["article_id"] != AID)
+    assert client.put("/api/reference/ref_articles/rows", json={"values": {**other, "planner": "ALICE"}}).status_code == 200
+    mine = client.get("/api/reference/ref_articles/rows", params={"planner": "quentin"}).json()
+    assert len(mine) == 15 and all(a["planner"] == "QUENTIN" for a in mine)
+    alice = client.get("/api/reference/ref_articles/rows", params={"planner": "ALICE"}).json()
+    assert [a["article_id"] for a in alice] == [other["article_id"]]
+    for table in ("ref_article_suppliers", "ref_bom", "fct_stock"):
+        rows = client.get(f"/api/reference/{table}/rows", params={"planner": "ALICE"}).json()
+        assert rows and all(r["article_id"] == other["article_id"] for r in rows), table
+    sups = client.get("/api/reference/ref_suppliers/rows", params={"planner": "ALICE"}).json()
+    links = client.get("/api/reference/ref_article_suppliers/rows", params={"planner": "ALICE"}).json()
+    assert {s["supplier_id"] for s in sups} == {l["supplier_id"] for l in links}
+    progs = client.get("/api/reference/ref_programs/rows", params={"planner": "ALICE"}).json()
+    bom = client.get("/api/reference/ref_bom/rows", params={"planner": "ALICE"}).json()
+    assert {p["program_id"] for p in progs} == {b["program_id"] for b in bom}
+    assert len(client.get("/api/reference/ref_planners/rows", params={"planner": "ALICE"}).json()) == len(client.get("/api/reference/ref_planners/rows").json())
+    sheet = client.get("/api/pdp/sheet", params={"weeks": 6, "planner": "ALICE"}).json()
+    assert {p["program_id"] for p in sheet["programs"]} == {b["program_id"] for b in bom}
+    full = [p["program_id"] for p in client.get("/api/pdp/sheet", params={"weeks": 6}).json()["programs"]]
+    assert len(full) > len(sheet["programs"])
+    # row order : the last two first, the rest alphabetical as before
+    wanted = full[-2:]
+    assert client.put("/api/pdp/order", json={"program_ids": wanted + [wanted[0]]}).json() == wanted
+    after = [p["program_id"] for p in client.get("/api/pdp/sheet", params={"weeks": 6}).json()["programs"]]
+    assert after[:2] == wanted and after[2:] == full[:-2]

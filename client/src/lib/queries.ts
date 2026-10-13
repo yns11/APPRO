@@ -77,13 +77,13 @@ export const useLinks = (articleId?: string) => useQuery({ queryKey: ["ref-links
 export const usePrograms = () => useQuery({ queryKey: ["ref-programs"], queryFn: () => api.get<ProgramRef[]>("/api/reference/programs"), staleTime: 300_000 });
 export const usePdpErp = (programId?: string) => useQuery({ queryKey: ["ref-pdp", programId], queryFn: () => api.get<PdpErpLine[]>("/api/reference/pdp", { program_id: programId }), staleTime: 300_000, enabled: !!programId });
 export const useRefTables = () => useQuery({ queryKey: ["ref-tables"], queryFn: () => api.get<RefTableInfo[]>("/api/reference/tables") });
-export const useRefRows = (name: string | null) => useQuery({ queryKey: ["ref-rows", name], queryFn: () => api.get<RefRow[]>(`/api/reference/${name}/rows`), enabled: !!name });
+export const useRefRows = (name: string | null, planner?: string | null) => useQuery({ queryKey: ["ref-rows", name, planner ?? null], queryFn: () => api.get<RefRow[]>(`/api/reference/${name}/rows`, { planner: planner ?? undefined }), enabled: !!name });
 
 export const useParamSchema = () => useQuery({ queryKey: ["param-schema"], queryFn: () => api.get<ParamDoc[]>("/api/params/schema"), staleTime: Infinity });
 export const useParamEffective = () => useQuery({ queryKey: ["param-effective"], queryFn: () => api.get<Record<string, unknown>>("/api/params/effective") });
 export const useOverrides = (params?: Params) => useQuery({ queryKey: ["overrides", params], queryFn: () => api.get<ParamOverrideOut[]>("/api/params/overrides", params) });
 export const usePerimeterLists = (planner: string | null | undefined) => useQuery({ queryKey: ["perimeter", planner ?? null], queryFn: () => api.get<PerimeterOut>("/api/reference/perimeter", { planner: planner ?? undefined }), staleTime: 300_000 });
-export const usePdpSheet = (weeks?: number) => useQuery({ queryKey: ["pdp-sheet", weeks], queryFn: () => api.get<PdpSheetOut>("/api/pdp/sheet", { weeks }), placeholderData: keepPreviousData });
+export const usePdpSheet = (weeks?: number, planner?: string | null) => useQuery({ queryKey: ["pdp-sheet", weeks, planner ?? null], queryFn: () => api.get<PdpSheetOut>("/api/pdp/sheet", { weeks, planner: planner ?? undefined }), placeholderData: keepPreviousData });
 export const usePdpVersions = () => useQuery({ queryKey: ["pdp-versions"], queryFn: () => api.get<PdpVersionOut[]>("/api/pdp/versions") });
 export const useAudit = (params?: Params) => useQuery({ queryKey: ["audit", params], queryFn: () => api.get<AuditOut[]>("/api/entries/audit", params) });
 

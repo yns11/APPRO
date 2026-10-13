@@ -30,14 +30,18 @@ export function parseCell(raw: string): number | "" | null {
  * pasted on a range fills it), the square of the active cell copies its value by dragging (``fillAxis``:
  * down, right or both), Delete clears the selection.  The owner receives the changes and decides.
  */
-export function SheetGrid({ rowHeaders, colHeaders, cells, canEdit, onCommit, onClear, corner, ariaLabel, className = "", fillAxis = "col", rowClass, colClass, colWidth }:
+export function SheetGrid({ rowHeaders, colHeaders, cells, canEdit, onCommit, onClear, corner, ariaLabel, className = "", fillAxis = "col", rowClass, colClass, colWidth, onReorder }:
   {
     rowHeaders: ReactNode[]; colHeaders: ReactNode[]; cells: SheetCell[][]; canEdit: boolean;
     onCommit: (changes: SheetChange[]) => void; onClear?: (cells: Pos[]) => void;
     corner?: ReactNode; ariaLabel: string; className?: string; fillAxis?: "col" | "row" | "both";
     rowClass?: (r: number) => string; colClass?: (c: number) => string; colWidth?: number;
+    /** rows can be dragged by their header (grip) : ``onReorder(from, to)`` receives the row indexes */
+    onReorder?: (from: number, to: number) => void;
   }) {
   const toast = useToast();
+  const [dragRow, setDragRow] = useState<number | null>(null);
+  const [overRow, setOverRow] = useState<number | null>(null);
   const nR = cells.length, nC = colHeaders.length;
   const [anchor, setAnchor] = useState<Pos | null>(null);
   const [focus, setFocus] = useState<Pos | null>(null);
@@ -170,8 +174,15 @@ export function SheetGrid({ rowHeaders, colHeaders, cells, canEdit, onCommit, on
         </thead>
         <tbody>
           {cells.map((row, r) => (
-            <tr key={r} className={rowClass?.(r)}>
-              <td className="rowno rowhead" onClick={() => { setAnchor({ r, c: 0 }); setFocus({ r, c: nC - 1 }); }} title="Sélectionner la ligne">{rowHeaders[r]}</td>
+            <tr key={r} className={[rowClass?.(r) ?? "", dragRow === r ? "dragging" : "", overRow === r && dragRow !== null && dragRow !== r ? (dragRow < r ? "drop-after" : "drop-before") : ""].filter(Boolean).join(" ")}
+              onDragOver={onReorder && dragRow !== null ? (e) => { e.preventDefault(); if (overRow !== r) setOverRow(r); } : undefined}
+              onDrop={onReorder && dragRow !== null ? (e) => { e.preventDefault(); if (dragRow !== r) onReorder(dragRow, r); setDragRow(null); setOverRow(null); } : undefined}>
+              <td className="rowno rowhead" onClick={() => { setAnchor({ r, c: 0 }); setFocus({ r, c: nC - 1 }); }} title="Sélectionner la ligne">
+                {onReorder && <span className="row-grip" draggable title="Glisser pour déplacer la ligne" aria-label="Déplacer la ligne"
+                  onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(r)); setDragRow(r); }}
+                  onDragEnd={() => { setDragRow(null); setOverRow(null); }} onClick={(e) => e.stopPropagation()}>⋮⋮</span>}
+                {rowHeaders[r]}
+              </td>
               {row.map((x, c) => {
                 const isEd = editing && editing.p.r === r && editing.p.c === c;
                 const isFocus = !isEd && focus?.r === r && focus?.c === c;

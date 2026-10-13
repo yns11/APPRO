@@ -5,9 +5,11 @@ import { api } from "@/lib/api";
 import { usePdpSheet, usePdpVersions, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { Badge, Button, Card, Empty, ErrorBox, Field, SkeletonBlock, useToast } from "@/components/ui";
+import { SearchSelect } from "@/components/SearchSelect";
+import { WeekRangeBar, type WeekChip, type WeekRange } from "@/components/WeekRangeBar";
 import { SheetGrid, type Pos, type SheetCell, type SheetChange } from "@/components/SheetGrid";
 import { fmtDate, fmtDateTime, fmtInt, fmtQty } from "@/lib/format";
-import type { ImportReport, PdpVersionOut } from "@/lib/types";
+import type { ImportReport, PdpSheetProgram, PdpVersionOut } from "@/lib/types";
 
 const WEEK_CHOICES = [26, 52, 78, 104];
 const SOURCE: Record<string, { label: string; tone: "ok" | "neutral" | "brand" | "outline" }> = {
@@ -22,11 +24,16 @@ const SOURCE: Record<string, { label: string; tone: "ok" | "neutral" | "brand" |
  */
 export default function PdpPage() {
   const toast = useToast();
-  const { rights } = usePerimeter();
+  const { rights, perimeter } = usePerimeter();
   const canEdit = rights.canImportPdp;
+  const [program, setProgram] = useState("");
+  const [onlyNoBom, setOnlyNoBom] = useState(false);
+  const [onlyNoPlan, setOnlyNoPlan] = useState(false);
+  const [range, setRange] = useState<WeekRange>(() => { try { return JSON.parse(localStorage.getItem("appro.pdp.weekRange") ?? "null"); } catch { return null; } });
+  useEffect(() => { try { localStorage.setItem("appro.pdp.weekRange", JSON.stringify(range)); } catch { /* private mode */ } }, [range]);
   const [weeks, setWeeks] = useState(() => { try { return Number(localStorage.getItem("appro.pdp.weeks")) || 26; } catch { return 26; } });
   useEffect(() => { try { localStorage.setItem("appro.pdp.weeks", String(weeks)); } catch { /* private mode */ } }, [weeks]);
-  const q = usePdpSheet(weeks);
+  const q = usePdpSheet(weeks, perimeter.planner);     // the global planner filter keeps the programmes reaching his articles
   const d = q.data;
   const versions = usePdpVersions();
   const [edits, setEdits] = useState<Map<string, number>>(new Map());   // "program|week_start" → qty
@@ -46,15 +53,45 @@ export default function PdpPage() {
   const act = useWrite(({ id, on }: { id: string; on: boolean }) => api.post(`/api/pdp/versions/${id}/${on ? "activate" : "deactivate"}`), () => toast.push("Version PDP mise à jour", "success"));
   const del = useWrite((id: string) => api.del(`/api/pdp/versions/${id}`), () => toast.push("Version supprimée"));
 
-  const programs = d?.programs ?? [], cols = d?.weeks ?? [];
+  const reorder = useWrite((ids: string[]) => api.put<string[]>("/api/pdp/order", { program_ids: ids }), () => toast.push("Ordre des programmes enregistré", "success"));
+  const allPrograms = useMemo(() => d?.programs ?? [], [d]);
+  const allWeeks = useMemo(() => d?.weeks ?? [], [d]);
+  const programOptions = useMemo(() => allPrograms.map((p) => ({ id: p.program_id, label: p.name || p.program_id, hint: p.program_id })), [allPrograms]);
+  const weekChips = useMemo<WeekChip[]>(() => allWeeks.map((w) => ({ key: w.week, label: w.week.replace(/^\d{4}-W/, "S"), start: fmtDate(w.week_start), current: w.week === d?.current_week })), [allWeeks, d?.current_week]);
+  /** the stored week range applies only when it overlaps the loaded weeks */
+  const effRange = useMemo(() => {
+    if (!range) return null;
+    const keys = allWeeks.map((w) => w.week);
+    const a = keys.indexOf(range.from), b = keys.indexOf(range.to);
+    if (a < 0 && b < 0) return null;
+    return { from: a < 0 ? keys[0] : range.from, to: b < 0 ? keys[keys.length - 1] : range.to };
+  }, [range, allWeeks]);
+  const colIdx = useMemo(() => {
+    const keys = allWeeks.map((w) => w.week);
+    const lo = effRange ? keys.indexOf(effRange.from) : 0, hi = effRange ? keys.indexOf(effRange.to) : keys.length - 1;
+    return allWeeks.map((_w, i) => i).filter((i) => i >= lo && i <= hi);
+  }, [allWeeks, effRange]);
+  const programs = useMemo<PdpSheetProgram[]>(() => allPrograms.filter((p) => (!program || p.program_id === program) && (!onlyNoBom || !p.has_bom) && (!onlyNoPlan || p.source === "none" || p.values.every((v) => v === 0))), [allPrograms, program, onlyNoBom, onlyNoPlan]);
+  const cols = useMemo(() => colIdx.map((i) => allWeeks[i]), [colIdx, allWeeks]);
+  const valueAt = (p: PdpSheetProgram, c: number) => p.values[colIdx[c]];
+  const moveRow = (from: number, to: number) => {
+    // the rows displayed may be a filtered subset : the move is applied inside the full list
+    const ids = allPrograms.map((p) => p.program_id);
+    const a = ids.indexOf(programs[from].program_id), b = ids.indexOf(programs[to].program_id);
+    if (a < 0 || b < 0 || a === b) return;
+    const [moved] = ids.splice(a, 1); ids.splice(b, 0, moved);
+    reorder.mutate(ids);
+  };
   const key = (r: number, c: number) => `${programs[r].program_id}|${cols[c].week_start}`;
   const cells = useMemo<SheetCell[][]>(() => programs.map((p) => cols.map((w, c) => {
     const k = `${p.program_id}|${w.week_start}`;
     const pending = edits.get(k);
-    const value = pending ?? p.values[c];
-    const title = `${p.name} · ${w.week.replace("-W", " S")} (${fmtDate(w.week_start)})${pending !== undefined ? ` · modifié : ${fmtQty(p.values[c])} → ${fmtQty(pending)} (non enregistré)` : ""}${!w.editable ? " · semaine en cours : lecture seule" : ""}`;
-    return { value, text: value === 0 ? "·" : fmtQty(value), over: pending !== undefined, ro: !w.editable, title, cls: !w.editable ? "current-week" : p.source === "app" ? "from-app" : "" };
-  })), [programs, cols, edits]);
+    const base = valueAt(p, c);
+    const value = pending ?? base;
+    const current = w.week === d?.current_week;
+    const title = `${p.name} · ${w.week.replace("-W", " S")} (${fmtDate(w.week_start)})${pending !== undefined ? ` · modifié : ${fmtQty(base)} → ${fmtQty(pending)} (non enregistré)` : ""}${current ? " · semaine en cours" : ""}${!w.editable ? " · lecture seule" : ""}`;
+    return { value, text: value === 0 ? "·" : fmtQty(value), over: pending !== undefined, ro: !w.editable, title, cls: current ? "current-week" : p.source === "app" ? "from-app" : "" };
+  })), [programs, cols, edits, d?.current_week]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const apply = (changes: SheetChange[]) => {
     if (!canEdit) return;
@@ -64,7 +101,7 @@ export default function PdpPage() {
         const v = x.value === "" ? 0 : x.value;
         if (v < 0) return;
         const k = key(x.r, x.c);
-        if (v === programs[x.r].values[x.c]) next.delete(k); else next.set(k, v);
+        if (v === valueAt(programs[x.r], x.c)) next.delete(k); else next.set(k, v);
       });
       return next;
     });
@@ -87,16 +124,24 @@ export default function PdpPage() {
       </div>
 
       <Card flush tight title={d ? <>PDP effectif · semaine en cours {d.current_week.replace("-W", " S")}{d.active_version ? <> · version active <b>{d.active_version.name}</b></> : d.erp_available ? " · PDP ERP" : ""}</> : "PDP effectif"}
-        hint={canEdit ? "Cliquer une cellule et saisir ; Entrée / Tab / flèches ; Ctrl+C / Ctrl+V (bloc Excel) ; tirer le carré pour recopier ; Suppr = 0. La semaine en cours est grisée (non modifiable)." : undefined}
+        hint={canEdit ? "Cliquer une cellule et saisir ; Entrée / Tab / flèches ; Ctrl+C / Ctrl+V (bloc Excel) ; tirer le carré pour recopier ; Suppr = 0 ; glisser la poignée ⋮⋮ pour réordonner les lignes. La semaine en cours est surlignée." : undefined}
         actions={canEdit && <div className="row">
           <input className="input sm" style={{ width: 220 }} placeholder="Nom de la version (facultatif)" value={name} onChange={(e) => setName(e.target.value)} aria-label="Nom de la version" />
           <Button size="sm" disabled={!edits.size} onClick={() => setEdits(new Map())}><RotateCcw />Annuler</Button>
           <Button size="sm" variant="primary" disabled={!edits.size || save.isPending} onClick={submit}><Save />Enregistrer{edits.size ? ` (${edits.size})` : ""}</Button>
         </div>}>
+        <div className="row wrap pdp-filters">
+          <SearchSelect value={program} onChange={setProgram} options={programOptions} placeholder="Tous les programmes" ariaLabel="Programme" width={260} />
+          <button type="button" className={`btn sm ${onlyNoBom ? "primary" : ""}`} onClick={() => setOnlyNoBom((v) => !v)} title="N'afficher que les programmes sans nomenclature">Sans nomenclature{allPrograms.length ? ` (${allPrograms.filter((p) => !p.has_bom).length})` : ""}</button>
+          <button type="button" className={`btn sm ${onlyNoPlan ? "primary" : ""}`} onClick={() => setOnlyNoPlan((v) => !v)} title="N'afficher que les programmes sans aucune quantité planifiée">Sans plan{allPrograms.length ? ` (${allPrograms.filter((p) => p.source === "none" || p.values.every((v) => v === 0)).length})` : ""}</button>
+          <span className="subtle small" style={{ marginLeft: "auto" }}>{programs.length} / {allPrograms.length} programme(s){perimeter.planner ? ` · approvisionneur ${perimeter.planner}` : ""}</span>
+        </div>
+        {weekChips.length > 1 && <WeekRangeBar weeks={weekChips} range={effRange} onChange={setRange} />}
         {q.isError ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : q.isLoading || !d ? <div style={{ padding: 20 }}><SkeletonBlock rows={8} /></div>
-          : programs.length === 0 ? <Empty title="Aucun programme" hint="Déclarer des programmes et leurs nomenclatures dans le Référentiel, ou importer un PDP." /> : (
+          : programs.length === 0 ? <Empty title="Aucun programme" hint={allPrograms.length ? "Aucun programme ne correspond aux filtres." : "Déclarer des programmes et leurs nomenclatures dans le Référentiel, ou importer un PDP."} /> : (
             <SheetGrid ariaLabel="Plan de production" className="pdp-sheet" canEdit={canEdit} cells={cells} onCommit={apply} onClear={clear} fillAxis="both" colWidth={78}
-              corner="Programme" colClass={(c) => (cols[c].editable ? "" : "current-week")}
+              onReorder={canEdit ? moveRow : undefined}
+              corner="Programme" colClass={(c) => (cols[c].week === d?.current_week ? "current-week" : "")}
               colHeaders={cols.map((w) => <>{w.week.replace("-W", " S")}<span className="sub">{fmtDate(w.week_start, "dd/MM")}</span></>)}
               rowHeaders={programs.map((p) => <><b>{p.name}</b> <span className="subtle mono small">{p.program_id}</span> <Badge tone={SOURCE[p.source].tone} title="Origine des quantités affichées">{SOURCE[p.source].label}</Badge>{!p.active && <Badge tone="outline">inactif</Badge>}{!p.has_bom && <Badge tone="warning" title="Aucune nomenclature : ce plan n'éclate en aucun besoin de composant (Référentiel › Nomenclatures)">sans nomenclature</Badge>}</>)} />
           )}
