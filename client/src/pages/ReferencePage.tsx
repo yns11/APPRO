@@ -10,6 +10,22 @@ import { Badge, Button, Card, Drawer, Empty, ErrorBox, Field, SkeletonBlock, Tab
 import { fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
 import type { ImportReport, RefColumn, RefRow, RefTableInfo, RefValue } from "@/lib/types";
 
+/** Quick filters of the Référentiel tables, on the query columns the server computes (several buttons combine with AND). */
+const QUICK_FILTERS: Record<string, { id: string; label: string; title: string; test: (r: RefRow) => boolean }[]> = {
+  ref_articles: [
+    { id: "no_supplier", label: "Sans fournisseur", title: "Articles sans règle article ↔ fournisseur active", test: (r) => Number(r.supplier_count ?? 0) === 0 },
+    { id: "multi", label: "Multi-sourcing", title: "Articles ayant au moins deux fournisseurs actifs", test: (r) => Number(r.supplier_count ?? 0) >= 2 },
+    { id: "no_program", label: "Sans programme", title: "Articles qu'aucune nomenclature n'utilise", test: (r) => Number(r.program_count ?? 0) === 0 },
+  ],
+  ref_suppliers: [{ id: "no_article", label: "Sans article", title: "Fournisseurs sans règle article ↔ fournisseur active", test: (r) => Number(r.article_count ?? 0) === 0 }],
+  ref_programs: [
+    { id: "no_bom", label: "Sans nomenclature", title: "Programmes sans composant dans les nomenclatures", test: (r) => Number(r.article_count ?? 0) === 0 },
+    { id: "no_plan", label: "Sans plan", title: "Programmes sans quantité planifiée à partir de la semaine en cours (PDP ERP ou version active)", test: (r) => !r.has_plan },
+  ],
+};
+/** Columns of the table itself that the Référentiel does not show (replaced by query columns). */
+const HIDDEN: Record<string, string[]> = { ref_articles: ["family", "planner"] };
+
 const fmtCell = (c: RefColumn, v: RefValue) => v === null || v === undefined || v === "" ? "" : c.type === "bool" ? (v ? "oui" : "non") : c.type === "date" ? fmtDate(String(v)) : c.type === "float" ? fmtQty(Number(v)) : String(v);
 
 /** Reference data managed in the application: one CRUD table per reference table, Excel template / import / export. */
@@ -24,6 +40,9 @@ export default function ReferencePage() {
   const toast = useToast();
   const table = tables.data?.find((t) => t.name === tab);
   const rows = useRefRows(tab, perimeter.planner);   // the global planner filter applies here too
+  const [flags, setFlags] = useState<Set<string>>(new Set());
+  const quick = QUICK_FILTERS[tab] ?? [];
+  const shown = useMemo(() => { const on = quick.filter((f) => flags.has(f.id)); return on.length ? (rows.data ?? []).filter((r) => on.every((f) => f.test(r))) : rows.data ?? []; }, [rows.data, quick, flags]);
   const fileInput = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"replace" | "merge">("merge");
   const del = useWrite(({ name, key }: { name: string; key: Record<string, RefValue> }) => api.post(`/api/reference/${name}/delete`, { key }), () => toast.push("Ligne supprimée"));
@@ -32,15 +51,21 @@ export default function ReferencePage() {
 
   const cols = useMemo<Column<RefRow>[]>(() => {
     if (!table) return [];
-    const out: Column<RefRow>[] = table.columns.map((c) => ({
+    const hidden = HIDDEN[table.name] ?? [];
+    const out: Column<RefRow>[] = table.columns.filter((c) => !hidden.includes(c.name)).map((c) => ({
       key: c.name, label: c.label, num: c.type === "float" || c.type === "int",
       filter: c.type === "bool" || (c.type === "str" && ["unit", "planner", "family", "country", "supplier_id", "program_id", "active"].includes(c.name) && !c.key) ? "select" : undefined,
       get: (r) => (c.type === "bool" ? (r[c.name] ? "oui" : "non") : (r[c.name] as string | number | null)),
       render: (r) => c.key && c.name === "article_id" ? <Link to={`/articles/${encodeURIComponent(String(r[c.name]))}`} onClick={(e) => e.stopPropagation()}><b>{String(r[c.name])}</b></Link>
         : c.type === "bool" ? <Badge tone={r[c.name] ? "ok" : "neutral"}>{r[c.name] ? "oui" : "non"}</Badge> : <>{fmtCell(c, r[c.name])}</>,
     }));
+    const after = (name: string, col: Column<RefRow>) => out.splice(out.findIndex((c) => c.key === name) + 1, 0, col);
+    const list = (text: RefValue, width: number) => <span className="truncate" style={{ display: "inline-block", maxWidth: width, verticalAlign: "bottom" }} title={String(text ?? "")}>{String(text ?? "")}</span>;
+    if (table.name === "ref_articles") after("unit", { key: "programs", label: "Programmes", title: "Programmes dont la nomenclature utilise l'article (colonne calculée)", get: (r) => (r.programs as string) ?? "", render: (r) => list(r.programs, 320) });
+    if (table.name === "ref_suppliers") after("name", { key: "articles", label: "Articles", title: "Articles reliés au fournisseur par une règle active (colonne calculée)", get: (r) => (r.articles as string) ?? "", render: (r) => <>{Number(r.article_count ?? 0) ? <b style={{ marginRight: 6 }}>{Number(r.article_count)} ·</b> : null}{list(r.articles, 360)}</> });
+    if (table.name === "ref_programs") after("name", { key: "article_count", label: "Articles", title: "Nombre de composants dans la nomenclature (colonne calculée)", num: true, get: (r) => Number(r.article_count ?? 0) });
     if (table.name === "ref_articles") out.push({ key: "weeks", label: "Semaines", get: () => "", filter: "none", sortable: false, render: (r) => <Button size="sm" variant="ghost" title="Politique de stock semaine par semaine" onClick={(e) => { e.stopPropagation(); setWeeklyOf({ id: String(r.article_id), planner: r.planner == null ? null : String(r.planner) }); }}><CalendarDays /></Button> });
-    out.push({ key: "who", label: "Modifié", get: (r) => `${r.updated_by ?? ""} ${r.updated_at ?? ""}`, render: (r) => <span className="subtle small">{r.updated_by}{r.updated_at ? <><br />{fmtDateTime(r.updated_at)}</> : null}</span> });
+    if (table.name !== "ref_articles") out.push({ key: "who", label: "Modifié", get: (r) => `${r.updated_by ?? ""} ${r.updated_at ?? ""}`, render: (r) => <span className="subtle small">{r.updated_by}{r.updated_at ? <><br />{fmtDateTime(r.updated_at)}</> : null}</span> });
     if (rights.canEditTable(table.name)) out.push({ key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (r) => <Button size="sm" variant="ghost" title="Supprimer" onClick={(e) => { e.stopPropagation(); if (window.confirm("Supprimer cette ligne ?")) del.mutate({ name: table.name, key: Object.fromEntries(table.key.map((k) => [k, r[k]])) }); }}><Trash2 /></Button> });
     return out;
   }, [table, del, rights]);
@@ -52,7 +77,7 @@ export default function ReferencePage() {
     <div className="page">
       <div className="page-header sticky">
         <div className="title"><h1>Référentiel</h1><p>Articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures, stock de référence, approvisionneurs et délégations sont gérés ici : ligne par ligne, ou par fichier Excel (modèle à télécharger, puis importer).{rights.access && !rights.canWrite ? " Lecture seule : vous n'êtes pas déclaré comme approvisionneur." : ""}</p></div>
-        {tables.data && <Tabs value={tab} onChange={(t) => { setTab(t); setReport(null); }} tabs={[...tables.data.map((t) => ({ id: t.name, label: t.label, count: t.rows })), { id: "pdp_erp", label: "PDP ERP" }]} />}
+        {tables.data && <Tabs value={tab} onChange={(t) => { setTab(t); setReport(null); setFlags(new Set()); }} tabs={[...tables.data.map((t) => ({ id: t.name, label: t.label, count: t.rows })), { id: "pdp_erp", label: "PDP ERP" }]} />}
       </div>
       {tables.isError ? <ErrorBox error={tables.error} /> : tables.isLoading || !tables.data ? <SkeletonBlock /> : (
         <>
@@ -72,10 +97,17 @@ export default function ReferencePage() {
               </>}>
               {importFile.error && <div className="error-box" style={{ margin: 12 }}>{(importFile.error as Error).message}</div>}
               {report && <div className="note" style={{ margin: 12 }}>{report.created} ligne(s) importée(s){report.notes.length ? ` · ${report.notes.slice(0, 5).join(" ; ")}${report.notes.length > 5 ? " …" : ""}` : ""}</div>}
+              {quick.length > 0 && (
+                <div className="row wrap quick-filters">
+                  {quick.map((f) => <button key={f.id} type="button" className={`btn sm ${flags.has(f.id) ? "primary" : ""}`} title={f.title}
+                    onClick={() => setFlags((prev) => { const n = new Set(prev); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n; })}>{f.label}{rows.data ? ` (${rows.data.filter(f.test).length})` : ""}</button>)}
+                  <span className="subtle small" style={{ marginLeft: "auto" }}>{shown.length} / {rows.data?.length ?? 0} ligne(s)</span>
+                </div>
+              )}
               {rows.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : (
-                <DataTable rows={rows.data ?? []} columns={cols} rowKey={(r) => table.key.map((k) => String(r[k])).join("|")} compact maxHeight="calc(100vh - 290px)"
+                <DataTable rows={shown} columns={cols} rowKey={(r) => table.key.map((k) => String(r[k])).join("|")} compact maxHeight="calc(100vh - 290px)"
                   onRowClick={rights.canEditTable(table.name) ? (r) => setEditing(r) : undefined}
-                  emptyTitle={`Aucune ligne dans « ${table.label} »`} emptyHint={table.name === "ref_planners" ? "Tant que cette table est vide, tout utilisateur est administrateur : commencez par vous déclarer avec le rôle admin." : "Télécharger le modèle, le remplir, l'importer ; ou ajouter une ligne."} />
+                  emptyTitle={flags.size && rows.data?.length ? "Aucune ligne ne correspond aux filtres" : `Aucune ligne dans « ${table.label} »`} emptyHint={flags.size && rows.data?.length ? undefined : table.name === "ref_planners" ? "Tant que cette table est vide, tout utilisateur est administrateur : commencez par vous déclarer avec le rôle admin." : "Télécharger le modèle, le remplir, l'importer ; ou ajouter une ligne."} />
               )}
             </Card>
           )}

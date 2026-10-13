@@ -755,3 +755,30 @@ def test_planner_filter_on_reference_tables_and_pdp_sheet_and_row_order(client):
     assert client.put("/api/pdp/order", json={"program_ids": wanted + [wanted[0]]}).json() == wanted
     after = [p["program_id"] for p in client.get("/api/pdp/sheet", params={"weeks": 6}).json()["programs"]]
     assert after[:2] == wanted and after[2:] == full[:-2]
+
+
+def test_reference_query_columns(client):
+    """Articles, suppliers and programmes carry columns computed from the other tables."""
+    arts = {r["article_id"]: r for r in client.get("/api/reference/ref_articles/rows").json()}
+    bom = client.get("/api/reference/ref_bom/rows").json()
+    links = [r for r in client.get("/api/reference/ref_article_suppliers/rows").json() if r["active"]]
+    names = {p["program_id"]: p["name"] for p in client.get("/api/reference/ref_programs/rows").json()}
+    for aid, r in arts.items():
+        want = sorted({names[b["program_id"]] for b in bom if b["article_id"] == aid}, key=str.lower)
+        assert r["programs"] == ", ".join(want) and r["program_count"] == len(want)
+        assert r["supplier_count"] == sum(1 for lk in links if lk["article_id"] == aid)
+    assert any(r["supplier_count"] >= 2 for r in arts.values())   # the seed holds a multi-sourced article
+    sups = client.get("/api/reference/ref_suppliers/rows").json()
+    for s in sups:
+        want = sorted({lk["article_id"] for lk in links if lk["supplier_id"] == s["supplier_id"]})
+        assert s["articles"] == ", ".join(want) and s["article_count"] == len(want)
+    progs = {p["program_id"]: p for p in client.get("/api/reference/ref_programs/rows").json()}
+    assert all(p["article_count"] == sum(1 for b in bom if b["program_id"] == pid) for pid, p in progs.items())
+    assert {p["has_plan"] for p in progs.values()} <= {True, False} and any(p["has_plan"] for p in progs.values())
+    # a new programme : no components, no plan
+    assert client.put("/api/reference/ref_programs/rows", json={"values": {"program_id": "mass-NEW", "name": "Nouveau", "active": True}}).status_code == 200
+    new = next(p for p in client.get("/api/reference/ref_programs/rows").json() if p["program_id"] == "mass-NEW")
+    assert new["article_count"] == 0 and new["has_plan"] is False
+    # the query columns are not stored : saving a row carrying them is fine
+    row = arts[AID]
+    assert client.put("/api/reference/ref_articles/rows", json={"values": row}).status_code == 200

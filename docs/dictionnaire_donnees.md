@@ -18,6 +18,15 @@ Le modèle Excel de chaque table (`GET /api/reference/<table>/template.xlsx`, bo
 libellés ci-dessous en en-tête, une ligne d'exemple et un onglet NOTICE. L'import accepte les libellés ou les
 noms techniques, en mode *remplacer* ou *fusionner* (par clé).
 
+La page Référentiel ajoute à trois tables des **colonnes requête**, calculées à la lecture à partir des autres
+tables (`GET /api/reference/<table>/rows`) ; elles ne sont ni stockées, ni exportées, ni importées :
+
+| Table | Colonnes requête | Boutons de filtre rapide (cumulables) |
+|---|---|---|
+| `ref_articles` | *Programmes* (noms des programmes dont la nomenclature utilise l'article, `programs`, `program_count`) ; `supplier_count` (règles article ↔ fournisseur actives). Les colonnes *Famille*, *Approvisionneur* et *Modifié* ne sont pas affichées (l'approvisionneur est le filtre global). | *Sans fournisseur*, *Multi-sourcing* (≥ 2 fournisseurs actifs), *Sans programme* |
+| `ref_suppliers` | *Articles* (nombre et références des articles reliés par une règle active, `articles`, `article_count`) | *Sans article* |
+| `ref_programs` | *Articles* (nombre de composants de la nomenclature, `article_count`) ; `has_plan` (une quantité planifiée à partir de la semaine en cours, PDP ERP ou version active) | *Sans nomenclature*, *Sans plan* |
+
 ### 1.1 `ref_articles` — Articles
 
 | Colonne | Libellé | Type | Obligatoire | Description |

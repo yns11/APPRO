@@ -112,27 +112,68 @@ def tables(session: Session = Depends(session_dep)):
 
 
 @router.get("/reference/{name}/rows")
-def rows(name: str, planner: str | None = None, session: Session = Depends(session_dep)):
+def rows(name: str, planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """Rows of one reference table ; ``planner`` keeps what concerns that planner's articles (the
     articles themselves, their supplier links, bills of material and stock, the suppliers and the
-    programmes they reach) ; planners and delegations are never filtered."""
+    programmes they reach) ; planners and delegations are never filtered.  Articles, suppliers and
+    programmes carry **query columns** computed from the other tables (never stored, never
+    imported) : see :func:`query_columns`."""
     _schema(name)
     out = reference.rows_out(session, name)
-    if not planner or name in ("ref_planners", "ref_delegations"):
-        return out
-    want = planner.upper()
-    ids = {r["article_id"] for r in reference.rows_out(session, "ref_articles") if str(r.get("planner") or "").upper() == want}
-    if name == "ref_articles":
-        return [r for r in out if str(r.get("planner") or "").upper() == want]
-    if name in ("ref_article_suppliers", "ref_bom", "fct_stock"):
-        return [r for r in out if r.get("article_id") in ids]
-    if name == "ref_suppliers":
-        sids = {r["supplier_id"] for r in reference.rows_out(session, "ref_article_suppliers") if r.get("article_id") in ids}
-        return [r for r in out if r.get("supplier_id") in sids]
-    if name == "ref_programs":
-        pids = {r["program_id"] for r in reference.rows_out(session, "ref_bom") if r.get("article_id") in ids}
-        return [r for r in out if r.get("program_id") in pids]
+    if planner and name not in ("ref_planners", "ref_delegations"):
+        want = planner.upper()
+        ids = {r["article_id"] for r in reference.rows_out(session, "ref_articles") if str(r.get("planner") or "").upper() == want}
+        if name == "ref_articles":
+            out = [r for r in out if str(r.get("planner") or "").upper() == want]
+        elif name in ("ref_article_suppliers", "ref_bom", "fct_stock"):
+            out = [r for r in out if r.get("article_id") in ids]
+        elif name == "ref_suppliers":
+            sids = {r["supplier_id"] for r in reference.rows_out(session, "ref_article_suppliers") if r.get("article_id") in ids}
+            out = [r for r in out if r.get("supplier_id") in sids]
+        elif name == "ref_programs":
+            pids = {r["program_id"] for r in reference.rows_out(session, "ref_bom") if r.get("article_id") in ids}
+            out = [r for r in out if r.get("program_id") in pids]
+    query_columns(ctx, session, name, out)
     return out
+
+
+def query_columns(ctx: AppContext, session: Session, name: str, out: list[dict]) -> None:
+    """Add the computed columns of the Référentiel tables (in place) :
+
+    * articles : ``programs`` (names of the programmes whose bill of material uses the article),
+      ``program_count``, ``supplier_count`` (active article ↔ supplier rules) ;
+    * suppliers : ``articles`` (ids of the articles with an active rule for the supplier), ``article_count`` ;
+    * programmes : ``article_count`` (components of the bill of material), ``has_plan`` (a quantity
+      planned from the current week on, PDP ERP or active version)."""
+    if name == "ref_articles":
+        names = {p["program_id"]: str(p.get("name") or p["program_id"]) for p in reference.rows_out(session, "ref_programs")}
+        progs: dict[str, set[str]] = {}
+        for b in reference.rows_out(session, "ref_bom"):
+            progs.setdefault(b["article_id"], set()).add(names.get(b["program_id"], str(b["program_id"])))
+        sups: dict[str, int] = {}
+        for lk in reference.rows_out(session, "ref_article_suppliers"):
+            if lk.get("active", True):
+                sups[lk["article_id"]] = sups.get(lk["article_id"], 0) + 1
+        for r in out:
+            found = sorted(progs.get(r["article_id"], ()), key=str.lower)
+            r["programs"], r["program_count"], r["supplier_count"] = ", ".join(found), len(found), sups.get(r["article_id"], 0)
+    elif name == "ref_suppliers":
+        arts: dict[str, set[str]] = {}
+        for lk in reference.rows_out(session, "ref_article_suppliers"):
+            if lk.get("active", True):
+                arts.setdefault(lk["supplier_id"], set()).add(str(lk["article_id"]))
+        for r in out:
+            found = sorted(arts.get(r["supplier_id"], ()))
+            r["articles"], r["article_count"] = ", ".join(found), len(found)
+    elif name == "ref_programs":
+        from .pdp import _sheet_frame
+        counts: dict[str, int] = {}
+        for b in reference.rows_out(session, "ref_bom"):
+            counts[b["program_id"]] = counts.get(b["program_id"], 0) + 1
+        ds, _erp, _as_of, monday = _sheet_frame(ctx, session)
+        planned = {p.program_id for p in ds.pdp if p.qty > 0 and p.week_start >= monday}
+        for r in out:
+            r["article_count"], r["has_plan"] = counts.get(r["program_id"], 0), r["program_id"] in planned
 
 
 @router.put("/reference/{name}/rows")

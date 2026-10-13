@@ -390,7 +390,7 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .pivot tr.group-head td .lane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- PDP sheet : filters, drag-and-drop rows */
-.pdp-filters { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.pdp-filters, .quick-filters { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .row-grip { display: inline-block; margin-right: 6px; color: var(--fg-subtle); cursor: grab; letter-spacing: -2px; user-select: none; }
 .row-grip:active { cursor: grabbing; }
 .dgrid tr.dragging td { opacity: 0.5; }
