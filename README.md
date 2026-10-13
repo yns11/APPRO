@@ -47,6 +47,7 @@ databricks bundle run appro_sync_erp -t dev --profile PROD           # première
 
 ## Documentation
 
+* [`docs/guide_moteur.md`](docs/guide_moteur.md) — **guide du moteur et du tableau d'approvisionnement** : chaque paramètre et son effet, avec des scénarios calculés par le moteur (tableaux générés par `scripts/guide_moteur.py`)
 * [`docs/regles_metier.md`](docs/regles_metier.md) — règles de calcul (besoin, voies fournisseur, plan par cellules, backlog, ajustements, projection, couverture, alertes, propositions, classeur)
 * [`docs/dictionnaire_donnees.md`](docs/dictionnaire_donnees.md) — référentiel géré dans l'application, faits ERP et leur correspondance avec `commandes_edi` / `recep_edi`, base applicative
 * [`docs/modele_donnees.md`](docs/modele_donnees.md) — vue d'ensemble des tables

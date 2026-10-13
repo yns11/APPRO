@@ -10,6 +10,11 @@ from .models import Alert, AlertType, Article, EngineParams, Lane, Proposal, Sev
 from .projection import Projection, first_shortage
 
 
+def _fmt(v: float) -> str:
+    """Quantity in a message : thousands separated by a space, as in the screens."""
+    return f"{v:,.0f}".replace(",", " ")
+
+
 def _severity_by_horizon(days_ahead: int, lead: int, params: EngineParams) -> Severity:
     """Inside the lead time nothing can be done any more; inside the firm horizon the planner
     must act (confirm / order); beyond it the alert is informational.  Same grading for the ERP
@@ -59,7 +64,7 @@ def classify_alerts(
     # --- stock / coverage ----------------------------------------------------------
     if stock_start < -1e-6:
         alerts.append(Alert(aid, AlertType.NEGATIVE_STOCK, Severity.CRITICAL,
-                            f"Stock de départ négatif dans l'ERP ({stock_start:,.0f}) : vérifier inventaire / saisies",
+                            f"Stock de départ négatif dans l'ERP ({_fmt(stock_start)}) : vérifier inventaire / saisies",
                             date=as_of, value=float(stock_start), scope="data"))
 
     # Stockouts per layer.  A physical stock is never negative: a stockout is the first day
@@ -70,7 +75,7 @@ def classify_alerts(
         worst = float(np.max(plan.shortage[k_plan:]))
         alerts.append(Alert(aid, AlertType.STOCKOUT, _severity_by_horizon(k_plan - i0, lead, params),
                             f"Rupture Projeté Appro. le {index.dates[k_plan].isoformat()} (J+{k_plan - i0}) malgré le plan de "
-                            f"livraison et le complément CBN, manque max {worst:,.0f}", date=index.dates[k_plan], value=worst,
+                            f"livraison et le complément CBN, manque max {_fmt(worst)}", date=index.dates[k_plan], value=worst,
                             scope="plan", details={"days_ahead": k_plan - i0, "lead_time_days": lead}))
     if k_erp is not None:
         worst = float(np.max(erp.shortage[k_erp:]))
@@ -114,7 +119,7 @@ def classify_alerts(
         p = urgent[0]
         alerts.append(Alert(aid, AlertType.URGENT_PROPOSAL, Severity.CRITICAL,
                             f"{len(urgent)} proposition(s) hors délai fournisseur – première livraison requise le "
-                            f"{p.delivery_date.isoformat()} ({p.qty:,.0f})", date=p.delivery_date, value=p.qty,
+                            f"{p.delivery_date.isoformat()} ({_fmt(p.qty)})", date=p.delivery_date, value=p.qty,
                             details={"count": len(urgent)}))
     return alerts
 

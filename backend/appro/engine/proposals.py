@@ -30,6 +30,11 @@ from .projection import Projection
 EPS = 1e-6
 
 
+def _fmt(v: float) -> str:
+    """Quantity in a message : thousands separated by a space, as in the screens."""
+    return f"{v:,.0f}".replace(",", " ")
+
+
 def choose_supplier(links: list[SupplierLink], proposed_so_far: dict[str, float],
                     policy: str) -> SupplierLink | None:
     active = [l for l in links if l.active]
@@ -226,7 +231,7 @@ def generate_proposals(
                 shortage = np.maximum(-stock, 0.0)
             if link:
                 proposed_by_supplier[link.supplier_id] = proposed_by_supplier.get(link.supplier_id, 0.0) + qty
-            reason = f"Stock projeté {before:,.0f} < cible {target[k]:,.0f} le {index.dates[k].isoformat()}"
+            reason = f"Stock projeté {_fmt(before)} < cible {_fmt(target[k])} le {index.dates[k].isoformat()}"
             if j > i:
                 reason += f" (besoin dès le {index.dates[i].isoformat()}, première livraison possible le {delivery.isoformat()})"
             if urgent:
@@ -236,7 +241,7 @@ def generate_proposals(
                     if len(later):
                         d_later = index.dates[j + 1 + int(later[0])]
                         reason += (f" ; alternative : avancer la commande prévisionnelle / planifiée du "
-                                   f"{d_later.isoformat()} ({supply_planned[j + 1 + int(later[0])]:,.0f})")
+                                   f"{d_later.isoformat()} ({_fmt(supply_planned[j + 1 + int(later[0])])})")
             proposals.append(Proposal(
                 proposal_id=f"PR-{article.article_id}-{seq:03d}",
                 article_id=article.article_id,
