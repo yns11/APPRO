@@ -135,6 +135,8 @@ Table vide = tout utilisateur est administrateur (première installation).
 
 ## 2. Faits ERP
 
+Lecture de bout en bout (colonnes UC lues, miroir Lakebase, usage écran par écran) : `flux_donnees_erp.md`.
+
 Correspondance appliquée par `backend/appro/data/erp_sql.py` (Databricks SQL), exécutée soit par le job
 `appro_sync_erp` (vers `erp_*`), soit par l'application sur un SQL warehouse. Une seule source de vérité
 pour la correspondance.
