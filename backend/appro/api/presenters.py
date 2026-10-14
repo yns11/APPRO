@@ -39,7 +39,7 @@ LANE_SERIES = [("orders_firm", "Ferme"), ("orders_firm_hist", "Ferme (passé)"),
 GRID_SERIES = {"demand", "supply_proposed", "adjustments", "stock_erp", "stock_plan", "shortage_erp", "shortage_plan",
                "coverage_erp", "coverage_plan", "target_stock"}
 FLOWS = {"demand", "consumed", "required", "demand_plan", "orders_firm", "orders_firm_hist", "orders_forecast",
-         "receipts", "plan", "supply_proposed", "adjustments", "desadv_open"}
+         "receipts", "plan", "supply_proposed", "adjustments", "desadv_open", "orders_firm_ordered", "orders_firm_open"}
 SHORTAGES = {"shortage_erp", "shortage_plan"}
 
 

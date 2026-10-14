@@ -97,12 +97,14 @@ export function PerimeterProvider({ children }: { children: ReactNode }) {
     const a = config?.access;
     const portfolio = new Set((a?.portfolio ?? []).map((p) => p.toUpperCase()));
     const ARTICLE_TABLES = ["ref_articles", "ref_article_suppliers", "ref_bom", "fct_stock", "ref_delegations"];
+    const OPEN_TABLES = ["ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_programs", "ref_bom", "fct_stock"];
+    const openTo = (name: string) => !!a?.can_edit_reference && OPEN_TABLES.includes(name);
     return {
       access: a,
       canEditPlanner: (planner) => !!a && (a.is_admin || (!!planner && portfolio.has(planner.toUpperCase()))),
       canWrite: !!a?.can_write, canManageParams: !!a?.can_manage_params, canImportPdp: !!a?.can_import_pdp, isAdmin: !!a?.is_admin,
-      canEditTable: (name) => !!a && (a.is_admin || (a.can_manage_params && name !== "ref_planners") || (a.can_write && ARTICLE_TABLES.includes(name))),
-      canImportTable: (name) => !!a && (a.is_admin || (a.can_manage_params && name !== "ref_planners")),
+      canEditTable: (name) => !!a && (a.is_admin || openTo(name) || (a.can_manage_params && name !== "ref_planners") || (a.can_write && ARTICLE_TABLES.includes(name))),
+      canImportTable: (name) => !!a && (a.is_admin || openTo(name) || (a.can_manage_params && name !== "ref_planners")),
     };
   }, [config]);
   const value = useMemo(() => ({ perimeter, set, config, configError: error as Error | null, engineParams, rights }), [perimeter, set, config, error, engineParams, rights]);

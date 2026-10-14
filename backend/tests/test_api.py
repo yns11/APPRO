@@ -479,15 +479,18 @@ def test_planners_delegations_and_roles(client):
     assert client.put("/api/params/overrides", json={"scope": "article_week", "key1": other["article_id"], "key2": "2026-W40", "field": "coverage_target_days", "value": 2}).status_code == 403
     assert client.put("/api/params/overrides", json={"scope": "article_week", "key1": AID, "key2": "2026-W40", "field": "coverage_target_days", "value": 2}).status_code == 200
     assert put({"planner_id": "PROC3", "name": "Z", "email": "z@example.com", "role": "appro", "active": True}, {}).status_code == 403
-    assert client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", b"x")}).status_code == 403
-    # his own article row: yes ; somebody else's: no ; giving his article away: no
+    # the reference tables are open to every declared user for now (OPEN_REFERENCE): his own article row,
+    # somebody else's, an import of a whole table ; a reader still writes nothing
     row = next(a for a in arts if a["article_id"] == AID)
+    assert client.get("/api/config").json()["access"]["can_edit_reference"] is True
     assert client.put("/api/reference/ref_articles/rows", json={"values": {**row, "coverage_target_days": 9}}).status_code == 200
-    assert client.put("/api/reference/ref_articles/rows", json={"values": {**row, "planner": other["planner"]}}).status_code == 403
-    assert client.put("/api/reference/ref_articles/rows", json={"values": {**other, "coverage_target_days": 9}}).status_code == 403
+    assert client.put("/api/reference/ref_articles/rows", json={"values": {**other, "coverage_target_days": 9}}).status_code == 200
+    assert client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", b"x")}).status_code != 403
+    assert client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", b"x")}, headers={"x-forwarded-email": "nobody@example.com"}).status_code == 403
     # a reader (not declared) and an inactive planner write nothing
     reader = {"x-forwarded-email": "nobody@example.com"}
     assert client.get("/api/config", headers=reader).json()["access"]["role"] == "reader"
+    assert client.get("/api/config", headers=reader).json()["access"]["can_edit_reference"] is False
     assert client.put("/api/entries/plan", json={"article_id": AID, "date": day, "expression": "10"}, headers=reader).status_code == 403
     assert client.post("/api/reference/refresh", headers=reader).status_code == 403
     # delegation PROC2 → PROC1 (other's portfolio) between two dates covering today
@@ -782,3 +785,24 @@ def test_reference_query_columns(client):
     # the query columns are not stored : saving a row carrying them is fine
     row = arts[AID]
     assert client.put("/api/reference/ref_articles/rows", json={"values": row}).status_code == 200
+
+
+def test_grid_week_columns_keep_firm_orders_and_filter_several_suppliers(client):
+    """Week columns aggregate the firm display series (ordered / open) like the day columns ; the
+    supplier filter accepts several suppliers (any of them)."""
+    day = client.get("/api/grid", params={"granularity": "day", "page_size": 200}).json()
+    week = client.get("/api/grid", params={"granularity": "week", "page_size": 200}).json()
+    assert week["periods"][1].startswith("20") and "-W" in week["periods"][1]
+    for ad, aw in zip(day["articles"], week["articles"]):
+        for ld, lw in zip(ad["lanes"], aw["lanes"]):
+            sd = {x["key"]: sum(x["values"]) for x in ld["series"]}
+            sw = {x["key"]: sum(x["values"]) for x in lw["series"]}
+            for key in ("orders_firm_ordered", "orders_firm_open", "orders_firm", "receipts"):
+                assert abs(sd[key] - sw[key]) < 1e-6, (ad["article"]["article_id"], key)
+    assert any(sum(x["values"]) > 0 for a in week["articles"] for l in a["lanes"] for x in l["series"] if x["key"] == "orders_firm_ordered")
+    links = client.get("/api/reference/ref_article_suppliers/rows").json()
+    sids = sorted({lk["supplier_id"] for lk in links})[:2]
+    one = {a["article"]["article_id"] for a in client.get("/api/grid", params={"supplier_id": sids[0], "page_size": 200}).json()["articles"]}
+    two = {a["article"]["article_id"] for a in client.get("/api/grid", params=[("supplier_id", sids[0]), ("supplier_id", sids[1]), ("page_size", 200)]).json()["articles"]}
+    want = {lk["article_id"] for lk in links if lk["supplier_id"] in sids}
+    assert one <= two == want and len(two) > len(one)

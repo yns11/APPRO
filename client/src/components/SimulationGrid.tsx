@@ -78,7 +78,9 @@ function laneSeries(l: LaneOut, k: string): number[] | undefined { return l.seri
  * struck, out of the ERP scenario and of the plan ; click again to restore) and **Proposition CBN**
  * (a click refuses the proposal: struck, no proposal until the end of its week ; click again).
  * A CBN proposal is shown greyed in an empty plan cell: one click then Enter takes it.  Right-click
- * on a typed cell adds a comment.  Week columns are read-only: clicking one switches to the day view.
+ * on a typed cell adds a comment.  A week column is typed like a day column: the value is stored on
+ * the **Monday** of the week (the reference day in the current week) ; clicking a week header switches
+ * to the day view.
  */
 export function SimulationGrid({ cols, articles, planCells, adjustments, flags = [], showArticleRows, onSwitchDay }: {
   cols: GridColumns; articles: GridRowArticle[]; planCells: PlanCellOut[]; adjustments: AdjustmentOut[]; flags?: FlagOut[];
@@ -108,6 +110,9 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
     (out) => toast.push(`${out.length} ajustement(s) recopié(s)`, "success"));
   const toggleFlag = useWrite((f: FlagIn) => api.post<FlagOut | null>("/api/entries/flags/toggle", f),
     (out) => toast.push(out ? (out.kind === "order_ignored" ? `Commande ferme du ${fmtDate(out.date)} ignorée` : `Proposition du ${fmtDate(out.date)} refusée jusqu'à la fin de sa semaine`) : "Rétabli", "success"));
+  /** several days at once (the firm orders of a week column) */
+  const toggleFlags = useWrite((fs: FlagIn[]) => Promise.all(fs.map((f) => api.post<FlagOut | null>("/api/entries/flags/toggle", f))),
+    (outs) => { const on = outs.filter(Boolean).length; toast.push(on ? `${on} jour(s) de commandes fermes ignoré(s)` : `${outs.length} jour(s) rétabli(s)`, "success"); });
 
   /* ---------------- lookups */
   const n = cols.periods.length;
@@ -115,20 +120,25 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   const initIdx = useMemo(() => columnOf(cols, cols.init_date), [cols]);
   const planBy = useMemo(() => {
     const m = new Map<string, PlanCellOut>();
-    planCells.forEach((c) => { const i = columnOf(cols, c.date); if (i >= 0) m.set(`${c.article_id}|${c.supplier_id}|${i}`, c); });
+    planCells.forEach((c) => m.set(`${c.article_id}|${c.supplier_id ?? ""}|${c.date}`, c));
     return m;
-  }, [planCells, cols]);
+  }, [planCells]);
   const adjBy = useMemo(() => {
     const m = new Map<string, AdjustmentOut>();
-    adjustments.forEach((c) => { const i = columnOf(cols, c.date); if (i >= 0) m.set(`${c.article_id}|${i}`, c); });
+    adjustments.forEach((c) => m.set(`${c.article_id}|${c.date}`, c));
     return m;
-  }, [adjustments, cols]);
+  }, [adjustments]);
   const flagBy = useMemo(() => {
     const m = new Map<string, FlagOut>();
     flags.forEach((f) => { const i = columnOf(cols, f.date); if (i >= 0) m.set(`${f.kind}|${f.article_id}|${f.supplier_id}|${i}`, f); });
     return m;
   }, [flags, cols]);
-  const readOnlyCol = useCallback((i: number) => isWeekKey(cols.periods[i]), [cols]);
+  const weekCol = useCallback((i: number) => isWeekKey(cols.periods[i]), [cols]);
+  /** day a value typed in column ``i`` is stored on: the day itself, or the first day of a week column
+   *  (its Monday ; the reference day in the current week, since the plan never dates before it) */
+  const editDate = useCallback((i: number, key: "plan" | "adjustments") => { const d = cols.period_start[i]; return key === "plan" && d < cols.as_of ? cols.as_of : d; }, [cols]);
+  const planCell = useCallback((aid: string, sid: string | null, i: number) => planBy.get(`${aid}|${sid ?? ""}|${editDate(i, "plan")}`), [planBy, editDate]);
+  const adjCell = useCallback((aid: string, i: number) => adjBy.get(`${aid}|${editDate(i, "adjustments")}`), [adjBy, editDate]);
   /** ISO week of every column ("2026-W40") : the key of the week range picker */
   const weekOf = useCallback((i: number) => (isWeekKey(cols.periods[i]) ? cols.periods[i] : isoWeekKey(cols.period_start[i])), [cols]);
   const weeks = useMemo<WeekChip[]>(() => {
@@ -230,20 +240,20 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   const commit = (next?: Edit) => {
     if (editing && editing.value.trim() !== editing.initial.trim()) {
       const a = articles.find((x) => x.article.article_id === editing.aid);
-      const date = cols.period_start[editing.i];
+      const date = editDate(editing.i, editing.key);
       if (editing.key === "adjustments") saveAdj.mutate({ article_id: editing.aid, date, expression: editing.value });
       else if (a) savePlan.mutate({ article_id: editing.aid, supplier_id: a.lanes[editing.lane].supplier_id, date, expression: editing.value });
     }
     setEditing(next ?? null);
   };
   const comment = (aid: string, key: "plan" | "adjustments", lane: LaneOut | null, i: number, current: string, currentValue: string) => {
-    if (key === "adjustments" && !adjBy.get(`${aid}|${i}`)) { toast.push("Saisir d'abord une quantité d'ajustement dans la cellule", "info"); return; }
+    if (key === "adjustments" && !adjCell(aid, i)) { toast.push("Saisir d'abord une quantité d'ajustement dans la cellule", "info"); return; }
     const note = window.prompt("Commentaire de la cellule (vide pour effacer)", current);
     if (note === null) return;
-    const date = cols.period_start[i];
+    const date = editDate(i, key);
     if (key === "adjustments") saveAdj.mutate({ article_id: aid, date, note });
     // a comment on an ERP cell turns it into a typed cell with the same quantity (0 when the ERP has nothing)
-    else savePlan.mutate({ article_id: aid, supplier_id: lane?.supplier_id ?? null, date, note, ...(planBy.get(`${aid}|${lane?.supplier_id ?? ""}|${i}`) ? {} : { expression: currentValue || "0" }) });
+    else savePlan.mutate({ article_id: aid, supplier_id: lane?.supplier_id ?? null, date, note, ...(planCell(aid, lane?.supplier_id ?? null, i) ? {} : { expression: currentValue || "0" }) });
   };
 
   /* ---------------- fill handle (copy along the row) */
@@ -265,15 +275,15 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
       if (!f || f.to === f.from) return;
       const lo = Math.min(f.from, f.to), hi = Math.max(f.from, f.to);
       const targets = [] as number[];
-      for (let i = lo; i <= hi; i++) if (i !== f.from && !readOnlyCol(i) && (f.key === "adjustments" || i >= asOfIdx)) targets.push(i);
+      for (let i = lo; i <= hi; i++) if (i !== f.from && (f.key === "adjustments" || i >= asOfIdx)) targets.push(i);
       if (!targets.length) return;
       const a = articles.find((x) => x.article.article_id === f.aid);
-      if (f.key === "plan" && a) savePlanBatch.mutate(targets.map((i) => ({ article_id: f.aid, supplier_id: a.lanes[f.lane].supplier_id, date: cols.period_start[i], expression: f.value })));
-      else if (f.key === "adjustments") saveAdjBatch.mutate(targets.map((i) => ({ article_id: f.aid, date: cols.period_start[i], expression: f.value })));
+      if (f.key === "plan" && a) savePlanBatch.mutate(targets.map((i) => ({ article_id: f.aid, supplier_id: a.lanes[f.lane].supplier_id, date: editDate(i, "plan"), expression: f.value })));
+      else if (f.key === "adjustments") saveAdjBatch.mutate(targets.map((i) => ({ article_id: f.aid, date: editDate(i, "adjustments"), expression: f.value })));
     };
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
-  }, [fill, articles, cols, asOfIdx, readOnlyCol, savePlanBatch, saveAdjBatch]);
+  }, [fill, articles, asOfIdx, editDate, savePlanBatch, saveAdjBatch]);
   const inFill = (aid: string, key: string, lane: number, i: number) => !!fill && fill.aid === aid && fill.key === key && fill.lane === lane && i >= Math.min(fill.from, fill.to) && i <= Math.max(fill.from, fill.to);
 
   const input = (e: Edit, label: string, initial: (i: number) => string, canTab: (ni: number) => boolean) => (
@@ -344,13 +354,17 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const qo = ordered?.[i] ?? 0, qr = open?.[i] ?? 0;
               const ignored = !!l.orders_ignored[i];
               const partial = qr > 0 && qr < qo;
-              const past = i < asOfIdx, ro = readOnlyCol(i);
-              const clickable = qo > 0 && !past && !locked;
+              const past = i < asOfIdx, wk = weekCol(i);
+              // days of the firm orders of the column on / after the reference day (a week column holds several)
+              const days = wk ? [...new Map(l.orders.filter((o) => o.order_type === "FIRM" && o.expected_date >= cols.as_of && columnOf(cols, o.expected_date) === i).map((o) => [o.expected_date, o.ignored] as const)).entries()] : [];
+              const clickable = qo > 0 && !past && !locked && (!wk || days.length > 0);
               const cls = [...cellBase(i), qo > 0 ? (ignored ? "ignored" : qr > 0 ? "firm-open" : "firm-settled") : "", clickable ? "clickable" : "", l.orders.length && ordersTitle(i) ? "event" : ""].filter(Boolean).join(" ");
               const text = qo === 0 ? "·" : partial ? <span className="partial">{fmtQty(qr, unit)} / {fmtQty(qo, unit)}</span> : fmtQty(qo, unit);
-              const state = qo === 0 ? "" : ignored ? "Commande ignorée : hors Projeté ERP et hors Appro. (cliquer pour la rétablir)" : qr > 0 ? `En cours : ${fmtQty(qr, unit)} restant à livrer sur ${fmtQty(qo, unit)} commandé${clickable ? (ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – cliquer pour l'ignorer") : ""}` : `Soldée : ${fmtQty(qo, unit)} commandé, tout reçu`;
+              const state = qo === 0 ? "" : ignored ? `Commande${wk ? "s" : ""} ignorée${wk ? "s" : ""} : hors Projeté ERP et hors Appro. (cliquer pour ${wk ? "les" : "la"} rétablir)` : qr > 0 ? `En cours : ${fmtQty(qr, unit)} restant à livrer sur ${fmtQty(qo, unit)} commandé${clickable ? (wk ? " – cliquer pour ignorer les commandes de la semaine" : " – cliquer pour l'ignorer") : ""}` : `Soldée : ${fmtQty(qo, unit)} commandé, tout reçu`;
               const title = [state, ordersTitle(i)].filter(Boolean).join("\n");
-              const onClick = !clickable ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => toggleFlag.mutate({ article_id: aid, supplier_id: l.supplier_id, date: cols.period_start[i], kind: "order_ignored" });
+              // a week column toggles every day of the week : ignore the days not yet ignored, or restore them all
+              const onClick = !clickable ? undefined : !wk ? () => toggleFlag.mutate({ article_id: aid, supplier_id: l.supplier_id, date: cols.period_start[i], kind: "order_ignored" })
+                : () => { const all = days.every(([, ig]) => ig); toggleFlags.mutate(days.filter(([, ig]) => all || !ig).map(([d]) => ({ article_id: aid, supplier_id: l.supplier_id, date: d, kind: "order_ignored" as const }))); };
               return <td key={i} className={cls} title={title} onClick={onClick}>{ignored ? <s>{text}</s> : text}</td>;
             })}
             {spacerR}
@@ -381,7 +395,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
             {spacerL}
             {visibleCols.map((i) => {
               const v = rc?.[i] ?? 0, open = dv?.[i] ?? 0;
-              const ro = readOnlyCol(i);
+              const ro = weekCol(i);
               const hasDesadvData = l.desadv.length > 0;
               const recKo = !!l.receipts_ko?.[i], dvKo = !!l.desadv_ko?.[i];
               const openList = open > 0 ? openOf(i) : [];
@@ -409,30 +423,31 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
       case "plan": {
         const l = a.lanes[r.li], li = r.li;
         const pl = laneSeries(l, "plan"), cb = laneSeries(l, "supply_proposed");
-        const shownOf = (ni: number) => { const c = planBy.get(`${aid}|${l.supplier_id ?? ""}|${ni}`); const pv = pl?.[ni] ?? 0; return l.plan_typed[ni] ? (c?.expression || String(pv)) : pv ? String(pv) : ""; };
+        // a week column shows the week total (several typed days may add up) ; a day column its expression
+        const shownOf = (ni: number) => { const c = weekCol(ni) ? undefined : planCell(aid, l.supplier_id, ni); const pv = pl?.[ni] ?? 0; return l.plan_typed[ni] ? (c?.expression || String(pv)) : pv ? String(pv) : ""; };
         return (
           <tr key={r.key} style={{ height: r.h }}>
             <td>Appro.</td>
             {spacerL}
             {visibleCols.map((i) => {
-              const past = i < asOfIdx, ro = readOnlyCol(i);
+              const past = i < asOfIdx, wk = weekCol(i);
               const typed = !!l.plan_typed[i];
-              const cell = planBy.get(`${aid}|${l.supplier_id ?? ""}|${i}`);
+              const cell = planCell(aid, l.supplier_id, i);
               const v = pl?.[i] ?? 0, cbn = cb?.[i] ?? 0;
               const isEd = editing?.aid === aid && editing.key === "plan" && editing.lane === li && editing.i === i;
               const isActive = !isEd && active?.aid === aid && active.key === "plan" && active.lane === li && active.i === i;
               const ghost = !past && !typed && v === 0 && cbn > 0;
-              const cls = [...cellBase(i), past || ro || locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", typed ? "typed" : "erp", ghost ? "ghost" : "", cell?.note ? "noted" : "", inFill(aid, "plan", li, i) ? "fill-range" : ""].filter(Boolean).join(" ");
+              const cls = [...cellBase(i), past || locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", typed ? "typed" : "erp", ghost ? "ghost" : "", cell?.note ? "noted" : "", inFill(aid, "plan", li, i) ? "fill-range" : ""].filter(Boolean).join(" ");
               const shown = shownOf(i);
               const initial = ghost ? String(cbn) : shown;
               const title = past ? "" : [typed ? `Saisi : ${fmtQty(v, unit)}${cell?.note ? ` – ${cell.note}` : ""} (vider = retour à l'ERP)` : v ? `ERP : ${fmtQty(v, unit)} – taper une quantité pour décider (0 = rien attendu)` : "Vide = rien dans l'ERP – taper une quantité pour planifier une livraison",
-                cbn ? `Proposition CBN : ${fmtQty(cbn, unit)}${ghost ? " (cliquer puis Entrée pour la reprendre)" : ""}` : "", ro ? "Semaine agrégée : cliquer l'en-tête pour saisir par jour" : "Clic droit : commentaire · tirer le carré pour recopier"].filter(Boolean).join("\n");
-              const onClick = past || isEd || locked ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => { setActive({ aid, key: "plan", lane: li, i }); setEditing({ aid, key: "plan", lane: li, i, value: initial, initial: shown }); };
+                cbn ? `Proposition CBN : ${fmtQty(cbn, unit)}${ghost ? " (cliquer puis Entrée pour la reprendre)" : ""}` : "", wk ? `Colonne semaine : la saisie se place au ${fmtDate(editDate(i, "plan"), "EEEE dd/MM")} (total de la semaine affiché)` : "", "Clic droit : commentaire · tirer le carré pour recopier"].filter(Boolean).join("\n");
+              const onClick = past || isEd || locked ? undefined : () => { setActive({ aid, key: "plan", lane: li, i }); setEditing({ aid, key: "plan", lane: li, i, value: initial, initial: shown }); };
               return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined}
-                onContextMenu={past || ro || locked ? undefined : (e) => { e.preventDefault(); comment(aid, "plan", l, i, cell?.note ?? "", initial); }}>
-                {isEd ? input(editing!, `Appro. ${l.supplier_id ?? ""} ${periodLabel(cols.periods[i])}`, shownOf, (ni) => ni >= asOfIdx && !readOnlyCol(ni))
+                onContextMenu={past || locked ? undefined : (e) => { e.preventDefault(); comment(aid, "plan", l, i, cell?.note ?? "", initial); }}>
+                {isEd ? input(editing!, `Appro. ${l.supplier_id ?? ""} ${periodLabel(cols.periods[i])}`, shownOf, (ni) => ni >= asOfIdx)
                   : past ? "" : ghost ? <span className="ghostv">{fmtQty(cbn, unit)}</span> : <>{v === 0 && !typed ? "·" : fmtQty(v, unit)}{cbn > 0 && !ghost && <span className="ghostv small"> +{fmtQty(cbn, unit)}</span>}</>}
-                {(isEd || isActive) && !past && !ro && handle(aid, "plan", li, i, isEd ? editing!.value : shown)}
+                {(isEd || isActive) && !past && handle(aid, "plan", li, i, isEd ? editing!.value : shown)}
               </td>;
             })}
             {spacerR}
@@ -448,12 +463,13 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
             {visibleCols.map((i) => {
               const v = cbs?.[i] ?? 0;
               const flag = flagBy.get(`proposal_refused|${aid}|${sid}|${i}`) ?? flagBy.get(`proposal_refused|${aid}||${i}`);
-              const ro = readOnlyCol(i), past = i < asOfIdx;
+              const wk = weekCol(i), past = i < asOfIdx;
               const clickable = !past && !locked && (v > 0 || !!flag);
               const cls = [...cellBase(i), "cbn", flag ? "refused" : "", clickable ? "clickable" : ""].filter(Boolean).join(" ");
               const title = flag ? `Proposition refusée (${fmtQty(flag.qty, unit)}) : aucune proposition à ce fournisseur jusqu'à la fin de sa semaine – cliquer pour la rétablir`
-                : v > 0 ? `Besoin net calculé sur le Projeté Appro. : ${fmtQty(v, unit)}${ro ? " (semaine agrégée : cliquer l'en-tête pour le détail)" : " – reprise dans l'Appro. (cellule grisée) ; cliquer pour la refuser"}` : "";
-              const onClick = !clickable ? undefined : ro && !flag ? () => onSwitchDay?.(cols.period_start[i]) : () => toggleFlag.mutate({ article_id: aid, supplier_id: flag ? (flag.supplier_id || null) : (sid || null), date: flag ? flag.date : cols.period_start[i], kind: "proposal_refused", qty: v });
+                : v > 0 ? `Besoin net calculé sur le Projeté Appro. : ${fmtQty(v, unit)} – reprise dans l'Appro. (cellule grisée) ; cliquer pour la refuser${wk ? " (toute la semaine)" : ""}` : "";
+              // a refusal blocks the supplier until the end of its week : in a week column it is dated on the Monday (the reference day in the current week)
+              const onClick = !clickable ? undefined : () => toggleFlag.mutate({ article_id: aid, supplier_id: flag ? (flag.supplier_id || null) : (sid || null), date: flag ? flag.date : editDate(i, "plan"), kind: "proposal_refused", qty: v });
               return <td key={i} className={cls} title={title} onClick={onClick}>{flag ? <s>{fmtQty(flag.qty, unit)}</s> : v === 0 ? "·" : fmtQty(v, unit)}</td>;
             })}
             {spacerR}
@@ -461,25 +477,26 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         );
       }
       case "adj": {
-        const initialOf = (ni: number) => { const c = adjBy.get(`${aid}|${ni}`); const av = series("adjustments", ni); return c ? (c.expression || String(c.qty)) : av ? String(av) : ""; };
+        const initialOf = (ni: number) => { const c = weekCol(ni) ? undefined : adjCell(aid, ni); const av = series("adjustments", ni); return c ? (c.expression || String(c.qty)) : av ? String(av) : ""; };
         return (
           <tr key={r.key} style={{ height: r.h }}>
             <td>Ajustement</td>
             {spacerL}
             {visibleCols.map((i) => {
-              const cell = adjBy.get(`${aid}|${i}`);
+              const cell = adjCell(aid, i);
               const v = series("adjustments", i);
-              const ro = readOnlyCol(i);
+              const wk = weekCol(i);
               const isEd = editing?.aid === aid && editing.key === "adjustments" && editing.i === i;
               const isActive = !isEd && active?.aid === aid && active.key === "adjustments" && active.i === i;
-              const cls = [...cellBase(i), ro || locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", cell ? "typed" : "", v < 0 ? "neg-val" : "", cell?.note ? "noted" : "", inFill(aid, "adjustments", 0, i) ? "fill-range" : ""].filter(Boolean).join(" ");
+              const cls = [...cellBase(i), locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", cell || (wk && v !== 0) ? "typed" : "", v < 0 ? "neg-val" : "", cell?.note ? "noted" : "", inFill(aid, "adjustments", 0, i) ? "fill-range" : ""].filter(Boolean).join(" ");
               const initial = initialOf(i);
-              const title = [cell ? `${cell.expression || cell.qty} = ${fmtQty(cell.qty, unit)}${cell.note ? ` – ${cell.note}` : ""}` : i <= initIdx ? "Quantité signée : corrige le stock initial (point zéro)" : "Quantité signée ou formule (ex. -(30+20)) : mouvement, passé ou prévu", ro ? "Semaine agrégée : cliquer l'en-tête pour saisir par jour" : "Clic droit : commentaire · tirer le carré pour recopier"].join("\n");
-              const onClick = isEd || locked ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i]) : () => { setActive({ aid, key: "adjustments", lane: 0, i }); setEditing({ aid, key: "adjustments", lane: 0, i, value: initial, initial }); };
+              const title = [cell && !wk ? `${cell.expression || cell.qty} = ${fmtQty(cell.qty, unit)}${cell.note ? ` – ${cell.note}` : ""}` : i <= initIdx ? "Quantité signée : corrige le stock initial (point zéro)" : "Quantité signée ou formule (ex. -(30+20)) : mouvement, passé ou prévu",
+                wk ? `Colonne semaine : la saisie se place au ${fmtDate(editDate(i, "adjustments"), "EEEE dd/MM")} (total de la semaine affiché)${cell ? ` – ce jour : ${cell.expression || cell.qty}${cell.note ? ` – ${cell.note}` : ""}` : ""}` : "", "Clic droit : commentaire · tirer le carré pour recopier"].filter(Boolean).join("\n");
+              const onClick = isEd || locked ? undefined : () => { setActive({ aid, key: "adjustments", lane: 0, i }); setEditing({ aid, key: "adjustments", lane: 0, i, value: initial, initial }); };
               return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined}
-                onContextMenu={ro || locked ? undefined : (e) => { e.preventDefault(); comment(aid, "adjustments", null, i, cell?.note ?? "", initial); }}>
-                {isEd ? input(editing!, `Ajustement ${periodLabel(cols.periods[i])}`, initialOf, (ni) => !readOnlyCol(ni)) : v === 0 ? "·" : `${v > 0 ? "+" : ""}${fmtQty(v, unit)}`}
-                {(isEd || isActive) && !ro && handle(aid, "adjustments", 0, i, isEd ? editing!.value : initial)}
+                onContextMenu={locked ? undefined : (e) => { e.preventDefault(); comment(aid, "adjustments", null, i, cell?.note ?? "", initial); }}>
+                {isEd ? input(editing!, `Ajustement ${periodLabel(cols.periods[i])}`, initialOf, () => true) : v === 0 ? "·" : `${v > 0 ? "+" : ""}${fmtQty(v, unit)}`}
+                {(isEd || isActive) && handle(aid, "adjustments", 0, i, isEd ? editing!.value : initial)}
               </td>;
             })}
             {spacerR}
@@ -556,7 +573,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         <span><span className="sw bar" style={{ background: "var(--brand-soft)", boxShadow: "inset 0 -2px 0 var(--brand)" }} />chiffre = votre Appro. (0 = rien attendu, vider = retour ERP) · carré = recopier en tirant</span>
         <span><span className="sw bar" style={{ background: "transparent", border: "1px dashed var(--warning)" }} />grisé = proposition CBN, cliquer puis Entrée pour la reprendre · cliquer la ligne CBN pour la refuser</span>
         <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} />ferme en cours · <span className="sw bar" style={{ background: "var(--cell-green)" }} />ferme soldée · <span className="sw bar" style={{ background: "var(--cell-red)" }} />ferme ignorée (clic)</span>
-        <span>clic droit = commentaire · <EyeOff size={11} style={{ verticalAlign: "middle" }} /> masquer des lignes</span>
+        <span>colonne semaine : saisie placée au lundi, clic Ferme / CBN sur toute la semaine · clic droit = commentaire · <EyeOff size={11} style={{ verticalAlign: "middle" }} /> masquer des lignes</span>
       </div>
     </div>
   );

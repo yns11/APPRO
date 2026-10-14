@@ -100,6 +100,8 @@ export type Role = "reader" | "appro" | "manager" | "admin";
 export interface AccessOut {
   user: string; role: Role; planner_id: string | null; name: string | null; portfolio: string[]; delegated_from: string[]; bootstrap: boolean;
   can_write: boolean; can_edit_all: boolean; can_manage_params: boolean; can_import_pdp: boolean; is_admin: boolean;
+  /** edits and imports the open reference tables as a whole (every declared user for now) */
+  can_edit_reference: boolean;
 }
 /** ``as_of`` = today (the real date, or the simulated one) ; ``init_date`` = stock initialisation day, point zero of the application. */
 export interface ConfigOut { title: string; data_source: Record<string, unknown>; as_of: string; init_date: string; horizon_days: number; planners: string[]; default_planner: string | null; user: string; version: string; reference_empty: boolean; access: AccessOut; }

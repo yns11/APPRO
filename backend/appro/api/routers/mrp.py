@@ -102,12 +102,12 @@ def _programs_of(ctx: AppContext) -> dict[str, list[str]]:
 
 @router.get("/grid", response_model=S.GridResponse)
 def grid(planner: str | None = None, article_ids: list[str] | None = Query(None), program_id: str | None = None,
-         supplier_id: str | None = None, q: str | None = None, granularity: Literal["default", "day", "week"] = "default",
+         supplier_id: list[str] | None = Query(None), q: str | None = None, granularity: Literal["default", "day", "week"] = "default",
          horizon_days: int | None = HORIZON, history_weeks: int | None = HISTORY,
          page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=200), sort: Literal["article", "supplier"] = "article",
          ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """One page of the supply table (same columns for every article).  Filters: articles, programme,
-    supplier, free text ``q`` on the identifier / designation ; ``sort`` by article identifier or by
+    suppliers (several ``supplier_id`` = any of them), free text ``q`` on the identifier / designation ; ``sort`` by article identifier or by
     the name of the (first) supplier.  The whole perimeter is computed once (cached) ; only the
     requested page is serialised."""
     ids = set(article_ids or [])
@@ -117,7 +117,7 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
         ids = (ids & prog_ids if ids else prog_ids) or {"__none__"}
     if supplier_id:
         lk = ctx.table("ref_article_suppliers")
-        sup_ids = set(lk[lk["supplier_id"] == supplier_id]["article_id"])
+        sup_ids = set(lk[lk["supplier_id"].isin(supplier_id)]["article_id"])
         ids = (ids & sup_ids if ids else sup_ids) or {"__none__"}
     result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
                                  **_kw(horizon_days=horizon_days, history_weeks=history_weeks))

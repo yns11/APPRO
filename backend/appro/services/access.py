@@ -7,6 +7,10 @@
   of any article) and imports the PDP ;
 * an **admin** has every right (reference tables, planners, delegations included) ;
 * while ``ref_planners`` is empty every user is an admin (first installation).
+
+**For now** (``OPEN_REFERENCE``), every declared user edits and imports the reference tables of
+``OPEN_TABLES`` as a whole, his portfolio or not ; the planners stay the admins' and the delegations
+keep their own rule.
 """
 from __future__ import annotations
 
@@ -22,6 +26,9 @@ READER = "reader"
 ARTICLE_TABLES = ("ref_articles", "ref_article_suppliers", "ref_bom", "fct_stock")
 # tables reserved to admins (a manager edits the others as a whole)
 ADMIN_TABLES = ("ref_planners",)
+# reference tables every declared user may edit and import as a whole while OPEN_REFERENCE is set
+OPEN_TABLES = ("ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_programs", "ref_bom", "fct_stock")
+OPEN_REFERENCE = True
 
 
 @dataclass
@@ -61,6 +68,8 @@ class Access:
     def can_edit_table(self, name: str) -> bool:
         """Whole-table rights (import / replace, add any row)."""
         if self.is_admin:
+            return True
+        if OPEN_REFERENCE and self.can_write and name in OPEN_TABLES:
             return True
         return self.is_manager and name not in ADMIN_TABLES
 
@@ -109,7 +118,8 @@ class Access:
 
     def require_table(self, name: str) -> None:
         if not self.can_edit_table(name):
-            raise self._deny(f"la table {name} n'est modifiable en bloc que par " + ("un administrateur" if name in ADMIN_TABLES else "un manager ou un administrateur"))
+            who = "un administrateur" if name in ADMIN_TABLES else "un approvisionneur déclaré" if OPEN_REFERENCE and name in OPEN_TABLES else "un manager ou un administrateur"
+            raise self._deny(f"la table {name} n'est modifiable en bloc que par {who}")
 
     def require_row(self, name: str, row: dict) -> None:
         if not self.can_edit_row(name, row):
@@ -119,7 +129,8 @@ class Access:
         return {"user": self.user, "role": self.role, "planner_id": self.planner_id, "name": self.name,
                 "portfolio": sorted(self.portfolio), "delegated_from": list(self.delegated_from), "bootstrap": self.bootstrap,
                 "can_write": self.can_write, "can_edit_all": self.is_admin, "can_manage_params": self.is_manager,
-                "can_import_pdp": self.is_manager, "is_admin": self.is_admin}
+                "can_import_pdp": self.is_manager, "is_admin": self.is_admin,
+                "can_edit_reference": self.can_edit_table("ref_articles")}
 
 
 def _s(v) -> str:

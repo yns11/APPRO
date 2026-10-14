@@ -23,14 +23,14 @@ function useDebounced<T>(value: T, ms: number): T {
 export default function SupplyTablePage() {
   const { perimeter, set, engineParams } = usePerimeter();
   const [program, setProgram] = useState("");
-  const [supplier, setSupplier] = useState("");
+  const [suppliers, setSuppliers] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(() => { try { return Number(localStorage.getItem("appro.grid.pageSize")) || 20; } catch { return 20; } });
   const [sort, setSort] = useState<"article" | "supplier">(() => { try { return localStorage.getItem("appro.grid.sort") === "supplier" ? "supplier" : "article"; } catch { return "article"; } });
   useEffect(() => { try { localStorage.setItem("appro.grid.sort", sort); } catch { /* private mode */ } }, [sort]);
   const q = useDebounced(search.trim(), 300);
-  useEffect(() => { setPage(1); }, [program, supplier, q, pageSize, perimeter.planner, sort]);
+  useEffect(() => { setPage(1); }, [program, suppliers, q, pageSize, perimeter.planner, sort]);
   useEffect(() => { try { localStorage.setItem("appro.grid.pageSize", String(pageSize)); } catch { /* private mode */ } }, [pageSize]);
   // the lists follow the planner chosen at the top of the page: his programmes and suppliers only
   const lists = usePerimeterLists(perimeter.planner);
@@ -39,9 +39,9 @@ export default function SupplyTablePage() {
   useEffect(() => {   // a choice outside the new perimeter is dropped
     if (!lists.data) return;
     if (program && !lists.data.programs.some((p) => p.id === program)) setProgram("");
-    if (supplier && !lists.data.suppliers.some((s) => s.id === supplier)) setSupplier("");
-  }, [lists.data, program, supplier]);
-  const grid = useGrid({ program_id: program || undefined, supplier_id: supplier || undefined, q: q || undefined, page, page_size: pageSize, sort });
+    if (suppliers.some((id) => !lists.data!.suppliers.some((s) => s.id === id))) setSuppliers(suppliers.filter((id) => lists.data!.suppliers.some((s) => s.id === id)));
+  }, [lists.data, program, suppliers]);
+  const grid = useGrid({ program_id: program || undefined, supplier_id: suppliers.length ? suppliers : undefined, q: q || undefined, page, page_size: pageSize, sort });
   const planCells = usePlanCells();
   const adjustments = useAdjustments();
   const flags = useFlags();
@@ -63,7 +63,7 @@ export default function SupplyTablePage() {
         <div className="row wrap">
           <div className="search" style={{ minWidth: 260 }}><Search /><input className="input sm" placeholder="Article ou désignation…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
           <SearchSelect value={program} onChange={setProgram} options={programOptions} placeholder="Tous les programmes" ariaLabel="Programme" loading={lists.isLoading} />
-          <SearchSelect value={supplier} onChange={setSupplier} options={supplierOptions} placeholder="Tous les fournisseurs" ariaLabel="Fournisseur" loading={lists.isLoading} />
+          <SearchSelect values={suppliers} onChangeMany={setSuppliers} options={supplierOptions} placeholder="Tous les fournisseurs" ariaLabel="Fournisseurs" loading={lists.isLoading} />
           <button type="button" className={`btn sm ${sort === "supplier" ? "primary" : ""}`} onClick={() => setSort(sort === "supplier" ? "article" : "supplier")} title={sort === "supplier" ? "Trié par nom de fournisseur (cliquer pour revenir à l'ordre des articles)" : "Trier les articles par nom de leur fournisseur"}><ArrowDownAZ />Trier par nom de fournisseur</button>
           <div className="pager" style={{ marginLeft: "auto" }}>
             <span>{total === 0 ? "Aucun article" : `Articles ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} sur ${total}`}</span>

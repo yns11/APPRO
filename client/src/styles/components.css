@@ -358,6 +358,8 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .combo-list li.chosen .lbl { font-weight: var(--fw-semibold); color: var(--brand-fg); }
 .combo-list li .hint { color: var(--fg-subtle); font-size: var(--fs--2); white-space: nowrap; }
 .combo-list li.subtle { cursor: default; }
+.combo-list li .tick { flex: none; width: 14px; color: var(--brand-fg); font-weight: var(--fw-semibold); }
+.combo-list li.combo-foot { cursor: pointer; justify-content: center; border-top: 1px solid var(--border); margin-top: 4px; border-radius: 0; }
 .dgrid td.rowno.rowhead { text-align: left; white-space: nowrap; }
 .dgrid th.rowno.corner { text-align: left; }
 .pdp-sheet { max-height: calc(100vh - 300px); }

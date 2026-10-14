@@ -85,11 +85,16 @@ du plan saisie ce jour-là est prise telle quelle.
 * **Proposition CBN** (§ 7) : affichée en grisé dans une cellule vide sans ERP ; un clic puis Entrée la reprend
   (elle devient une cellule saisie ordinaire).
 * Une cellule datée avant la référence a **expiré** : ignorée, listée « expirée » dans *Saisies & journal*.
-* Le plan se saisit en granularité jour ; une colonne semaine est en lecture et bascule sur le jour au clic.
+* Le plan se saisit aussi bien dans une colonne jour que dans une **colonne semaine** : la valeur saisie se place
+  alors au **lundi** de la semaine (au jour de référence dans la semaine en cours, le plan ne datant jamais avant) ;
+  la cellule semaine affiche le total de la semaine (le lundi saisi plus les autres jours, ERP ou saisis). Même
+  règle pour un ajustement (lundi, sans limite au passé) ; un clic Ferme dans une colonne semaine ignore (ou
+  rétablit) les commandes de tous les jours de la semaine, un clic CBN refuse la proposition pour toute la
+  semaine. L'en-tête d'une colonne semaine bascule sur le détail par jour.
 * Un **commentaire** facultatif se pose par clic droit sur une cellule (Plan ou Ajustement).
 * **Recopie** : la cellule active (Plan ou Ajustement) porte un petit carré dans son coin ; le tirer le long de la
-  ligne recopie la valeur sur les cellules traversées, comme Excel (copie, pas de série). Les colonnes semaine
-  et le passé sont sautés ; une seule transaction, un seul recalcul.
+  ligne recopie la valeur sur les cellules traversées, comme Excel (copie, pas de série) ; une colonne semaine
+  traversée reçoit la valeur à son lundi. Le passé est sauté ; une seule transaction, un seul recalcul.
 
 Il n'existe **aucun autre objet** : ni ligne de plan, ni statut de commande, ni action « dater / clôturer ».
 Deux lignes en lecture sont néanmoins **cliquables** (§ 3.3 bis et § 7).
@@ -366,8 +371,8 @@ verrouille ce qui n'est pas permis (cellules non éditables, cadenas sur l'artic
 | Qui | Peut écrire |
 |---|---|
 | utilisateur non déclaré, ou inactif (**lecteur**) | rien : lecture seule partout |
-| **appro** | les cellules Plan / Ajustement / Ferme / CBN, les paramètres hebdomadaires et les lignes du référentiel (articles, article ↔ fournisseur, nomenclatures, stock) **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations |
-| **manager** | comme un appro sur son carnet, **plus** les règles globales du moteur, les paramètres hebdomadaires de tout article, la saisie, l'import et l'activation des PDP, l'import des tables du référentiel (sauf celle des approvisionneurs) |
+| **appro** | les cellules Plan / Ajustement / Ferme / CBN et les paramètres hebdomadaires **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations ; **pour le moment, toutes les tables du référentiel** (articles, fournisseurs, article ↔ fournisseur, programmes, nomenclatures, stock), ligne par ligne ou par import, carnet ou non (`OPEN_REFERENCE` dans `services/access.py` ; remettre à `False` pour revenir au carnet) |
+| **manager** | comme un appro, **plus** les règles globales du moteur, les paramètres hebdomadaires de tout article, la saisie, l'import et l'activation des PDP |
 | **admin** | tout, y compris la table des approvisionneurs |
 
 L'identité est l'e-mail transmis par Databricks Apps (`x-forwarded-email`), comparé sans tenir compte de la
