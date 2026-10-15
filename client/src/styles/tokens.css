@@ -151,3 +151,40 @@
   --shadow-md: 0 4px 12px rgb(0 0 0 / 0.45);
   --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.6);
 }
+
+/* --------------------------------------------------------------------------
+   Thème « Octobre rose » (provisoire) : forcé par FORCED_THEME dans state/PerimeterContext.tsx,
+   par-dessus les thèmes système / clair / sombre. Remettre FORCED_THEME à null pour revenir aux
+   thèmes habituels ; ce bloc peut alors rester ou partir.
+   -------------------------------------------------------------------------- */
+:root[data-theme="rose"] {
+  --bg: #fdf2f7;
+  --bg-elev: #fffafc;
+  --bg-subtle: #fbe4ee;
+  --bg-hover: #fde9f1;
+  --border: #f3c9da;
+  --border-strong: #e9a3bf;
+  --fg: #3b0f22;
+  --fg-muted: #6f3a52;
+  --fg-subtle: #96607a;
+  --fg-inverse: #ffffff;
+  --brand: #d6336c;
+  --brand-strong: #b9225a;
+  --brand-soft: #fbd5e3;
+  --brand-fg: #a51d52;
+  --info: #c2418a;
+  --info-soft: #fbe0ee;
+  --info-fg: #9a2a6b;
+  --s-stock-firm: #b9225a;
+  --s-stock-forecast: #0e9384;
+  --s-stock-sim: #7c3aed;
+  --s-firm: #d6336c;
+  --s-forecast: #ec7ba3;
+  --s-planned: #f7c3d6;
+  --s-plan-only: #e5c3cf;
+  --cell-past: #fff5f9;
+  --cell-today: #fbd5e3;
+  --shadow-sm: 0 1px 2px rgb(120 20 60 / 0.08);
+  --shadow-md: 0 4px 12px rgb(120 20 60 / 0.10);
+  --shadow-lg: 0 12px 32px rgb(120 20 60 / 0.16);
+}

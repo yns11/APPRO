@@ -4,6 +4,12 @@ import { api } from "@/lib/api";
 import { DISPLAY_DEFAULTS, applyDisplay, type Display } from "@/lib/display";
 import type { AccessOut, ConfigOut } from "@/lib/types";
 
+/**
+ * Octobre rose : thème provisoire appliqué à tout le monde, par-dessus le choix système / clair / sombre.
+ * Remettre à ``null`` pour revenir aux thèmes habituels (le choix de chacun est conservé entre-temps).
+ */
+export const FORCED_THEME: "rose" | null = "rose";
+
 /** Global "perimeter" of the analysis: planner, horizon, granularity, theme, hidden grid rows. */
 export interface Perimeter {
   planner: string | null;
@@ -80,6 +86,7 @@ export function PerimeterProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const root = document.documentElement;
     const apply = () => {
+      if (FORCED_THEME) { root.setAttribute("data-theme", FORCED_THEME); return; }
       const dark = perimeter.theme === "dark" || (perimeter.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
       root.setAttribute("data-theme", dark ? "dark" : "light");
     };

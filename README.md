@@ -45,6 +45,10 @@ scripts/deploy.sh dev PROD --var="sync_role=prenom.nom@exemple.com"  # compile, 
 databricks bundle run appro_sync_erp -t dev --profile PROD           # première synchronisation ERP → Lakebase
 ```
 
+> **Octobre rose (provisoire)** : un thème rose est appliqué à tout le monde, par-dessus les thèmes système / clair /
+> sombre. Pour revenir aux thèmes habituels : `FORCED_THEME = null` dans `client/src/state/PerimeterContext.tsx`
+> (les jetons du thème sont dans `client/src/styles/tokens.css`, bloc `data-theme="rose"`).
+
 ## Documentation
 
 * [`docs/guide_moteur.md`](docs/guide_moteur.md) — **guide du moteur et du tableau d'approvisionnement** : chaque paramètre et son effet, avec des scénarios calculés par le moteur (tableaux générés par `scripts/guide_moteur.py`)

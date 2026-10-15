@@ -349,6 +349,7 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .pivot td .dot.ko, .legend .dot.ko { background: var(--critical); }
 
 /* ---- searchable list (combobox) */
+.badge.ribbon { display: inline-flex; align-items: center; gap: 4px; }
 .combo { position: relative; }
 .combo .input { width: 100%; padding-right: 28px; }
 .combo-x, .combo-chev { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: inline-flex; color: var(--fg-subtle); background: transparent; border: 0; padding: 2px; cursor: pointer; }

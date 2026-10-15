@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, BookOpen, CalendarRange, Factory, FileSpreadsheet, LayoutDashboard, Menu, Moon, PanelLeftClose, PanelLeftOpen, PenLine, Search, Settings, Sun, Monitor, RefreshCw, Table } from "lucide-react";
-import { usePerimeter } from "@/state/PerimeterContext";
+import { Activity, BookOpen, CalendarRange, Factory, FileSpreadsheet, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Ribbon, Search, Settings, Sun, Table } from "lucide-react";
+import { FORCED_THEME, usePerimeter } from "@/state/PerimeterContext";
 import { useInvalidateAll } from "@/lib/queries";
 import { Button } from "@/components/ui";
 import { fmtDate } from "@/lib/format";
@@ -30,7 +30,7 @@ export default function AppShell() {
   const [open, setOpen] = useState(false);
   const invalidate = useInvalidateAll();
   const toast = useToast();
-  const ThemeIcon = perimeter.theme === "dark" ? Moon : perimeter.theme === "light" ? Sun : Monitor;
+  const ThemeIcon = FORCED_THEME ? Ribbon : perimeter.theme === "dark" ? Moon : perimeter.theme === "light" ? Sun : Monitor;
   const cycleTheme = () => set({ theme: perimeter.theme === "system" ? "light" : perimeter.theme === "light" ? "dark" : "system" });
   const refresh = async () => {
     try { await api.post("/api/reference/refresh"); invalidate(); toast.push("Données ERP rechargées", "success"); }
@@ -82,7 +82,8 @@ export default function AppShell() {
           <div className="right row">
             <span className="freshness" title="Aujourd'hui = date du calcul (passé / futur, propositions, expiration des cellules) · le stock a été initialisé en fin de journée du point zéro, la projection commence le lendemain">Aujourd'hui : <b>{config ? fmtDate(config.as_of) : "…"}</b>{config && <span className="subtle"> · stock initialisé le {fmtDate(config.init_date)}</span>}</span>
             {config?.access?.can_write && <Button variant="ghost" icon title="Recharger les données ERP" onClick={refresh}><RefreshCw /></Button>}
-            <Button variant="ghost" icon title={`Thème : ${perimeter.theme}`} onClick={cycleTheme}><ThemeIcon /></Button>
+            {FORCED_THEME ? <span className="badge brand ribbon" title="Octobre rose : thème provisoire appliqué à tout le monde ; les thèmes habituels reviendront ensuite"><Ribbon size={13} /> Octobre rose</span>
+              : <Button variant="ghost" icon title={`Thème : ${perimeter.theme}`} onClick={cycleTheme}><ThemeIcon /></Button>}
           </div>
         </header>
         <main className="content"><Outlet /></main>
