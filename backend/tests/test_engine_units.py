@@ -698,3 +698,16 @@ def test_daily_average_over_working_days_and_backlog_window_start():
     assert r.kpis["demand_next_30d"] == pytest.approx(total) and r.kpis["working_days_30d"] == open_days == 22
     assert r.kpis["avg_daily_demand_30d"] == pytest.approx(total / open_days) and r.kpis["avg_daily_demand_30d"] > total / 30
     assert r.kpis["backlog_window_start"] == max(MON - D(days=28), MON - D(days=1)).isoformat()
+
+
+def test_programme_scrap_rate_raises_the_weekly_need_before_the_bom():
+    """need = PDP × (1 + scrap_pct / 100), exploded through the bill of material ; the rate is carried
+    by each weekly line, so a dated change leaves the earlier weeks untouched."""
+    base = run(make_dataset(), horizon_days=21)
+    lines = [PdpLine("P1", MON + D(weeks=k), 500.0, scrap_pct=10.0 if k >= 1 else 0.0) for k in range(-2, 8)]
+    r = run(make_dataset(pdp=lines), horizon_days=21)
+    i0, i1 = r.dates.index(MON), r.dates.index(MON + D(weeks=1))
+    week = lambda res, i: sum(res.demand[i:i + 7])  # noqa: E731
+    assert week(r, i0) == week(base, i0)                       # current week : rate 0
+    assert week(r, i1) == pytest.approx(week(base, i1) * 1.1)   # next week : +10 %, i.e. 500 × 1.1 × 2 per unit
+    assert week(r, i1) == pytest.approx(1100.0)

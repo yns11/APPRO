@@ -499,6 +499,9 @@ def guide() -> str:
       "valeur se place au lundi de la semaine (au jour de référence dans la semaine en cours) ; cliquer "
       "l'en-tête pour le détail par jour.\n"
       "- Le **sélecteur de période** sous la barre d'outils ne change que les colonnes affichées.\n"
+      "- Le **taux de rebut d'un programme** (colonne *Taux rebut (%)* du Plan de production) majore le PDP de la "
+      "semaine avant l'éclatement : besoin = PDP × (1 + taux / 100) ; daté, il ne touche que la semaine en cours "
+      "et les suivantes.\n"
       "- Tout est recalculé à chaque demande et mis en cache jusqu'à la prochaine écriture (saisie, import, "
       "paramètre) ou synchronisation ERP.\n")
 

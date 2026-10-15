@@ -110,6 +110,7 @@ class PdpLine:
     week_start: dt.date   # Monday
     qty: float
     version: str = ""
+    scrap_pct: float = 0.0   # programme scrap rate in force that week : the need is qty × (1 + scrap_pct / 100)
 
 
 @dataclass

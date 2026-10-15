@@ -388,7 +388,8 @@ Les tables de référentiel (`Article`, `Supplier`, `SupplierLink`, `Program`, `
 `Dataset`, puis `app_entries_into_dataset` (`services/mrp_service.py`) y ajoute les saisies de
 l'application : cellules Appro. (`app_plan_cells`), ajustements (`app_adjustments`), drapeaux
 (`app_cell_flags` : commande ignorée, proposition refusée, DESADV masqué), version de PDP active
-(`app_pdp_lines`), paramètres par semaine (`app_param_overrides`).
+(`app_pdp_lines`), paramètres par semaine (`app_param_overrides`), taux de rebut datés par programme
+(`app_program_scrap`, appliqués à chaque ligne de PDP : besoin = PDP × (1 + taux / 100)).
 
 Repères de temps (`regles_metier.md` § 1) : le **point zéro** est la date d'initialisation du stock
 (`fct_stock.snapshot_date`, unique) ; **aujourd'hui** est la date réelle ou `APPRO_AS_OF` ; la fenêtre

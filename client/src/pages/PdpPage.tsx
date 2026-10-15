@@ -54,6 +54,7 @@ export default function PdpPage() {
   const del = useWrite((id: string) => api.del(`/api/pdp/versions/${id}`), () => toast.push("Version supprimée"));
 
   const reorder = useWrite((ids: string[]) => api.put<string[]>("/api/pdp/order", { program_ids: ids }), () => toast.push("Ordre des programmes enregistré", "success"));
+  const saveScrap = useWrite((x: { program_id: string; rate_pct: number }) => api.put("/api/pdp/scrap", x), () => toast.push("Taux de rebut enregistré : il s'applique à partir de la semaine en cours", "success"));
   const allPrograms = useMemo(() => d?.programs ?? [], [d]);
   const allWeeks = useMemo(() => d?.weeks ?? [], [d]);
   const programOptions = useMemo(() => allPrograms.map((p) => ({ id: p.program_id, label: p.name || p.program_id, hint: p.program_id })), [allPrograms]);
@@ -142,6 +143,8 @@ export default function PdpPage() {
             <SheetGrid ariaLabel="Plan de production" className="pdp-sheet" canEdit={canEdit} cells={cells} onCommit={apply} onClear={clear} fillAxis="both" colWidth={78}
               onReorder={canEdit ? moveRow : undefined}
               corner="Programme" colClass={(c) => (cols[c].week === d?.current_week ? "current-week" : "")}
+              sideHeader={<span title="Taux de rebut du programme : besoin de la semaine = PDP × (1 + taux / 100), avant l'éclatement par la nomenclature. Un changement s'applique à la semaine en cours et aux suivantes ; les semaines passées gardent leur taux.">Taux rebut (%)</span>}
+              rowSides={programs.map((p) => <ScrapInput key={p.program_id} value={p.scrap_pct} canEdit={canEdit} onSave={(v) => saveScrap.mutate({ program_id: p.program_id, rate_pct: v })} />)}
               colHeaders={cols.map((w) => <>{w.week.replace("-W", " S")}<span className="sub">{fmtDate(w.week_start, "dd/MM")}</span></>)}
               rowHeaders={programs.map((p) => <><b>{p.name}</b> <span className="subtle mono small">{p.program_id}</span> <Badge tone={SOURCE[p.source].tone} title="Origine des quantités affichées">{SOURCE[p.source].label}</Badge>{!p.active && <Badge tone="outline">inactif</Badge>}{!p.has_bom && <Badge tone="warning" title="Aucune nomenclature : ce plan n'éclate en aucun besoin de composant (Référentiel › Nomenclatures)">sans nomenclature</Badge>}</>)} />
           )}
@@ -188,4 +191,18 @@ export default function PdpPage() {
       </div>
     </div>
   );
+}
+
+/** The scrap rate of one programme : typed in place, saved on Enter / blur when it changes. */
+function ScrapInput({ value, canEdit, onSave }: { value: number; canEdit: boolean; onSave: (v: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+  const commit = () => {
+    const n = Number(text.replace(",", "."));
+    if (!Number.isFinite(n) || n < 0) { setText(String(value)); return; }
+    if (n !== value) onSave(n);
+  };
+  return <input className={`scrap-input ${value ? "nonzero" : ""}`} value={text} disabled={!canEdit} aria-label="Taux de rebut (%)" inputMode="decimal"
+    title={canEdit ? "Taux de rebut (%) : Entrée ou quitter la cellule pour enregistrer ; s'applique à partir de la semaine en cours" : `Taux de rebut ${value} %`}
+    onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); } else if (e.key === "Escape") setText(String(value)); }} />;
 }

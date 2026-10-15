@@ -13,7 +13,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..data.assembler import erp_dataset
-from ..data.store import AppAdjustment, AppCellFlag, AppPlanCell, ParamOverride, PdpLine, PdpVersion, audit
+from ..data.store import (
+    AppAdjustment,
+    AppCellFlag,
+    AppPlanCell,
+    ParamOverride,
+    PdpLine,
+    PdpVersion,
+    ProgramScrap,
+    audit,
+)
 from ..engine import run_mrp
 from ..engine.models import AdjustCell, CellFlag, Dataset, EngineParams, MrpResult, PlanCell
 from ..engine.models import PdpLine as EnginePdpLine
@@ -109,6 +118,28 @@ def app_entries_into_dataset(ds: Dataset, session: Session) -> None:
         for pid, ls in by_program.items():
             ds.pdp.extend(EnginePdpLine(pid, l.week_start, l.qty, version=f"APP:{active.id}") for l in ls)
         ds.meta["pdp_version"] = {"id": active.id, "name": active.name}
+    rates = scrap_rates(session)
+    for p in ds.pdp:
+        p.scrap_pct = scrap_rate_at(rates, p.program_id, p.week_start)
+
+
+def scrap_rates(session: Session) -> dict[str, list[tuple[dt.date, float]]]:
+    """Dated programme scrap rates, per programme, in week order."""
+    out: dict[str, list[tuple[dt.date, float]]] = {}
+    for r in session.scalars(select(ProgramScrap).order_by(ProgramScrap.program_id, ProgramScrap.week_start)):
+        out.setdefault(r.program_id, []).append((r.week_start, float(r.rate_pct or 0.0)))
+    return out
+
+
+def scrap_rate_at(rates: dict[str, list[tuple[dt.date, float]]], program_id: str, week_start: dt.date) -> float:
+    """Rate in force for one week : the latest row dated on or before its Monday ; 0 before the first row."""
+    rate = 0.0
+    for start, value in rates.get(program_id, ()):
+        if start <= week_start:
+            rate = value
+        else:
+            break
+    return rate
 
 
 def _cache_key(version: int, planner: str | None, article_ids: list[str] | None, params: EngineParams) -> str:

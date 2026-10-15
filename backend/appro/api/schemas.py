@@ -598,6 +598,7 @@ class PdpSheetProgram(BaseModel):
     active: bool = True
     source: Literal["app", "erp", "none"]   # where the displayed quantities come from
     has_bom: bool = True                    # without a bill of material the plan explodes into nothing
+    scrap_pct: float = 0.0                  # programme scrap rate in force from the current week (need = PDP × (1 + rate / 100))
     values: list[float]
 
 
@@ -620,6 +621,13 @@ class PdpCellIn(BaseModel):
 
 class PdpOrderIn(BaseModel):
     program_ids: list[str] = Field(default_factory=list)
+
+
+class PdpScrapIn(BaseModel):
+    """Programme scrap rate (%) ; applies from the current week on, the past keeps its rate."""
+
+    program_id: str
+    rate_pct: float = Field(0.0, ge=0, le=1000)
 
 
 class PdpSheetIn(BaseModel):

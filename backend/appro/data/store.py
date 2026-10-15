@@ -181,6 +181,18 @@ class PdpLine(Base):
     version: Mapped["PdpVersion"] = relationship(back_populates="lines")
 
 
+class ProgramScrap(Base):
+    """Programme scrap rate (%) typed in the PDP sheet, **dated** : the rate applies from its Monday
+    on, until a later row ; the weeks before keep the rate they had (a change never rewrites the past)."""
+
+    __tablename__ = "app_program_scrap"
+    program_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    week_start: Mapped[dt.date] = mapped_column(Date, primary_key=True)
+    rate_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_by: Mapped[str] = mapped_column(String(120), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class ParamOverride(Base):
     """Engine rules (``global``) and per-ISO-week article parameters (``article_week``)."""
 

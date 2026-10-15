@@ -111,7 +111,7 @@ export interface ConfigOut { title: string; data_source: Record<string, unknown>
 export interface PerimeterItem { id: string; name: string; }
 export interface PerimeterOut { planner: string | null; articles: number; programs: PerimeterItem[]; suppliers: PerimeterItem[]; }
 export interface PdpSheetWeek { week: string; week_start: string; editable: boolean; }
-export interface PdpSheetProgram { program_id: string; name: string; active: boolean; source: "app" | "erp" | "none"; has_bom: boolean; values: number[]; }
+export interface PdpSheetProgram { program_id: string; name: string; active: boolean; source: "app" | "erp" | "none"; has_bom: boolean; scrap_pct: number; values: number[]; }
 export interface PdpSheetOut { as_of: string; current_week: string; active_version: PdpVersionOut | null; erp_available: boolean; weeks: PdpSheetWeek[]; programs: PdpSheetProgram[]; }
 
 // ---- supply flows (cockpit tab 2) and search page

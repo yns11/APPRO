@@ -811,3 +811,29 @@ def test_grid_week_columns_keep_firm_orders_and_filter_several_suppliers(client)
     two = {a["article"]["article_id"] for a in client.get("/api/grid", params=[("supplier_id", sids[0]), ("supplier_id", sids[1]), ("page_size", 200)]).json()["articles"]}
     want = {lk["article_id"] for lk in links if lk["supplier_id"] in sids}
     assert one <= two == want and len(two) > len(one)
+
+
+def test_programme_scrap_rate_in_the_pdp_sheet(client):
+    """Column « Taux rebut (%) » of the PDP sheet : 0 by default ; a rate typed by a manager applies from
+    the current week on (dated row), the need of the components follows, the past is untouched."""
+    sh = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
+    assert all(p["scrap_pct"] == 0 for p in sh["programs"])
+    pid = "mass-00037796"
+    bom = client.get("/api/reference/ref_bom/rows").json()
+    aid = next(b["article_id"] for b in bom if b["program_id"] == pid)
+    before = client.get(f"/api/articles/{aid}/projection", params={"granularity": "day"}).json()
+    req = lambda body: {k: v for k, v in zip(body["periods"], next(s for s in body["series"] if s["key"] == "required")["values"])}  # noqa: E731
+    r = client.put("/api/pdp/scrap", json={"program_id": pid, "rate_pct": 10})
+    assert r.status_code == 200, r.text
+    sh2 = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
+    assert next(p for p in sh2["programs"] if p["program_id"] == pid)["scrap_pct"] == 10
+    after = client.get(f"/api/articles/{aid}/projection", params={"granularity": "day"}).json()
+    b, a = req(before), req(after)
+    future = [d for d in a if d >= "2026-09-14" and b[d] > 0]
+    assert future and all(a[d] == pytest.approx(b[d] * 1.1, rel=1e-6) for d in future)
+    assert all(a[d] == b[d] for d in a if d < "2026-09-14")
+    # a second rate replaces the current week's row (same Monday) ; validation
+    assert client.put("/api/pdp/scrap", json={"program_id": pid, "rate_pct": 0}).status_code == 200
+    assert next(p for p in client.get("/api/pdp/sheet", params={"weeks": 8}).json()["programs"] if p["program_id"] == pid)["scrap_pct"] == 0
+    assert client.put("/api/pdp/scrap", json={"program_id": "nope", "rate_pct": 1}).status_code == 422
+    assert client.put("/api/pdp/scrap", json={"program_id": pid, "rate_pct": -1}).status_code == 422

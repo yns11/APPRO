@@ -20,6 +20,10 @@ Business rules (all configurable through :class:`~appro.engine.models.EnginePara
   The consumption comes **already exploded** per component (upstream pipeline) ; only the PDP goes
   through the bill of material.
 
+* **Programme scrap** – the weekly PDP quantity is raised by the programme scrap rate in force that
+  week (``PdpLine.scrap_pct``, typed in the PDP sheet, dated : a change applies to the current and
+  the following weeks only) : need = PDP × (1 + scrap% / 100), before the BOM explosion.
+
 * **BOM explosion** – component demand = Σ effective production × qty_per × (1 + scrap%).
   ``consumption_offset_days`` shifts the consumption relative to the production day
   (negative = components consumed before the production day).
@@ -96,11 +100,12 @@ def build_program_daily(
         if monday + dt.timedelta(days=6) < index.start or monday > index.end:
             continue
         open_days = calendar.open_days_in_week(monday)
+        qty = float(line.qty) * (1.0 + max(float(line.scrap_pct or 0.0), 0.0) / 100.0)
         if not open_days:
             if line.qty:
                 diagnostics.append(f"{program_id}: week of {monday} has no open day – {line.qty} dropped")
             continue
-        for day, q in zip(open_days, spread_week(line.qty, len(open_days), params.spread_rounding)):
+        for day, q in zip(open_days, spread_week(qty, len(open_days), params.spread_rounding)):
             i = index.offset(day)
             if i is not None:
                 planned[program_id][i] += q

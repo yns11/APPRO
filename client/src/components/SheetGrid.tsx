@@ -30,9 +30,11 @@ export function parseCell(raw: string): number | "" | null {
  * pasted on a range fills it), the square of the active cell copies its value by dragging (``fillAxis``:
  * down, right or both), Delete clears the selection.  The owner receives the changes and decides.
  */
-export function SheetGrid({ rowHeaders, colHeaders, cells, canEdit, onCommit, onClear, corner, ariaLabel, className = "", fillAxis = "col", rowClass, colClass, colWidth, onReorder }:
+export function SheetGrid({ rowHeaders, colHeaders, cells, canEdit, onCommit, onClear, corner, ariaLabel, className = "", fillAxis = "col", rowClass, colClass, colWidth, onReorder, sideHeader, rowSides }:
   {
     rowHeaders: ReactNode[]; colHeaders: ReactNode[]; cells: SheetCell[][]; canEdit: boolean;
+    /** an extra fixed column between the row header and the cells (own content, outside the sheet navigation) */
+    sideHeader?: ReactNode; rowSides?: ReactNode[];
     onCommit: (changes: SheetChange[]) => void; onClear?: (cells: Pos[]) => void;
     corner?: ReactNode; ariaLabel: string; className?: string; fillAxis?: "col" | "row" | "both";
     rowClass?: (r: number) => string; colClass?: (c: number) => string; colWidth?: number;
@@ -169,6 +171,7 @@ export function SheetGrid({ rowHeaders, colHeaders, cells, canEdit, onCommit, on
         <thead>
           <tr>
             <th className="rowno corner" onClick={() => { setAnchor({ r: 0, c: 0 }); setFocus({ r: nR - 1, c: nC - 1 }); }} title="Tout sélectionner">{corner}</th>
+            {rowSides && <th className="rowno side">{sideHeader}</th>}
             {colHeaders.map((h, c) => <th key={c} className={`num ${colClass?.(c) ?? ""}`} style={colWidth ? { minWidth: colWidth } : undefined} onClick={() => { setAnchor({ r: 0, c }); setFocus({ r: nR - 1, c }); }} title="Sélectionner la colonne">{h}</th>)}
           </tr>
         </thead>
@@ -183,6 +186,7 @@ export function SheetGrid({ rowHeaders, colHeaders, cells, canEdit, onCommit, on
                   onDragEnd={() => { setDragRow(null); setOverRow(null); }} onClick={(e) => e.stopPropagation()}>⋮⋮</span>}
                 {rowHeaders[r]}
               </td>
+              {rowSides && <td className="rowno side" onMouseDown={(e) => e.stopPropagation()}>{rowSides[r]}</td>}
               {row.map((x, c) => {
                 const isEd = editing && editing.p.r === r && editing.p.c === c;
                 const isFocus = !isEd && focus?.r === r && focus?.c === c;

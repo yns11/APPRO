@@ -9,8 +9,8 @@ from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ...data.store import AppMeta, PdpLine, PdpVersion, audit
-from ...services import excel_service
+from ...data.store import AppMeta, PdpLine, PdpVersion, ProgramScrap, audit
+from ...services import excel_service, mrp_service
 from ...services.access import Access
 from ...services.context import AppContext
 from .. import schemas as S
@@ -101,6 +101,7 @@ def sheet(weeks: int = Query(26, ge=4, le=160), planner: str | None = None, ctx:
         listed = [pid for pid in listed if pid in reach]
     order = {pid: i for i, pid in enumerate(read_program_order(session))}
     listed.sort(key=lambda pid: (order.get(pid, len(order)), 0))   # stable : the alphabetical order remains inside each group
+    rates = mrp_service.scrap_rates(session)
     active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
     return S.PdpSheetOut(
         as_of=as_of, current_week=iso_week_label(monday), active_version=_out(session, active) if active else None,
@@ -108,7 +109,7 @@ def sheet(weeks: int = Query(26, ge=4, le=160), planner: str | None = None, ctx:
         weeks=[S.PdpSheetWeek(week=iso_week_label(d), week_start=d, editable=d >= monday) for d in week_starts],
         programs=[S.PdpSheetProgram(program_id=pid, name=names[pid].name if pid in names else pid,
                                     active=names[pid].active if pid in names else True, source=src.get(pid, "none"),
-                                    has_bom=pid in with_bom,
+                                    has_bom=pid in with_bom, scrap_pct=mrp_service.scrap_rate_at(rates, pid, monday),
                                     values=[float(by_program.get(pid, {}).get(d, 0.0)) for d in week_starts])
                   for pid in listed])
 
@@ -155,6 +156,33 @@ def save_sheet(body: S.PdpSheetIn, ctx: AppContext = Depends(ctx_dep), session: 
     session.commit()
     ctx.bump()
     return _out(session, version)
+
+
+@router.put("/scrap", response_model=S.PdpSheetProgram | None)
+def save_scrap(body: S.PdpScrapIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+               user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """Programme scrap rate (%) : the weekly need becomes PDP × (1 + rate / 100) before the bill of
+    material.  The rate is **dated on the current week's Monday** : it applies to the current and the
+    following weeks, the weeks before keep the rate they had."""
+    access.require_pdp()
+    from ...data.assembler import erp_dataset
+    from ...engine.calendar import iso_week_monday
+    from ...engine.runner import resolve_as_of
+    ds = erp_dataset(ctx.table)
+    if body.program_id not in {p.program_id for p in ds.programs}:
+        raise HTTPException(422, f"Programme inconnu : {body.program_id}")
+    monday = iso_week_monday(resolve_as_of(ds, mrp_service.build_params(ctx, session)))
+    row = session.get(ProgramScrap, (body.program_id, monday))
+    if row is None:
+        row = ProgramScrap(program_id=body.program_id, week_start=monday, rate_pct=0.0)
+        session.add(row)
+    previous = row.rate_pct
+    row.rate_pct, row.updated_by = float(body.rate_pct), user
+    audit(session, user, "edit", "program_scrap", f"{body.program_id}|{monday.isoformat()}", None,
+          {"program_id": body.program_id, "week_start": monday.isoformat(), "rate_pct": float(body.rate_pct), "previous": previous})
+    session.commit()
+    ctx.bump()
+    return None
 
 
 @router.put("/order", response_model=list[str])

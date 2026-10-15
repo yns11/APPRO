@@ -33,6 +33,10 @@ se lit.
 1. **Lissage du PDP hebdomadaire** sur les jours ouverts de la semaine ISO (`spread_rounding`) : `exact`
    [défaut] quantités entières dont la somme égale le PDP ; `none` quotient réel ; `per_day` `ROUND(qté / n)`
    (classeur historique).
+1 bis. **Taux de rebut du programme** (colonne *Taux rebut (%)* de la page *Plan de production*, 0 par défaut) :
+   besoin de la semaine = PDP de la semaine × (1 + taux / 100), avant l'éclatement. Le taux est **daté** : une
+   modification vaut pour la semaine en cours et les suivantes, les semaines passées gardent le taux qu'elles
+   avaient (table `app_program_scrap`, une ligne par programme et lundi d'entrée en vigueur).
 2. **Éclatement nomenclature (1 niveau)** du PDP : besoin composant = Σ production × `qty_per` ×
    (1 + `scrap_pct` %) ; `consumption_offset_days` [0] décale la consommation.
 3. **Besoin effectif par composant** (`production_mode`, `actual_then_remainder` [défaut]) : **jours passés** =
@@ -362,6 +366,12 @@ Cette version reprend les programmes de la version active précédente et y ajou
 (copiés depuis l'ERP puis corrigés) ; les autres programmes continuent de suivre l'ERP. Désactiver la version
 revient à l'état précédent. L'import d'un classeur et la liste des versions (activer, désactiver, supprimer)
 sont sur la même page.
+
+La colonne **Taux rebut (%)**, juste après le programme, porte le taux de rebut du programme (0 par défaut) :
+le besoin hebdomadaire éclaté par la nomenclature est PDP × (1 + taux / 100) (§ 2). Saisi par un manager ou un
+administrateur (Entrée ou sortie de la cellule), il est enregistré aussitôt, hors des versions de PDP, et
+**daté du lundi de la semaine en cours** : il s'applique à la semaine en cours et aux suivantes, les semaines
+passées conservent le taux en vigueur à l'époque. Les quantités affichées dans la feuille restent le PDP brut.
 
 Le **modèle du fichier PDP** (onglet `SOP - PDP`, une ligne par programme, une colonne par semaine ISO)
 se télécharge dans *Plan de production (PDP)* ; les **modèles du référentiel** (un par table) dans *Référentiel*.
