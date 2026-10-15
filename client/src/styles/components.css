@@ -341,6 +341,9 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 /* ---------- DESADV in the Reçu row ---------- */
 .pivot td.desadv { background: var(--cell-yellow); }
 .pivot td .desadv-qty { color: var(--warning-fg); font-style: italic; }
+.pivot td .desadv-qty .truck { vertical-align: -1px; margin-right: 3px; }
+.pivot td.rec-booked { background: var(--cell-green); }
+.pivot td.rec-booked.desadv { background: linear-gradient(180deg, var(--cell-green) 50%, var(--cell-yellow) 50%); }
 .pivot td .dot, .legend .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 4px; vertical-align: 1px; }
 .pivot td .dot.ok, .legend .dot.ok { background: var(--ok); }
 .pivot td .dot.ko, .legend .dot.ko { background: var(--critical); }

@@ -123,20 +123,20 @@ les commandes fermes sont conservées depuis le début de l'année, les prévisi
 suivant ; l'ERP ne déplace ni n'annule un créneau, et `Quantite_restante` n'est plus fiable une fois la
 date passée.
 
-### 2.2 `recep_edi` → `fct_receipts` (réceptions)
+### 2.2 `recep_edi` → `fct_receipts` (journaux d'arrivée et réceptions)
 
-**Grain lu** : une ligne par fournisseur, commande, BL, article, jour et statut de réception. Les lignes
-dont `Quantite_recue` est nulle ou vide sont ignorées.
+**Grain lu** : une ligne par fournisseur, commande, BL, article, jour et statut de réception. Les lignes dont
+`Quantite_recue` est nulle ou vide sont ignorées.
 
 | Colonne `recep_edi` | Type attendu | Colonne canonique | Transformation |
 |---|---|---|---|
 | `Code_fournisseur` | texte | `supplier_id` | tel quel ; entre dans `receipt_id` |
 | `Commande` | texte | `purch_id` | tel quel ; entre dans `receipt_id` |
-| `BL` | texte | `packing_slip` | tel quel, **entier** ; dans `receipt_id`, remplacé par `LEFT(SHA2(BL, 256), 16)` si plus de 60 caractères (une réception enregistrée liste tous les BL de son DESADV, séparés par ` \| `) |
+| `BL` | texte | `packing_slip` | tel quel, **entier** ; dans `receipt_id`, remplacé par `LEFT(SHA2(BL, 256), 16)` si plus de 60 caractères (plusieurs BL séparés par ` \| `) |
 | `Article` | texte | `article_id` | tel quel ; entre dans `receipt_id` |
 | `Date_reception` | date | `receipt_date` | tronquée au jour ; `yyyyMMdd` dans `receipt_id` |
 | `Quantite_recue` | nombre | `qty` | en double ; `IS NOT NULL AND <> 0` |
-| `Statut_reception` | texte | `status` | `COALESCE(x, 'Reçu')` : `Reçu` (statuts ERP 1 et 2) ou `Enregistré` (statut 3 : BL enregistré, accusé de réception non validé) ; entre dans `receipt_id` |
+| `Statut_reception` | texte | `status` | `COALESCE(x, 'Reçu')` ; entre dans `receipt_id` ; trois valeurs attendues : **`En transit`**, **`Reçu`**, **`Comptabilisé`** (§ 5.2) |
 
 ```sql
 SELECT
@@ -152,10 +152,17 @@ FROM `emotors_data_champions`.`silver_erp_ye`.`recep_edi` r
 WHERE r.Quantite_recue IS NOT NULL AND r.Quantite_recue <> 0
 ```
 
-Pour une réception *Enregistrée*, `Date_reception` est la date d'enregistrement et `BL` est repris du
-DESADV d'origine (plusieurs BL possibles). Historique souhaité : au moins la fenêtre de backlog
-(`backlog_days`, 28 jours par défaut) avant aujourd'hui, et tout ce qui suit la date d'initialisation
-du stock.
+**Contrat du statut** (job amont, table `wmsjournaltable` jointe à `wmsjournaltrans` et à l'ACR de
+`vend_packing_slip_trans`) :
+
+| `Statut_reception` | État ERP | `Date_reception` |
+|---|---|---|
+| `En transit` | journal d'arrivée créé, non validé (`posted = 0`) | date de la ligne du journal (`transDate`) |
+| `Reçu` | journal validé (`posted = 1`), aucun accusé de réception pour ce BL et cet article | date de validation (`postedDateTime`) |
+| `Comptabilisé` | journal validé, accusé de réception présent dans `vend_packing_slip_trans` | date de validation (`postedDateTime`) |
+
+Historique souhaité : au moins la fenêtre de backlog (`backlog_days`, 28 jours par défaut) avant aujourd'hui, et
+tout ce qui suit la date d'initialisation du stock.
 
 ### 2.3 `desadv_edi` → `fct_desadv` (avis d'expédition EDI)
 
@@ -237,10 +244,12 @@ GROUP BY a.item_id
 Un article présent ici et absent du référentiel n'est **jamais ajouté** au référentiel ; seuls les
 articles du référentiel sont valorisés.
 
-### 2.6 `bl_en_attente` → `fct_bl_pending` (accusés de réception non validés)
+### 2.6 `bl_en_attente` → `fct_bl_pending` (accusés de réception non validés, facultatif)
 
-Réceptions en statut *Enregistré* depuis au moins 7 jours (règle de l'amont), BL repris du DESADV.
-**Grain lu** : une ligne par fournisseur, commande, BL, article, jour d'enregistrement.
+Réceptions validées depuis au moins 7 jours sans accusé de réception. Depuis le contrat à trois statuts de
+`recep_edi`, le flux *À valider* est calculé par l'application depuis les réceptions (§ 5.2) ; cette table ne sert
+plus qu'à la page *Recherche* et peut rester vide. **Grain lu** : une ligne par fournisseur, commande, BL,
+article, jour d'enregistrement.
 
 | Colonne `bl_en_attente` | Type attendu | Colonne canonique | Transformation |
 |---|---|---|---|
@@ -251,18 +260,6 @@ Réceptions en statut *Enregistré* depuis au moins 7 jours (règle de l'amont),
 | `Quantite` | nombre | `qty` | en double |
 | `Date_enregistrement` | date | `registered_date` | tronquée au jour ; `IS NOT NULL` ; `yyyyMMdd` dans `pending_id` |
 | `Jours_en_attente` | nombre | `days_pending` | en entier |
-
-```sql
-SELECT
-  CONCAT_WS('|', b.Fournisseur, b.Commande,
-            CASE WHEN LENGTH(COALESCE(b.BL_DESADV, '')) > 60 THEN LEFT(SHA2(b.BL_DESADV, 256), 16) ELSE COALESCE(b.BL_DESADV, '') END,
-            b.Article, DATE_FORMAT(b.Date_enregistrement, 'yyyyMMdd')) AS pending_id,
-  b.Fournisseur AS supplier_id, b.Commande AS purch_id, b.BL_DESADV AS packing_slip, b.Article AS article_id,
-  CAST(b.Quantite AS DOUBLE) AS qty, CAST(b.Date_enregistrement AS DATE) AS registered_date,
-  CAST(b.Jours_en_attente AS INT) AS days_pending
-FROM `emotors_data_champions`.`silver_erp_ye`.`bl_en_attente` b
-WHERE b.Article IS NOT NULL AND b.Date_enregistrement IS NOT NULL
-```
 
 ### 2.7 Table de PDP hebdomadaire → `fct_production_plan` (facultative, non configurée aujourd'hui)
 
@@ -428,15 +425,15 @@ Clic sur une cellule *Ferme* (TA) : la commande ferme du jour et du fournisseur 
 (`app_cell_flags`, `order_ignored`) : hors Projeté ERP et hors *Appro.*, barrée en rouge ; second clic pour
 rétablir. Dans une colonne semaine, le clic porte sur tous les jours de la semaine.
 
-### 5.2 Réceptions (`erp_receipts`)
+### 5.2 Journaux d'arrivée et réceptions (`erp_receipts`)
 
 | Colonne | Usage |
 |---|---|
-| `receipt_date`, `qty` | ligne *Reçu* (TA) au jour de réception, sur la voie de `supplier_id` ; **entrée de stock** dans la reconstitution du passé (Projeté ERP et Projeté Appro., entre le point zéro et hier) **quel que soit le statut** ; réceptions de la fenêtre de backlog (`backlog_days` avant aujourd'hui) soustraites des commandes fermes passées ; réceptions du jour soustraites du restant ferme du jour ; flux **Reçu** (CK) : réceptions datées d'aujourd'hui ; les réceptions antérieures au point zéro sont ignorées |
-| `status` | `Enregistré` = accusé de réception non validé : point **rouge** et mention « ACR non validé » dans l'info-bulle de la cellule *Reçu* (TA), colonne *Statut* des flux et de la recherche ; `Reçu` : point vert si le BL est annoncé par un DESADV traité, rouge sinon |
-| `packing_slip` | numéro(s) de BL dans l'info-bulle de la cellule *Reçu* (TA) ; **rapprochement avec les DESADV** : chaque BL listé marque le DESADV de même BL comme reçu (il quitte la ligne *Reçu* et le flux *En transit*) ; un BL vide affiche « ACR non validé » ; colonne des flux et de la recherche |
+| `status` | **`En transit`** : la ligne n'est pas une réception. Affichée dans la ligne *Reçu* (TA) à sa date, en italique sur fond orange avec une icône camion, jamais comptée ; flux **En transit** (CK). Son BL « porte » le DESADV de même BL, qui n'est plus affiché séparément. **`Reçu`** : réception comptée, accusé de réception à valider ; après 7 jours, flux **À valider** (CK). **`Comptabilisé`** : réception comptée, **fond vert** (TA). Colonne *Statut* des flux et de la recherche |
+| `receipt_date`, `qty` | pour `Reçu` / `Comptabilisé` : ligne *Reçu* (TA) au jour de réception, sur la voie de `supplier_id` ; **entrée de stock** dans la reconstitution du passé (Projeté ERP et Projeté Appro., entre le point zéro et hier) ; réceptions de la fenêtre de backlog (`backlog_days` avant aujourd'hui) soustraites des commandes fermes passées ; réceptions du jour soustraites du restant ferme du jour ; flux **Reçu** (CK) : réceptions datées d'aujourd'hui ; les lignes antérieures au point zéro sont ignorées. Pour `En transit` : jour et quantité affichés, rien de compté |
+| `packing_slip` | numéro(s) de BL dans l'info-bulle de la cellule *Reçu* (TA), colonnes des flux et de la recherche ; **rapprochement avec les DESADV** : un BL porté par une réception marque le DESADV comme reçu, un BL porté par un journal en transit fait afficher le journal à la place du DESADV ; le **point** de la ligne est vert si un DESADV traité porte ce BL, rouge sinon ; un BL vide = « sans BL », réception manuelle, point rouge |
 | `purch_id` | info-bulle, flux, recherche |
-| `receipt_id` | identifiant technique |
+| `receipt_id` | identifiant technique ; identifiant des lignes *En transit* (journaux) et *À valider* |
 
 ### 5.3 Avis d'expédition (`erp_desadv`)
 
@@ -444,16 +441,16 @@ Un DESADV n'est **jamais compté** dans un stock : il annonce. Un message `Annul
 
 | Colonne | Usage |
 |---|---|
-| `packing_slip` | **clé de rapprochement** avec `erp_receipts.packing_slip` : BL présent dans une réception → DESADV *reçu* (disparaît de la ligne *Reçu* et du flux *En transit*) ; absent → DESADV **non reçu** : affiché en italique sur fond orange dans la ligne *Reçu* (TA) au jour d'émission, listé dans **En transit** (CK). Un BL vide ne peut être rapproché : affiché, jamais reçu, sauf masquage |
+| `packing_slip` | **clé de rapprochement** avec `erp_receipts.packing_slip` : BL porté par une réception validée → DESADV *reçu* (disparaît de la ligne *Reçu* et du flux *En transit*) ; BL porté par un journal en transit → le journal est affiché à sa place ; sinon DESADV **annoncé** : affiché en italique sur fond orange avec l'icône camion dans la ligne *Reçu* (TA) au jour d'émission, listé dans **En transit** (CK). Un BL vide ne peut être rapproché : affiché, jamais reçu, sauf masquage |
 | `issue_date` | jour d'affichage dans la ligne *Reçu* (TA) ; tri des flux |
 | `qty` | quantité annoncée, affichée dans la cellule (TA), les flux et la recherche |
-| `state`, `final_processing` | `processed` = *Traité* et *OK* : point **vert** sur le DESADV non reçu, rouge sinon (TA) ; une réception validée dont le BL correspond à un DESADV traité porte un point vert, rouge sinon ; `Erreur` → flux **À traiter** (CK, motif « message en erreur ») ; `Annulé` → ignoré |
+| `state`, `final_processing` | `processed` = *Traité* et *OK* : point **vert** sur l'en transit (DESADV ou journal portant ce BL), rouge sinon (TA) ; une réception dont le BL correspond à un DESADV traité porte un point vert, rouge sinon (réception manuelle) ; `Erreur` → flux **À traiter** (CK, motif « message en erreur ») ; `Annulé` → ignoré |
 | `stock_trans_id` | vide sur un message **traité** = aucun journal de saisie créé dans l'ERP → flux **À traiter** (CK, motif « traité sans journal de saisie ») ; colonne *Journal* de la recherche (oui / non) |
 | `supplier_id` | voie du TA ; un fournisseur inconnu des règles crée sa voie |
 | `purch_id`, `supplier_name` | information (info-bulle, flux, recherche) |
 
-Double-clic sur un DESADV non reçu (TA, vue jour) : il est **masqué** (`desadv_hidden`, BL conservé en
-note), rétablissable depuis *Saisies & journal*.
+Double-clic sur un en transit (TA, vue jour) : il est **masqué** (`desadv_hidden`, BL conservé en note),
+rétablissable depuis *Saisies & journal*.
 
 ### 5.4 Consommation réelle (`erp_consumption_actual`)
 
@@ -474,7 +471,7 @@ alertes, propositions CBN.
 
 | Colonne | Usage |
 |---|---|
-| toutes | flux **À valider** (CK) : toutes les lignes des articles du périmètre, triées par `days_pending` décroissant ; recherche (RE), type *BL en attente*. Aucun effet sur les calculs |
+| toutes | recherche (RE), type *BL en attente*, uniquement : le flux **À valider** (CK) est calculé depuis `erp_receipts` (statut `Reçu` depuis 7 jours ou plus). Aucun effet sur les calculs |
 
 ### 5.7 PDP ERP (`erp_production_plan`)
 
@@ -486,10 +483,10 @@ alertes, propositions CBN.
 
 | Écran | Faits ERP mobilisés |
 |---|---|
-| Tableau d'approvisionnement (TA) | *Besoin* ← consommation + PDP éclaté ; *Ferme*, *Ferme (passé)*, *Prévisionnel* ← commandes ; *Reçu* ← réceptions (+ statut, BL) et DESADV non reçus ; *Appro.* ← fermes restantes par défaut ; *Projeté ERP / Appro.* ← stock de référence + réceptions passées + fermes futures (+ saisies) − besoin ; en-tête de voie : backlog ← fermes passées − réceptions |
+| Tableau d'approvisionnement (TA) | *Besoin* ← consommation + PDP éclaté ; *Ferme*, *Ferme (passé)*, *Prévisionnel* ← commandes ; *Reçu* ← réceptions validées (statut, BL, ACR) et en transit (journaux non validés, DESADV annoncés) ; *Appro.* ← fermes restantes par défaut ; *Projeté ERP / Appro.* ← stock de référence + réceptions passées + fermes futures (+ saisies) − besoin ; en-tête de voie : backlog ← fermes passées − réceptions |
 | Fiche article (FA) | les mêmes, plus : stock à date, prix et valeurs, prochaine livraison (ferme, saisie ou CBN), backlog depuis la date de fenêtre |
 | Cockpit, *Couvertures et stocks* (CK) | couvertures et stocks projetés (tous faits), valeur du stock et projection ← prix |
-| Cockpit, *Flux d'approvisionnement* (CK) | À commander ← propositions CBN urgentes ; Commandé ← `first_seen` ; En transit ← DESADV non reçus ; À traiter ← DESADV en erreur ou sans journal ; À réceptionner ← fermes du jour ; Reçu ← réceptions du jour ; En retard ← backlog ; À valider ← BL en attente |
+| Cockpit, *Flux d'approvisionnement* (CK) | À commander ← propositions CBN urgentes ; Commandé ← `first_seen` ; En transit ← journaux non validés + DESADV annoncés sans journal ; À traiter ← DESADV en erreur ou sans journal de saisie ; À réceptionner ← fermes du jour ; Reçu ← réceptions du jour ; En retard ← backlog ; À valider ← réceptions `Reçu` depuis 7 jours |
 | Recherche (RE) | réceptions, commandes, DESADV, BL en attente : toutes les lignes du périmètre, filtres texte (`;` = ou), dates, fournisseur |
 | Alertes (AL) | calculées sur les stocks projetés ; le backlog est affiché, pas alerté |
 | `GET /api/health`, `GET /api/config` | `erp_sync_log` : fraîcheur et volume de chaque table miroir |
@@ -504,8 +501,11 @@ alertes, propositions CBN.
   disparaît du miroir ; seule `first_seen` survit, et seulement pour les créneaux encore présents.
 * **`qty_open` d'une commande passée** n'est pas fiable (l'ERP ne la solde pas) : l'application n'y lit que
   l'affichage `restant / commandé` ; le backlog se calcule sur `qty_ordered` − réceptions.
-* **Un DESADV sans BL** et une réception sans BL ne peuvent pas être rapprochés : ils sont affichés comme
-  « ACR non validé » et restent en transit tant qu'ils ne sont pas masqués.
+* **Un DESADV sans BL** et une réception sans BL ne peuvent pas être rapprochés : la réception est une
+  réception manuelle (point rouge), le DESADV reste en transit tant qu'il n'est pas masqué.
+* **Un journal d'arrivée non validé** n'est visible que si `recep_edi` le conserve avec le statut `En transit` ;
+  l'accusé de réception vient de `vend_packing_slip_trans` (ancien schéma, un jour de décalage) : une réception
+  reste `Reçu` un jour après la validation de l'ACR.
 * **Point zéro** : une réception, une commande ou une consommation datée avant la date d'initialisation
   du stock n'entre dans aucun calcul ; une table de faits qui ne couvre pas cette date fausse la
   reconstitution du passé.

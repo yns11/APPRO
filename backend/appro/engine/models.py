@@ -155,12 +155,18 @@ class Receipt:
     supplier_id: str | None = None
     ref: str = ""
     packing_slip: str = ""         # delivery note number(s) (BL, several joined by " | ") : matched with the despatch advices
-    status: str = ""               # Reçu (ERP statuses 1-2) or Enregistré (3 : acknowledgement of receipt not validated)
+    status: str = ""               # En transit (arrival journal not validated) / Reçu (validated, not booked) / Comptabilisé (ACR validated)
 
     @property
-    def registered(self) -> bool:
-        """Registered, not validated yet (« ACR non validé ») : counted as a receipt, flagged red."""
-        return self.status.strip().lower().startswith("enregistr")
+    def in_transit(self) -> bool:
+        """Arrival journal created but not validated (``posted = 0``) : the goods are on their way, nothing
+        is in stock ; shown as « En transit » in the Reçu row, never counted."""
+        return "transit" in self.status.strip().lower()
+
+    @property
+    def booked(self) -> bool:
+        """Acknowledgement of receipt validated (« Comptabilisé ») : green background in the Reçu row."""
+        return self.status.strip().lower().startswith("comptabilis")
 
     @property
     def packing_slips(self) -> list[str]:
@@ -420,6 +426,7 @@ class Lane:
     desadv_open: np.ndarray | None = None   # announced, not received, not hidden DESADV quantity (display only)
     desadv_ko: np.ndarray | None = None     # bool: an unreceived DESADV of the day is not « Traité / OK »
     receipts_ko: np.ndarray | None = None   # bool: a receipt of the day has no processed DESADV for its BL
+    receipts_booked: np.ndarray | None = None   # bool: every receipt of the day is booked (ACR validated) : green background
     desadv: list["DesadvInfo"] = field(default_factory=list)
     receipt_lines: list["ReceiptInfo"] = field(default_factory=list)   # the receipts of the lane, one per ERP line (tooltips)
 
@@ -437,13 +444,16 @@ class DesadvInfo:
     hidden: bool
     purch_id: str = ""
     stock_trans_id: str = ""
+    journaled: bool = False        # its BL is carried by an arrival journal not validated yet (shown through that journal)
+    source: str = "desadv"         # desadv (announced by EDI) or journal (arrival journal not validated : « En transit »)
 
 
 @dataclass
 class ReceiptInfo:
     """One ERP receipt line as displayed in the tooltips of the Reçu row.  ``packing_slip`` is empty
-    when the ERP has no delivery note yet (shown as « ACR non validé ») ; ``processed`` tells whether
-    the delivery note matches a processed DESADV (green dot)."""
+    when the ERP has no delivery note (manual receipt) ; ``processed`` tells whether the delivery note
+    matches a processed DESADV (green dot) ; ``booked`` whether the acknowledgement of receipt is
+    validated (green background)."""
 
     receipt_id: str
     receipt_date: dt.date
@@ -451,7 +461,8 @@ class ReceiptInfo:
     packing_slip: str
     purch_id: str
     processed: bool
-    status: str = ""               # Reçu / Enregistré
+    status: str = ""               # Reçu / Comptabilisé
+    booked: bool = False
 
 
 @dataclass

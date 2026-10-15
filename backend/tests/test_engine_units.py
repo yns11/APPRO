@@ -598,22 +598,42 @@ def test_refused_proposal_is_per_supplier():
     assert all(not (first.delivery_date <= p.delivery_date <= end) for p in blocked.proposals if p.supplier_id == "S1")
 
 
-def test_registered_receipt_and_multi_bl_matching():
-    """A receipt « Enregistré » (acknowledgement not validated) counts in the stock but is red whatever
-    its BL ; its BL list (« BL-1 | BL-2 », taken from the DESADV) still marks those DESADV as received."""
-    tue1 = MON - D(days=6)
+def test_receipt_statuses_transit_received_booked():
+    """Three receipt statuses.  « En transit » (arrival journal not validated) : shown in the Reçu row like
+    an announced DESADV, green when its BL matches a processed DESADV, never counted, and the DESADV it
+    carries is listed through it.  « Reçu » : counted, green dot when announced by a processed DESADV,
+    red otherwise (manual receipt).  « Comptabilisé » : the same, plus the green background."""
+    mon1, tue1, wed1, thu1 = MON - D(days=7), MON - D(days=6), MON - D(days=5), MON - D(days=4)
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
-                      receipts=[Receipt("R1", "A1", tue1, 300, supplier_id="S1", packing_slip="BL-1 | BL-2", status="Enregistré"),
-                                Receipt("R2", "A1", tue1, 50, supplier_id="S1", packing_slip="BL-3", status="Reçu")])
-    ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", tue1, 150, state="Traité", final_processing="OK"),
-                 DesadvLine("D2|1", "A1", "S1", "BL-2", tue1, 150, state="Traité", final_processing="OK"),
-                 DesadvLine("D3|1", "A1", "S1", "BL-3", tue1, 50, state="Traité", final_processing="OK")]
+                      receipts=[Receipt("R1", "A1", tue1, 300, supplier_id="S1", packing_slip="BL-1 | BL-2", status="Reçu"),
+                                Receipt("R2", "A1", tue1, 50, supplier_id="S1", packing_slip="BL-3", status="Comptabilisé"),
+                                Receipt("J1", "A1", wed1, 500, supplier_id="S1", packing_slip="BL-4", status="En transit"),   # processed DESADV
+                                Receipt("J2", "A1", wed1, 60, supplier_id="S1", packing_slip="BL-9", status="En transit"),    # no DESADV
+                                Receipt("R3", "A1", thu1, 10, supplier_id="S1", packing_slip="", status="Comptabilisé")])     # manual, booked
+    ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", mon1, 150, state="Traité", final_processing="OK"),
+                 DesadvLine("D2|1", "A1", "S1", "BL-2", mon1, 150, state="Traité", final_processing="OK"),
+                 DesadvLine("D3|1", "A1", "S1", "BL-3", mon1, 50, state="Traité", final_processing="OK"),
+                 DesadvLine("D4|1", "A1", "S1", "BL-4", mon1, 500, state="Traité", final_processing="OK"),
+                 DesadvLine("D5|1", "A1", "S1", "BL-5", thu1, 40, state="Créé", final_processing="Non traité")]   # announced, no journal
     r = run(ds, horizon_days=5)
     i = r.dates.index(MON)
     s1 = {l.supplier_id: l for l in r.lanes}["S1"]
-    assert [d.received for d in s1.desadv] == [True, True, True] and s1.desadv_open[i - 6] == 0
-    assert [(x.receipt_id, x.processed, x.status) for x in s1.receipt_lines] == [("R1", False, "Enregistré"), ("R2", True, "Reçu")]
-    assert bool(s1.receipts_ko[i - 6]) and r.receipts[i - 6] == 350
+    # counted : R1 + R2 on Tuesday, R3 on Thursday ; the journals in transit never
+    assert r.receipts[i - 6] == 350 and r.receipts[i - 5] == 0 and r.receipts[i - 4] == 10 and sum(r.receipts) == 360
+    # in transit on Wednesday : both journals (560), red because J2 has no processed DESADV ; D5 announced on Thursday, red
+    assert s1.desadv_open[i - 5] == 560 and bool(s1.desadv_ko[i - 5]) and s1.desadv_open[i - 4] == 40 and bool(s1.desadv_ko[i - 4])
+    journals = [d for d in s1.desadv if d.source == "journal"]
+    assert [(d.desadv_id, d.packing_slip, d.processed, d.state) for d in journals] == [("J1", "BL-4", True, "Journal d'arrivée non validé"), ("J2", "BL-9", False, "Journal d'arrivée non validé")]
+    by_bl = {d.packing_slip: d for d in s1.desadv if d.source == "desadv"}
+    assert [(bl, by_bl[bl].received, by_bl[bl].journaled) for bl in ("BL-1", "BL-2", "BL-3", "BL-4", "BL-5")] == [
+        ("BL-1", True, False), ("BL-2", True, False), ("BL-3", True, False), ("BL-4", False, True), ("BL-5", False, False)]
+    # receipt lines : processed (green dot) and booked (green background)
+    assert [(x.receipt_id, x.processed, x.booked, x.status) for x in s1.receipt_lines] == [
+        ("R1", True, False, "Reçu"), ("R2", True, True, "Comptabilisé"), ("R3", False, True, "Comptabilisé")]
+    assert not bool(s1.receipts_ko[i - 6]) and bool(s1.receipts_ko[i - 4])          # R3 : manual receipt → red
+    assert not bool(s1.receipts_booked[i - 6]) and bool(s1.receipts_booked[i - 4])  # Tuesday holds an unbooked receipt
+    # a legacy « Enregistré » status is a plain receipt
+    assert not Receipt("R9", "A1", tue1, 1, status="Enregistré").in_transit and not Receipt("R9", "A1", tue1, 1, status="Enregistré").booked
 
 
 def test_plan_stockout_severity_is_graded_like_the_erp_one():

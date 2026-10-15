@@ -118,28 +118,32 @@ fournisseur et de ce jour : elles sortent du Projeté ERP et ne pré-remplissent
 0 ; une cellule saisie garde sa valeur). Un nouveau clic les rétablit. Le passé ne s'ignore pas (il ne compte
 dans aucun stock). Ces jours ignorés sont listés dans *Saisies & journal* et comptés dans le KPI *Appro.*.
 
-### 3.3 ter La ligne Reçu : réceptions et avis d'expédition (DESADV)
+### 3.3 ter La ligne Reçu : journaux d'arrivée, réceptions et avis d'expédition (DESADV)
 
-La ligne *Reçu* de chaque fournisseur montre les réceptions ERP et, **en italique sur fond orange, les DESADV
-non reçus** : un avis d'expédition dont le BL n'apparaît pas encore dans les réceptions, affiché au jour
-d'émission avec sa quantité annoncée. Cette quantité **n'entre dans aucun calcul** (ni stock, ni backlog, ni
-proposition) : elle prévient que la marchandise est en route. Point **vert** si le message est *Traité* et son
-traitement final *OK*, **rouge** sinon (erreur, en attente, créé). Le DESADV disparaît du tableau dès que son BL
-est réceptionné, ou si l'approvisionneur **double-clique** la cellule et confirme (drapeau `desadv_hidden`,
-listé et rétablissable dans *Saisies & journal*). Les messages annulés ne sont jamais affichés. Les réceptions
-portent elles aussi un point : vert si leur BL correspond à un DESADV traité, rouge sinon.
+Une ligne de `recep_edi` est un **journal d'arrivée** de l'ERP, porteur d'un statut :
+
+| Statut | État ERP | Dans l'application |
+|---|---|---|
+| **En transit** | journal créé, non validé (`posted = 0`) | affiché en italique sur fond orange avec une icône camion, **jamais compté** (ni stock, ni backlog) |
+| **Reçu** | journal validé, accusé de réception (ACR) non validé | réception : comptée dans le stock ; après 7 jours sans ACR, flux *À valider* |
+| **Comptabilisé** | journal validé, ACR validé | réception, **fond vert** |
+
+Chaque ligne porte un **point** qui dit si son BL est annoncé par un DESADV traité : **vert** si un DESADV à
+l'état *Traité* et au traitement final *OK* porte ce BL, **rouge** sinon (réception manuelle, DESADV absent, en
+erreur, créé, en attente ou annulé). Le point et le fond sont indépendants : un reçu comptabilisé sans DESADV
+traité a un fond vert et un point rouge.
+
+Les **DESADV** non annulés sont affichés en transit, au jour d'émission et pour leur quantité annoncée, tant que
+leur BL n'est porté ni par une réception (journal validé) ni par un journal en transit ; dès qu'un journal porte
+le BL, c'est le journal qui est affiché. Point vert si le message est *Traité / OK*, rouge sinon. Un en transit
+(journal ou DESADV) peut être **masqué** par un double-clic confirmé (drapeau `desadv_hidden`, listé et
+rétablissable dans *Saisies & journal*).
 
 L'**info-bulle** de chaque cellule *Reçu* détaille les lignes du jour (ou de la semaine) : pour chaque réception
-et chaque DESADV, son **numéro de BL** et sa quantité (le DESADV ajoute son état et son traitement final). Quand l'ERP n'a pas encore de BL (colonne
-`BL` nulle), l'info-bulle affiche **« ACR non validé »** à la place du numéro. Une ligne sans BL ne peut être
-rapprochée d'aucune autre : la réception porte alors un point rouge expliqué « ACR non validé » (et non « BL reçu
-sans DESADV traité » : le DESADV correspondant peut très bien être traité, c'est l'accusé de réception qui n'est
-pas encore validé), et le DESADV reste annoncé jusqu'à ce que l'ERP lui donne un BL réceptionné ou que
-l'approvisionneur le masque. Depuis la version `recep_edi` à statut, une réception **Enregistrée** (statut ERP 3 :
-BL enregistré, accusé de réception non validé) arrive avec le BL de son DESADV : elle **compte dans le stock**, marque
-ce DESADV comme reçu, et porte le point rouge « ACR non validé » jusqu'à sa validation (statut *Reçu*). Ces règles
-valent à l'identique dans la fiche article et dans le tableau d'approvisionnement global (mêmes info-bulles, points et cellules DESADV ; la ligne *Projeté Appro.* y affiche
-aussi le **stock cible** du jour).
+son BL, sa quantité et son état d'ACR (*comptabilisé* ou *ACR à valider depuis n j*) ; pour chaque en transit son BL,
+sa quantité et son origine (journal d'arrivée non validé, ou DESADV avec son état). Une ligne sans BL s'affiche
+« sans BL » : c'est une réception manuelle, qui ne peut être rapprochée d'aucun DESADV (point rouge). Ces règles
+valent à l'identique dans la fiche article et dans le tableau d'approvisionnement global.
 
 ### 3.4 Backlog fournisseur
 
@@ -295,12 +299,12 @@ l'en-tête de la table restent visibles pendant le défilement.
 |---|---|
 | À commander | propositions CBN **urgentes** (date réelle « à commander le » dans le passé) ; une proposition refusée d'un clic reste listée, marquée *ignorée*, hors calculs |
 | Commandé | commandes fermes **apparues aujourd'hui** dans la copie ERP (`first_seen` posé par le job de synchronisation), quelle que soit la date de livraison |
-| En transit | DESADV non annulés dont le BL n'est pas encore réceptionné |
+| En transit | journaux d'arrivée **non validés** (statut *En transit*), plus les DESADV non annulés qu'aucun journal ne porte encore |
 | À traiter | DESADV en **erreur**, ou **traités sans journal de saisie** (`ID_transaction_stock` vide) |
 | À réceptionner | commandes fermes dont la livraison est attendue aujourd'hui |
-| Reçu | réceptions datées d'aujourd'hui |
+| Reçu | réceptions (journaux validés) datées d'aujourd'hui |
 | En retard | commandes en souffrance (backlog fournisseur, § 3.4) |
-| À valider | accusés de réception non validés depuis 7 jours (table `bl_en_attente`, toutes les lignes du périmètre) |
+| À valider | réceptions au statut *Reçu* (journal validé, ACR non validé) depuis **7 jours** ou plus, calculées depuis les réceptions ; la table `bl_en_attente` n'alimente plus que la page *Recherche* |
 
 L'ancienne page *Propositions CBN* est remplacée par le flux *À commander* (`/propositions` y redirige).
 

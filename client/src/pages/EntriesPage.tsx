@@ -10,7 +10,7 @@ import { fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
 import type { AdjustmentOut, AuditOut, FlagOut, PlanCellOut } from "@/lib/types";
 
 type Tab = "plan" | "adjustments" | "flags" | "audit";
-const FLAG_LABELS: Record<string, string> = { order_ignored: "commande ferme ignorée", proposal_refused: "proposition CBN refusée", desadv_hidden: "DESADV non reçu masqué" };
+const FLAG_LABELS: Record<string, string> = { order_ignored: "commande ferme ignorée", proposal_refused: "proposition CBN refusée", desadv_hidden: "en transit masqué (DESADV / journal d'arrivée)" };
 
 const article = <T extends { article_id: string }>(): Column<T> => ({ key: "article", label: "Article", get: (r) => r.article_id, render: (r) => <Link to={`/articles/${encodeURIComponent(r.article_id)}`}><b>{r.article_id}</b></Link> });
 const who = <T extends { updated_by: string; updated_at: string }>(): Column<T> => ({ key: "who", label: "Modifié", get: (r) => `${r.updated_by} ${r.updated_at}`, render: (r) => <span className="subtle small">{r.updated_by}<br />{fmtDateTime(r.updated_at)}</span> });

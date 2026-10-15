@@ -47,15 +47,15 @@ export default function SearchPage() {
     const qty = (label: string, get: (r: SearchRow) => number | undefined): Column<SearchRow> => ({ key: label, label, get: (r) => get(r) ?? null, num: true, render: (r) => fmtQty(get(r) ?? 0, r.unit) });
     switch (kind) {
       case "receipts": return [...base,
-        { key: "bl", label: "BL", get: (r) => r.packing_slip ?? "", render: (r) => r.packing_slip || <span className="subtle">ACR non validé</span> },
+        { key: "bl", label: "BL", get: (r) => r.packing_slip ?? "", render: (r) => r.packing_slip || <span className="subtle">sans BL</span> },
         date("Reçu le"), qty("Quantité", (r) => r.qty),
-        { key: "status", label: "Statut", get: (r) => r.status ?? "", filter: "select", render: (r) => <Badge tone={(r.status ?? "").toLowerCase().startsWith("enregistr") ? "warning" : "ok"}>{r.status || "Reçu"}</Badge> }];
+        { key: "status", label: "Statut", get: (r) => r.status ?? "", filter: "select", render: (r) => <Badge tone={(r.status ?? "").toLowerCase().startsWith("comptabilis") ? "ok" : (r.status ?? "").toLowerCase().includes("transit") ? "info" : "warning"}>{r.status || "Reçu"}</Badge> }];
       case "orders": return [...base,
         { key: "type", label: "Type", get: (r) => ORDER_TYPE_LABELS[r.order_type ?? ""] ?? r.order_type ?? "", filter: "select" },
         date("Livraison prévue"), qty("Commandé", (r) => r.qty_ordered), qty("Restant", (r) => r.qty_open),
         { key: "seen", label: "Apparue le", get: (r) => r.first_seen ?? "", render: (r) => r.first_seen ? fmtDate(r.first_seen) : <span className="subtle">–</span> }];
       case "desadv": return [...base,
-        { key: "bl", label: "BL", get: (r) => r.packing_slip ?? "", render: (r) => r.packing_slip || <span className="subtle">ACR non validé</span> },
+        { key: "bl", label: "BL", get: (r) => r.packing_slip ?? "", render: (r) => r.packing_slip || <span className="subtle">sans BL</span> },
         date("Émis le"), qty("Annoncé", (r) => r.qty),
         { key: "state", label: "État", get: (r) => `${r.state ?? ""}${r.final_processing ? ` / ${r.final_processing}` : ""}`, filter: "select" },
         { key: "received", label: "Reçu ?", get: (r) => r.received ? "reçu" : "en transit", filter: "select", render: (r) => <Badge tone={r.received ? "ok" : "info"}>{r.received ? "reçu" : "en transit"}</Badge> },

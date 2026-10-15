@@ -130,6 +130,8 @@ class DesadvInfoOut(BaseModel):
     received: bool
     hidden: bool
     purch_id: str = ""
+    journaled: bool = False
+    source: str = "desadv"   # desadv | journal (arrival journal not validated : « En transit »)
 
 
 class SeriesOut(BaseModel):
@@ -139,7 +141,7 @@ class SeriesOut(BaseModel):
 
 
 class ReceiptInfoOut(BaseModel):
-    """One ERP receipt line: delivery note (BL) for the tooltips of the Reçu row ; empty = « ACR non validé »."""
+    """One ERP receipt line: delivery note (BL) for the tooltips of the Reçu row ; empty = manual receipt."""
 
     receipt_id: str
     receipt_date: dt.date
@@ -147,6 +149,8 @@ class ReceiptInfoOut(BaseModel):
     packing_slip: str
     purch_id: str
     processed: bool
+    status: str = ""
+    booked: bool = False
 
 
 class LaneOut(BaseModel):
@@ -159,6 +163,7 @@ class LaneOut(BaseModel):
     orders_ignored: list[bool] = Field(default_factory=list)
     desadv_ko: list[bool] = Field(default_factory=list)
     receipts_ko: list[bool] = Field(default_factory=list)
+    receipts_booked: list[bool] = Field(default_factory=list)
     backlog_ordered: float
     backlog_received: float
     backlog_qty: float

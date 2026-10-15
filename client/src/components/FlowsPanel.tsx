@@ -12,12 +12,12 @@ const FLOW_H = "calc(100vh - 330px)";   // the table scrolls under its sticky he
 const FLOWS: { key: FlowKey; label: string; hint: string; icon: typeof Truck; tone?: "critical" | "warning" | "ok" | "info" | "brand" }[] = [
   { key: "to_order", label: "À commander", hint: "propositions CBN urgentes (refusées comprises, marquées ignorées)", icon: ShoppingCart, tone: "critical" },
   { key: "ordered", label: "Commandé", hint: "commandes fermes apparues aujourd'hui dans l'ERP", icon: ClipboardList, tone: "brand" },
-  { key: "in_transit", label: "En transit", hint: "DESADV pas encore reçus", icon: Truck, tone: "info" },
+  { key: "in_transit", label: "En transit", hint: "journaux d'arrivée non validés et DESADV annoncés", icon: Truck, tone: "info" },
   { key: "to_process", label: "À traiter", hint: "DESADV en erreur, ou traités sans journal de saisie", icon: AlertTriangle, tone: "warning" },
   { key: "to_receive", label: "À réceptionner", hint: "commandes fermes attendues aujourd'hui", icon: Inbox, tone: "brand" },
   { key: "received", label: "Reçu", hint: "réceptions apparues aujourd'hui", icon: PackageCheck, tone: "ok" },
   { key: "late", label: "En retard", hint: "commandes en souffrance (backlog)", icon: Clock, tone: "warning" },
-  { key: "to_validate", label: "À valider", hint: "accusés de réception non validés depuis 7 jours", icon: CheckSquare, tone: "warning" },
+  { key: "to_validate", label: "À valider", hint: "réceptions non comptabilisées depuis 7 jours (ACR à valider)", icon: CheckSquare, tone: "warning" },
 ];
 
 const art = <T extends { article_id: string; designation: string }>(): Column<T> => ({ key: "article", label: "Article", get: (r) => `${r.article_id} ${r.designation}`, render: (r) => <><Link to={`/articles/${encodeURIComponent(r.article_id)}`}><b>{r.article_id}</b></Link><span className="sub">{r.designation}</span></> });
@@ -51,20 +51,20 @@ export function FlowsPanel() {
   ], []);
   const desadvCols = useMemo<Column<DesadvRow>[]>(() => [
     art<DesadvRow>(), planner<DesadvRow>(), sup<DesadvRow>(),
-    { key: "bl", label: "BL", get: (x) => x.packing_slip, render: (x) => x.packing_slip || <span className="subtle">ACR non validé</span> },
+    { key: "bl", label: "BL", get: (x) => x.packing_slip, render: (x) => x.packing_slip || <span className="subtle">sans BL</span> },
     { key: "purch", label: "Commande", get: (x) => x.purch_id },
-    { key: "date", label: "Émis le", get: (x) => x.issue_date, render: (x) => fmtDate(x.issue_date) },
+    { key: "date", label: "Date", get: (x) => x.issue_date, render: (x) => fmtDate(x.issue_date), title: "Date d'émission du DESADV, ou date de la ligne du journal d'arrivée" },
     { key: "qty", label: "Annoncé", get: (x) => x.qty, num: true, render: (x) => fmtQty(x.qty, x.unit) },
-    { key: "state", label: "État", get: (x) => `${x.state}${x.final_processing ? ` / ${x.final_processing}` : ""}`, filter: "select", render: (x) => <Badge tone={x.state.toLowerCase() === "erreur" ? "critical" : x.state.toLowerCase() === "traité" && x.final_processing.toUpperCase() === "OK" ? "ok" : "warning"}>{x.state}{x.final_processing ? ` / ${x.final_processing}` : ""}</Badge> },
+    { key: "state", label: "État", get: (x) => `${x.state}${x.final_processing ? ` / ${x.final_processing}` : ""}`, filter: "select", render: (x) => <Badge tone={x.state.toLowerCase() === "erreur" ? "critical" : x.state.toLowerCase().startsWith("journal") ? "info" : x.state.toLowerCase() === "traité" && x.final_processing.toUpperCase() === "OK" ? "ok" : "warning"}>{x.state}{x.final_processing ? ` / ${x.final_processing}` : ""}</Badge> },
     { key: "issue", label: "Point", get: (x) => x.issue || (x.received ? "reçu" : "en transit"), filter: "select" },
   ], []);
   const receiptCols = useMemo<Column<ReceiptRow>[]>(() => [
     art<ReceiptRow>(), planner<ReceiptRow>(), sup<ReceiptRow>(),
-    { key: "bl", label: "BL", get: (r) => r.packing_slip, render: (r) => r.packing_slip || <span className="subtle">ACR non validé</span> },
+    { key: "bl", label: "BL", get: (r) => r.packing_slip, render: (r) => r.packing_slip || <span className="subtle">sans BL</span> },
     { key: "purch", label: "Commande", get: (r) => r.purch_id },
     { key: "date", label: "Reçu le", get: (r) => r.receipt_date, render: (r) => fmtDate(r.receipt_date) },
     { key: "qty", label: "Quantité", get: (r) => r.qty, num: true, render: (r) => fmtQty(r.qty, r.unit) },
-    { key: "status", label: "Statut", get: (r) => r.status, filter: "select", render: (r) => <Badge tone={r.status.toLowerCase().startsWith("enregistr") ? "warning" : "ok"}>{r.status || "Reçu"}</Badge> },
+    { key: "status", label: "Statut", get: (r) => r.status, filter: "select", render: (r) => <Badge tone={r.status.toLowerCase().startsWith("comptabilis") ? "ok" : r.status.toLowerCase().includes("transit") ? "info" : "warning"}>{r.status || "Reçu"}</Badge> },
   ], []);
   const backlogCols = useMemo<Column<BacklogRow>[]>(() => [
     art<BacklogRow>(), sup<BacklogRow>(),
@@ -74,9 +74,9 @@ export function FlowsPanel() {
   ], []);
   const pendingCols = useMemo<Column<PendingRow>[]>(() => [
     art<PendingRow>(), planner<PendingRow>(), sup<PendingRow>(),
-    { key: "bl", label: "BL (DESADV)", get: (b) => b.packing_slip, render: (b) => b.packing_slip || <span className="subtle">–</span> },
+    { key: "bl", label: "BL", get: (b) => b.packing_slip, render: (b) => b.packing_slip || <span className="subtle">sans BL</span> },
     { key: "purch", label: "Commande", get: (b) => b.purch_id },
-    { key: "date", label: "Enregistré le", get: (b) => b.registered_date, render: (b) => fmtDate(b.registered_date) },
+    { key: "date", label: "Reçu le", get: (b) => b.registered_date, render: (b) => fmtDate(b.registered_date) },
     { key: "qty", label: "Quantité", get: (b) => b.qty, num: true, render: (b) => fmtQty(b.qty, b.unit) },
     { key: "days", label: "Jours en attente", get: (b) => b.days_pending, num: true, render: (b) => <Badge tone={b.days_pending >= 14 ? "critical" : "warning"}>{fmtInt(b.days_pending)} j</Badge> },
   ], []);
@@ -88,12 +88,12 @@ export function FlowsPanel() {
     switch (flow) {
       case "to_order": return <div className="scroll-x"><DataTable rows={d.to_order} columns={proposalCols} rowKey={(p) => `${p.proposal_id}-${p.ignored}`} rowClass={(p) => (p.ignored ? "muted" : "")} emptyTitle="Aucune proposition urgente" emptyHint="Toutes les propositions CBN respectent le délai fournisseur." maxHeight={FLOW_H} /></div>;
       case "ordered": return <DataTable rows={d.ordered} columns={orderCols} rowKey={(o) => o.order_id} emptyTitle="Aucune nouvelle commande ferme aujourd'hui" emptyHint={d.first_seen_available ? undefined : "La date d'apparition des commandes est posée par le job de synchronisation : elle sera disponible après sa prochaine exécution."} maxHeight={FLOW_H} />;
-      case "in_transit": return <DataTable rows={d.in_transit} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Aucun DESADV en transit" maxHeight={FLOW_H} />;
+      case "in_transit": return <DataTable rows={d.in_transit} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Rien en transit" maxHeight={FLOW_H} />;
       case "to_process": return <DataTable rows={d.to_process} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Aucun DESADV à traiter" maxHeight={FLOW_H} />;
       case "to_receive": return <DataTable rows={d.to_receive} columns={orderCols} rowKey={(o) => o.order_id} emptyTitle="Aucune commande ferme attendue aujourd'hui" maxHeight={FLOW_H} />;
       case "received": return <DataTable rows={d.received} columns={receiptCols} rowKey={(r) => r.receipt_id} emptyTitle="Aucune réception aujourd'hui" maxHeight={FLOW_H} />;
       case "late": return <DataTable rows={d.late} columns={backlogCols} rowKey={(b) => `${b.article_id}-${b.supplier_id}`} emptyTitle="Aucune commande en souffrance" maxHeight={FLOW_H} />;
-      case "to_validate": return <DataTable rows={d.to_validate} columns={pendingCols} rowKey={(b) => b.pending_id} emptyTitle="Aucun accusé de réception en attente" maxHeight={FLOW_H} />;
+      case "to_validate": return <DataTable rows={d.to_validate} columns={pendingCols} rowKey={(b) => b.pending_id} emptyTitle="Aucune réception en attente de comptabilisation" maxHeight={FLOW_H} />;
     }
   };
   return (

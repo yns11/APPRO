@@ -645,9 +645,14 @@ def test_flows_of_the_day(client):
     k = f["kpis"]
     assert set(k) == {"to_order", "ordered", "in_transit", "to_process", "to_receive", "received", "late", "to_validate"}
     assert f["first_seen_available"] is False and k["ordered"] == 0        # the seed carries no first_seen stamp
-    assert k["to_validate"] == 2 and {r["packing_slip"] for r in f["to_validate"]} == {"BL-990005", "BL-980001"}
-    transit = {d["packing_slip"] for d in f["in_transit"]}
-    assert {"BL-990001", "BL-990002", "BL-990006"} <= transit and "BL-990005" not in transit and "BL-990000" not in transit
+    # à valider : validated receipts not booked for a week or more (RC-900003 : 9 days, RC-900004 : 14 days) ;
+    # RC-900001 (yesterday) is not there yet
+    assert k["to_validate"] == 2 and {r["packing_slip"]: r["days_pending"] for r in f["to_validate"]} == {"BL-980001": 9, "BL-980002": 14}
+    transit = {d["packing_slip"]: d for d in f["in_transit"]}
+    assert {"BL-990001", "BL-990002", "BL-990006", "BL-990005"} <= set(transit) and "BL-990000" not in transit
+    # BL-990005 is carried by an arrival journal not validated yet : listed once, through that journal
+    assert transit["BL-990005"]["state"] == "Journal d'arrivée non validé" and transit["BL-990005"]["desadv_id"] == "RC-900002"
+    assert transit["BL-990001"]["state"] == "Traité"
     issues = {d["packing_slip"]: d["issue"] for d in f["to_process"]}
     assert issues["BL-990002"] == "message en erreur" and issues["BL-990005"] == "traité sans journal de saisie"
     assert all(p["urgent"] for p in f["to_order"]) and k["to_order"] == len(f["to_order"])
@@ -665,7 +670,7 @@ def test_flows_of_the_day(client):
 def test_search_page_queries(client):
     r = client.get("/api/search", params={"kind": "receipts", "q": "BL-990000;BL-990005", "planner": "QUENTIN"}).json()
     assert r["total"] == 2 and {x["packing_slip"] for x in r["rows"]} == {"BL-990000", "BL-990005"} and r["truncated"] is False
-    assert {x["status"] for x in r["rows"]} == {"Reçu", "Enregistré"}
+    assert {x["status"] for x in r["rows"]} == {"Reçu", "En transit"}
     r = client.get("/api/search", params={"kind": "receipts", "date_from": "2026-09-01", "date_to": "2026-09-30"}).json()
     assert r["total"] >= 2 and all("2026-09-01" <= x["date"] <= "2026-09-30" for x in r["rows"])
     assert client.get("/api/search", params={"kind": "pending"}).json()["total"] == 2

@@ -166,18 +166,23 @@ elle entre dans le **backlog** du fournisseur (§ 3.3 des règles métier).
 
 ### 2.2 `fct_receipts` ← `silver_erp_ye.recep_edi`
 
+Une ligne par **journal d'arrivée** (fournisseur / commande / BL / article / jour / statut).
+
 | Colonne | Type | `recep_edi` | Règle |
 |---|---|---|---|
-| receipt_id | texte **clé** | `Code_fournisseur|Commande|BL|Article|yyyyMMdd|Statut_reception` | construit |
+| receipt_id | texte **clé** | `Code_fournisseur|Commande|BL|Article|yyyyMMdd|Statut_reception` | construit (BL haché au-delà de 60 caractères) |
 | article_id | texte | `Article` | |
-| supplier_id | texte | `Code_fournisseur` | affecte la réception à la voie du fournisseur |
-| receipt_date | date | `Date_reception` | date physique (statuts ERP 1-2) ou date d'enregistrement (statut 3) |
-| qty | nombre | `Quantite_recue` | lignes à quantité nulle ignorées ; **comptée dans le stock quel que soit le statut** |
+| supplier_id | texte | `Code_fournisseur` | affecte la ligne à la voie du fournisseur |
+| receipt_date | date | `Date_reception` | date de validation du journal (`posted = 1`) ou date de la ligne du journal (`posted = 0`) |
+| qty | nombre | `Quantite_recue` | lignes à quantité nulle ignorées |
 | purch_id | texte | `Commande` | information |
-| packing_slip | texte | `BL` | numéro de BL en info-bulle de la ligne *Reçu* ; pour une réception enregistrée, BL repris du DESADV d'origine (plusieurs séparés par « \| ») ; chaque BL listé marque le DESADV correspondant comme reçu |
-| status | texte | `Statut_reception` | `Reçu` (statuts 1-2) ou `Enregistré` (statut 3 : BL enregistré, **accusé de réception non validé**) ; une réception enregistrée porte un point rouge « ACR non validé » |
+| packing_slip | texte | `BL` | numéro(s) de BL (plusieurs séparés par « \| ») : clé de rapprochement avec les DESADV ; vide = réception manuelle |
+| status | texte | `Statut_reception` | **`En transit`** (journal créé, non validé : affiché avec une icône camion, jamais compté), **`Reçu`** (journal validé, accusé de réception non validé : compté, flux *À valider* après 7 jours), **`Comptabilisé`** (accusé de réception validé : compté, fond vert) |
 
-Historique souhaité : au moins la fenêtre de backlog (28 jours par défaut, `backlog_days`).
+Contrat attendu de `recep_edi` (job amont) : `Statut_reception` dérivé de `wmsjournaltable.posted` et de la
+présence du BL dans `vend_packing_slip_trans` (ACR) ; les journaux non validés **sont conservés** avec le statut
+`En transit`. Historique souhaité : au moins la fenêtre de backlog (28 jours par défaut, `backlog_days`) et tout ce
+qui suit la date d'initialisation du stock.
 
 ### 2.3 `fct_consumption_actual` ← table UC de consommation réelle par composant (facultatif)
 
@@ -290,10 +295,13 @@ cible du jour (KPI *Valeur du stock*, sous-ligne +x % / −x % de la cible, roug
 valeur du stock** (Projeté Appro., fin de chaque semaine ISO) dans le cockpit. Un article sans prix n'entre dans
 aucune valeur (compté « sans prix » sur la carte).
 
-### 2.7 `fct_bl_pending` ← `silver_erp_ye.bl_en_attente` — accusés de réception non validés
+### 2.7 `fct_bl_pending` ← `silver_erp_ye.bl_en_attente` — accusés de réception non validés (facultatif)
 
-Réceptions en statut *Enregistré* depuis au moins 7 jours, dont le BL est repris du DESADV
-(`APPRO_ERP_BL_PENDING_TABLE`, variable `erp_bl_pending_table`, défaut `bl_en_attente`).
+Réceptions en statut *Reçu* (journal validé) depuis au moins 7 jours sans accusé de réception validé
+(`APPRO_ERP_BL_PENDING_TABLE`, variable `erp_bl_pending_table`, défaut `bl_en_attente`). Depuis le contrat à trois
+statuts de `recep_edi`, le flux **À valider** du cockpit est calculé depuis les réceptions elles-mêmes (statut
+*Reçu* depuis 7 jours ou plus) ; cette table n'alimente plus que la page *Recherche* (type « BL en attente ») et
+peut être laissée vide.
 
 | Colonne | Type | Source | Règle |
 |---|---|---|---|
@@ -305,9 +313,6 @@ Réceptions en statut *Enregistré* depuis au moins 7 jours, dont le BL est repr
 | qty | nombre | `Quantite` | |
 | registered_date | date | `Date_enregistrement` | |
 | days_pending | entier | `Jours_en_attente` | |
-
-Usage : flux **À valider** du cockpit et page *Recherche* (« BL en attente »). Toutes les lignes sont listées,
-restreintes aux articles du périmètre.
 
 ## 3. Base applicative (écrite par l'application)
 

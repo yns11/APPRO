@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, Eye, EyeOff, Lock } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Lock, Truck } from "lucide-react";
 import { api } from "@/lib/api";
 import { useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -92,7 +92,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   /** read-only article: outside the user's portfolio (the server refuses the writes too) */
   const lockedOf = useCallback((a: GridRowArticle) => !rights.canEditPlanner(a.article.planner), [rights]);
   const LOCK = "Lecture seule : article hors de votre carnet";
-  const NO_BL = "ACR non validé";   // réception ou DESADV sans BL dans l'ERP
+  const NO_BL = "sans BL";   // réception manuelle ou DESADV sans BL dans l'ERP
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<Edit | null>(null);
@@ -380,15 +380,16 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         const l = a.lanes[r.li], rc = laneSeries(l, "receipts"), dv = laneSeries(l, "desadv_open");
         const sid = l.supplier_id ?? "";
         const inCol = (d: DesadvInfo, i: number) => columnOf(cols, d.issue_date) === i;
-        const openOf = (i: number) => l.desadv.filter((d) => inCol(d, i) && !d.received && !d.hidden);
+        const openOf = (i: number) => l.desadv.filter((d) => inCol(d, i) && !d.received && !d.hidden && !d.journaled);
         const receiptsOf = (i: number) => (l.receipt_lines ?? []).filter((x: ReceiptInfo) => columnOf(cols, x.receipt_date) === i);
-        const registered = (x: { status?: string }) => (x.status ?? "").toLowerCase().startsWith("enregistr");
-        const bl = (x: { packing_slip: string; status?: string }) => `${x.packing_slip ? `BL ${x.packing_slip}` : NO_BL}${x.packing_slip && registered(x) ? ` (${NO_BL})` : ""}`;
-        // why a receipt carries a red dot: no BL yet (the ACR is not validated : nothing to match, by construction) or a BL unknown to the processed DESADV
+        const bl = (x: { packing_slip: string }) => (x.packing_slip ? `BL ${x.packing_slip}` : NO_BL);
+        const acr = (x: ReceiptInfo) => (x.booked ? "comptabilisé" : `ACR à valider${(() => { const d = Math.round((new Date(cols.as_of).getTime() - new Date(x.receipt_date).getTime()) / 86400000); return d >= 7 ? ` depuis ${d} j` : ""; })()}`);
+        // why a receipt carries a red dot: manual receipt (no BL) or a BL unknown to the processed DESADV
         const recKoReason = (xs: ReceiptInfo[]) => {
-          const noBl = xs.some((x) => !x.packing_slip || registered(x)), unknown = xs.some((x) => x.packing_slip && !registered(x) && !x.processed);
-          return [noBl ? NO_BL : "", unknown ? "BL reçu sans DESADV traité" : ""].filter(Boolean).join(" ; ") || "BL reçu sans DESADV traité";
+          const noBl = xs.some((x) => !x.packing_slip), unknown = xs.some((x) => x.packing_slip && !x.processed);
+          return [noBl ? "réception manuelle (sans BL)" : "", unknown ? "aucun DESADV traité pour ce BL" : ""].filter(Boolean).join(" ; ") || "aucun DESADV traité pour ce BL";
         };
+        const transitLine = (d: DesadvInfo) => (d.source === "journal" ? `${bl(d)} ${fmtQty(d.qty, unit)} · journal d'arrivée non validé${d.processed ? " · DESADV traité" : " · aucun DESADV traité"}` : `${bl(d)} ${fmtQty(d.qty, unit)} · DESADV ${d.state}${d.final_processing ? ` / ${d.final_processing}` : ""}`);
         return (
           <tr key={r.key} style={{ height: r.h }}>
             <td>Reçu</td>
@@ -397,21 +398,21 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const v = rc?.[i] ?? 0, open = dv?.[i] ?? 0;
               const ro = weekCol(i);
               const hasDesadvData = l.desadv.length > 0;
-              const recKo = !!l.receipts_ko?.[i], dvKo = !!l.desadv_ko?.[i];
+              const recKo = !!l.receipts_ko?.[i], dvKo = !!l.desadv_ko?.[i], booked = v > 0 && !!l.receipts_booked?.[i];
               const openList = open > 0 ? openOf(i) : [];
               const recList = v > 0 ? receiptsOf(i) : [];
               const title = [
-                v > 0 ? `Reçu ${fmtQty(v, unit)}${recList.length ? ` : ${recList.map((x) => `${bl(x)} ${fmtQty(x.qty, unit)}`).join(" ; ")}` : ""}${hasDesadvData ? (recKo ? ` – point rouge : ${recKoReason(recList)}` : " – point vert : BL annoncé par un DESADV traité") : ""}` : "",
-                open > 0 ? `DESADV non reçu ${fmtQty(open, unit)} (annoncé, hors calculs) : ${openList.map((d) => `${bl(d)} ${fmtQty(d.qty, unit)} · ${d.state}${d.final_processing ? ` / ${d.final_processing}` : ""}`).join(" ; ")}${ro ? " – semaine agrégée : cliquer l'en-tête pour le détail" : locked ? "" : " – double-clic pour le masquer"}` : "",
+                v > 0 ? `Reçu ${fmtQty(v, unit)}${recList.length ? ` : ${recList.map((x) => `${bl(x)} ${fmtQty(x.qty, unit)} · ${acr(x)}`).join(" ; ")}` : ""}${hasDesadvData ? (recKo ? ` – point rouge : ${recKoReason(recList)}` : " – point vert : BL annoncé par un DESADV traité") : ""}${booked ? " – fond vert : accusé de réception validé" : ""}` : "",
+                open > 0 ? `En transit ${fmtQty(open, unit)} (hors calculs) : ${openList.map(transitLine).join(" ; ")}${dvKo ? " – point rouge : aucun DESADV traité pour ce BL" : " – point vert : DESADV traité"}${ro ? " – semaine agrégée : cliquer l'en-tête pour le détail" : locked ? "" : " – double-clic pour le masquer"}` : "",
               ].filter(Boolean).join("\n");
-              const cls = [...cellBase(i), open > 0 ? "desadv" : "", open > 0 && !ro && !locked ? "clickable" : ""].filter(Boolean).join(" ");
+              const cls = [...cellBase(i), open > 0 ? "desadv" : "", booked ? "rec-booked" : "", open > 0 && !ro && !locked ? "clickable" : ""].filter(Boolean).join(" ");
               const onDouble = open <= 0 || locked ? undefined : ro ? () => onSwitchDay?.(cols.period_start[i])
-                : () => { if (window.confirm(`Masquer le DESADV non reçu du ${fmtDate(cols.period_start[i])} (${fmtQty(open, unit)}, ${openList.map(bl).join(", ")}) ?\nIl ne sera plus affiché dans le tableau ; rétablissable depuis Saisies & journal.`)) toggleFlag.mutate({ article_id: aid, supplier_id: sid || null, date: cols.period_start[i], kind: "desadv_hidden", qty: open, note: openList.map((d) => d.packing_slip || NO_BL).join(", ") }); };
+                : () => { if (window.confirm(`Masquer l'en transit du ${fmtDate(cols.period_start[i])} (${fmtQty(open, unit)}, ${openList.map(bl).join(", ")}) ?\nIl ne sera plus affiché dans le tableau ; rétablissable depuis Saisies & journal.`)) toggleFlag.mutate({ article_id: aid, supplier_id: sid || null, date: cols.period_start[i], kind: "desadv_hidden", qty: open, note: openList.map((d) => d.packing_slip || NO_BL).join(", ") }); };
               return (
                 <td key={i} className={cls} title={title} onDoubleClick={onDouble}>
                   {v > 0 && <>{fmtQty(v, unit)}{hasDesadvData && <span className={`dot ${recKo ? "ko" : "ok"}`} />}</>}
                   {v > 0 && open > 0 && <br />}
-                  {open > 0 && <span className="desadv-qty">{fmtQty(open, unit)}<span className={`dot ${dvKo ? "ko" : "ok"}`} /></span>}
+                  {open > 0 && <span className="desadv-qty"><Truck size={10} className="truck" aria-label="En transit" />{fmtQty(open, unit)}<span className={`dot ${dvKo ? "ko" : "ok"}`} /></span>}
                   {v === 0 && open === 0 && "·"}
                 </td>
               );
@@ -569,7 +570,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
       </div>
       <div className="legend small" style={{ padding: "6px 10px" }}>
         <span><span className="sw bar" style={{ background: "var(--bg-subtle)", border: "1px solid var(--border-strong)" }} />vide = ERP</span>
-        <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} /><i>DESADV non reçu</i> (annoncé, hors calculs ; double-clic pour masquer) · <span className="dot ok" style={{ verticalAlign: "middle" }} /> traité OK · <span className="dot ko" style={{ verticalAlign: "middle" }} /> non traité / BL sans DESADV</span>
+        <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} /><Truck size={11} style={{ verticalAlign: "middle" }} /> <i>en transit</i> (journal d'arrivée non validé ou DESADV annoncé ; hors calculs ; double-clic pour masquer) · <span className="dot ok" style={{ verticalAlign: "middle" }} /> DESADV traité · <span className="dot ko" style={{ verticalAlign: "middle" }} /> aucun DESADV traité (réception manuelle) · <span className="sw bar" style={{ background: "var(--cell-green)" }} />reçu comptabilisé (ACR validé)</span>
         <span><span className="sw bar" style={{ background: "var(--brand-soft)", boxShadow: "inset 0 -2px 0 var(--brand)" }} />chiffre = votre Appro. (0 = rien attendu, vider = retour ERP) · carré = recopier en tirant</span>
         <span><span className="sw bar" style={{ background: "transparent", border: "1px dashed var(--warning)" }} />grisé = proposition CBN, cliquer puis Entrée pour la reprendre · cliquer la ligne CBN pour la refuser</span>
         <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} />ferme en cours · <span className="sw bar" style={{ background: "var(--cell-green)" }} />ferme soldée · <span className="sw bar" style={{ background: "var(--cell-red)" }} />ferme ignorée (clic)</span>

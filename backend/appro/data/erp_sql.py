@@ -8,9 +8,10 @@ Sources (schema ``emotors_data_champions.silver_erp_ye`` by default) :
 
 * ``commandes_edi`` – firm and forecast schedule lines aggregated by supplier / purchase order /
   article / delivery date (``ID`` = ``vendaccount|itemid|yyyyMMdd|silfirmorder``) ;
-* ``recep_edi`` – receipts by supplier / purchase order / packing slip / article / day and **status** :
-  ``Reçu`` (ERP receipt statuses 1-2) or ``Enregistré`` (3 : packing slip registered, acknowledgement
-  of receipt not validated yet ; its BL is taken from the DESADV, several joined by `` | ``) ;
+* ``recep_edi`` – arrival journals by supplier / purchase order / packing slip / article / day and
+  **status** : ``En transit`` (journal created, not validated : shown, never counted), ``Reçu``
+  (journal validated, acknowledgement of receipt pending) or ``Comptabilisé`` (acknowledgement of
+  receipt validated) ; several BL may be joined by `` | `` ;
 * ``bl_en_attente`` – registered receipts older than 7 days still waiting for validation ;
 * ``silver_base_article`` – item master : ``std_cost_price`` (euros) values the stocks ;
 * an optional daily **actual consumption** table (``APPRO_ERP_CONSUMPTION_TABLE``) with the canonical
@@ -63,9 +64,9 @@ GROUP BY c.ID, c.Article, c.Code_fournisseur
 
 
 def receipts_sql(t: ErpTables) -> str:
-    """One row per supplier / order / BL / article / day / status (``Reçu`` or ``Enregistré``).  A registered
-    receipt lists every BL of its DESADV (dozens, sometimes) : the identifier keeps a 16-character hash of
-    the list instead of the list itself, the ``packing_slip`` column keeps it whole."""
+    """One row per supplier / order / BL / article / day / status (``En transit``, ``Reçu`` or ``Comptabilisé``).
+    A BL list may be long (dozens of BL) : the identifier keeps a 16-character hash of the list instead of the
+    list itself, the ``packing_slip`` column keeps it whole."""
     return f"""
 SELECT
   CONCAT_WS('|', r.Code_fournisseur, r.Commande,

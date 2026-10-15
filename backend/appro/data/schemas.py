@@ -146,17 +146,18 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("first_seen", "date", "Première apparition", "jour où le créneau est apparu dans l'ERP (posé par le job de synchronisation, "
                   "conservé d'une exécution à l'autre ; vide = inconnu)", False),
        ], reference=False),
-    _t("fct_receipts", "Réceptions ERP", "Réceptions par fournisseur / commande / BL / article / jour et statut (recep_edi) : "
-       "Reçu (statuts ERP 1-2) ou Enregistré (3 : BL enregistré, accusé de réception non validé, BL repris du DESADV).",
+    _t("fct_receipts", "Réceptions ERP", "Journaux d'arrivée par fournisseur / commande / BL / article / jour et statut (recep_edi) : "
+       "En transit (journal non validé : affiché, jamais compté), Reçu (journal validé, accusé de réception à valider) ou "
+       "Comptabilisé (accusé de réception validé).",
        ("receipt_id",), [
            Column("receipt_id", "str", "Identifiant", "fournisseur|commande|BL|article|jour|statut", True),
            Column("article_id", "str", "Article", "", True),
            Column("supplier_id", "str", "Fournisseur", "", True),
-           Column("receipt_date", "date", "Date de réception", "date physique (Reçu) ou d'enregistrement (Enregistré)", True),
+           Column("receipt_date", "date", "Date de réception", "date de validation du journal (Reçu, Comptabilisé) ou date de la ligne du journal (En transit)", True),
            Column("qty", "float", "Quantité reçue", "", True),
            Column("purch_id", "str", "N° commande", "", False),
-           Column("packing_slip", "str", "N° BL", "plusieurs BL séparés par « | » pour une réception enregistrée (repris du DESADV)", False),
-           Column("status", "str", "Statut", "Reçu ou Enregistré (accusé de réception non validé)", False),
+           Column("packing_slip", "str", "N° BL", "plusieurs BL séparés par « | » possibles ; vide = réception manuelle", False),
+           Column("status", "str", "Statut", "En transit, Reçu ou Comptabilisé", False),
        ], reference=False),
     _t("fct_consumption_actual", "Consommation réelle", "Consommation réelle journalière par composant (déjà éclatée : "
        "quantité d'article consommée, dans son unité de stock). Alimente le besoin des jours passés et le reliquat de la "

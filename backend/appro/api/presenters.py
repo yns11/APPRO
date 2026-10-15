@@ -34,7 +34,7 @@ SERIES_LABELS = [
 LANE_SERIES = [("orders_firm", "Ferme"), ("orders_firm_hist", "Ferme (passé)"), ("orders_forecast", "Prévisionnel"),
                ("receipts", "Reçu"), ("plan", "Appro."), ("supply_proposed", "Proposition CBN"),
                ("orders_firm_ordered", "Ferme commandé"), ("orders_firm_open", "Ferme restant ERP"),
-               ("desadv_open", "DESADV non reçu")]
+               ("desadv_open", "En transit")]
 #: series of the multi-article table (the article page gets every series)
 GRID_SERIES = {"demand", "supply_proposed", "adjustments", "stock_erp", "stock_plan", "shortage_erp", "shortage_plan",
                "coverage_erp", "coverage_plan", "target_stock"}
@@ -191,8 +191,17 @@ def weekly_stock_value(result: MrpResult, weeks: int = 52) -> list[S.WeeklyStock
     return out
 
 
+ACR_PENDING_DAYS = 7   # a receipt not booked for a week or more : flow « À valider »
+
+
 def _desadv_received(ds: Dataset) -> set[str]:
-    return {bl for r in ds.receipts for bl in r.packing_slips}
+    """BL of the validated receipts (an arrival journal not validated yet receives nothing)."""
+    return {bl for r in ds.receipts if not r.in_transit for bl in r.packing_slips}
+
+
+def _desadv_journaled(ds: Dataset) -> set[str]:
+    """BL carried by an arrival journal not validated yet (« En transit »)."""
+    return {bl for r in ds.receipts if r.in_transit for bl in r.packing_slips}
 
 
 def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], planner: str | None) -> S.FlowsResponse:
@@ -224,10 +233,18 @@ def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], pl
                            issue_date=d.issue_date, qty=d.qty, state=d.state, final_processing=d.final_processing,
                            received=d.packing_slip.strip() in received_bls, journal=bool(d.stock_trans_id.strip()), issue=issue)
 
-    def pending_row(b) -> S.PendingRow:
-        return S.PendingRow(pending_id=b.pending_id, article_id=b.article_id, **art(b.article_id), supplier_id=b.supplier_id,
-                            supplier_name=supplier_names.get(b.supplier_id or "", ""), purch_id=b.purch_id, packing_slip=b.packing_slip,
-                            qty=b.qty, registered_date=b.registered_date, days_pending=b.days_pending)
+    def pending_row(r) -> S.PendingRow:
+        """A validated receipt whose acknowledgement of receipt is still not validated."""
+        return S.PendingRow(pending_id=r.receipt_id, article_id=r.article_id, **art(r.article_id), supplier_id=r.supplier_id,
+                            supplier_name=supplier_names.get(r.supplier_id or "", ""), purch_id=r.ref, packing_slip=r.packing_slip,
+                            qty=r.qty, registered_date=r.receipt_date, days_pending=(as_of - r.receipt_date).days)
+
+    def journal_row(r) -> S.DesadvRow:
+        """An arrival journal not validated yet, listed with the announced DESADV (« En transit »)."""
+        return S.DesadvRow(desadv_id=r.receipt_id, article_id=r.article_id, **art(r.article_id), supplier_id=r.supplier_id,
+                           supplier_name=supplier_names.get(r.supplier_id or "", ""), packing_slip=r.packing_slip, purch_id=r.ref,
+                           issue_date=r.receipt_date, qty=r.qty, state="Journal d'arrivée non validé", final_processing="",
+                           received=False, journal=False, issue="")
 
     # 1. à commander : urgent proposals, the refused ones included (flagged « ignorée »)
     to_order = [proposal_out(p, r, supplier_names) for r in res.values() for p in (*r.proposals, *r.proposals_ignored) if p.urgent]
@@ -236,8 +253,13 @@ def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], pl
     # 2. commandé : firm slots that appeared in the ERP today, whatever their delivery date
     ordered = sorted((order_row(o) for o in firm if o.first_seen == as_of), key=lambda o: (o.expected_date, o.article_id))
     live = [d for d in ds.desadv if d.article_id in res and d.state.strip().lower() != "annulé"]
-    # 3. en transit : announced, not received yet
-    in_transit = sorted((desadv_row(d) for d in live if d.packing_slip.strip() not in received_bls), key=lambda d: (d.issue_date, d.article_id))
+    posted = [r for r in ds.receipts if r.article_id in res and not r.in_transit]
+    journals = [r for r in ds.receipts if r.article_id in res and r.in_transit]
+    journaled_bls = _desadv_journaled(ds)
+    # 3. en transit : arrival journals not validated yet, plus the announced DESADV no journal carries
+    in_transit = [journal_row(r) for r in journals]
+    in_transit += [desadv_row(d) for d in live if d.packing_slip.strip() not in received_bls and d.packing_slip.strip() not in journaled_bls]
+    in_transit.sort(key=lambda d: (d.issue_date, d.article_id))
     # 4. à traiter : in error, or processed without any stock transaction (no entry journal)
     to_process = []
     for d in live:
@@ -248,12 +270,13 @@ def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], pl
     to_process.sort(key=lambda d: (d.issue_date, d.article_id))
     # 5. à réceptionner : firm slots due today
     to_receive = sorted((order_row(o) for o in firm if o.expected_date == as_of), key=lambda o: (o.supplier_id or "", o.article_id))
-    # 6. reçu : receipts dated today
-    received = sorted((receipt_row(r) for r in ds.receipts if r.article_id in res and r.receipt_date == as_of), key=lambda r: (r.supplier_id or "", r.article_id))
+    # 6. reçu : validated receipts dated today
+    received = sorted((receipt_row(r) for r in posted if r.receipt_date == as_of), key=lambda r: (r.supplier_id or "", r.article_id))
     # 7. en retard : supplier backlog
     late = backlog_rows(result)
-    # 8. à valider : registered receipts waiting for their acknowledgement
-    to_validate = sorted((pending_row(b) for b in ds.bl_pending if b.article_id in res), key=lambda b: (-b.days_pending, b.article_id))
+    # 8. à valider : validated receipts not booked (acknowledgement of receipt pending) for a week or more
+    to_validate = sorted((pending_row(r) for r in posted if not r.booked and (as_of - r.receipt_date).days >= ACR_PENDING_DAYS),
+                         key=lambda b: (-b.days_pending, b.article_id))
     return S.FlowsResponse(
         as_of=as_of, planner=planner, first_seen_available=any(o.first_seen is not None for o in ds.orders),
         kpis=S.FlowsKpis(to_order=len(to_order), ordered=len(ordered), in_transit=len(in_transit), to_process=len(to_process),
@@ -381,6 +404,9 @@ def lane_out(l: Lane, cols: Columns, with_orders: bool = True, since: dt.date | 
         "plan_typed": cols.any(l.plan_typed), "orders_ignored": cols.any(l.orders_ignored),
         "desadv_ko": cols.any(l.desadv_ko) if l.desadv_ko is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
         "receipts_ko": cols.any(l.receipts_ko) if l.receipts_ko is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
+        # a week is « booked » when every receipt day of the week is : all(booked) = not any(received and not booked)
+        "receipts_booked": [bool(a) and not bool(b) for a, b in zip(cols.any(l.receipts > 0), cols.any((l.receipts > 0) & ~l.receipts_booked))]
+                           if l.receipts_booked is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
         "backlog_ordered": l.backlog_ordered, "backlog_received": l.backlog_received, "backlog_qty": l.backlog_qty,
         "orders": [o.__dict__ for o in l.orders if shown(o.expected_date)] if with_orders else [],
         "desadv": [d.__dict__ for d in l.desadv if shown(d.issue_date)] if with_orders else [],

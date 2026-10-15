@@ -14,7 +14,10 @@ Rules (docs/regles_metier.md § 3):
   the firm orders of a supplier is ``max(0, open − receipts of the day)`` (a typed cell is taken as
   is, the planner knows) ;
 * the **backlog** of a supplier is ``max(0, Σ ordered firm quantity − Σ received)`` over the last
-  ``backlog_days`` before the reference day: no per-order matching, no action to take, it ages out.
+  ``backlog_days`` before the reference day: no per-order matching, no action to take, it ages out ;
+* a **receipt** is a validated arrival journal (status « Reçu », or « Comptabilisé » once the
+  acknowledgement of receipt is validated) ; an arrival journal not validated yet (« En transit ») is
+  shown in the Reçu row like an announced DESADV and never counted.
 
 For display the Ferme row also carries, per day, the **ordered** and **ERP remaining** quantities
 of the firm orders whatever their date (``orders_firm_ordered`` / ``orders_firm_open``): the cell
@@ -63,6 +66,7 @@ class _LaneAcc:
     desadv_open: np.ndarray = field(init=False)
     desadv_ko: np.ndarray = field(init=False)
     receipts_ko: np.ndarray = field(init=False)
+    receipts_booked: np.ndarray = field(init=False)
     backlog_ordered: float = 0.0
     backlog_received: float = 0.0
     orders: list[OrderInfo] = field(default_factory=list)
@@ -76,6 +80,7 @@ class _LaneAcc:
         self.plan_typed, self.ignored = np.zeros(n, dtype=bool), np.zeros(n, dtype=bool)
         self.desadv_open = np.zeros(n)
         self.desadv_ko, self.receipts_ko = np.zeros(n, dtype=bool), np.zeros(n, dtype=bool)
+        self.receipts_booked = np.zeros(n, dtype=bool)
 
 
 def lane_ids(links: list[SupplierLink], orders: list[OrderLine], receipts: list[Receipt], cells: list[PlanCell],
@@ -117,17 +122,18 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
                 lane_of(f.supplier_id).ignored[i] = True
 
     window_start = max(as_of - dt.timedelta(days=max(int(params.backlog_days), 0)), index.start)  # never before the point zero
-    # ---- receipts
-    for r in receipts:
-        if r.qty == 0:
-            continue
+    # ---- receipts : the validated arrival journals only (« Reçu », « Comptabilisé ») ; a journal not
+    # validated yet (« En transit ») is on its way : shown, never counted
+    posted = [r for r in receipts if r.qty and not r.in_transit]
+    transit = [r for r in receipts if r.qty and r.in_transit]
+    for r in posted:
         ln = lane_of(r.supplier_id)
         add(ln.receipts, r.receipt_date, r.qty)
         if window_start <= r.receipt_date < as_of:
             ln.backlog_received += r.qty
     # ---- ERP orders
     received_today: dict[str | None, float] = defaultdict(float)
-    for r in receipts:
+    for r in posted:
         if r.receipt_date == as_of:
             received_today[lane_of(r.supplier_id).supplier_id] += r.qty
     for o in sorted(orders, key=lambda o: (o.expected_date, o.order_id)):
@@ -157,40 +163,59 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     if i0 is not None:
         for ln in acc.values():
             ln.orders_firm[i0] = max(0.0, ln.orders_firm[i0] - received_today.get(ln.supplier_id, 0.0))
-    # ---- despatch advices (DESADV): announced, matched to the receipts by delivery note (BL)
+    # ---- in transit : the arrival journals not validated yet and the announced DESADV, matched to the
+    # receipts by delivery note (BL).  Green dot = the BL is announced by a processed DESADV, red otherwise.
     hidden_days = {(f.supplier_id or None, f.date) for f in (flags or ()) if f.kind == "desadv_hidden"}
-    received_bls = {bl for r in receipts for bl in r.packing_slips}      # a registered receipt lists the BL of its DESADV
-    processed_bls: set[str] = set()
-    for d in desadv or ():
-        if d.state.strip().lower() == "annulé":
+    live = [d for d in (desadv or ()) if d.state.strip().lower() != "annulé"]
+    processed_bls = {d.packing_slip.strip() for d in live if d.processed and d.packing_slip.strip()}
+    received_bls = {bl for r in posted for bl in r.packing_slips}
+    transit_bls = {bl for r in transit for bl in r.packing_slips}
+    for r in sorted(transit, key=lambda r: (r.receipt_date, r.receipt_id)):
+        ln = lane_of(r.supplier_id)
+        bl = (r.packing_slip or "").strip()
+        processed = any(x in processed_bls for x in r.packing_slips)
+        hidden = (ln.supplier_id, r.receipt_date) in hidden_days
+        ln.desadv.append(DesadvInfo(r.receipt_id, bl, r.receipt_date, float(r.qty), "Journal d'arrivée non validé", "",
+                                    processed, False, hidden, r.ref or "", "", False, "journal"))
+        i = index.offset(r.receipt_date)
+        if hidden or i is None:
             continue
+        ln.desadv_open[i] += float(r.qty)
+        if not processed:
+            ln.desadv_ko[i] = True
+    for d in live:
         bl = d.packing_slip.strip()
         ln = lane_of(d.supplier_id)
         received = bl in received_bls
+        journaled = bool(bl) and bl in transit_bls           # shown through its arrival journal
         hidden = (ln.supplier_id, d.issue_date) in hidden_days
-        if d.processed and bl:
-            processed_bls.add(bl)
         ln.desadv.append(DesadvInfo(d.desadv_id, bl, d.issue_date, float(d.qty), d.state, d.final_processing,
-                                    d.processed, received, hidden, d.purch_id, d.stock_trans_id))
-        if received or hidden:
+                                    d.processed, received, hidden, d.purch_id, d.stock_trans_id, journaled))
+        if received or journaled or hidden:
             continue
         i = index.offset(d.issue_date)
         if i is not None:
             ln.desadv_open[i] += float(d.qty)
             if not d.processed:
                 ln.desadv_ko[i] = True
-    for r in sorted(receipts, key=lambda r: (r.receipt_date, r.receipt_id)):
+    unbooked = {sid: np.zeros(n, dtype=bool) for sid in acc}
+    for r in sorted(posted, key=lambda r: (r.receipt_date, r.receipt_id)):
         i = index.offset(r.receipt_date)
-        if not r.qty or i is None:                           # nothing exists before the point zero
+        if i is None:                                         # nothing exists before the point zero
             continue
         bl = (r.packing_slip or "").strip()
-        # green only when validated (« Reçu ») and announced by a processed DESADV ; a registered receipt
-        # (« Enregistré » : acknowledgement of receipt not validated) or an empty BL is red
-        processed = (not r.registered) and any(x in processed_bls for x in r.packing_slips)
+        # green when the BL is announced by a processed DESADV ; a manual receipt (no BL, or a BL unknown to
+        # the processed DESADV) is red ; the acknowledgement of receipt gives the green background
+        processed = any(x in processed_bls for x in r.packing_slips)
         ln = lane_of(r.supplier_id)
-        ln.receipt_lines.append(ReceiptInfo(r.receipt_id, r.receipt_date, float(r.qty), bl, r.ref or "", processed, r.status))
+        ln.receipt_lines.append(ReceiptInfo(r.receipt_id, r.receipt_date, float(r.qty), bl, r.ref or "", processed, r.status, r.booked))
         if not processed:
             ln.receipts_ko[i] = True
+        ln.receipts_booked[i] = True
+        if not r.booked:
+            unbooked[ln.supplier_id][i] = True
+    for sid, ln in acc.items():
+        ln.receipts_booked &= ~unbooked[sid]
     # ---- plan: typed cells, else the ERP
     for ln in acc.values():
         ln.plan[:] = ln.orders_firm
@@ -206,7 +231,8 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     return [Lane(supplier_id=ln.supplier_id, name=supplier_names.get(ln.supplier_id or "", ln.supplier_id or ""),
                  orders_firm=ln.orders_firm, orders_firm_hist=ln.orders_firm_hist, orders_forecast=ln.orders_forecast,
                  receipts=ln.receipts, plan=ln.plan, supply_proposed=np.zeros(n), plan_typed=ln.plan_typed,
-                 desadv_open=ln.desadv_open, desadv_ko=ln.desadv_ko, receipts_ko=ln.receipts_ko, desadv=ln.desadv, receipt_lines=ln.receipt_lines,
+                 desadv_open=ln.desadv_open, desadv_ko=ln.desadv_ko, receipts_ko=ln.receipts_ko, receipts_booked=ln.receipts_booked,
+                 desadv=ln.desadv, receipt_lines=ln.receipt_lines,
                  orders_firm_ordered=ln.ordered, orders_firm_open=ln.open, orders_ignored=ln.ignored,
                  backlog_ordered=ln.backlog_ordered, backlog_received=ln.backlog_received,
                  backlog_qty=max(0.0, ln.backlog_ordered - ln.backlog_received), orders=ln.orders)
