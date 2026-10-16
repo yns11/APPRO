@@ -243,20 +243,24 @@ Tolérance 2 jours ouvrés :
 
 ## 9. Multi-sourcing : quotas, priorité, refus d'une proposition
 
-Deux fournisseurs : S1 (quota 70 %, priorité 1, délai 3) et S2 (quota 30 %, priorité 2, délai 5). Avec `sourcing_policy = quota` (défaut), chaque proposition va au fournisseur dont la part cumulée est la plus en retard sur son quota ; avec `priority`, tout va au fournisseur de priorité 1. Chaque fournisseur a sa propre voie dans le tableau (lignes Ferme / Reçu / Appro. / Prop. CBN).
+Deux fournisseurs : S1 (quota 70 %, priorité 1, délai 3) et S2 (quota 30 %, priorité 2, délai 5). Avec `sourcing_policy = quota` (défaut), **chaque besoin est partagé** entre les fournisseurs à quota, au prorata des quotas : chaque part est arrondie au MOQ et à l'UM de son fournisseur et livrée à son propre jour (délai, jours de livraison), dès le premier besoin ; avec `priority`, tout va au fournisseur de priorité 1. Chaque fournisseur a sa propre voie dans le tableau (lignes Ferme / Reçu / Appro. / Prop. CBN).
 
 Quotas 70 / 30 (six semaines) :
 
 | Livraison | Fournisseur | Quantité | Besoin net | À commander le | Urgente | Motif |
 |---|---|---:|---:|---|---|---|
-| ven 09/10 | S1 | 400 | 400 | mar 06/10 | non | Stock projeté 400 < cible 500 le 2026-10-11 |
-| ven 16/10 | S2 | 400 | 400 | ven 09/10 | non | Stock projeté 300 < cible 400 le 2026-10-17 |
-| ven 23/10 | S1 | 400 | 400 | mar 20/10 | non | Stock projeté 200 < cible 300 le 2026-10-23 |
-| jeu 29/10 | S1 | 400 | 400 | lun 26/10 | non | Stock projeté 200 < cible 300 le 2026-10-29 |
-| mer 04/11 | S2 | 500 | 500 | mer 28/10 | non | Stock projeté 200 < cible 300 le 2026-11-04 |
-| mer 11/11 | S1 | 200 | 100 | ven 06/11 | non | Stock projeté 200 < cible 300 le 2026-11-11 |
+| ven 09/10 | S1 | 300 | 280 | mar 06/10 | non | Stock projeté 400 < cible 500 le 2026-10-11 ; part 70 % du quota (280 sur 400) |
+| ven 09/10 | S2 | 200 | 120 | ven 02/10 | **oui** | Stock projeté 400 < cible 500 le 2026-10-11 ; part 30 % du quota (120 sur 400) – délai fournisseur (5 j ouvrés) non tenable, commande à passer immédiatement |
+| ven 16/10 | S1 | 300 | 280 | mar 13/10 | non | Stock projeté 400 < cible 500 le 2026-10-18 ; part 70 % du quota (280 sur 400) |
+| ven 16/10 | S2 | 200 | 120 | ven 09/10 | non | Stock projeté 400 < cible 500 le 2026-10-18 ; part 30 % du quota (120 sur 400) |
+| ven 23/10 | S1 | 300 | 280 | mar 20/10 | non | Stock projeté 400 < cible 500 le 2026-10-25 ; part 70 % du quota (280 sur 400) |
+| ven 23/10 | S2 | 200 | 120 | ven 16/10 | non | Stock projeté 400 < cible 500 le 2026-10-25 ; part 30 % du quota (120 sur 400) |
+| ven 30/10 | S1 | 300 | 280 | mar 27/10 | non | Stock projeté 400 < cible 500 le 2026-11-01 ; part 70 % du quota (280 sur 400) |
+| ven 30/10 | S2 | 200 | 120 | ven 23/10 | non | Stock projeté 400 < cible 500 le 2026-11-01 ; part 30 % du quota (120 sur 400) |
+| ven 06/11 | S1 | 200 | 140 | mar 03/11 | non | Stock projeté 400 < cible 500 le 2026-11-08 ; part 70 % du quota (140 sur 200) |
+| ven 06/11 | S2 | 200 | 60 | ven 30/10 | non | Stock projeté 400 < cible 500 le 2026-11-08 ; part 30 % du quota (60 sur 200) |
 
-Parts obtenues sur six semaines : S1 1 400, S2 900 (61 % / 39 %) : la répartition est déterministe et se rapproche du quota proposition après proposition, sans jamais couper une proposition en deux.
+Parts obtenues sur six semaines : S1 1 400, S2 1 000 (58 % / 42 %) : l'écart avec 70 / 30 vient des MOQ et des UM de chaque fournisseur (une part de 120 devient 200 chez S2, MOQ oblige).
 
 Priorité :
 
@@ -272,20 +276,23 @@ Priorité :
 | | lun 05/10 | mar 06/10 | mer 07/10 | jeu 08/10 | ven 09/10 | lun 12/10 | mar 13/10 | mer 14/10 | jeu 15/10 | ven 16/10 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Besoin | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 |
-| Prop. CBN · S1 | · | · | · | · | 400 | · | · | · | · | · |
-| Prop. CBN · S2 | · | · | · | · | · | · | · | · | · | 400 |
-| Projeté Appro. | **800** | **700** | **600** | **500** | **800** | **700** | **600** | **500** | **400** | **700** |
+| Prop. CBN · S1 | · | · | · | · | 300 | · | · | · | · | 300 |
+| Prop. CBN · S2 | · | · | · | · | 200 | · | · | · | · | 200 |
+| Projeté Appro. | **800** | **700** | **600** | **500** | **900** | **800** | **700** | **600** | **500** | **900** |
 
-**Refus** : un clic sur la proposition du ven 09/10 (S1) la barre et interdit toute proposition à **ce fournisseur** jusqu'au dimanche de sa semaine ; le besoin est reporté après la fenêtre (ou va à l'autre fournisseur si les quotas le permettent). La proposition refusée reste listée dans le flux *À commander* du cockpit, marquée « ignorée », si elle était urgente.
+**Refus** : un clic sur la proposition du ven 09/10 (S1) la barre et interdit toute proposition à **ce fournisseur** jusqu'au dimanche de sa semaine ; sa part passe à l'autre fournisseur à quota pour les besoins de cette semaine. Quand tous les fournisseurs sont refusés, le besoin est reporté après la fenêtre. La proposition refusée reste listée dans le flux *À commander* du cockpit, marquée « ignorée », si elle était urgente.
 
 | Livraison | Fournisseur | Quantité | Besoin net | À commander le | Urgente | Motif |
 |---|---|---:|---:|---|---|---|
-| lun 12/10 | S1 | 500 | 500 | mer 07/10 | non | Stock projeté 300 < cible 400 le 2026-10-12 (besoin dès le 2026-10-11, première livraison possible le 2026-10-12) |
-| ven 16/10 | S2 | 400 | 400 | ven 09/10 | non | Stock projeté 400 < cible 500 le 2026-10-18 |
-| ven 23/10 | S1 | 400 | 400 | mar 20/10 | non | Stock projeté 300 < cible 400 le 2026-10-24 |
-| ven 30/10 | S1 | 400 | 400 | mar 27/10 | non | Stock projeté 200 < cible 300 le 2026-10-30 |
-| jeu 05/11 | S2 | 400 | 400 | jeu 29/10 | non | Stock projeté 200 < cible 300 le 2026-11-05 |
-| mer 11/11 | S1 | 200 | 100 | ven 06/11 | non | Stock projeté 200 < cible 300 le 2026-11-11 |
+| ven 09/10 | S2 | 400 | 400 | ven 02/10 | **oui** | Stock projeté 400 < cible 500 le 2026-10-11 – délai fournisseur (5 j ouvrés) non tenable, commande à passer immédiatement |
+| ven 16/10 | S1 | 300 | 280 | mar 13/10 | non | Stock projeté 300 < cible 400 le 2026-10-17 ; part 70 % du quota (280 sur 400) |
+| ven 16/10 | S2 | 200 | 120 | ven 09/10 | non | Stock projeté 300 < cible 400 le 2026-10-17 ; part 30 % du quota (120 sur 400) |
+| ven 23/10 | S1 | 300 | 280 | mar 20/10 | non | Stock projeté 300 < cible 400 le 2026-10-24 ; part 70 % du quota (280 sur 400) |
+| ven 23/10 | S2 | 200 | 120 | ven 16/10 | non | Stock projeté 300 < cible 400 le 2026-10-24 ; part 30 % du quota (120 sur 400) |
+| ven 30/10 | S1 | 300 | 280 | mar 27/10 | non | Stock projeté 300 < cible 400 le 2026-10-31 ; part 70 % du quota (280 sur 400) |
+| ven 30/10 | S2 | 200 | 120 | ven 23/10 | non | Stock projeté 300 < cible 400 le 2026-10-31 ; part 30 % du quota (120 sur 400) |
+| ven 06/11 | S1 | 250 | 210 | mar 03/11 | non | Stock projeté 300 < cible 400 le 2026-11-07 ; part 70 % du quota (210 sur 300) |
+| ven 06/11 | S2 | 200 | 90 | ven 30/10 | non | Stock projeté 300 < cible 400 le 2026-11-07 ; part 30 % du quota (90 sur 300) |
 
 ## 10. Alertes : seuils rouge et orange, surstock, gradation des ruptures
 

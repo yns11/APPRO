@@ -711,3 +711,37 @@ def test_programme_scrap_rate_raises_the_weekly_need_before_the_bom():
     assert week(r, i0) == week(base, i0)                       # current week : rate 0
     assert week(r, i1) == pytest.approx(week(base, i1) * 1.1)   # next week : +10 %, i.e. 500 × 1.1 × 2 per unit
     assert week(r, i1) == pytest.approx(1100.0)
+
+
+def test_quota_split_every_need_and_a_refused_supplier_hands_its_share_over():
+    """With quotas, every need is split between the quota suppliers from the very first proposal
+    (70 / 30 : two proposals for one need, each lot-sized by its own MOQ / pack) ; a supplier refused
+    for a week hands its share to the other one instead of pushing the need after the window."""
+    from appro.engine.models import CellFlag
+    links = [SupplierLink("A1", "S1", moq=1, pack_qty=10, lead_time_days=2, quota_pct=70, priority=1),
+             SupplierLink("A1", "S2", moq=1, pack_qty=10, lead_time_days=2, quota_pct=30, priority=2)]
+    ds = make_dataset(links=links, suppliers=[Supplier("S1", "Supplier 1"), Supplier("S2", "Supplier 2")],
+                      stock=[StockSnapshot("A1", MON - D(days=1), 300.0)])
+    r = run(ds, horizon_days=42, generate_proposals=True)
+    first_day = min(p.delivery_date for p in r.proposals)
+    first = {p.supplier_id: p for p in r.proposals if p.delivery_date == first_day}
+    assert set(first) == {"S1", "S2"}                                   # the first need is already split
+    s1, s2 = first["S1"], first["S2"]
+    assert s1.qty / (s1.qty + s2.qty) == pytest.approx(0.7, abs=0.03) and "part 70 %" in s1.reason and "part 30 %" in s2.reason
+    tot = {sid: sum(p.qty for p in r.proposals if p.supplier_id == sid) for sid in ("S1", "S2")}
+    assert tot["S1"] / (tot["S1"] + tot["S2"]) == pytest.approx(0.7, abs=0.03)
+    # refuse S1 for the week of the first proposal : S2 takes 100 % of that week's needs, nothing is pushed
+    ds.flags = [CellFlag("A1", "S1", first_day, "proposal_refused", qty=s1.qty)]
+    r2 = run(ds, horizon_days=42, generate_proposals=True)
+    week_end = first_day + D(days=6 - first_day.weekday())
+    in_week = [p for p in r2.proposals if first_day <= p.delivery_date <= week_end]
+    assert in_week and all(p.supplier_id == "S2" for p in in_week)
+    assert sum(p.qty for p in in_week) >= s1.qty + s2.qty - 10        # the whole need, served by S2 (pack rounding aside)
+    assert not any(p.supplier_id == "S1" and first_day <= p.delivery_date <= week_end for p in r2.proposals)
+    # single quota supplier : nothing to split, the need moves after the refused window as before
+    ds1 = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 300.0)])
+    base = run(ds1, horizon_days=42, generate_proposals=True)
+    f = base.proposals[0]
+    ds1.flags = [CellFlag("A1", "S1", f.delivery_date, "proposal_refused", qty=f.qty)]
+    pushed = run(ds1, horizon_days=42, generate_proposals=True)
+    assert all(p.delivery_date > f.delivery_date + D(days=6 - f.delivery_date.weekday()) for p in pushed.proposals)

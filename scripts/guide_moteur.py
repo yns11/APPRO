@@ -391,16 +391,17 @@ def guide() -> str:
     ar_q = run(ds, horizon_days=42, generate_proposals=True).articles["A1"]
     ar_p = run(ds, horizon_days=42, generate_proposals=True, sourcing_policy="priority").articles["A1"]
     w("Deux fournisseurs : S1 (quota 70 %, priorité 1, délai 3) et S2 (quota 30 %, priorité 2, délai 5). Avec "
-      "`sourcing_policy = quota` (défaut), chaque proposition va au fournisseur dont la part cumulée est la plus "
-      "en retard sur son quota ; avec `priority`, tout va au fournisseur de priorité 1. Chaque fournisseur a sa "
-      "propre voie dans le tableau (lignes Ferme / Reçu / Appro. / Prop. CBN).\n")
+      "`sourcing_policy = quota` (défaut), **chaque besoin est partagé** entre les fournisseurs à quota, au prorata "
+      "des quotas : chaque part est arrondie au MOQ et à l'UM de son fournisseur et livrée à son propre jour "
+      "(délai, jours de livraison), dès le premier besoin ; avec `priority`, tout va au fournisseur de priorité 1. "
+      "Chaque fournisseur a sa propre voie dans le tableau (lignes Ferme / Reçu / Appro. / Prop. CBN).\n")
     w("Quotas 70 / 30 (six semaines) :\n")
     w(propositions(ar_q))
     tot = {sid: sum(p.qty for p in ar_q.proposals if p.supplier_id == sid) for sid in ("S1", "S2")}
     w("")
     w(f"Parts obtenues sur six semaines : S1 {q(tot['S1'])}, S2 {q(tot['S2'])} ({100 * tot['S1'] / (tot['S1'] + tot['S2']):.0f} % / "
-      f"{100 * tot['S2'] / (tot['S1'] + tot['S2']):.0f} %) : la répartition est déterministe et se rapproche du quota "
-      "proposition après proposition, sans jamais couper une proposition en deux.\n")
+      f"{100 * tot['S2'] / (tot['S1'] + tot['S2']):.0f} %) : l'écart avec 70 / 30 vient des MOQ et des UM de chaque "
+      "fournisseur (une part de 120 devient 200 chez S2, MOQ oblige).\n")
     w("Priorité :\n")
     w(propositions(ar_p))
     w("")
@@ -410,9 +411,10 @@ def guide() -> str:
     ds.flags = [CellFlag("A1", first.supplier_id, first.delivery_date, "proposal_refused", qty=first.qty)]
     ar_ref = run(ds, horizon_days=42, generate_proposals=True).articles["A1"]
     w(f"**Refus** : un clic sur la proposition du {jour(first.delivery_date)} ({first.supplier_id}) la barre et "
-      f"interdit toute proposition à **ce fournisseur** jusqu'au dimanche de sa semaine ; le besoin est reporté "
-      "après la fenêtre (ou va à l'autre fournisseur si les quotas le permettent). La proposition refusée reste "
-      "listée dans le flux *À commander* du cockpit, marquée « ignorée », si elle était urgente.\n")
+      f"interdit toute proposition à **ce fournisseur** jusqu'au dimanche de sa semaine ; sa part passe à l'autre "
+      "fournisseur à quota pour les besoins de cette semaine. Quand tous les fournisseurs sont refusés, le besoin "
+      "est reporté après la fenêtre. La proposition refusée reste listée dans le flux *À commander* du cockpit, "
+      "marquée « ignorée », si elle était urgente.\n")
     w(propositions(ar_ref))
     w("")
 

@@ -10,10 +10,12 @@ Algorithm (per article, on the *plan* stock)::
             order    = delivery - lead_time (working days); urgent when order < as_of
             re-project the simulated stock with the proposal and continue scanning
 
-Supplier choice follows the sourcing policy: ``quota`` (keep the cumulated proposed
-quantities close to the quota split, deterministic) or ``priority`` (always the priority-1
-supplier).  All rules are parameters of :class:`~appro.engine.models.EngineParams` or of the
-article / supplier link records.
+Supplier choice follows the sourcing policy: ``quota`` **splits every need** between the quota
+suppliers in proportion to their quotas (each part lot-sized with its own MOQ / pack quantity,
+delivered on its own allowed day with its own lead time), ``priority`` gives everything to the
+priority-1 supplier.  A supplier the planner refused for the week (blocked window) hands its share
+to the others ; when every supplier is refused the need moves after the window.  All rules are
+parameters of :class:`~appro.engine.models.EngineParams` or of the article / supplier link records.
 """
 from __future__ import annotations
 
@@ -35,24 +37,19 @@ def _fmt(v: float) -> str:
     return f"{v:,.0f}".replace(",", " ")
 
 
-def choose_supplier(links: list[SupplierLink], proposed_so_far: dict[str, float],
-                    policy: str) -> SupplierLink | None:
+def eligible_suppliers(links: list[SupplierLink], policy: str) -> list[tuple[SupplierLink | None, float]]:
+    """The suppliers a need is split between, with their share (Σ = 1).  ``priority`` : the priority-1
+    supplier alone ; ``quota`` : every supplier with a quota, in proportion (the priority-1 supplier
+    alone when no quota is set) ; ``[(None, 1.0)]`` without any active supplier."""
     active = [l for l in links if l.active]
     if not active:
-        return None
-    if policy == "priority":
-        return min(active, key=lambda l: (l.priority, l.supplier_id))
-    quota_links = [l for l in active if (l.quota_pct or 0) > 0]
+        return [(None, 1.0)]
+    first = min(active, key=lambda l: (l.priority, l.supplier_id))
+    quota_links = [l for l in active if (l.quota_pct or 0) > 0] if policy != "priority" else []
     if not quota_links:
-        return min(active, key=lambda l: (l.priority, l.supplier_id))
-    total = sum(proposed_so_far.get(l.supplier_id, 0.0) for l in quota_links)
-    total_quota = sum(l.quota_pct for l in quota_links)
-
-    def deficit(l: SupplierLink) -> float:
-        share = proposed_so_far.get(l.supplier_id, 0.0) / total if total > 0 else 0.0
-        return (l.quota_pct / total_quota) - share
-
-    return max(quota_links, key=lambda l: (deficit(l), -l.priority, l.supplier_id))
+        return [(first, 1.0)]
+    total = sum(l.quota_pct for l in quota_links)
+    return [(l, l.quota_pct / total) for l in sorted(quota_links, key=lambda l: (l.priority, l.supplier_id))]
 
 
 def fill_level(target: np.ndarray, demand_cum: np.ndarray, i: int, article: Article,
@@ -172,7 +169,6 @@ def generate_proposals(
     last_idx = n - 1
     if params.proposal_lookahead_days is not None:
         last_idx = min(last_idx, as_of_idx + int(params.proposal_lookahead_days))
-    proposed_by_supplier: dict[str, float] = {}
     tolerance = max(int(params.shortfall_tolerance_days), 0)
     seq = seq_start
     i = earliest_idx
@@ -188,77 +184,95 @@ def generate_proposals(
                 if stock[k] >= target[k] - EPS and days <= tolerance and shortage[i:k + 1].max() <= EPS:
                     i = k + 1
                     continue
-            link = choose_supplier(links, proposed_by_supplier, params.sourcing_policy)
-            supplier = suppliers.get(link.supplier_id) if link else None
-            lead = int(link.lead_time_days) if link else 0
-            weekdays = supplier.delivery_weekdays if supplier else None
-            if params.proposal_placement == "monday":
-                weekdays = frozenset({1})  # deliveries grouped on Mondays whatever the supplier days
-            earliest_date = index.dates[earliest_idx]
-            if params.respect_lead_time and link:
-                earliest_date = max(earliest_date, calendar.add_working_days(as_of, lead))
-            blocked_here = (blocked or {}).get(None, []) + ((blocked or {}).get(link.supplier_id, []) if link else [])
-            delivery = _delivery_day(index.dates[i], earliest_date, index.dates[last_idx], calendar,
-                                     weekdays, params.delivery_shift, blocked_here)
-            if delivery is None:
+            # ---- one delivery day per eligible supplier (own lead time, delivery days, refused windows)
+            parts = []   # (link, share, lead, delivery day, free of any refusal)
+            for link, share in eligible_suppliers(links, params.sourcing_policy):
+                supplier = suppliers.get(link.supplier_id) if link else None
+                lead = int(link.lead_time_days) if link else 0
+                weekdays = supplier.delivery_weekdays if supplier else None
+                if params.proposal_placement == "monday":
+                    weekdays = frozenset({1})  # deliveries grouped on Mondays whatever the supplier days
+                earliest_date = index.dates[earliest_idx]
+                if params.respect_lead_time and link:
+                    earliest_date = max(earliest_date, calendar.add_working_days(as_of, lead))
+                blocked_here = (blocked or {}).get(None, []) + ((blocked or {}).get(link.supplier_id, []) if link else [])
+                free_day = _delivery_day(index.dates[i], earliest_date, index.dates[last_idx], calendar, weekdays, params.delivery_shift)
+                delivery = _delivery_day(index.dates[i], earliest_date, index.dates[last_idx], calendar,
+                                         weekdays, params.delivery_shift, blocked_here)
+                if delivery is not None:
+                    parts.append((link, share, lead, delivery, delivery == free_day))
+            if not parts:
                 break  # no feasible delivery day inside the horizon
-            j = index.offset(delivery)
-            # The need is evaluated on the delivery day when it had to be pushed later than the
+            # a supplier the planner refused for the week hands its share to the others ; when every
+            # supplier is refused, the need moves after the window (never before)
+            chosen = [x for x in parts if x[4]] or parts
+            total_share = sum(x[1] for x in chosen)
+            # The need is evaluated on the first delivery day when it had to be pushed later than the
             # trigger day (the days in between are an unavoidable shortage, reported as an alert).
-            k = max(i, j)
+            k = max(i, min(index.offset(x[3]) for x in chosen))
             if stock[k] >= target[k] - EPS:
                 i = k + 1  # the delivery day is already covered: the shortage before it cannot be fixed
                 continue
             level = fill_level(target, demand_cum, k, article, index, calendar, params)
             need = level - stock[k]
-            if article.lot_policy == "fixed_lot" and article.fixed_lot_qty > 0:
-                qty = ceil_to_multiple(max(need, EPS), article.fixed_lot_qty)
-            else:
-                qty = max(need, link.moq if link else 0.0)
-                qty = ceil_to_multiple(qty, link.pack_qty if link else 0.0)
-            if qty <= EPS:
+            before = float(stock[k])
+            lines = []
+            for link, share, lead, delivery, _free in chosen:
+                part = need * share / total_share
+                if article.lot_policy == "fixed_lot" and article.fixed_lot_qty > 0:
+                    qty = ceil_to_multiple(max(part, EPS), article.fixed_lot_qty)
+                else:
+                    qty = max(part, link.moq if link else 0.0)
+                    qty = ceil_to_multiple(qty, link.pack_qty if link else 0.0)
+                if qty <= EPS:
+                    continue
+                j = index.offset(delivery)
+                proposed[j] += qty
+                lines.append((link, share / total_share, lead, delivery, j, qty, part))
+            if not lines:
                 i = k + 1
                 continue
-            order_date = calendar.add_working_days(delivery, -lead)
-            urgent = order_date < as_of
-            before = float(stock[k])
-            proposed[j] += qty
             if reproject is not None:
                 proj = reproject(proposed)
                 stock, shortage = proj.net, proj.shortage
             else:
-                stock[j:] += qty
+                for _link, _share, _lead, _delivery, j, qty, _part in lines:
+                    stock[j:] += qty
                 shortage = np.maximum(-stock, 0.0)
-            if link:
-                proposed_by_supplier[link.supplier_id] = proposed_by_supplier.get(link.supplier_id, 0.0) + qty
-            reason = f"Stock projeté {_fmt(before)} < cible {_fmt(target[k])} le {index.dates[k].isoformat()}"
-            if j > i:
-                reason += f" (besoin dès le {index.dates[i].isoformat()}, première livraison possible le {delivery.isoformat()})"
-            if urgent:
-                reason += f" – délai fournisseur ({lead} j ouvrés) non tenable, commande à passer immédiatement"
-                if supply_planned is not None:
-                    later = np.where(supply_planned[j + 1:min(n, j + 60)] > 0)[0]
-                    if len(later):
-                        d_later = index.dates[j + 1 + int(later[0])]
-                        reason += (f" ; alternative : avancer la commande prévisionnelle / planifiée du "
-                                   f"{d_later.isoformat()} ({_fmt(supply_planned[j + 1 + int(later[0])])})")
-            proposals.append(Proposal(
-                proposal_id=f"PR-{article.article_id}-{seq:03d}",
-                article_id=article.article_id,
-                supplier_id=link.supplier_id if link else None,
-                delivery_date=delivery,
-                order_date=order_date,       # the real day the order had to be placed, even in the past (urgent)
-                qty=float(qty),
-                net_requirement=float(max(need, 0.0)),
-                reason=reason,
-                urgent=urgent,
-                lead_time_days=lead,
-                moq=float(link.moq) if link else 0.0,
-                pack_qty=float(link.pack_qty) if link else 0.0,
-                projected_stock_before=before,
-                projected_stock_after=float(stock[k]),
-            ))
-            seq += 1
+            split = len(lines) > 1
+            for link, share, lead, delivery, j, qty, part in lines:
+                order_date = calendar.add_working_days(delivery, -lead)
+                urgent = order_date < as_of
+                reason = f"Stock projeté {_fmt(before)} < cible {_fmt(target[k])} le {index.dates[k].isoformat()}"
+                if split:
+                    reason += f" ; part {share * 100:.0f} % du quota ({_fmt(part)} sur {_fmt(need)})"
+                if j > i:
+                    reason += f" (besoin dès le {index.dates[i].isoformat()}, première livraison possible le {delivery.isoformat()})"
+                if urgent:
+                    reason += f" – délai fournisseur ({lead} j ouvrés) non tenable, commande à passer immédiatement"
+                    if supply_planned is not None:
+                        later = np.where(supply_planned[j + 1:min(n, j + 60)] > 0)[0]
+                        if len(later):
+                            d_later = index.dates[j + 1 + int(later[0])]
+                            reason += (f" ; alternative : avancer la commande prévisionnelle / planifiée du "
+                                       f"{d_later.isoformat()} ({_fmt(supply_planned[j + 1 + int(later[0])])})")
+                proposals.append(Proposal(
+                    proposal_id=f"PR-{article.article_id}-{seq:03d}",
+                    article_id=article.article_id,
+                    supplier_id=link.supplier_id if link else None,
+                    delivery_date=delivery,
+                    order_date=order_date,       # the real day the order had to be placed, even in the past (urgent)
+                    qty=float(qty),
+                    net_requirement=float(max(part, 0.0)),
+                    reason=reason,
+                    urgent=urgent,
+                    lead_time_days=lead,
+                    moq=float(link.moq) if link else 0.0,
+                    pack_qty=float(link.pack_qty) if link else 0.0,
+                    projected_stock_before=before,
+                    projected_stock_after=float(stock[k]),
+                ))
+                seq += 1
             i = k + 1
             continue
         i += 1

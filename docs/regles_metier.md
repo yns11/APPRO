@@ -233,7 +233,10 @@ Recalculées à chaque calcul (`generate_proposals` [oui]) sur le Projeté Appro
 proposent que ce que ni l'ERP ni le plan ne couvrent. Algorithme : dès que `stock[d] < cible[d]` (sauf creux
 toléré, `shortfall_tolerance_days` [0] : retour au-dessus de la cible en n jours ouvrés **sans aucun besoin non
 servi**, jugé sur la série des manques quelle que soit la politique de manque), quantité = max(besoin net jusqu'au niveau de recomplètement, MOQ)
-arrondie à l'UM (unité de manutention) ; fournisseur par quota [défaut] ou priorité ; livraison le premier jour ouvré autorisé du
+arrondie à l'UM (unité de manutention) ; **multi-sourcing** : avec `sourcing_policy = quota` [défaut] chaque besoin
+est **partagé entre les fournisseurs à quota au prorata des quotas**, dès le premier besoin (chaque part a son propre
+MOQ, UM, délai et jour de livraison ; les parts d'un même besoin forment une proposition par fournisseur), avec
+`priority` tout va au fournisseur de priorité 1 ; livraison le premier jour ouvré autorisé du
 fournisseur (`delivery_shift` [`earlier`]), ou le **lundi** (`proposal_placement = monday`) ; date de
 commande = livraison − délai ouvré, **urgente** si déjà passée ; re-projection puis itération. La date de commande
 d'une proposition urgente est la **date réelle** à laquelle il fallait commander (dans le passé), affichée telle
@@ -247,9 +250,11 @@ Pour la reprendre : taper la quantité dans la cellule *Appro.* (la cellule gris
 recalcule sans elle.
 
 **Refuser une proposition** : un clic sur une cellule *Proposition CBN* la barre, la retire du plan et
-**interdit toute proposition à ce fournisseur entre sa date et le dimanche de sa semaine** : le besoin est servi
-par une proposition placée après cette fenêtre (jamais avant : l'approvisionneur a dit « pas de livraison de ce
-fournisseur cette semaine »), au prix d'un manque éventuel entre-temps, affiché dans le Projeté Appro.. Un refus
+**interdit toute proposition à ce fournisseur entre sa date et le dimanche de sa semaine** : en multi-sourcing,
+sa part des besoins de la semaine **passe aux autres fournisseurs à quota** ; quand tous sont refusés (ou en
+mono-source), le besoin est servi par une proposition placée après cette fenêtre (jamais avant : l'approvisionneur
+a dit « pas de livraison de ce fournisseur cette semaine »), au prix d'un manque éventuel entre-temps, affiché
+dans le Projeté Appro.. Un refus
 enregistré sans fournisseur (anciennes données) vaut pour tous. La quantité refusée reste
 affichée barrée ; un nouveau clic rétablit la proposition. Les refus sont listés dans *Saisies & journal*. Une proposition refusée **urgente** reste listée dans le flux *À commander* du cockpit, marquée « ignorée », hors de tout calcul.
 
