@@ -1,0 +1,63 @@
+# =============================================================================
+# Ressource Databricks App — APPRO
+# -----------------------------------------------------------------------------
+# Le code déployé est le CONTENU de la racine du dépôt (main.py, backend/,
+# client/dist, requirements.txt). Le bloc `config` doit rester identique à
+# app.yaml (vérifié par backend/tests/test_bundle.py) : ici `value_from` en
+# snake_case (la CLI ignore silencieusement `valueFrom` dans databricks.yml).
+#
+# Ressource Lakebase : clé `postgres` (génération projets / branches / endpoints)
+# avec des CHEMINS DE RESSOURCE COMPLETS. L'ancienne clé `database` échoue avec
+# « Database instance <nom> does not exist » (404) même si le projet existe.
+# =============================================================================
+resources:
+  apps:
+    appro:
+      name: "appro-${bundle.target}"
+      description: >-
+        Ma Routine Appro – cockpit approvisionnement : projection de stock, plan de livraison,
+        propositions CBN (remplace le classeur SIMULATION).
+      source_code_path: ..
+
+      resources:
+        - name: postgres
+          description: Projet Lakebase (base applicative + miroir des faits ERP).
+          postgres:
+            branch: projects/${var.lakebase_project}/branches/${var.lakebase_branch}
+            database: projects/${var.lakebase_project}/branches/${var.lakebase_branch}/databases/${var.lakebase_database}
+            permission: CAN_CONNECT_AND_CREATE
+
+      config:
+        command:
+          - python
+          - main.py
+        env:
+          - name: LAKEBASE_ENDPOINT
+            value_from: postgres
+          - name: APPRO_LAKEBASE_BRANCH
+            value: projects/${var.lakebase_project}/branches/${var.lakebase_branch}
+          - name: APPRO_SYNC_ROLE
+            value: ${var.sync_role}
+          - name: APPRO_DB_SCHEMA
+            value: ${var.app_schema}
+          - name: APPRO_ADMINS
+            value: ${var.admin_emails}
+          - name: APPRO_DATA_SOURCE
+            value: lakebase
+          - name: APPRO_UC_CATALOG
+            value: ${var.uc_catalog}
+          - name: APPRO_UC_SCHEMA
+            value: ${var.uc_schema}
+          - name: APPRO_ERP_ORDERS_TABLE
+            value: ${var.erp_orders_table}
+          - name: APPRO_ERP_RECEIPTS_TABLE
+            value: ${var.erp_receipts_table}
+          - name: APPRO_HORIZON_DAYS
+            value: "120"
+          - name: APPRO_HISTORY_WEEKS
+            value: "2"
+          - name: APPRO_LOG_LEVEL
+            value: INFO
+
+      lifecycle:
+        started: true
