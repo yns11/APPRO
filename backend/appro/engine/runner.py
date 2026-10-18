@@ -13,7 +13,7 @@ from .models import Alert, ArticleResult, Dataset, DatasetError, EngineParams, M
 from .programs import program_impact
 from .projection import Projection, coverage_days, first_shortage, project_stock, target_stock
 from .proposals import generate_proposals, is_refused
-from .supply import blocked_days, build_lanes, lane_totals
+from .supply import blocked_days, build_lanes, lane_totals, unlinked_flows
 
 
 def resolve_as_of(dataset: Dataset, params: EngineParams) -> dt.date:
@@ -115,9 +115,11 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         lanes = build_lanes(links_by_article.get(aid, []), orders_by_article.get(aid, []), receipts_by_article.get(aid, []),
                             plan_by_article.get(aid, []), supplier_names, index, as_of, params, flags_by_article.get(aid),
                             desadv_by_article.get(aid))
-        receipts = lane_totals(lanes, "receipts")
-        orders_firm = lane_totals(lanes, "orders_firm")
-        plan = lane_totals(lanes, "plan")
+        unlinked = unlinked_flows([l.supplier_id for l in lanes], orders_by_article.get(aid, []), receipts_by_article.get(aid, []),
+                                  desadv_by_article.get(aid), supplier_names, as_of)
+        receipts = lane_totals(lanes, "receipts", n)
+        orders_firm = lane_totals(lanes, "orders_firm", n)
+        plan = lane_totals(lanes, "plan", n)
 
         adjustments = np.zeros(n)        # dated after the snapshot: movements of the projection
         past_adjust = np.zeros(n)        # dated on/before the snapshot: corrections of the reference stock
@@ -162,7 +164,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         lane_plan = {l.supplier_id: l.plan for l in lanes}
         proposals, supply_proposed, _, cap_shortfalls = generate_proposals(
             article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand, target,
-            index, calendar, as_of, params, supply_planned=lane_totals(lanes, "orders_forecast"),
+            index, calendar, as_of, params, supply_planned=lane_totals(lanes, "orders_forecast", n),
             reproject=lambda extra: project(inflow_plan + extra), blocked=blocked, lane_plan=lane_plan)
         proposals_ignored: list = []
         if blocked:
@@ -178,9 +180,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         plan_proj = project(inflow_plan + supply_proposed)
         by_lane = {l.supplier_id: l for l in lanes}
         for p in proposals:
-            lane = by_lane.get(p.supplier_id) or lanes[0]
+            lane = by_lane.get(p.supplier_id) or (lanes[0] if lanes else None)
             j = index.offset(p.delivery_date)
-            if j is not None:
+            if j is not None and lane is not None:
                 lane.supply_proposed[j] += p.qty
         # next expected delivery (Plan row + CBN complement, every supplier) : its day, quantity and nature
         next_delivery = None
@@ -195,7 +197,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
 
         alerts = classify_alerts(article, index, calendar, as_of, erp, plan_proj, cov["plan"], stock_start, demand,
                                  lanes, proposals, links_by_article.get(aid, []), suppliers, aid in bom_articles,
-                                 snap is not None, cap_shortfalls)
+                                 snap is not None, cap_shortfalls, unlinked)
         k = {name: first_shortage(layer.shortage, i_as_of) for name, layer in (("erp", erp), ("plan", plan_proj))}
         horizon_slice = slice(i_as_of, n)
         typed = int(sum(int(l.plan_typed[i_as_of:].sum()) for l in lanes))
@@ -258,6 +260,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "severity": (worst_severity(alerts).value if alerts else None),
             "actual_share_30d": float(share[i_as_of - 30 if i_as_of >= 30 else 0:i_as_of + 1].mean()) if i_as_of > 0 else 0.0,
             "lanes": len(lanes),
+            "unlinked_flows": sum(u.orders_open + u.orders_late + u.receipts + u.desadv for u in unlinked),
             "next_delivery_date": next_delivery[0].isoformat() if next_delivery else None,
             "next_delivery_qty": next_delivery[1] if next_delivery else None,
             "next_delivery_type": next_delivery[2] if next_delivery else None,
@@ -265,8 +268,8 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         results[aid] = ArticleResult(
             article=article, start_date=start, as_of=as_of, dates=index.dates,
             demand=demand, consumed=consumed, required=required, demand_plan=dplan, demand_actual_share=share,
-            orders_firm=orders_firm, orders_firm_hist=lane_totals(lanes, "orders_firm_hist"),
-            orders_forecast=lane_totals(lanes, "orders_forecast"), receipts=receipts,
+            orders_firm=orders_firm, orders_firm_hist=lane_totals(lanes, "orders_firm_hist", n),
+            orders_forecast=lane_totals(lanes, "orders_forecast", n), receipts=receipts,
             plan=plan, supply_proposed=supply_proposed,
             adjustments=adjustments + past_adjust, reference_correction=reference_correction,
             stock_erp=erp.stock, stock_plan=plan_proj.stock,
@@ -276,6 +279,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             coverage_erp=cov["erp"], coverage_plan=cov["plan"], target_stock=target,
             lanes=lanes, alerts=alerts, proposals=proposals, kpis=kpis, suppliers=links_by_article.get(aid, []),
             diagnostics=notes, proposals_ignored=proposals_ignored, price=price, cap_shortfalls=cap_shortfalls,
+            unlinked=unlinked,
         )
 
     program_daily = {pid: {index.dates[i]: float(v) for i, v in enumerate(arr) if v}

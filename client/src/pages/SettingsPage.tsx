@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Clock, Database, Lightbulb, RefreshCw, RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
@@ -9,8 +9,10 @@ import { BASE_SIZES, DISPLAY_DEFAULTS, FONTS, GRID_SIZES, fontStack, type FontId
 import { ArticleLink, Badge, Button, Card, ErrorBox, Kpi, Skeleton, SkeletonBlock, SupplierLink, Tabs, useToast } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
 import { SearchSelect } from "@/components/SearchSelect";
-import { CONSUMPTION_SOURCE_SHORT, WEEKDAY_LONG, WEEKDAY_SHORT, fmtDate, fmtDateTime, fmtInt, fmtMinutes, fmtQty } from "@/lib/format";
-import type { AdherenceRow, OrphanRow, SyncTable } from "@/lib/types";
+import { WeekRangeBar, type WeekChip, type WeekRange } from "@/components/WeekRangeBar";
+import { addDays, format as fmtRaw, parseISO, startOfISOWeek } from "date-fns";
+import { CONSUMPTION_SOURCE_SHORT, PLAN_ORIGIN_LABELS, WEEKDAY_LONG, WEEKDAY_SHORT, fmtDate, fmtDateTime, fmtInt, fmtMinutes, fmtQty, isoWeekKey } from "@/lib/format";
+import type { AdherenceRow, OrphanRow, PlanVersionWeek, SyncTable } from "@/lib/types";
 
 type Tab = "rules" | "display" | "data" | "users";
 const ROLE_LABELS: Record<string, string> = { reader: "lecture seule", appro: "approvisionneur", manager: "manager", admin: "administrateur" };
@@ -220,12 +222,33 @@ function CalendarCard() {
   );
 }
 
+/** The past ISO weeks the adherence can look at : the 26 complete weeks before the current one. */
+const ADHERENCE_WEEKS = 26;
+function pastWeekChips(asOf: string | undefined): (WeekChip & { monday: string })[] {
+  const thisMonday = startOfISOWeek(asOf ? parseISO(asOf) : new Date());
+  return Array.from({ length: ADHERENCE_WEEKS }, (_, k) => {
+    const monday = addDays(thisMonday, -7 * (ADHERENCE_WEEKS - k));
+    const iso = fmtRaw(monday, "yyyy-MM-dd");
+    return { key: isoWeekKey(iso), label: isoWeekKey(iso).replace(/^\d{4}-W/, "S"), start: fmtRaw(monday, "dd/MM"), monday: iso };
+  });
+}
+
 function AdherenceCard() {
-  const { perimeter } = usePerimeter();
-  const [f, patch] = usePageState("parametres.adherence", { weeks: 12, bucket: "week" as "week" | "day", plan_mode: "monday" as "monday" | "latest", program: "" });
+  const { perimeter, config } = usePerimeter();
+  const chips = useMemo(() => pastWeekChips(config?.as_of), [config?.as_of]);
+  const [f, patch] = usePageState("parametres.adherence", {
+    weekRange: { from: chips[ADHERENCE_WEEKS - 12].key, to: chips[ADHERENCE_WEEKS - 1].key } as WeekRange,
+    bucket: "week" as "week" | "day", plan_mode: "monday" as "monday" | "latest", program: "",
+  });
+  // a remembered period that slid out of the window (weeks went by) falls back to the whole window
+  const known = (k: string) => chips.some((c) => c.key === k);
+  const range: WeekRange = f.weekRange && known(f.weekRange.from) && known(f.weekRange.to) ? f.weekRange : null;
+  useEffect(() => { if (f.weekRange && !range) patch({ weekRange: null }); }, [f.weekRange, range, patch]);
+  const first = chips.find((c) => c.key === (range?.from ?? chips[0].key)) ?? chips[0];
+  const last = chips.find((c) => c.key === (range?.to ?? chips[ADHERENCE_WEEKS - 1].key)) ?? chips[ADHERENCE_WEEKS - 1];
   const lists = usePerimeterLists(perimeter.planner);
   const programOptions = useMemo(() => (lists.data?.programs ?? []).map((p) => ({ id: p.id, label: p.name || p.id, hint: p.name ? p.id : undefined })), [lists.data]);
-  const q = useAdherence({ weeks: f.weeks, bucket: f.bucket, plan_mode: f.plan_mode, planner: perimeter.planner ?? undefined, program_id: f.program || undefined });
+  const q = useAdherence({ week_from: first.monday, week_to: last.monday, bucket: f.bucket, plan_mode: f.plan_mode, planner: perimeter.planner ?? undefined, program_id: f.program || undefined });
   const toast = useToast();
   const applySuggestion = useWrite(async (r: AdherenceRow) => {
     const rows = await api.get<Record<string, unknown>[]>("/api/reference/ref_articles/rows");
@@ -253,14 +276,15 @@ function AdherenceCard() {
   const t = d?.totals;
   return (
     <div className="stack">
-      <Card tight>
-        <div className="row wrap">
-          <label className="row small subtle">Semaines <select className="select sm" value={f.weeks} onChange={(e) => patch({ weeks: Number(e.target.value) })} aria-label="Semaines analysées">{[4, 8, 12, 16, 26, 52].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+      <Card flush>
+        <WeekRangeBar weeks={chips} range={range} onChange={(weekRange) => patch({ weekRange })} />
+        <div className="row wrap" style={{ padding: "8px 12px" }}>
           <label className="row small subtle">Période brute <select className="select sm" value={f.bucket} onChange={(e) => patch({ bucket: e.target.value as "week" | "day" })} aria-label="Granularité de l'adhérence brute"><option value="week">semaine</option><option value="day">jour</option></select></label>
           <label className="row small subtle">Plan de référence <select className="select sm" value={f.plan_mode} onChange={(e) => patch({ plan_mode: e.target.value as "monday" | "latest" })} aria-label="Plan de référence" title="Lundi : la version du PDP connue au lundi de chaque semaine (celle qu'a vue le CBN) ; actuel : le plan en vigueur aujourd'hui"><option value="monday">PDP du lundi</option><option value="latest">PDP actuel</option></select></label>
           <SearchSelect value={f.program} onChange={(program) => patch({ program })} options={programOptions} placeholder="Tous les programmes" ariaLabel="Programme" loading={lists.isLoading} />
-          <span className="subtle small" style={{ marginLeft: "auto" }}>{d ? `du ${fmtDate(d.from)} au ${fmtDate(d.to)}${d.excluded_plan_source.length ? ` · ${d.excluded_plan_source.length} article(s) en source PDP exclus` : ""}` : q.isFetching ? "calcul…" : ""}</span>
+          <span className="subtle small" style={{ marginLeft: "auto" }}>{d ? `${d.weeks} semaine(s), du ${fmtDate(d.from)} au ${fmtDate(d.to)}${d.excluded_plan_source.length ? ` · ${d.excluded_plan_source.length} article(s) en source PDP exclus` : ""}` : q.isFetching ? "calcul…" : ""}</span>
         </div>
+        {d && <PlanVersionsStrip versions={d.plan_versions} mode={d.plan_mode} />}
       </Card>
       <div className="grid kpis">
         <Kpi label="Adhérence nette" value={t ? (t.net_pct === null ? "–" : `${t.net_pct} %`) : <Skeleton w={60} h={28} />} meta="1 − |Σ réel − Σ plan| / Σ plan, tous articles" tone={t && t.net_pct !== null ? (t.net_pct >= 85 ? "ok" : t.net_pct >= 60 ? "warning" : "critical") : undefined} />
@@ -272,6 +296,36 @@ function AdherenceCard() {
       <Card flush title="Adhérence par article" hint="plan = PDP éclaté par la nomenclature et profilé selon les jours de consommation ; réel = consommation déclarée (dérivée : Σ coef × sources)">
         {q.isError ? <ErrorBox error={q.error} /> : !d ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <div className="scroll-x"><DataTable rows={d.rows} columns={cols} rowKey={(r) => r.article_id} compact maxHeight="calc(100vh - 520px)" storageKey="data.adherence" exportTitle="Adhérence PDP réel" emptyTitle="Aucun article dans le périmètre" /></div>}
       </Card>
+    </div>
+  );
+}
+
+/** Which PDP version stood for the plan of each week of the window, and a notice when a week had no
+ * version imported before its Monday (the first later version holding it is taken) or no plan at all. */
+function PlanVersionsStrip({ versions, mode }: { versions: PlanVersionWeek[]; mode: "monday" | "latest" }) {
+  const later = versions.filter((v) => v.origin === "later");
+  const none = versions.filter((v) => v.origin === "none");
+  const names = (vs: PlanVersionWeek[]) => Array.from(new Set(vs.map((v) => v.version_name ?? "?"))).join(", ");
+  return (
+    <div className="stack" style={{ gap: 0 }}>
+      {(later.length > 0 || none.length > 0) && (
+        <div className={`banner ${none.length ? "warning" : "info"}`} style={{ margin: "0 12px 6px" }}>
+          <AlertTriangle size={14} />
+          <span>
+            {later.length > 0 && <>{later.length} semaine{later.length > 1 ? "s" : ""} ({later.map((v) => v.week.replace(/^\d{4}-W/, "S")).join(", ")}) sans version du PDP importée avant le lundi : la première version importée ensuite qui les contient ({names(later)}) sert de plan.{" "}</>}
+            {none.length > 0 && <>{none.length} semaine{none.length > 1 ? "s" : ""} ({none.map((v) => v.week.replace(/^\d{4}-W/, "S")).join(", ")}) sans aucun plan : aucune version importée ne contient ces semaines{mode === "monday" ? " (importez un PDP couvrant ces semaines, ou passez en « PDP actuel »)" : ""}.</>}
+          </span>
+        </div>
+      )}
+      <div className="plan-versions" role="list" aria-label="Version du PDP prise pour chaque semaine">
+        {versions.map((v) => (
+          <span key={v.week} role="listitem" className={`pv ${v.origin}`} title={`${v.week} · ${PLAN_ORIGIN_LABELS[v.origin]}${v.version_name ? ` : ${v.version_name}` : ""}${v.imported_at ? ` (importée le ${fmtDateTime(v.imported_at)})` : ""}`}>
+            <b>{v.week.replace(/^\d{4}-W/, "S")}</b>
+            <small>{v.version_name ?? PLAN_ORIGIN_LABELS[v.origin]}</small>
+          </span>
+        ))}
+        <span className="pv-legend"><span><i style={{ borderColor: "var(--ok-fg)" }} />connue le lundi</span><span><i style={{ borderColor: "var(--warning-fg)", background: "var(--warning-bg)" }} />importée après coup</span><span><i style={{ borderColor: "var(--info-fg)" }} />plan ERP</span><span><i style={{ borderStyle: "dashed" }} />aucun plan</span></span>
+      </div>
     </div>
   );
 }

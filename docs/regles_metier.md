@@ -67,9 +67,14 @@ distingue par la date de référence.
 
 ## 3. Approvisionnements : voies fournisseur, plan, commandes en retard
 
-Le tableau montre, **par fournisseur de l'article** (les liens actifs, par priorité, puis tout fournisseur
-présent dans les commandes ou réceptions), quatre lignes : *Ferme*, *Prévisionnel*, *Reçu* (ERP, lecture) et
-*Appro.* (saisie). Les lignes suivantes sont à la maille article : *Proposition CBN*, *Ajustement*, *Projeté
+Le tableau montre, **par fournisseur de l'article**, quatre lignes : *Ferme*, *Prévisionnel*, *Reçu* (ERP,
+lecture) et *Appro.* (saisie). Les voies sont **les liens actifs article ↔ fournisseur** du Référentiel (par
+priorité), et rien d'autre : les commandes, réceptions et DESADV d'un fournisseur **sans lien actif** restent
+hors du tableau (hors des voies, des stocks projetés et du retard de l'article) et ne sont visibles que dans
+les vues d'état (cockpit *Flux*, fiche fournisseur, *Recherche*) ; l'alerte `UNLINKED_FLOWS` les signale sur
+l'article. Un fournisseur sans lien actif qui porte encore des cellules *Appro.* saisies garde une voie,
+marquée « hors lien », le temps de les effacer ou de réactiver le lien. Un flux sans fournisseur suit la
+première voie. Sans aucun lien actif, l'article n'a pas de voie : aucun approvisionnement n'est compté. Les lignes suivantes sont à la maille article : *Proposition CBN*, *Ajustement*, *Projeté
 ERP*, *Projeté Appro.*. Les stocks somment les voies.
 
 ### 3.1 La commande = un créneau de livraison
@@ -240,6 +245,7 @@ rouge foncé. Les alertes de rupture donnent le manque cumulé maximal.
 | `NEGATIVE_STOCK` | critique | stock de référence négatif |
 | `URGENT_PROPOSAL` | critique | proposition dont la date de commande est déjà passée (plancher dans le délai, § 7) |
 | `CAP_REACHED` | avertissement | manque inévitable sous les plafonds du fournisseur (§ 7) |
+| `UNLINKED_FLOWS` | avertissement (commandes ouvertes ou en retard) / info | commandes, réceptions ou DESADV d'un fournisseur sans lien actif, exclus du tableau (§ 3) |
 | `NO_DEMAND` | info | aucun besoin alors que du stock existe |
 | `MISSING_DATA` | avertissement / info | pas de stock de référence, pas de fournisseur, pas de nomenclature |
 
@@ -366,9 +372,15 @@ classeur de simulation (§ 11).
 **Paramètres › Données** : journal de synchronisation ERP (âge de chaque table miroir, alerte au-delà de deux
 heures, bandeau en haut de page si la dernière copie est en retard), articles présents dans l'ERP et absents
 du référentiel, calendrier usine, **adhérence PDP / réel** (nette = 1 − |Σ réel − Σ plan| / Σ plan ; brute =
-1 − Σ par semaine ou par jour |réel − plan| / Σ plan ; biais ; plan de référence = version du PDP connue au
-lundi de chaque semaine ou plan actuel ; profil réel par jour de semaine et suggestion de jours de
-consommation, applicable d'un clic).
+1 − Σ par semaine ou par jour |réel − plan| / Σ plan ; biais ; profil réel par jour de semaine et suggestion de
+jours de consommation, applicable d'un clic). La période se choisit avec le **sélecteur de semaines** du
+tableau d'approvisionnement (les 26 semaines complètes avant la semaine en cours, mémorisé). Le **plan de
+référence** est, au choix, le *PDP actuel* ou le ***PDP du lundi*** : pour chaque semaine, la dernière version
+importée **avant son lundi qui contient cette semaine** (ce que le CBN a vu) ; quand aucune version
+antérieure ne la contient (application pas encore en service, versions trop courtes), la **première version
+importée ensuite** qui la contient sert de plan, et la semaine est signalée « importée après coup » ; sans
+aucune version, le plan ERP s'il est configuré, sinon « aucun plan ». Une bande sous le sélecteur montre,
+semaine par semaine, la version retenue et sa date d'import.
 
 **Fiches articles** (liste) : en-tête fixe ; colonnes *Prochaine livraison* (quantité), *Attendue le* et *Nature*
 (**Ferme ERP**, **CBN** ou **Saisie**) = première quantité attendue à partir d'aujourd'hui sur la ligne *Appro.* et le

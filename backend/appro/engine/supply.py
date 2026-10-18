@@ -3,6 +3,9 @@ plan scenario (the planner's plan cells, else the ERP), the receipts and the bac
 
 Rules (docs/regles_metier.md § 3):
 
+* the lanes are the **active links** of the article (priority order) ; the ERP flows of any other
+  supplier are left out of the table (status views and search still show them) and summarised in an
+  ``UNLINKED_FLOWS`` alert ; a supplier holding typed plan cells keeps a lane « hors lien » ;
 * an ERP **order** is a delivery slot ``supplier|article|date|firm`` ; the ERP never moves nor
   cancels a slot and its remaining quantity is unreliable once the date is past ;
 * the **ERP scenario** counts the open firm orders dated on or after the reference day, except the
@@ -84,31 +87,81 @@ class _LaneAcc:
         self.receipts_booked = np.zeros(n, dtype=bool)
 
 
-def lane_ids(links: list[SupplierLink], orders: list[OrderLine], receipts: list[Receipt], cells: list[PlanCell],
-             as_of: dt.date, desadv: list[DesadvLine] | None = None) -> list[str | None]:
-    """Suppliers shown as lanes: the active links (priority order), then any other supplier that
-    appears in the orders, receipts, plan cells or despatch advices ; a single anonymous lane when
-    there is none."""
+def lane_ids(links: list[SupplierLink], cells: list[PlanCell], as_of: dt.date) -> list[str | None]:
+    """Suppliers shown as lanes : the **active links** (priority order) and nothing else from the ERP.
+    A supplier that still carries typed plan cells dated on/after the reference day keeps a lane
+    (« hors lien » : the planner's own entries never vanish), so he can clear or move them.  The ERP
+    orders, receipts and despatch advices of any other supplier stay out of the table (they remain in
+    the status views and in the search)."""
     ids: list[str | None] = [l.supplier_id for l in sorted(links, key=lambda l: (l.priority, l.supplier_id)) if l.active]
-    extra = ({o.supplier_id for o in orders} | {r.supplier_id for r in receipts} | {c.supplier_id for c in cells if c.date >= as_of}
-             | {d.supplier_id for d in (desadv or ())})
-    for sid in sorted((s for s in extra if s and s not in ids)):
+    typed = {c.supplier_id for c in cells if c.date >= as_of and c.qty > EPS}
+    for sid in sorted((s for s in typed if s and s not in ids)):
         ids.append(sid)
-    if None in extra and not ids:
+    if None in typed and not ids:
         ids.append(None)
-    return ids or [None]
+    return ids
+
+
+@dataclass
+class UnlinkedFlows:
+    """ERP flows of one supplier without an active link, left out of the supply table of the article."""
+
+    supplier_id: str | None
+    name: str
+    orders_open: int = 0        # firm orders dated on/after the reference day still open in the ERP
+    open_qty: float = 0.0
+    orders_late: int = 0        # firm orders dated before the reference day still open (late)
+    late_qty: float = 0.0
+    receipts: int = 0           # validated receipts inside the window
+    desadv: int = 0             # announced despatch advices
+
+
+def unlinked_flows(lane_ids_: list[str | None], orders: list[OrderLine], receipts: list[Receipt],
+                   desadv: list[DesadvLine] | None, supplier_names: dict[str, str], as_of: dt.date) -> list[UnlinkedFlows]:
+    """What the table does not show : the ERP flows whose supplier has no lane."""
+    shown = set(lane_ids_)
+    if lane_ids_:
+        shown.add(None)          # anonymous flows ride the first lane
+    out: dict[str | None, UnlinkedFlows] = {}
+
+    def of(sid: str | None) -> UnlinkedFlows:
+        if sid not in out:
+            out[sid] = UnlinkedFlows(sid, supplier_names.get(sid or "", sid or "sans fournisseur"))
+        return out[sid]
+
+    for o in orders:
+        if o.supplier_id in shown or o.order_type.value != "FIRM" or not o.qty_open or o.qty_open <= EPS:
+            continue
+        u = of(o.supplier_id)
+        if o.expected_date < as_of:
+            u.orders_late += 1
+            u.late_qty += float(o.qty_open)
+        else:
+            u.orders_open += 1
+            u.open_qty += float(o.qty_open)
+    for r in receipts:
+        if r.supplier_id not in shown and r.qty and not r.in_transit:
+            of(r.supplier_id).receipts += 1
+    for d in desadv or ():
+        if d.supplier_id not in shown and d.state.strip().lower() != "annulé":
+            of(d.supplier_id).desadv += 1
+    return [out[k] for k in sorted(out, key=lambda x: x or "")]
 
 
 def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: list[Receipt], cells: list[PlanCell],
                 supplier_names: dict[str, str], index: DayIndex, as_of: dt.date, params: EngineParams,
                 flags: list[CellFlag] | None = None, desadv: list[DesadvLine] | None = None) -> list[Lane]:
     n = index.n
-    ids = lane_ids(links, orders, receipts, cells, as_of, desadv)
+    ids = lane_ids(links, cells, as_of)
     acc = {sid: _LaneAcc(sid, n) for sid in ids}
-    fallback = ids[0]
+    linked = {l.supplier_id for l in links if l.active}
 
-    def lane_of(sid: str | None) -> _LaneAcc:
-        return acc.get(sid) or acc[fallback]
+    first = next(iter(acc.values()), None)
+
+    def lane_of(sid: str | None) -> _LaneAcc | None:
+        """The lane of a supplier ; ``None`` when he has no lane : his flows stay out of the table.  A
+        flow without any supplier cannot belong to « another supplier » : it rides the first lane."""
+        return acc.get(sid) or (first if not sid else None)
 
     def add(arr: np.ndarray, day: dt.date, qty: float) -> None:
         i = index.offset(day)
@@ -119,16 +172,18 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     for f in flags or ():
         if f.kind == "order_ignored" and f.date >= as_of:
             i = index.offset(f.date)
-            if i is not None:
-                lane_of(f.supplier_id).ignored[i] = True
+            ln = lane_of(f.supplier_id)
+            if i is not None and ln is not None:
+                ln.ignored[i] = True
 
     # ---- receipts : the validated arrival journals only (« Reçu », « Comptabilisé ») ; a journal not
     # validated yet (« En transit ») is on its way : shown, never counted
     posted = [r for r in receipts if r.qty and not r.in_transit]
     transit = [r for r in receipts if r.qty and r.in_transit]
+    posted = [r for r in posted if lane_of(r.supplier_id) is not None]
+    transit = [r for r in transit if lane_of(r.supplier_id) is not None]
     for r in posted:
-        ln = lane_of(r.supplier_id)
-        add(ln.receipts, r.receipt_date, r.qty)
+        add(lane_of(r.supplier_id).receipts, r.receipt_date, r.qty)
     # ---- ERP orders
     received_today: dict[str | None, float] = defaultdict(float)
     for r in posted:
@@ -136,6 +191,8 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
             received_today[lane_of(r.supplier_id).supplier_id] += r.qty
     for o in sorted(orders, key=lambda o: (o.expected_date, o.order_id)):
         ln = lane_of(o.supplier_id)
+        if ln is None:
+            continue
         typ = o.order_type.value
         firm = typ == "FIRM"
         day = o.expected_date
@@ -164,7 +221,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     # ---- in transit : the arrival journals not validated yet and the announced DESADV, matched to the
     # receipts by delivery note (BL).  Green dot = the BL is announced by a processed DESADV, red otherwise.
     hidden_days = {(f.supplier_id or None, f.date) for f in (flags or ()) if f.kind == "desadv_hidden"}
-    live = [d for d in (desadv or ()) if d.state.strip().lower() != "annulé"]
+    live = [d for d in (desadv or ()) if d.state.strip().lower() != "annulé" and lane_of(d.supplier_id) is not None]
     processed_bls = {d.packing_slip.strip() for d in live if d.processed and d.packing_slip.strip()}
     received_bls = {bl for r in posted for bl in r.packing_slips}
     transit_bls = {bl for r in transit for bl in r.packing_slips}
@@ -224,6 +281,8 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         if i is None:
             continue
         ln = lane_of(c.supplier_id)
+        if ln is None:
+            continue
         ln.plan[i] = max(0.0, float(c.qty))
         ln.plan_typed[i] = True
     return [Lane(supplier_id=ln.supplier_id, name=supplier_names.get(ln.supplier_id or "", ln.supplier_id or ""),
@@ -233,13 +292,14 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
                  desadv=ln.desadv, receipt_lines=ln.receipt_lines,
                  orders_firm_ordered=ln.ordered, orders_firm_open=ln.open, orders_ignored=ln.ignored,
                  backlog_ordered=ln.backlog_ordered, backlog_received=ln.backlog_received,
-                 backlog_qty=ln.backlog_open, orders=ln.orders)
+                 backlog_qty=ln.backlog_open, orders=ln.orders, linked=ln.supplier_id in linked)
             for ln in acc.values()]
 
 
-def lane_totals(lanes: list[Lane], key: str) -> np.ndarray:
+def lane_totals(lanes: list[Lane], key: str, n: int = 0) -> np.ndarray:
+    """Σ of one series over the lanes ; ``n`` sizes the result when there is no lane at all."""
     if not lanes:
-        return np.zeros(0)
+        return np.zeros(n)
     out = np.zeros_like(getattr(lanes[0], key), dtype=float)
     for l in lanes:
         out += getattr(l, key)

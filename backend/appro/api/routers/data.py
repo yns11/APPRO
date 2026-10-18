@@ -49,11 +49,17 @@ def calendar(ctx: AppContext = Depends(ctx_dep), session: Session = Depends(sess
 @router.get("/data/adherence")
 def adherence(weeks: int = Query(12, ge=1, le=52), bucket: Literal["week", "day"] = "week",
               plan_mode: Literal["monday", "latest"] = "monday", planner: str | None = None, program_id: str | None = None,
-              article_id: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+              article_id: str | None = None, week_from: dt.date | None = None, week_to: dt.date | None = None,
+              ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """Adherence of the reported consumption to the planned requirement (net, gross, bias, weekday
-    profile and suggested ``demand_days``), per article, over the last complete ISO weeks."""
+    profile and suggested ``demand_days``), per article, over past complete ISO weeks : ``week_from`` →
+    ``week_to`` (Mondays, inclusive) or the last ``weeks`` weeks.  ``plan_versions`` tells, week by week,
+    which imported PDP version stood for the plan (and whether it was known on the Monday)."""
+    if week_from and week_to and week_from > week_to:
+        raise HTTPException(422, "week_from doit précéder week_to")
     return json_response(data_service.adherence(ctx, session, weeks=weeks, bucket=bucket, plan_mode=plan_mode,
-                                                planner=planner, program_id=program_id, article_id=article_id))
+                                                planner=planner, program_id=program_id, article_id=article_id,
+                                                week_from=week_from, week_to=week_to))
 
 
 # ---------------------------------------------------------------- supplier page
@@ -100,17 +106,20 @@ def supplier_detail(supplier_id: str, ctx: AppContext = Depends(ctx_dep), sessio
     def mine(rows):
         return [r for r in rows if (r.supplier_id or "") == supplier_id]
 
+    # the firm orders to come are read from the ERP data, not from the lanes : a supplier without an
+    # active link has no lane, his orders still belong to his page
+    ignored = {(f.article_id, f.supplier_id or None, f.date) for f in ds.flags if f.kind == "order_ignored"}
     upcoming = []
-    for ar in result.articles.values():
-        for ln in ar.lanes:
-            if ln.supplier_id != supplier_id:
-                continue
-            for o in ln.orders:
-                if o.order_type == "FIRM" and o.expected_date >= result.as_of:
-                    upcoming.append(S.OrderRow(order_id=o.order_id, article_id=ar.article.article_id, designation=ar.article.designation,
-                                               unit=ar.article.unit, planner=ar.article.planner, supplier_id=supplier_id,
-                                               supplier_name=sup.name, order_type="FIRM", expected_date=o.expected_date,
-                                               qty_ordered=o.qty_ordered, qty_open=o.qty_open, purch_id=o.ref))
+    for o in ds.orders:
+        if o.supplier_id != supplier_id or o.order_type.value != "FIRM" or o.expected_date < result.as_of:
+            continue
+        a = arts.get(o.article_id)
+        if a is None or not a.active:
+            continue
+        upcoming.append(S.OrderRow(order_id=o.order_id, article_id=o.article_id, designation=a.designation, unit=a.unit,
+                                   planner=a.planner, supplier_id=supplier_id, supplier_name=sup.name, order_type="FIRM",
+                                   expected_date=o.expected_date, qty_ordered=float(o.qty_ordered), qty_open=float(o.qty_open or 0.0),
+                                   purch_id=o.ref, ignored=(o.article_id, supplier_id, o.expected_date) in ignored))
     upcoming.sort(key=lambda o: (o.expected_date, o.article_id))
     return json_response(S.SupplierDetail(
         supplier=S.SupplierRef(supplier_id=sup.supplier_id, name=sup.name, country=sup.country, contact=sup.contact,

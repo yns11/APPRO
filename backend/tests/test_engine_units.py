@@ -224,7 +224,8 @@ def test_backlog_is_the_erp_remaining_quantity_of_the_late_firm_orders():
 
 
 def test_reference_day_receipts_cover_the_firm_orders_of_the_day():
-    ds = make_dataset(orders=[OrderLine("F1", "A1", "S1", MON, 600, order_type=OrderType.FIRM),
+    ds = make_dataset(links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, priority=1), SupplierLink("A1", "S2", priority=2)],
+                      orders=[OrderLine("F1", "A1", "S1", MON, 600, order_type=OrderType.FIRM),
                               OrderLine("F2", "A1", "S2", MON, 1000, order_type=OrderType.FIRM)],
                       receipts=[Receipt("R1", "A1", MON, 400, supplier_id="S1"), Receipt("R2", "A1", MON, 150, supplier_id="S2")])
     r = run(ds, no_cbn=True, horizon_days=3)
@@ -237,13 +238,38 @@ def test_reference_day_receipts_cover_the_firm_orders_of_the_day():
     assert run(ds, no_cbn=True, horizon_days=3).plan[i] == 600 + 850
 
 
-def test_lanes_follow_the_active_links_then_the_data():
-    ds = make_dataset(links=[SupplierLink("A1", "S2", priority=1), SupplierLink("A1", "S1", priority=2)],
-                      orders=[OrderLine("F1", "A1", "S9", MON + D(days=2), 10, order_type=OrderType.FIRM)])
-    r = run(ds)
-    assert [l.supplier_id for l in r.lanes] == ["S2", "S1", "S9"]
-    r1 = run(make_dataset(links=[]))
-    assert [l.supplier_id for l in r1.lanes] == [None] and r1.kpis["lanes"] == 1
+def test_lanes_are_the_active_links_only_and_other_flows_are_reported():
+    """The supply table shows the active links (priority order) and nothing else : the ERP flows of
+    another supplier stay out of the lanes, of the stocks and of the backlog, and are listed in an
+    UNLINKED_FLOWS alert (the status views and the search still show them).  A supplier holding typed
+    plan cells keeps a lane « hors lien » ; a flow without supplier rides the first lane."""
+    wed = MON + D(days=2)
+    ds = make_dataset(links=[SupplierLink("A1", "S2", priority=1), SupplierLink("A1", "S1", priority=2),
+                             SupplierLink("A1", "S9", priority=3, active=False)],
+                      suppliers=[Supplier("S1", "Supplier 1"), Supplier("S2", "Supplier 2"), Supplier("S9", "Other")],
+                      orders=[OrderLine("F1", "A1", "S9", wed, 10, order_type=OrderType.FIRM),
+                              OrderLine("F0", "A1", "S9", MON - D(days=3), 30, order_type=OrderType.FIRM),
+                              OrderLine("F2", "A1", None, wed, 7, order_type=OrderType.FIRM)],
+                      receipts=[Receipt("R1", "A1", MON - D(days=1), 40, supplier_id="S9")])
+    r = run(ds, no_cbn=True, horizon_days=5)
+    i = r.dates.index(MON)
+    assert [l.supplier_id for l in r.lanes] == ["S2", "S1"] and all(l.linked for l in r.lanes)
+    assert r.orders_firm[i + 2] == 7 and r.lanes[0].orders_firm[i + 2] == 7      # anonymous order on the first lane
+    assert sum(r.receipts) == 0 and r.kpis["backlog_qty"] == 0
+    u = r.unlinked
+    assert [x.supplier_id for x in u] == ["S9"] and u[0].orders_open == 1 and u[0].open_qty == 10
+    assert u[0].orders_late == 1 and u[0].late_qty == 30 and u[0].receipts == 1
+    alert = next(a for a in r.alerts if a.alert_type.value == "UNLINKED_FLOWS")
+    assert "S9 Other" in alert.message and alert.severity.value == "warning" and r.kpis["unlinked_flows"] == 3
+    # typed cells of a supplier without active link : his lane stays, flagged
+    ds.plan = [PlanCell("A1", "S9", wed, 25)]
+    r2 = run(ds, no_cbn=True, horizon_days=5)
+    assert [(l.supplier_id, l.linked) for l in r2.lanes] == [("S2", True), ("S1", True), ("S9", False)]
+    assert r2.plan[i + 2] == 7 + 25 and r2.lanes[2].orders_firm[i + 2] == 10   # the lane exists : its ERP flows show again
+    # no active link at all : no lane, the ERP flows are reported, the stock has no supply
+    r1 = run(make_dataset(links=[], orders=[OrderLine("F1", "A1", "S9", wed, 10, order_type=OrderType.FIRM)]), no_cbn=True, horizon_days=5)
+    assert r1.lanes == [] and r1.kpis["lanes"] == 0 and r1.orders_firm[i + 2] == 0 and r1.unlinked[0].supplier_id == "S9"
+    assert {a.alert_type.value for a in r1.alerts} >= {"MISSING_DATA", "UNLINKED_FLOWS"}
 
 
 def test_adjustments_correct_the_reference_stock_and_the_past_is_projected_forward():
@@ -552,7 +578,8 @@ def test_ignored_firm_orders_leave_the_erp_scenario_and_the_plan():
 
 def test_desadv_shown_in_the_receipt_row_until_received_or_hidden():
     mon1, tue1, wed1 = MON - D(days=7), MON - D(days=6), MON - D(days=5)
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
+    ds = make_dataset(links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, priority=1), SupplierLink("A1", "S2", priority=2)],
+                      stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
                       receipts=[Receipt("R1", "A1", tue1, 300, supplier_id="S1", packing_slip="BL-1"),
                                 Receipt("R2", "A1", wed1, 100, supplier_id="S1", packing_slip="BL-9")])
     ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", mon1, 300, state="Traité", final_processing="OK"),

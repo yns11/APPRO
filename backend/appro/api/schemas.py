@@ -217,6 +217,7 @@ class LaneOut(BaseModel):
 
     supplier_id: str | None
     name: str
+    linked: bool = True          # False : no active link, the lane only carries typed plan cells
     series: list[SeriesOut]
     plan_typed: list[bool]
     orders_ignored: list[bool] = Field(default_factory=list)
@@ -325,6 +326,7 @@ class OrderRow(BaseModel):
     qty_ordered: float
     qty_open: float
     purch_id: str = ""
+    ignored: bool = False      # the planner ignored the firm orders of that day (Ferme row click)
     first_seen: dt.date | None = None
 
 

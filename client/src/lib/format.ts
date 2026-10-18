@@ -54,7 +54,10 @@ export function periodLabel(p: string): string {
 export const ALERT_LABELS: Record<string, string> = {
   STOCKOUT: "Rupture", LOW_COVERAGE: "Couverture insuffisante", OVERSTOCK: "Surstock", BACKLOG: "Backlog fournisseur",
   URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock de départ négatif",
-  CAP_REACHED: "Plafond fournisseur atteint",
+  CAP_REACHED: "Plafond fournisseur atteint", UNLINKED_FLOWS: "Flux hors lien actif",
+};
+export const PLAN_ORIGIN_LABELS: Record<string, string> = {
+  monday: "version connue le lundi", later: "version importée après coup", erp: "plan ERP", latest: "PDP actuel", none: "aucun plan",
 };
 export const WEEKDAY_SHORT = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 export const WEEKDAY_LONG = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];

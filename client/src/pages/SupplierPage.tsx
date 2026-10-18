@@ -55,6 +55,7 @@ export default function SupplierPage() {
     { key: "date", label: "Livraison prévue", get: (o) => o.expected_date, render: (o) => fmtDate(o.expected_date) },
     { key: "qty", label: "Commandé", get: (o) => o.qty_ordered, num: true, render: (o) => fmtQty(o.qty_ordered, o.unit) },
     { key: "open", label: "Restant", get: (o) => o.qty_open, num: true, sum: true, unit: (o) => o.unit, render: (o) => fmtQty(o.qty_open, o.unit) },
+    { key: "state", label: "Dans le tableau", get: (o) => (o.ignored ? "ignorée" : "comptée"), filter: "select", render: (o) => (o.ignored ? <Badge tone="neutral" title="Ignorée par l'approvisionneur (clic sur la ligne Ferme) : hors projection, toujours attendue">ignorée</Badge> : <span className="subtle">comptée</span>) },
   ], []);
   const desadvCols = useMemo<Column<DesadvRow>[]>(() => [
     art<DesadvRow>(), planner<DesadvRow>(),

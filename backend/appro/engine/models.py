@@ -330,6 +330,7 @@ class AlertType(str, Enum):
     MISSING_DATA = "MISSING_DATA"
     NEGATIVE_STOCK = "NEGATIVE_STOCK"
     CAP_REACHED = "CAP_REACHED"
+    UNLINKED_FLOWS = "UNLINKED_FLOWS"
 
 
 class Severity(str, Enum):
@@ -397,6 +398,7 @@ class Lane:
     receipts_booked: np.ndarray | None = None   # bool: every receipt of the day is booked (ACR validated) : green background
     desadv: list["DesadvInfo"] = field(default_factory=list)
     receipt_lines: list["ReceiptInfo"] = field(default_factory=list)   # the receipts of the lane, one per ERP line (tooltips)
+    linked: bool = True               # False : no active link, the lane only exists for typed plan cells
 
 
 @dataclass
@@ -490,6 +492,7 @@ class ArticleResult:
     proposals_ignored: list[Proposal] = field(default_factory=list)   # refused urgent / normal proposals, information only
     price: float | None = None                                         # standard cost price (euros), None = unknown
     cap_shortfalls: list["CapShortfall"] = field(default_factory=list) # needs that no delivery cap could absorb
+    unlinked: list[Any] = field(default_factory=list)                  # ERP flows of suppliers without an active link (out of the table)
 
 
 @dataclass

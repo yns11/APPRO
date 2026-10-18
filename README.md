@@ -21,7 +21,7 @@ du tableau se saisissent, *Appro.* (une par fournisseur) et *Ajustement* ; deux 
 | Plan de production (PDP) | PDP effectif en feuille (programmes × semaines) : saisie directe des semaines à venir par les managers et administrateurs, import d'un classeur, versions |
 | Impact programmes | production réalisable par programme et semaine |
 | Imports / exports | classeur de simulation à formules (export, réimport), alertes, plan |
-| Paramètres | **Règles communes** (tolérance sous la cible ; règles figées listées), **Affichage** (semaines passées / détaillées, thème, polices), **Données** (synchronisation ERP et alerte de retard, articles hors référentiel, calendrier usine, **adhérence PDP / réel** avec suggestion de jours de consommation), **Utilisateurs** |
+| Paramètres | **Règles communes** (tolérance sous la cible ; règles figées listées), **Affichage** (semaines passées / détaillées, thème, polices), **Données** (synchronisation ERP et alerte de retard, articles hors référentiel, calendrier usine, **adhérence PDP / réel** sur une période choisie au sélecteur de semaines, version du PDP retenue semaine par semaine, suggestion de jours de consommation), **Utilisateurs** |
 
 Tout tableau porte un bouton **Excel** (colonnes affichées, lignes filtrées) et un pied de totaux ; les filtres
 de chaque page sont mémorisés entre deux visites. Le moteur compte en **jours ouvrés** (délai fournisseur

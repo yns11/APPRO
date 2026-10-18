@@ -875,6 +875,38 @@ def test_adherence_net_gross_and_demand_days_suggestion(client):
         assert len(row["weekday_share"]) == 5
     daily = client.get("/api/data/adherence", params={"weeks": 2, "bucket": "day", "plan_mode": "latest", "article_id": AID}).json()
     assert len(daily["buckets"]) == 14 and [r["article_id"] for r in daily["rows"]] == [AID]
+    assert [v["origin"] for v in daily["plan_versions"]] == ["latest", "latest"]
+
+
+def test_adherence_plan_of_each_week_falls_back_on_a_later_version_and_takes_week_bounds(client):
+    """« PDP du lundi » : with no version imported before the Monday of a week, the first version imported
+    afterwards that holds the week is the plan of that week (flagged ``later``) instead of an empty plan ;
+    the window is given by Mondays (``week_from`` / ``week_to``), always before the current week."""
+    before = client.get("/api/data/adherence", params={"weeks": 4, "article_id": AID}).json()
+    assert before["from"] == "2026-08-17" and before["to"] == "2026-09-13" and len(before["plan_versions"]) == 4
+    assert {v["origin"] for v in before["plan_versions"]} <= {"erp", "none"}       # the seed plan comes from the ERP table
+    # a version imported today (after every Monday of the window) holding four past weeks
+    wb = load_workbook(io.BytesIO(client.get("/api/pdp/template.xlsx", params={"weeks": 4}).content))
+    ws = wb["SOP - PDP"]
+    for k, col in enumerate("CDEF"):
+        ws[f"{col}1"] = f"2026-W{34 + k}"
+        for row in range(2, ws.max_row + 1):
+            ws[f"{col}{row}"] = 1000
+    buf = io.BytesIO()
+    wb.save(buf)
+    rep = client.post("/api/pdp/import", files={"file": ("past.xlsx", buf.getvalue())}, data={"name": "PDP passé", "activate": "false"}).json()
+    assert rep["created"] >= 4
+    after = client.get("/api/data/adherence", params={"weeks": 4, "article_id": AID}).json()
+    assert [v["origin"] for v in after["plan_versions"]] == ["later"] * 4
+    assert all(v["version_id"] == rep["version"]["id"] and v["version_name"] == "PDP passé" for v in after["plan_versions"])
+    assert after["plan_coverage"] == {"monday": 0, "later": 4, "erp": 0, "latest": 0, "none": 0}
+    assert after["rows"][0]["plan"] > 0 and after["rows"][0]["plan"] != before["rows"][0]["plan"]
+    # week bounds : two weeks, the current week is never part of the window
+    two = client.get("/api/data/adherence", params={"week_from": "2026-08-24", "week_to": "2026-09-07", "article_id": AID}).json()
+    assert two["from"] == "2026-08-24" and two["to"] == "2026-09-13" and two["weeks"] == 3 and len(two["buckets"]) == 3
+    cur = client.get("/api/data/adherence", params={"week_from": "2026-09-07", "week_to": "2026-09-16", "article_id": AID}).json()
+    assert cur["buckets"] == ["2026-W37"]
+    assert client.get("/api/data/adherence", params={"week_from": "2026-09-07", "week_to": "2026-08-01"}).status_code == 422
 
 
 def test_supplier_page(client):

@@ -405,7 +405,7 @@ def lane_out(l: Lane, cols: Columns, with_orders: bool = True, since: dt.date | 
     def shown(day: dt.date) -> bool:
         return since is None or day >= since
     return {
-        "supplier_id": l.supplier_id, "name": l.name,
+        "supplier_id": l.supplier_id, "name": l.name, "linked": bool(l.linked),
         "series": [{"key": key, "label": label, "values": _agg(key, getattr(l, key), cols)} for key, label in LANE_SERIES],
         "plan_typed": cols.any(l.plan_typed), "orders_ignored": cols.any(l.orders_ignored),
         "desadv_ko": cols.any(l.desadv_ko) if l.desadv_ko is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),

@@ -40,7 +40,7 @@ export interface SeriesOut { key: string; label: string; values: number[]; }
 export interface DesadvInfo { desadv_id: string; packing_slip: string; issue_date: string; qty: number; state: string; final_processing: string; processed: boolean; received: boolean; hidden: boolean; purch_id: string; journaled: boolean; source: "desadv" | "journal"; }
 /** A validated receipt : ``processed`` = announced by a processed DESADV (green dot), ``booked`` = acknowledgement of receipt validated (green background). */
 export interface ReceiptInfo { receipt_id: string; receipt_date: string; qty: number; packing_slip: string; purch_id: string; processed: boolean; status: string; booked: boolean; }
-export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; desadv_ko: boolean[]; receipts_ko: boolean[]; receipts_booked: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; desadv: DesadvInfo[]; receipt_lines: ReceiptInfo[]; }
+export interface LaneOut { supplier_id: string | null; name: string; linked: boolean; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; desadv_ko: boolean[]; receipts_ko: boolean[]; receipts_booked: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; desadv: DesadvInfo[]; receipt_lines: ReceiptInfo[]; }
 
 export interface ArticleKpis {
   stock_on_hand: number; reference_correction: number; stock_reference: number; stock_at_date: number; price: number | null; stock_value: number | null; target_value: number | null; stockout_plan_severity: Severity | null; init_date: string;
@@ -125,7 +125,7 @@ export interface PdpSheetProgram { program_id: string; name: string; active: boo
 export interface PdpSheetOut { as_of: string; current_week: string; active_version: PdpVersionOut | null; erp_available: boolean; weeks: PdpSheetWeek[]; programs: PdpSheetProgram[]; }
 
 // ---- supply flows (cockpit tab 2) and search page
-export interface OrderRow { order_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; purch_id: string; first_seen: string | null; }
+export interface OrderRow { order_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; purch_id: string; ignored: boolean; first_seen: string | null; }
 export interface ReceiptRow { receipt_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; receipt_date: string; qty: number; purch_id: string; packing_slip: string; status: string; }
 export interface DesadvRow { desadv_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; packing_slip: string; purch_id: string; issue_date: string; qty: number; state: string; final_processing: string; received: boolean; journal: boolean; issue: string; }
 export interface PendingRow { pending_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; purch_id: string; packing_slip: string; qty: number; registered_date: string; days_pending: number; }
@@ -148,10 +148,15 @@ export interface AdherenceRow {
   plan: number; real: number; bias_pct: number | null; net_pct: number | null; gross_pct: number | null; weekday_share: number[]; suggested_demand_days: number | null;
   status: "ok" | "plan sans conso" | "conso sans plan" | "sans donnée";
 }
+/** Which imported PDP version stands for the plan of one past week : known on its Monday, imported
+ * later (fallback, flagged), the ERP plan, the current plan (« PDP actuel » mode) or nothing at all. */
+export type PlanOrigin = "monday" | "later" | "erp" | "latest" | "none";
+export interface PlanVersionWeek { week: string; week_start: string; version_id: string | null; version_name: string | null; imported_at: string | null; origin: PlanOrigin; }
 export interface AdherenceResponse {
   as_of: string; from: string; to: string; weeks: number; bucket: "week" | "day"; plan_mode: "monday" | "latest"; buckets: string[];
   totals: { articles: number; plan: number; real: number; bias_pct: number | null; net_pct: number | null; gross_pct: number | null; plan_without_consumption: number; suggestion_changes: number };
   rows: AdherenceRow[]; excluded_plan_source: string[];
+  plan_versions: PlanVersionWeek[]; plan_coverage: Record<PlanOrigin, number>;
 }
 export interface SupplierArticleRow {
   article_id: string; designation: string; unit: string; planner: string; active: boolean; moq: number; pack_qty: number; lead_time_days: number; lead_time_override: number | null;

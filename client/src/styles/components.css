@@ -456,6 +456,7 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .status-dot.ok { background: var(--ok); } .status-dot.late { background: var(--critical); } .status-dot.unknown { background: var(--border-strong); }
 .banner { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 14px; border-radius: var(--r-md); border: 1px solid var(--warning); background: var(--warning-soft); color: var(--warning-fg); }
 .banner.ok { border-color: var(--ok); background: var(--ok-soft); color: var(--ok-fg); }
+.banner.info { border-color: var(--info-fg); background: var(--info-soft, var(--bg-subtle)); color: var(--info-fg); }
 .banner.neutral { border-color: var(--border-strong); background: var(--bg-subtle); color: var(--fg-muted); }
 .pct-bar { position: relative; height: 14px; border-radius: 7px; background: var(--bg-subtle); overflow: hidden; min-width: 80px; }
 .pct-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ok); border-radius: 7px; }
@@ -468,3 +469,18 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .tbl tbody tr.muted td { opacity: 0.6; }
 .kpi .value.long { font-size: var(--fs-1); }
 .kpi .value { overflow-wrap: anywhere; }
+
+/* ---- lane without active link (typed cells only) */
+.lane-unlinked { margin-left: 6px; padding: 1px 6px; border-radius: var(--r-sm); background: var(--warning-bg); color: var(--warning-fg); font-size: var(--fs--2); font-weight: var(--fw-semibold); letter-spacing: .02em; }
+
+/* ---- adherence : PDP version taken for each week */
+.plan-versions { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px var(--sp-3); align-items: center; }
+.plan-versions .pv { display: inline-flex; flex-direction: column; min-width: 54px; padding: 2px 6px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--bg-subtle); font-size: var(--fs--2); line-height: 1.25; font-variant-numeric: tabular-nums; }
+.plan-versions .pv b { font-weight: var(--fw-semibold); color: var(--fg); }
+.plan-versions .pv small { color: var(--fg-muted); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-versions .pv.monday, .plan-versions .pv.latest { border-color: var(--ok-fg); }
+.plan-versions .pv.later { border-color: var(--warning-fg); background: var(--warning-bg); }
+.plan-versions .pv.erp { border-color: var(--info-fg); }
+.plan-versions .pv.none { border-style: dashed; opacity: .7; }
+.plan-versions .pv-legend { margin-left: auto; display: inline-flex; gap: 10px; color: var(--fg-muted); font-size: var(--fs--2); }
+.plan-versions .pv-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; border: 1px solid var(--border); vertical-align: -1px; margin-right: 4px; }

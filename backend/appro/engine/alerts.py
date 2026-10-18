@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 
 import numpy as np
 
@@ -55,6 +56,7 @@ def classify_alerts(
     has_bom: bool,
     has_snapshot: bool,
     cap_shortfalls: list[CapShortfall] | None = None,
+    unlinked: list[Any] | None = None,
 ) -> list[Alert]:
     alerts: list[Alert] = []
     aid = article.article_id
@@ -73,6 +75,16 @@ def classify_alerts(
     if not links:
         alerts.append(Alert(aid, AlertType.MISSING_DATA, Severity.WARNING,
                             "Aucun fournisseur actif lié à l'article (MOQ / délai inconnus)", scope="data"))
+    if unlinked:
+        parts = []
+        for u in unlinked:
+            what = [f"{u.orders_open} commande(s) ferme(s) ouverte(s) ({_fmt(u.open_qty)})" if u.orders_open else "",
+                    f"{u.orders_late} en retard ({_fmt(u.late_qty)})" if u.orders_late else "",
+                    f"{u.receipts} réception(s)" if u.receipts else "", f"{u.desadv} DESADV" if u.desadv else ""]
+            parts.append(f"{u.supplier_id or 'sans fournisseur'} {u.name}".strip() + " : " + ", ".join(x for x in what if x))
+        alerts.append(Alert(aid, AlertType.UNLINKED_FLOWS, Severity.WARNING if any(u.orders_open or u.orders_late for u in unlinked) else Severity.INFO,
+                            "Flux ERP hors lien actif, exclus du tableau (visibles dans Flux et Recherche) – " + " ; ".join(parts),
+                            scope="data", details={"suppliers": [u.supplier_id for u in unlinked]}))
     if not has_bom:
         alerts.append(Alert(aid, AlertType.MISSING_DATA, Severity.INFO,
                             "Article absent des nomenclatures : aucun besoin calculé", scope="data"))
