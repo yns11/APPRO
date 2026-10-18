@@ -1,158 +1,176 @@
 # Recommandations : rendre l'application plus simple, plus réaliste et plus fiable
 
-Synthèse des échanges d'octobre 2026 sur les règles du moteur, le multi-sourcing, le backlog, le
-délai, la tolérance et le rattrapage de stock. Chaque recommandation dit ce qu'elle change, pourquoi,
-et ce qu'il faut vérifier avant de l'appliquer. Les lots de la fin donnent un ordre de mise en œuvre.
+Liste exhaustive, à enrichir avant implémentation. Décisions acquises au fil des échanges : jours **ouvrés**
+partout ; propositions CBN sur **tous les jours de livraison du fournisseur** ; pas de rampe de cible, le
+lissage est porté par un **plancher** dans le délai et des **plafonds** par livraison et par semaine ; plus de
+stock de sécurité, la cible est la seule couverture cible ; besoin non servi **perdu** par défaut (fait) ;
+`RemainInventPhysical` décrémenté dès la validation du journal d'arrivée.
 
-Conventions acquises : **jours ouvrés** partout, propositions CBN sur **tous les jours de livraison du
-fournisseur**, cycle de commande à 0 sur tous les articles, valeurs du référentiel déjà saisies en ouvrés.
+## 1. Règles globales du moteur à supprimer (figées à la valeur en usage, résultats inchangés)
 
----
+- `proposal_placement` : supprimé, figé à `working_days` ; le regroupement hebdomadaire est porté par
+  `delivery_weekdays` du fournisseur et `delivery_shift = earlier`.
+- `lot_policy` et `fixed_lot_qty` du moteur : supprimés, jamais alimentés par le référentiel (code mort).
+- `target_policy` : supprimé, figé à `max` ; sans stock de sécurité il n'a plus d'objet du tout.
+- `missing_actual_policy` : supprimé, figé à `zero` (jour sans consommation déclarée = jour sans mouvement).
+- `coverage_tie_rule` : supprimé, figé à `covered`.
+- `production_mode` : supprimé, figé à `actual_then_remainder` ; les trois autres modes sont du débogage.
+- `spread_rounding` : supprimé, figé à `exact`, seul mode qui respecte la somme du PDP.
+- `consumption_offset_days` : supprimé, figé à 0.
+- `proposal_lookahead_days` et `stockout_lookahead_days` : supprimés, tout l'horizon est couvert.
+- `forecast_date_policy` : supprimé, figé à `actual` (affichage du prévisionnel uniquement).
+- `generate_proposals` et `include_proposals_in_plan` : supprimés, toujours actifs.
+- `coverage_unit` : supprimé, figé à `working` ; couverture cible, seuils rouge/jaune, surstock et
+  couverture affichée sont tous en jours ouvrés.
+- `shortfall_tolerance_days` : supprimé, remplacé par le plancher (§ 4).
+- `respect_lead_time` : supprimé ; une proposition peut tomber dans le délai, elle est alors marquée
+  urgente et limitée au plancher (§ 4).
+- `order_cycle_days` (article et hebdomadaire) : supprimé, à 0 partout ; la cadence est portée par les
+  jours de livraison du fournisseur et par le MOQ.
+- `safety_stock_qty` (article et hebdomadaire) : supprimé ; la couverture cible est le seul niveau visé.
+  Avant retrait, vérifier qu'aucune valeur non nulle n'est saisie ; sinon la convertir en jours de
+  couverture (sécurité / besoin moyen par jour ouvré) ajoutés à la cible de l'article.
+- `backlog_days` : supprimé, le backlog ne dépend plus d'une fenêtre (§ 6).
+- `focus_weeks` et `history_weeks` : retirés des règles du moteur, deviennent des réglages d'affichage par
+  utilisateur dans Paramètres › Affichage.
+- Restent globales : `horizon_days` (longueur de fenêtre, calendaire), `firm_sources`, `shortage_policy`
+  (défaut `lost`, fait) jusqu'à son rattachement à l'article.
+- Avant toute suppression : lister dans `app_param_overrides` les valeurs non défaut saisies en production
+  sur les règles retirées et les reporter là où la règle est rattachée ; les clés orphelines sont ensuite
+  purgées par la migration.
 
-## A. Règles globales du moteur : supprimer ou figer
+## 2. Règles à rattacher au fournisseur, au lien ou à l'article
 
-Objectif : passer de 25 règles à une dizaine, sans changer les résultats actuels (chaque règle retirée est
-figée à sa valeur par défaut ou à la valeur en usage).
+- Mécanisme : étendre `app_param_overrides` des portées `global` et `article_week` aux portées `article`,
+  `supplier` et `link`, précédence global < article < fournisseur < lien ; exposées comme colonnes
+  facultatives du Référentiel, vide = héritage ; aucun résultat ne change tant que rien n'est saisi.
+- Fournisseur `lead_time_days` : délai commande → livraison en jours ouvrés, délai inclus (lundi + 5 =
+  lundi suivant), obligatoire, devient la valeur par défaut des liens.
+- Fournisseur `frozen_days` : période gelée en jours ouvrés, aucune livraison proposée avant J + n, défaut 0.
+- Fournisseur `delivery_shift` : jour non autorisé → avancer (défaut, regroupe sur le jour de livraison
+  précédent) ou reculer.
+- Fournisseur `delivery_weekdays` : existant, porte la cadence (1 à 5 jours).
+- Pas de plafond au niveau du fournisseur toutes références confondues : il demanderait une unité commune
+  (palettes, camions) absente du référentiel ; les plafonds sont sur le lien, dans l'unité de l'article.
+- Lien `lead_time_days` : devient facultatif, exception au délai du fournisseur, affiché grisé quand hérité.
+- Lien `max_qty_per_delivery` : plafond par livraison, multiple de l'UM et ≥ MOQ, vide = aucun.
+- Lien `max_qty_per_week` : plafond par semaine ISO, multiple de l'UM, vide = aucun ; contrôle de saisie :
+  ≤ plafond par livraison × nombre de jours de livraison du fournisseur, et avertissement si
+  < besoin hebdomadaire moyen de l'article (plafond intenable).
+- Lien `moq`, `pack_qty`, `quota_pct`, `priority`, `active` : inchangés.
+- Article `sourcing_policy` : quotas ou priorité, défaut quota.
+- Article `shortage_policy` : perdu ou reporté, défaut perdu.
+- Article `firm_horizon_days` : horizon de gradation des ruptures, en jours ouvrés, défaut 20 ; variante :
+  dérivé du plus long délai des fournisseurs actifs de l'article.
+- Article `coverage_target_days`, `alert_red_days`, `alert_yellow_days`, `overstock_days` : inchangés,
+  hebdomadaires, en jours ouvrés ; la colonne Stock de sécurité et la colonne Cycle de commande sont retirées
+  du tableau, des paramètres hebdomadaires, du modèle Excel et de l'export.
 
-| Règle | Décision | Valeur figée | Pourquoi |
-|---|---|---|---|
-| `proposal_placement` | supprimer | `working_days` | doublon des jours de livraison du fournisseur ; `monday` = `delivery_weekdays = 1` |
-| `lot_policy`, `fixed_lot_qty` (moteur) | supprimer | `coverage` | jamais alimentés par le référentiel : code mort |
-| `target_policy` | supprimer | `max` | couverture à 0 ou sécurité à 0 donnent déjà les deux autres cas |
-| `missing_actual_policy` | supprimer | `zero` | un jour sans consommation déclarée est un jour sans mouvement |
-| `coverage_tie_rule` | supprimer | `covered` | égalité exacte besoin cumulé = stock, cas quasi inexistant, illisible |
-| `production_mode` | supprimer | `actual_then_remainder` | les trois autres modes sont des modes de débogage |
-| `spread_rounding` | supprimer | `exact` | seul mode qui respecte la somme du PDP |
-| `consumption_offset_days` | supprimer | 0 | jamais renseigné ; propre à une nomenclature s'il existe |
-| `proposal_lookahead_days`, `stockout_lookahead_days` | supprimer | tout l'horizon | doublons de l'horizon et de l'horizon ferme |
-| `forecast_date_policy` | supprimer | `actual` | n'affecte que l'affichage du prévisionnel |
-| `generate_proposals`, `include_proposals_in_plan` | supprimer | oui / oui | interrupteurs de développement ; les désactiver casse le flux À commander |
-| `coverage_unit` | supprimer | `working` | une seule unité, les jours ouvrés (§ E) |
-| `shortfall_tolerance_days` | supprimer | 0 | remplacée par le plancher et la rampe (§ C) |
-| `focus_weeks`, `history_weeks` | déplacer | — | réglages d'affichage, par utilisateur, dans Paramètres › Affichage |
-| `backlog_days` | supprimer | — | disparaît avec le backlog sur restant ERP (§ D) |
+## 3. Jour ouvré : une seule unité de temps
 
-Restent globales : `horizon_days`, `firm_sources`, `shortage_policy` (en attendant son rattachement à l'article).
+- Couverture cible, seuils, surstock et couverture affichée : jours ouvrés, figé (§ 1).
+- `frozen_days`, `firm_horizon_days`, délai : lus en jours ouvrés ; les valeurs saisies le sont déjà,
+  aucune conversion.
+- `horizon_days` reste calendaire (longueur de la fenêtre de calcul, pas une règle métier).
+- Indicateur « Besoin 30 j » de la fiche article : devient « Besoin 20 j ouvrés », même base que le besoin
+  moyen par jour ouvré.
+- Calendrier d'usine (`working_weekdays`, `APPRO_HOLIDAYS`) : devient structurant pour toutes les règles ;
+  à afficher dans Paramètres avec les prochains jours fermés.
 
-Précaution unique avant de supprimer : vérifier dans `app_param_overrides` qu'aucune valeur non défaut n'a été
-saisie en production sur les règles retirées ; sinon la reporter là où la règle est rattachée.
+## 4. Propositions CBN : plancher, plafonds, quotas, refus
 
-## B. Rattacher les règles au fournisseur, au lien ou à l'article
+- **Plancher dans le délai** : une proposition dont la date de commande (livraison − délai en jours ouvrés)
+  est antérieure à aujourd'hui est urgente ; elle porte uniquement la quantité qui évite tout besoin non
+  servi jusqu'à la veille de la livraison suivante du fournisseur, lotie au MOQ et à l'UM ; elle ne remonte
+  pas à la cible. Marquée urgente, motif « commande à passer immédiatement ».
+- **Cible pleine dès la première livraison tenable** : à partir de la première livraison dont la commande
+  peut encore être passée aujourd'hui, la proposition vise la couverture cible, sans rampe.
+- **Plafond par livraison** : appliqué après lotissement, la quantité est tronquée au multiple d'UM
+  inférieur ou égal au plafond ; le jour est alors plein et n'accueille plus de besoin ramené par le
+  décalage « avancer » ; l'excédent glisse à la livraison suivante du même fournisseur, par simple
+  reprojection.
+- **Plafond par semaine** : somme des propositions du lien sur la semaine ISO (fermes et lignes Appro
+  comprises dans le cumul, car ce sont des livraisons réelles) ; une fois atteint, les jours restants de la
+  semaine sont pleins et l'excédent glisse à la semaine suivante.
+- **Plafonds et plancher** : si même le plancher dépasse un plafond, le manque est inévitable : affiché en
+  rouge dans le Projeté Appro. et remonté en alerte « plafond fournisseur atteint », comme le délai non
+  tenable. Les plafonds s'appliquent aussi aux urgences.
+- **Plafonds et quotas** : chaque part est plafonnée par son lien ; l'excédent d'un fournisseur reste chez
+  lui à sa livraison suivante, les quotas ne bougent pas. Variante à trancher : un excédent plafonné peut-il
+  basculer vers l'autre fournisseur du quota comme le fait un refus ?
+- **Quotas** : déjà livré, chaque besoin partagé au prorata dès la première proposition, un fournisseur
+  refusé cède sa part.
+- **Refus d'une proposition** : bloque le jour et le reste de la semaine ISO pour ce fournisseur ; en
+  monosource le besoin glisse après la fenêtre et le manque intermédiaire est affiché et alerté ; le refus
+  d'une proposition plancher revient à accepter ce manque, rien n'est reproposé plus tôt.
+- **Motif des propositions** : conservé et complété : plancher, plafond atteint (livraison ou semaine),
+  part de quota, première livraison possible.
+- **Regroupement** : inchangé, `delivery_shift = earlier` ramène chaque besoin sur le jour de livraison
+  précédent du fournisseur ; un fournisseur quotidien n'est pas regroupé, un hebdomadaire porte toute la
+  semaine, un mardi-jeudi porte deux intervalles.
 
-Mécanisme : étendre `app_param_overrides` (portées `global` et `article_week` aujourd'hui) aux portées
-`supplier`, `link` et `article`, avec la précédence global < article < fournisseur < lien, et exposer ces
-valeurs comme colonnes **facultatives** du Référentiel : vide = héritage. Aucun résultat ne change tant que
-rien n'est saisi.
+## 5. Stock cible et alertes
 
-### Sur le fournisseur (`ref_suppliers`)
+- Cible du jour = besoin cumulé des `coverage_target_days` prochains jours ouvrés, rien d'autre.
+- Alertes rouge/jaune et surstock : seuils en jours ouvrés, inchangés par ailleurs.
+- Rupture gradée : `firm_horizon_days` en jours ouvrés.
+- Le KPI « valeur cible » utilise la même cible.
 
-| Champ | Rôle | Défaut |
-|---|---|---|
-| `lead_time_days` | délai commande → livraison par défaut, jours ouvrés | obligatoire |
-| `frozen_days` | période gelée : aucune livraison proposée avant J + n ouvrés | 0 |
-| `respect_lead_time` | ne jamais proposer avant J + délai (sinon la proposition est simplement marquée urgente) | non |
-| `delivery_shift` | jour non autorisé : avancer (regroupe sur le jour de livraison précédent) ou reculer | avancer |
-| `delivery_weekdays` | existant ; porte désormais aussi la cadence hebdomadaire | 1,2,3,4,5 |
+## 6. Backlog fournisseur sur le restant ERP
 
-### Sur le lien article ↔ fournisseur (`ref_article_suppliers`)
+- Backlog d'un fournisseur = Σ `qty_open` (`RemainInventPhysical`) des commandes fermes dont la date de
+  livraison est passée, sans fenêtre ; `RemainInventPhysical` étant décrémenté dès la validation du journal
+  d'arrivée, aucune correction par les réceptions *Reçu* n'est nécessaire.
+- La ligne Ferme affiche déjà `restant / commandé` : cohérence entre ligne et KPI.
+- Les fermes ignorées par clic restent hors projection mais restent dans le backlog : c'est précisément
+  du retard fournisseur. À confirmer.
+- `backlog_days` et la fenêtre de 28 jours disparaissent ; le flux « En retard » du cockpit liste les
+  commandes concernées avec leur restant.
 
-| Champ | Rôle | Défaut |
-|---|---|---|
-| `lead_time_days` | devient **facultatif** : exception au délai du fournisseur | vide = fournisseur |
-| `max_qty_per_delivery` | plafond par livraison (camion, emballage, capacité) ; l'excédent glisse à la livraison suivante | vide = aucun |
-| `moq`, `pack_qty`, `quota_pct`, `priority`, `active` | inchangés | |
+## 7. Données ERP et fiabilité
 
-### Sur l'article (`ref_articles`, et par semaine)
+- `recep_edi` : contrat à trois statuts *En transit* / *Reçu* / *Comptabilisé*, rapprochement ACR par
+  `inventTransId` (fait dans le job) ; mettre à jour `docs/flux_donnees_erp.md` et le dictionnaire qui
+  décrivent encore le rapprochement par numéro de BL.
+- `bl_en_attente` : table redondante avec le statut *Reçu*, retirée du job, de la configuration
+  (`APPRO_ERP_BL_PENDING_TABLE`), du miroir `erp_bl_pending` et du type de recherche *BL en attente*.
+- `desadv_edi` : conserver tous les messages, états *Traité* compris, depuis la date d'initialisation du
+  stock ; c'est l'absence d'un DESADV traité qui met un point rouge sur une réception correcte.
+- Articles orphelins : contrôle dans Paramètres listant les articles présents dans `erp_receipts`,
+  `erp_purchase_orders` ou `erp_desadv` et absents de `ref_articles`, avec quantités et dernière date.
+- `first_seen` des commandes : vérifier son remplissage après le premier passage du job ; sans lui le
+  flux Commandé reste vide.
+- Journal de synchronisation : afficher `erp_sync_log` dans Paramètres avec l'âge de chaque table miroir et
+  une alerte si une table a plus d'une heure de retard ; bandeau discret dans l'application quand la
+  dernière synchronisation a échoué.
+- Fraîcheur : rappeler que le bouton de recharge relit le miroir, et que le miroir est rafraîchi par le
+  job horaire à H:20.
 
-| Champ | Rôle | Défaut |
-|---|---|---|
-| `sourcing_policy` | quotas ou priorité | quota |
-| `shortage_policy` | besoin non servi perdu ou reporté | perdu |
-| `firm_horizon_days` | horizon de gradation des ruptures, jours ouvrés ; alternative : dériver du plus long délai des fournisseurs de l'article | 20 |
-| `target_ramp_days` | durée de rattrapage de la cible, jours ouvrés (§ C) ; 0 = en une fois | = couverture cible |
-| `order_cycle_days` | **supprimer** : à 0 partout, la cadence est portée par les jours de livraison du fournisseur et par le MOQ | — |
+## 8. Référentiel et écrans
 
-## C. Propositions CBN : plus réalistes
+- Articles : retirer *Stock de sécurité* et *Cycle de commande* ; conserver couverture et seuils ; colonnes
+  facultatives des règles rattachées (§ 2) ; boutons rapides existants conservés.
+- Fournisseurs : ajouter *Délai (j ouvrés)*, *Période gelée*, *Décalage de livraison* ; *Jours de livraison*
+  existant.
+- Liens article-fournisseur : *Délai* facultatif avec héritage grisé, *Max par livraison*, *Max par semaine*
+  avec contrôles de cohérence et avertissement de plafond intenable.
+- Paramètres hebdomadaires : couverture et seuils seulement ; plus de sécurité ni de cycle.
+- Modèles Excel d'import et exports : colonnes alignées ; les anciens fichiers contenant les colonnes
+  retirées sont acceptés, colonnes ignorées avec avertissement.
+- Page Paramètres : règles communes restantes seulement ; onglet Affichage avec `focus_weeks` et
+  `history_weeks` par utilisateur ; onglet Données avec journal de synchronisation, articles orphelins et
+  calendrier d'usine.
+- Tableau d'approvisionnement : motif des propositions enrichi ; légende complétée (plafond atteint).
+- Guide du moteur : régénéré avec les scénarios plancher, plafond par livraison, plafond par semaine,
+  quotidien / hebdomadaire / mardi-jeudi, multi-sourcing plafonné ; sections des règles supprimées retirées.
+- Documentation : règles métier, dictionnaire de données, flux ERP et README alignés.
 
-1. **Plancher dans le délai.** Avant J + délai du fournisseur, une proposition ne porte que la quantité qui
-   évite tout besoin non servi (plus le stock de sécurité). Elle reste marquée urgente, mais ne demande plus de
-   remonter à la cible. C'est la mesure qui change le plus vos urgences, sur tous les articles, sans paramètre.
-2. **Rampe de cible** (`target_ramp_days`). À partir de J + délai, la cible visée part du stock projeté et
-   rejoint la vraie cible en n jours ouvrés ; les propositions suivent cette pente, aux jours de livraison du
-   fournisseur, chaque livraison visant la cible effective de la veille de la livraison suivante. Rampe plus
-   courte que l'intervalle de livraison : étirée à la deuxième livraison. La rampe s'applique aussi en
-   anticipation d'une hausse de cible (PDP qui monte). Sans effet quand l'écart tient en quelques jours de
-   besoin ou quand le MOQ dépasse l'écart ; utile sur les couvertures longues. Défaut = couverture cible.
-3. **Plafond par livraison** (`max_qty_per_delivery`, lien). Complément physique de la rampe ; sur un
-   fournisseur hebdomadaire, un plafond trop bas crée un manque visible plutôt qu'une livraison impossible.
-4. **Quotas** : déjà livré, chaque besoin est partagé au prorata, un fournisseur refusé cède sa part.
-5. **Motif des propositions** : conserver la phrase explicative par proposition (plancher, part de quota,
-   rampe), c'est ce qui rend ces règles acceptables à l'écran.
+## 9. Migration et précautions
 
-## D. Backlog : exact et sans réglage
-
-Remplacer `max(0, Σ commandé des fermes passées − Σ réceptions de la fenêtre)` par
-**Σ restant ERP des commandes fermes dont la date de livraison est passée**, par fournisseur. Plus de fenêtre
-de 28 jours, plus d'effet d'une réception qui solde une autre commande, cohérence avec la ligne Ferme qui
-affiche déjà `restant / commandé`.
-
-Vérification préalable : à quel moment l'ERP décrémente `RemainInventPhysical`, à la validation du journal
-d'arrivée ou à l'accusé de réception. Si c'est à l'ACR, déduire du restant les réceptions au statut *Reçu* de
-la même commande (même `purch_id`), que `recep_edi` porte.
-
-## E. Une seule unité de temps : le jour ouvré
-
-| Paramètre | Aujourd'hui | Cible |
-|---|---|---|
-| couverture cible, seuils, surstock, couverture affichée | calendaires sauf règle basculée | ouvrés, figé |
-| `frozen_days` | calendaires | ouvrés |
-| `firm_horizon_days` | calendaires | ouvrés |
-| délai, tolérance | ouvrés | — |
-| `horizon_days` | calendaires | reste calendaire (longueur de fenêtre, pas une règle métier) |
-| Besoin 30 j (fiche article) | 30 jours calendaires, moyenne par jour ouvré | 20 jours ouvrés |
-
-Les valeurs du référentiel ayant été saisies en ouvrés, aucune conversion. Le calendrier d'usine
-(`APPRO_HOLIDAYS`, `working_weekdays`) devient structurant : à tenir à jour.
-
-## F. Référentiel et écrans
-
-- Retirer la colonne *Cycle de commande* des articles, des paramètres hebdomadaires, du modèle Excel et de
-  l'export ; ajouter *Rattrapage (j ouvrés)* avec la même mécanique hebdomadaire.
-- Fournisseurs : ajouter *Délai (j ouvrés)*, *Période gelée*, *Respecter le délai*, *Décalage de livraison* ;
-  rendre le délai du lien facultatif avec l'héritage affiché en grisé.
-- Lien : ajouter *Max par livraison*.
-- Page Paramètres : ne garder que les règles réellement communes ; déplacer `focus_weeks` et `history_weeks`
-  dans l'onglet Affichage ; afficher le journal de synchronisation (`erp_sync_log`) avec l'âge de chaque table
-  miroir et une alerte si une table a plus d'une heure de retard.
-- Guide du moteur : régénérer avec des scénarios plancher / rampe (quotidien, hebdomadaire, mardi-jeudi) et
-  retirer les sections des règles supprimées.
-
-## G. Fiabilité des données
-
-- `recep_edi` : contrat à trois statuts (*En transit*, *Reçu*, *Comptabilisé*) à déployer dans le job amont
-  tel que fourni ; sans lui, les journaux non validés apparaissent comme reçus.
-- `desadv_edi` : garder tous les messages, états *Traité* compris, depuis la date d'initialisation du stock ;
-  c'est l'absence d'un DESADV traité qui met un point rouge sur une réception correcte.
-- Articles orphelins : un contrôle dans Paramètres listant les articles présents dans `erp_receipts`,
-  `erp_purchase_orders` ou `erp_desadv` et absents de `ref_articles` (aujourd'hui ignorés en silence).
-- `first_seen` : vérifier après le premier passage du job que la colonne se remplit, sinon le flux Commandé
-  reste vide.
-- `bl_en_attente` : table devenue redondante avec le statut *Reçu* ; peut être retirée du job et de la
-  configuration.
-
-## H. Ordre de mise en œuvre proposé
-
-**Lot 1, sans changement de résultat** : suppression et figeage des règles du § A, jours ouvrés (§ E),
-retrait du cycle de commande, contrôle des articles orphelins, journal de synchronisation dans Paramètres.
-
-**Lot 2, propositions réalistes** : plancher dans le délai, rampe par article avec défaut = couverture,
-plafond par livraison, guide régénéré. Résultats modifiés uniquement sur les articles en rattrapage.
-
-**Lot 3, rattachements** : portées `supplier`, `link`, `article` des règles, délai par défaut sur le
-fournisseur, colonnes facultatives du Référentiel, migration des éventuelles valeurs globales non défaut.
-
-**Lot 4, backlog** : restant ERP après vérification du comportement de `RemainInventPhysical`, retrait de
-`backlog_days` et de `bl_en_attente`.
-
-Chaque lot est livrable seul, testé par les scénarios du guide du moteur, et rétro-compatible avec les
-saisies existantes.
+- Migration des `app_param_overrides` : report des valeurs non défaut, purge des clés orphelines.
+- Colonnes de référentiel retirées : conservées en base une version, ignorées par le moteur, supprimées
+  ensuite.
+- Jeu de tests : scénarios du guide du moteur comme tests de non-régression (plancher, plafonds, quotas,
+  refus, backlog sur restant).
+- Validation sur la base réelle : comparer les propositions avant / après sur l'ensemble du carnet et
+  lister les articles dont la première proposition change de plus d'un lot.
