@@ -284,8 +284,8 @@ def test_display_start_follows_history_weeks_but_never_the_point_zero():
 def test_shortage_policies_and_first_stockout():
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 500.0)],
                       orders=[OrderLine("F1", "A1", "S1", MON + D(days=3), 1000, order_type=OrderType.FIRM)])
-    backlog = run(ds, horizon_days=6)
-    lost = run(ds, horizon_days=6, shortage_policy="lost")
+    backlog = run(ds, horizon_days=6, shortage_policy="backlog")
+    lost = run(ds, horizon_days=6)                                      # « lost » is the default policy
     i = backlog.dates.index(MON)
     assert list(backlog.stock_erp[i:i + 4]) == [300, 100, 0, 700]
     assert list(backlog.stock_erp_net[i:i + 4]) == [300, 100, -100, 700]

@@ -67,7 +67,7 @@ rien n'est saisi.
 | Champ | Rôle | Défaut |
 |---|---|---|
 | `sourcing_policy` | quotas ou priorité | quota |
-| `shortage_policy` | besoin non servi reporté ou perdu | reporté |
+| `shortage_policy` | besoin non servi perdu ou reporté | perdu |
 | `firm_horizon_days` | horizon de gradation des ruptures, jours ouvrés ; alternative : dériver du plus long délai des fournisseurs de l'article | 20 |
 | `target_ramp_days` | durée de rattrapage de la cible, jours ouvrés (§ C) ; 0 = en une fois | = couverture cible |
 | `order_cycle_days` | **supprimer** : à 0 partout, la cadence est portée par les jours de livraison du fournisseur et par le MOQ | — |

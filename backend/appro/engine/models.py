@@ -325,7 +325,7 @@ class EngineParams:
     backlog_days: int = 28                        # age limit of the backlog (past firm orders − receipts)
 
     # Coverage / stock policy
-    shortage_policy: Literal["backlog", "lost"] = "backlog"  # unserved demand: carried forward or lost
+    shortage_policy: Literal["backlog", "lost"] = "lost"     # unserved demand: lost (default) or carried forward
     coverage_unit: Literal["calendar", "working"] = "calendar"
     coverage_tie_rule: Literal["covered", "not_covered"] = "covered"
     target_policy: Literal["coverage_days", "safety_qty", "max"] = "max"

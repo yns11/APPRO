@@ -356,17 +356,17 @@ def guide() -> str:
     # ------------------------------------------------------------------ 8. politique de manque
     w("## 8. Besoin non servi : `shortage_policy` et tolérance de manque\n")
     ds = dataset(stock=350.0, orders=[OrderLine("CO-1", "A1", "S1", TODAY + D(days=7), 600, order_type=OrderType.FIRM)])
-    ar_b = run(ds).articles["A1"]
-    ar_lo = run(ds, shortage_policy="lost").articles["A1"]
+    ar_b = run(ds, shortage_policy="backlog").articles["A1"]
+    ar_lo = run(ds).articles["A1"]
     w("Stock 350, une seule commande ferme de 600 le lundi 12/10. Le besoin des jours précédents n'est pas servi. "
-      "Avec `backlog` (défaut) le besoin non servi est **reporté** : la livraison du 12/10 sert d'abord le "
-      "retard (stock net négatif, affiché comme manque). Avec `lost` le besoin manqué est **perdu** : le stock "
-      "physique est borné à 0 et la livraison repart de zéro.\n")
+      "Avec `lost` (défaut) le besoin manqué est **perdu** : le stock physique est borné à 0 et la livraison "
+      "repart de zéro. Avec `backlog` le besoin non servi est **reporté** : la livraison du 12/10 sert d'abord le "
+      "retard (stock net négatif, affiché comme manque).\n")
+    w("Politique `lost` (défaut) :\n")
+    w(tableau(ar_lo, days=10, rows=["Besoin", "Ferme", "Projeté Appro."]))
+    w("")
     w("Politique `backlog` :\n")
     w(tableau(ar_b, days=10, rows=["Besoin", "Ferme", "Projeté Appro."]))
-    w("")
-    w("Politique `lost` :\n")
-    w(tableau(ar_lo, days=10, rows=["Besoin", "Ferme", "Projeté Appro."]))
     w("")
     ds_t = dataset(stock=420.0, orders=[OrderLine("CO-1", "A1", "S1", TODAY + D(days=2), 500, order_type=OrderType.FIRM)])
     ar_t0 = run(ds_t, generate_proposals=True).articles["A1"]
@@ -523,7 +523,7 @@ def guide() -> str:
         ("target_policy", "max", "global", "cible = couverture, sécurité fixe ou max des deux"),
         ("coverage_unit", "calendar", "global", "couverture et cible en jours calendaires ou ouvrés"),
         ("coverage_tie_rule", "covered", "global", "un jour dont le besoin cumulé égale le stock est-il couvert ?"),
-        ("shortage_policy", "backlog", "global", "besoin non servi reporté ou perdu"),
+        ("shortage_policy", "lost", "global", "besoin non servi perdu (défaut) ou reporté"),
         ("shortfall_tolerance_days", "0", "global", "creux sous cible tolérés s'ils se résorbent seuls"),
         ("generate_proposals", "oui", "global", "calcul des propositions CBN"),
         ("include_proposals_in_plan", "oui", "global", "les propositions entrent dans le Projeté Appro."),

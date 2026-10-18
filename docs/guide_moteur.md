@@ -28,7 +28,7 @@ Sans aucune commande, le stock de référence (900) s'épuise de 100 par jour ou
 
 **Lecture.** La couverture (en jours) est le nombre de jours dont le besoin cumulé tient dans le stock du jour. La première rupture est le premier jour dont le besoin n'est pas servi : le stock projeté y est nul et le manque est affiché entre parenthèses. Le *Besoin 30 j* reste une somme sur 30 jours calendaires ; sa moyenne se divise par les jours ouvrés de la fenêtre.
 
-- **STOCKOUT** (avertissement, plan) : Rupture Projeté Appro. le 2026-10-16 (J+11) malgré le plan de livraison et le complément CBN, manque max 700
+- **STOCKOUT** (avertissement, plan) : Rupture Projeté Appro. le 2026-10-16 (J+11) malgré le plan de livraison et le complément CBN, manque max 100
 - **STOCKOUT** (avertissement, erp) : Rupture sur les commandes ERP le 2026-10-16 (J+11) : livraison à planifier ou commande à passer
 
 ## 2. Commandes ERP, ligne Appro. et commande ignorée
@@ -87,7 +87,7 @@ Avec `generate_proposals` (défaut : oui), le moteur parcourt le Projeté Appro.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Besoin | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 |
 | Prop. CBN | · | · | · | · | 400 | · | · | · | · | 300 | · | · | · | · | · |
-| Projeté ERP | **800** | **700** | **600** | **500** | **400** | **300** | **200** | **100** | **·** | **·** (−100) | **·** (−200) | **·** (−300) | **·** (−400) | **·** (−500) | **·** (−600) |
+| Projeté ERP | **800** | **700** | **600** | **500** | **400** | **300** | **200** | **100** | **·** | **·** (−100) | **·** (−100) | **·** (−100) | **·** (−100) | **·** (−100) | **·** (−100) |
 | Projeté Appro. | **800** | **700** | **600** | **500** | **800** | **700** | **600** | **500** | **400** | **600** | **500** | **400** | **300** | **200** | **100** |
 | Cible | 400 | 300 | 300 | 300 | 300 | 400 | 300 | 300 | 300 | 300 | 400 | 300 | 300 | 200 | 100 |
 
@@ -139,15 +139,16 @@ Avec `respect_lead_time = oui`, le moteur **ne propose jamais l'impossible** : l
 | | lun 05/10 | mar 06/10 | mer 07/10 | jeu 08/10 | ven 09/10 | lun 12/10 | mar 13/10 | mer 14/10 | jeu 15/10 | ven 16/10 | lun 19/10 | mar 20/10 | mer 21/10 | jeu 22/10 | ven 23/10 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Besoin | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 |
-| Prop. CBN | · | · | · | · | · | · | · | · | · | · | 1 250 | · | · | · | · |
-| Projeté Appro. | **250** | **150** | **50** | **·** (−50) | **·** (−150) | **·** (−250) | **·** (−350) | **·** (−450) | **·** (−550) | **·** (−650) | **500** | **400** | **300** | **200** | **100** |
+| Prop. CBN | · | · | · | · | · | · | · | · | · | · | 500 | · | 200 | · | · |
+| Projeté Appro. | **250** | **150** | **50** | **·** (−50) | **·** (−100) | **·** (−100) | **·** (−100) | **·** (−100) | **·** (−100) | **·** (−100) | **400** | **300** | **400** | **300** | **200** |
 | Cible | 400 | 300 | 300 | 300 | 300 | 400 | 300 | 300 | 300 | 300 | 400 | 300 | 300 | 200 | 100 |
 
 | Livraison | Fournisseur | Quantité | Besoin net | À commander le | Urgente | Motif |
 |---|---|---:|---:|---|---|---|
-| lun 19/10 | S1 | 1 250 | 1 250 | lun 05/10 | non | Stock projeté -750 < cible 400 le 2026-10-19 (besoin dès le 2026-10-06, première livraison possible le 2026-10-19) |
+| lun 19/10 | S1 | 500 | 500 | lun 05/10 | non | Stock projeté 0 < cible 400 le 2026-10-19 (besoin dès le 2026-10-06, première livraison possible le 2026-10-19) |
+| mer 21/10 | S1 | 200 | 100 | mer 07/10 | non | Stock projeté 200 < cible 300 le 2026-10-21 |
 
-- **STOCKOUT** (critique, plan) : Rupture Projeté Appro. le 2026-10-08 (J+3) malgré le plan de livraison et le complément CBN, manque max 650
+- **STOCKOUT** (critique, plan) : Rupture Projeté Appro. le 2026-10-08 (J+3) malgré le plan de livraison et le complément CBN, manque max 100
 - **STOCKOUT** (critique, erp) : Rupture sur les commandes ERP le 2026-10-08 (J+3) : livraison à planifier ou commande à passer
 - **LOW_COVERAGE** (avertissement, erp) : Commandes ERP épuisées dans 3 j (≤ seuil orange 5 j) ; stock à date : 2 j de besoin
 
@@ -188,8 +189,8 @@ Avec `later` :
 
 | Livraison | Fournisseur | Quantité | Besoin net | À commander le | Urgente | Motif |
 |---|---|---:|---:|---|---|---|
-| lun 12/10 | S1 | 1 050 | 1 050 | mer 07/10 | non | Stock projeté -250 < cible 400 le 2026-10-12 (besoin dès le 2026-10-11, première livraison possible le 2026-10-12) |
-| ven 16/10 | S1 | 200 | 200 | mar 13/10 | non | Stock projeté 400 < cible 500 le 2026-10-18 |
+| lun 12/10 | S1 | 800 | 800 | mer 07/10 | non | Stock projeté 0 < cible 400 le 2026-10-12 (besoin dès le 2026-10-11, première livraison possible le 2026-10-12) |
+| ven 16/10 | S1 | 300 | 300 | mar 13/10 | non | Stock projeté 300 < cible 400 le 2026-10-17 |
 
 `proposal_lookahead_days = 14` : les propositions s'arrêtent à J + 14 même si l'horizon de calcul est plus long (2 proposition(s) sur un horizon de 60 jours) ; `stockout_lookahead_days` joue le même rôle pour la détection des ruptures.
 
@@ -200,7 +201,15 @@ Avec `later` :
 
 ## 8. Besoin non servi : `shortage_policy` et tolérance de manque
 
-Stock 350, une seule commande ferme de 600 le lundi 12/10. Le besoin des jours précédents n'est pas servi. Avec `backlog` (défaut) le besoin non servi est **reporté** : la livraison du 12/10 sert d'abord le retard (stock net négatif, affiché comme manque). Avec `lost` le besoin manqué est **perdu** : le stock physique est borné à 0 et la livraison repart de zéro.
+Stock 350, une seule commande ferme de 600 le lundi 12/10. Le besoin des jours précédents n'est pas servi. Avec `lost` (défaut) le besoin manqué est **perdu** : le stock physique est borné à 0 et la livraison repart de zéro. Avec `backlog` le besoin non servi est **reporté** : la livraison du 12/10 sert d'abord le retard (stock net négatif, affiché comme manque).
+
+Politique `lost` (défaut) :
+
+| | lun 05/10 | mar 06/10 | mer 07/10 | jeu 08/10 | ven 09/10 | lun 12/10 | mar 13/10 | mer 14/10 | jeu 15/10 | ven 16/10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Besoin | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 |
+| Ferme | · | · | · | · | · | 600 | · | · | · | · |
+| Projeté Appro. | **250** | **150** | **50** | **·** (−50) | **·** (−100) | **500** | **400** | **300** | **200** | **100** |
 
 Politique `backlog` :
 
@@ -209,14 +218,6 @@ Politique `backlog` :
 | Besoin | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 |
 | Ferme | · | · | · | · | · | 600 | · | · | · | · |
 | Projeté Appro. | **250** | **150** | **50** | **·** (−50) | **·** (−150) | **350** | **250** | **150** | **50** | **·** (−50) |
-
-Politique `lost` :
-
-| | lun 05/10 | mar 06/10 | mer 07/10 | jeu 08/10 | ven 09/10 | lun 12/10 | mar 13/10 | mer 14/10 | jeu 15/10 | ven 16/10 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Besoin | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 |
-| Ferme | · | · | · | · | · | 600 | · | · | · | · |
-| Projeté Appro. | **250** | **150** | **50** | **·** (−50) | **·** (−100) | **500** | **400** | **300** | **200** | **100** |
 
 **Tolérance de manque** (`shortfall_tolerance_days`) : stock 420, livraison ferme de 500 le mercredi. Le stock passe sous la cible mardi (220 < 300), **sans manque**, et repasse au-dessus mercredi grâce à la livraison. Avec la tolérance à 0 (défaut) le moteur propose dès mardi ; avec 2 jours ouvrés, un creux qui se résorbe seul en 2 jours sans besoin non servi est ignoré et la première proposition vient plus tard.
 
@@ -300,13 +301,13 @@ Les alertes de **couverture** regardent l'épuisement des flux ERP (stock + comm
 
 **Stock 150 (rupture dès demain)**
 
-- **STOCKOUT** (critique, plan) : Rupture Projeté Appro. le 2026-10-06 (J+1) malgré le plan de livraison et le complément CBN, manque max 3 850
+- **STOCKOUT** (critique, plan) : Rupture Projeté Appro. le 2026-10-06 (J+1) malgré le plan de livraison et le complément CBN, manque max 100
 - **STOCKOUT** (critique, erp) : Rupture sur les commandes ERP le 2026-10-06 (J+1) : livraison à planifier ou commande à passer
 - **LOW_COVERAGE** (critique, erp) : Commandes ERP épuisées dans 1 j (≤ seuil rouge 2 j) ; stock à date : 0 j de besoin
 
 **Stock 450 (rupture vendredi)**
 
-- **STOCKOUT** (avertissement, plan) : Rupture Projeté Appro. le 2026-10-09 (J+4) malgré le plan de livraison et le complément CBN, manque max 3 550
+- **STOCKOUT** (avertissement, plan) : Rupture Projeté Appro. le 2026-10-09 (J+4) malgré le plan de livraison et le complément CBN, manque max 100
 - **STOCKOUT** (avertissement, erp) : Rupture sur les commandes ERP le 2026-10-09 (J+4) : livraison à planifier ou commande à passer
 - **LOW_COVERAGE** (avertissement, erp) : Commandes ERP épuisées dans 4 j (≤ seuil orange 5 j) ; stock à date : 3 j de besoin
 
@@ -316,14 +317,14 @@ Les alertes de **couverture** regardent l'épuisement des flux ERP (stock + comm
 
 **Stock 3 000, ferme ERP 500 le 12/10 : rupture ERP à J + 32**
 
-- **STOCKOUT** (info, plan) : Rupture Projeté Appro. le 2026-11-23 (J+49) malgré le plan de livraison et le complément CBN, manque max 500
+- **STOCKOUT** (info, plan) : Rupture Projeté Appro. le 2026-11-23 (J+49) malgré le plan de livraison et le complément CBN, manque max 100
 - **STOCKOUT** (info, erp) : Rupture sur les commandes ERP le 2026-11-23 (J+49) : livraison à planifier ou commande à passer
 - **OVERSTOCK** (info, plan) : Surstock : le stock à date couvre 41 j de besoin (≥ 30 j)
 
 **Données manquantes** (pas de fournisseur lié) :
 
 - **MISSING_DATA** (avertissement, data) : Aucun fournisseur actif lié à l'article (MOQ / délai inconnus)
-- **STOCKOUT** (avertissement, plan) : Rupture Projeté Appro. le 2026-10-16 (J+11) malgré le plan de livraison et le complément CBN, manque max 700
+- **STOCKOUT** (avertissement, plan) : Rupture Projeté Appro. le 2026-10-16 (J+11) malgré le plan de livraison et le complément CBN, manque max 100
 - **STOCKOUT** (avertissement, erp) : Rupture sur les commandes ERP le 2026-10-16 (J+11) : livraison à planifier ou commande à passer
 
 ## 11. Consommation réelle, semaine en cours, réceptions et backlog
@@ -399,7 +400,7 @@ Les paramètres de l'article (couverture cible, seuils, surstock, stock de sécu
 | `target_policy` | max | global | cible = couverture, sécurité fixe ou max des deux |
 | `coverage_unit` | calendar | global | couverture et cible en jours calendaires ou ouvrés |
 | `coverage_tie_rule` | covered | global | un jour dont le besoin cumulé égale le stock est-il couvert ? |
-| `shortage_policy` | backlog | global | besoin non servi reporté ou perdu |
+| `shortage_policy` | lost | global | besoin non servi perdu (défaut) ou reporté |
 | `shortfall_tolerance_days` | 0 | global | creux sous cible tolérés s'ils se résorbent seuls |
 | `generate_proposals` | oui | global | calcul des propositions CBN |
 | `include_proposals_in_plan` | oui | global | les propositions entrent dans le Projeté Appro. |

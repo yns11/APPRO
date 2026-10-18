@@ -201,8 +201,8 @@ ajustements[j] + consommé[j]`, avec la consommation calculée (réel × nomencl
 reconstitution, pas le stock ERP de ces jours-là ; affichée en gris, sans couverture.
 
 Un stock physique n'est **jamais négatif** : le tableau affiche le stock physique et, dans la même cellule,
-le **manque** (besoin non servi) sur fond rouge foncé. `shortage_policy` : `backlog` [défaut] le besoin non
-servi est reporté (solde net négatif, les réceptions suivantes le servent d'abord) ; `lost` il est perdu.
+le **manque** (besoin non servi) sur fond rouge foncé. `shortage_policy` : `lost` [défaut] le besoin non
+servi est perdu ; `backlog` il est reporté (solde net négatif, les réceptions suivantes le servent d'abord).
 
 ## 5. Couverture et stock cible
 
