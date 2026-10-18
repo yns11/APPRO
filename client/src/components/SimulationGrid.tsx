@@ -5,9 +5,9 @@ import { api } from "@/lib/api";
 import { useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
-import { ORDER_TYPE_LABELS, fmtDate, fmtQty, isSaturday, isSunday, isWeekKey, isWeekend, isoWeekKey, isoWeekOf, periodLabel } from "@/lib/format";
+import { ORDER_TYPE_LABELS, fmtCellQty, fmtDate, fmtQty, isDecimalArticle, isSaturday, isSunday, isWeekKey, isWeekend, isoWeekKey, isoWeekOf, periodLabel } from "@/lib/format";
 import { WeekRangeBar, type WeekChip } from "@/components/WeekRangeBar";
-import type { DesadvInfo, ReceiptInfo, AdjustmentOut, ArticleRef, FlagIn, FlagOut, LaneOut, LinkRef, PlanCellOut, SeriesOut } from "@/lib/types";
+import type { DesadvInfo, ReceiptInfo, AdjustmentOut, ArticleRef, FlagIn, FlagOut, LaneOut, LinkRef, PlanCellOut, ProposalOut, SeriesOut } from "@/lib/types";
 
 /** Rows of the grid that can be hidden (for every article) ; lane rows are repeated per supplier. */
 export const ROW_LABELS: { key: string; label: string; lane?: boolean }[] = [
@@ -23,7 +23,7 @@ export const ROW_LABELS: { key: string; label: string; lane?: boolean }[] = [
 ];
 
 export interface GridColumns { as_of: string; init_date: string; periods: string[]; period_start: string[]; period_end: string[]; }
-export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis?: { severity?: string | null }; suppliers?: LinkRef[]; }
+export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis?: { severity?: string | null }; suppliers?: LinkRef[]; proposals?: ProposalOut[]; }
 
 /* ---------------------------------------------------------------- geometry (virtualisation) */
 const COL_W = 72;          // every data column has the same width: the visible range is arithmetic
@@ -76,7 +76,11 @@ function laneSeries(l: LaneOut, k: string): number[] | undefined { return l.seri
  *
  * Two rows are clickable: **Ferme** (a click ignores the firm orders of that supplier and day: red,
  * struck, out of the ERP scenario and of the plan ; click again to restore) and **Proposition CBN**
- * (a click refuses the proposal: struck, no proposal until the end of its week ; click again).
+ * (a click refuses the proposal: struck, no proposal to that supplier that day ; click again).
+ * A « ! » marks an urgent proposal (inside the lead time : floor = the minimum avoiding the stockout),
+ * a « ▲ » a proposal truncated by a supplier cap.  Decimal articles (KG, M, decimal bill of material)
+ * show the Besoin and stock rows with three decimals.  The stock cells show the **cumulated** unserved
+ * demand (reset when the stock is positive again).
  * A CBN proposal is shown greyed in an empty plan cell: one click then Enter takes it.  Right-click
  * on a typed cell adds a comment.  A week column is typed like a day column: the value is stored on
  * the **Monday** of the week (the reference day in the current week) ; clicking a week header switches
@@ -109,7 +113,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   const saveAdjBatch = useWrite((cells: { article_id: string; date: string; expression: string }[]) => api.put<AdjustmentOut[]>("/api/entries/adjustments/batch", { cells }),
     (out) => toast.push(`${out.length} ajustement(s) recopié(s)`, "success"));
   const toggleFlag = useWrite((f: FlagIn) => api.post<FlagOut | null>("/api/entries/flags/toggle", f),
-    (out) => toast.push(out ? (out.kind === "order_ignored" ? `Commande ferme du ${fmtDate(out.date)} ignorée` : `Proposition du ${fmtDate(out.date)} refusée jusqu'à la fin de sa semaine`) : "Rétabli", "success"));
+    (out) => toast.push(out ? (out.kind === "order_ignored" ? `Commande ferme du ${fmtDate(out.date)} ignorée` : `Proposition du ${fmtDate(out.date)} refusée (ce jour seulement)`) : "Rétabli", "success"));
   /** several days at once (the firm orders of a week column) */
   const toggleFlags = useWrite((fs: FlagIn[]) => Promise.all(fs.map((f) => api.post<FlagOut | null>("/api/entries/flags/toggle", f))),
     (outs) => { const on = outs.filter(Boolean).length; toast.push(on ? `${on} jour(s) de commandes fermes ignoré(s)` : `${outs.length} jour(s) rétabli(s)`, "success"); });
@@ -307,11 +311,13 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   };
   const spacerL = leftW > 0 ? <td key="sl" className="spacer" style={{ width: leftW, minWidth: leftW, maxWidth: leftW }} /> : null;
   const spacerR = rightW > 0 ? <td key="sr" className="spacer" style={{ width: rightW, minWidth: rightW, maxWidth: rightW }} /> : null;
-  const plainRow = (r: RowDesc, label: ReactNode, cls: string, val: (i: number) => number, title?: (i: number) => string, extra?: (i: number) => string) => (
+  /** decimal article (non-piece unit or decimal requirement) : Besoin and stock rows with three decimals */
+  const decimalOf = useCallback((a: GridRowArticle) => isDecimalArticle(a.article.unit, a.series.find((s) => s.key === "demand")?.values), []);
+  const plainRow = (r: RowDesc, label: ReactNode, cls: string, val: (i: number) => number, title?: (i: number) => string, extra?: (i: number) => string, decimal = false) => (
     <tr key={r.key} className={cls} style={{ height: r.h }}>
       <td>{label}</td>
       {spacerL}
-      {visibleCols.map((i) => { const v = val(i); return <td key={i} className={[...cellBase(i), extra?.(i) ?? ""].filter(Boolean).join(" ")} title={title?.(i)}>{v === 0 ? "·" : fmtQty(v, r.a.article.unit)}</td>; })}
+      {visibleCols.map((i) => { const v = val(i); return <td key={i} className={[...cellBase(i), extra?.(i) ?? "", decimal ? "decimal" : ""].filter(Boolean).join(" ")} title={title?.(i)}>{v === 0 ? "·" : fmtCellQty(v, r.a.article.unit, decimal)}</td>; })}
       {spacerR}
     </tr>
   );
@@ -329,18 +335,21 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         );
       case "group": {
         const l = a.lanes[r.li], g = `${aid}-lane-${r.li}`;
-        const label = l.supplier_id ? `${l.supplier_id}${l.name ? ` · ${l.name}` : ""}` : "Sans fournisseur";
         const link = a.suppliers?.find((x) => x.supplier_id === l.supplier_id);
-        const rules = link ? `MOQ ${fmtQty(link.moq, unit)} · UM ${fmtQty(link.pack_qty, unit)} · délai ${link.lead_time_days} j ouvrés` : "";
+        const rules = link ? `MOQ ${fmtQty(link.moq, unit)} · UM ${fmtQty(link.pack_qty, unit)} · délai ${link.lead_time_days} j ouvrés${link.lead_time_override === null ? " (fournisseur)" : " (lien)"}${link.max_qty_per_delivery ? ` · max ${fmtQty(link.max_qty_per_delivery, unit)} / livraison` : ""}${link.max_qty_per_week ? ` · max ${fmtQty(link.max_qty_per_week, unit)} / semaine` : ""}${link.quota_pct < 100 ? ` · quota ${link.quota_pct} %` : ""}` : "";
         return (
           <tr key={r.key} className="group-head" style={{ height: r.h }} onClick={() => toggleGroup(g)} title={[rules, collapsed[g] ? "Afficher le bloc" : "Masquer le bloc"].filter(Boolean).join("\n")}>
-            <td>{collapsed[g] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<span className="lane-name">{label}</span></td>
+            <td>{collapsed[g] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<span className="lane-name">{l.supplier_id ? <><Link to={`/fournisseurs/${encodeURIComponent(l.supplier_id)}`} onClick={(e) => e.stopPropagation()} title="Ouvrir la fiche fournisseur">{l.supplier_id}</Link>{l.name ? <> · <Link to={`/fournisseurs/${encodeURIComponent(l.supplier_id)}`} onClick={(e) => e.stopPropagation()} title="Ouvrir la fiche fournisseur">{l.name}</Link></> : null}</> : "Sans fournisseur"}</span>{link && (link.max_qty_per_delivery || link.max_qty_per_week) ? <span className="subtle small" style={{ marginLeft: 6 }} title={rules}>plafonné</span> : null}</td>
             <td colSpan={colCount - 1} />
           </tr>
         );
       }
-      case "demand":
-        return plainRow(r, "Besoin", "", (i) => series("demand", i), (i) => (i < asOfIdx ? "consommé (réel × nomenclature)" : "requis (PDP × nomenclature)"));
+      case "demand": {
+        const src = a.article.consumption_source;
+        const pastTitle = src === "plan" ? "consommé = PDP éclaté (source de consommation : PDP)" : src === "derived" ? "consommé = dérivé de la consommation d'autres articles (Σ coef × conso)" : "consommé (réel × nomenclature)";
+        const n = a.article.demand_days ?? 5;
+        return plainRow(r, <>Besoin{n < 5 && <span className="subtle small" title={`Besoin hebdomadaire réparti sur les ${n} premier(s) jour(s) ouvré(s) de la semaine`}> · {n} j</span>}</>, "", (i) => series("demand", i), (i) => (i < asOfIdx ? pastTitle : `requis (PDP × nomenclature${n < 5 ? `, ${n} premiers jours ouvrés de la semaine` : ""})`), undefined, decimalOf(a));
+      }
       case "firm": {
         const l = a.lanes[r.li];
         const ordered = laneSeries(l, "orders_firm_ordered"), open = laneSeries(l, "orders_firm_open");
@@ -457,6 +466,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
       }
       case "cbn": {
         const l = a.lanes[r.li], cbs = laneSeries(l, "supply_proposed"), sid = l.supplier_id ?? "";
+        const propsOf = (i: number) => (a.proposals ?? []).filter((p) => (p.supplier_id ?? "") === sid && columnOf(cols, p.delivery_date) === i);
         return (
           <tr key={r.key} style={{ height: r.h }}>
             <td>Proposition CBN</td>
@@ -465,13 +475,16 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const v = cbs?.[i] ?? 0;
               const flag = flagBy.get(`proposal_refused|${aid}|${sid}|${i}`) ?? flagBy.get(`proposal_refused|${aid}||${i}`);
               const wk = weekCol(i), past = i < asOfIdx;
+              const ps = v > 0 ? propsOf(i) : [];
+              const urgent = ps.some((p) => p.urgent), floor = ps.some((p) => p.floor), capped = ps.some((p) => p.capped);
               const clickable = !past && !locked && (v > 0 || !!flag);
-              const cls = [...cellBase(i), "cbn", flag ? "refused" : "", clickable ? "clickable" : ""].filter(Boolean).join(" ");
-              const title = flag ? `Proposition refusée (${fmtQty(flag.qty, unit)}) : aucune proposition à ce fournisseur jusqu'à la fin de sa semaine – cliquer pour la rétablir`
-                : v > 0 ? `Besoin net calculé sur le Projeté Appro. : ${fmtQty(v, unit)} – reprise dans l'Appro. (cellule grisée) ; cliquer pour la refuser${wk ? " (toute la semaine)" : ""}` : "";
-              // a refusal blocks the supplier until the end of its week : in a week column it is dated on the Monday (the reference day in the current week)
+              const cls = [...cellBase(i), "cbn", flag ? "refused" : "", clickable ? "clickable" : "", floor ? "floor" : ""].filter(Boolean).join(" ");
+              const reasons = ps.map((p) => p.reason).filter(Boolean).join("\n");
+              const title = flag ? `Proposition refusée (${fmtQty(flag.qty, unit)}) : aucune proposition à ce fournisseur ce jour-là (les autres jours de livraison restent possibles) – cliquer pour la rétablir`
+                : v > 0 ? [`Proposition CBN : ${fmtQty(v, unit)}${urgent ? " – URGENT : livraison dans le délai fournisseur, à commander sans attendre" : ""}${floor ? " – plancher : le minimum qui évite la rupture jusqu'à la veille de la livraison suivante" : ""}${capped ? " – plafonnée par le fournisseur (max / livraison ou / semaine) : le reste glisse" : ""}`, reasons, `Reprise dans l'Appro. (cellule grisée) ; cliquer pour la refuser${wk ? " (le lundi de la semaine)" : " ce jour"}`].filter(Boolean).join("\n") : "";
+              // a refusal blocks the supplier that day only : in a week column it is dated on the Monday (the reference day in the current week)
               const onClick = !clickable ? undefined : () => toggleFlag.mutate({ article_id: aid, supplier_id: flag ? (flag.supplier_id || null) : (sid || null), date: flag ? flag.date : editDate(i, "plan"), kind: "proposal_refused", qty: v });
-              return <td key={i} className={cls} title={title} onClick={onClick}>{flag ? <s>{fmtQty(flag.qty, unit)}</s> : v === 0 ? "·" : fmtQty(v, unit)}</td>;
+              return <td key={i} className={cls} title={title} onClick={onClick}>{flag ? <s>{fmtQty(flag.qty, unit)}</s> : v === 0 ? "·" : <>{fmtQty(v, unit)}{urgent && <span className="mark urgent" aria-label="urgent">!</span>}{capped && <span className="mark capped" aria-label="plafonnée">▲</span>}</>}</td>;
             })}
             {spacerR}
           </tr>
@@ -506,6 +519,8 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
       }
       case "stock": {
         const k = r.sk!;
+        const decimal = decimalOf(a);
+        const f = (x: number) => fmtCellQty(x, unit, decimal);
         return (
           <tr key={r.key} style={{ height: r.h }}>
             <td>{k === "stock_erp" ? "Projeté ERP" : "Projeté Appro."}</td>
@@ -514,14 +529,15 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const past = i < asOfIdx;
               const v = series(k, i);
               const cov = series(k === "stock_erp" ? "coverage_erp" : "coverage_plan", i);
-              const short = series(k === "stock_erp" ? "shortage_erp" : "shortage_plan", i);
-              const cls = [...cellBase(i), "stock", past ? "" : coverageClass(cov, a.article), short > 0 ? "short" : ""].filter(Boolean).join(" ");
+              const shortCum = series(k === "stock_erp" ? "shortage_erp_cum" : "shortage_plan_cum", i);
+              const shortDay = series(k === "stock_erp" ? "shortage_erp" : "shortage_plan", i);
+              const cls = [...cellBase(i), "stock", past ? "" : coverageClass(cov, a.article), shortCum > 0 ? "short" : "", decimal ? "decimal" : ""].filter(Boolean).join(" ");
               const target = k === "stock_plan" ? series("target_stock", i) : 0;
-              const title = past ? `stock reconstitué ${fmtQty(v, unit)}` : `stock ${fmtQty(v, unit)} · couverture ${cov} j${k === "stock_plan" ? ` · stock cible ${fmtQty(target, unit)}` : ""}${short > 0 ? ` · manque ${fmtQty(short, unit)} (besoin non servi)` : ""}`;
+              const title = past ? `stock reconstitué ${f(v)}${shortCum > 0 ? ` · manque cumulé ${f(shortCum)}` : ""}` : `stock ${f(v)} · couverture ${cov} j ouvrés${k === "stock_plan" ? ` · stock cible ${f(target)}` : ""}${shortCum > 0 ? ` · manque cumulé ${f(shortCum)} (besoin non servi depuis le dernier jour avec stock${shortDay > 0 ? ` ; ce jour ${f(shortDay)}` : ""})` : ""}`;
               return <td key={i} className={cls} title={title}>
                 {!past && <span className="cov">{cov} j</span>}
-                <span className="val">{fmtQty(v, unit)}</span>
-                {short > 0 && <span className="shortv">−{fmtQty(short, unit)}</span>}
+                <span className="val">{f(v)}</span>
+                {shortCum > 0 && <span className="shortv">−{f(shortCum)}<small> Σ</small></span>}
               </td>;
             })}
             {spacerR}
@@ -572,9 +588,10 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         <span><span className="sw bar" style={{ background: "var(--bg-subtle)", border: "1px solid var(--border-strong)" }} />vide = ERP</span>
         <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} /><Truck size={11} style={{ verticalAlign: "middle" }} /> <i>en transit</i> (journal d'arrivée non validé ou DESADV annoncé ; hors calculs ; double-clic pour masquer) · <span className="dot ok" style={{ verticalAlign: "middle" }} /> DESADV traité · <span className="dot ko" style={{ verticalAlign: "middle" }} /> aucun DESADV traité (réception manuelle) · <span className="sw bar" style={{ background: "var(--cell-green)" }} />reçu comptabilisé (ACR validé)</span>
         <span><span className="sw bar" style={{ background: "var(--brand-soft)", boxShadow: "inset 0 -2px 0 var(--brand)" }} />chiffre = votre Appro. (0 = rien attendu, vider = retour ERP) · carré = recopier en tirant</span>
-        <span><span className="sw bar" style={{ background: "transparent", border: "1px dashed var(--warning)" }} />grisé = proposition CBN, cliquer puis Entrée pour la reprendre · cliquer la ligne CBN pour la refuser</span>
+        <span><span className="sw bar" style={{ background: "transparent", border: "1px dashed var(--warning)" }} />grisé = proposition CBN, cliquer puis Entrée pour la reprendre · cliquer la ligne CBN pour la refuser (ce jour) · <b style={{ color: "var(--critical-fg)" }}>!</b> urgent = plancher dans le délai · <b style={{ color: "var(--warning-fg)" }}>▲</b> plafonnée (max fournisseur)</span>
+        <span><span className="sw bar" style={{ background: "var(--cell-neg-strong)" }} />manque : cumul du besoin non servi (−Σ), remis à zéro dès que le stock redevient positif · couvertures et cibles en jours ouvrés</span>
         <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} />ferme en cours · <span className="sw bar" style={{ background: "var(--cell-green)" }} />ferme soldée · <span className="sw bar" style={{ background: "var(--cell-red)" }} />ferme ignorée (clic)</span>
-        <span>colonne semaine : saisie placée au lundi, clic Ferme / CBN sur toute la semaine · clic droit = commentaire · <EyeOff size={11} style={{ verticalAlign: "middle" }} /> masquer des lignes</span>
+        <span>colonne semaine : saisie placée au lundi, clic Ferme sur toute la semaine · clic droit = commentaire · <EyeOff size={11} style={{ verticalAlign: "middle" }} /> masquer des lignes</span>
       </div>
     </div>
   );

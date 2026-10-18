@@ -9,8 +9,8 @@ import { fmtDate } from "@/lib/format";
 import type { WeeklyParamsResponse } from "@/lib/types";
 
 const LABELS: Record<string, string> = {
-  coverage_target_days: "Couverture cible (j)", alert_red_days: "Seuil rouge (j)", alert_yellow_days: "Seuil orange (j)",
-  overstock_days: "Surstock (j)", safety_stock_qty: "Stock sécurité", order_cycle_days: "Cycle cde (j)",
+  coverage_target_days: "Couverture cible (j ouvrés)", alert_red_days: "Seuil rouge (j ouvrés)", alert_yellow_days: "Seuil orange (j ouvrés)",
+  overstock_days: "Surstock (j ouvrés)",
 };
 
 type Item = { key2: string; field: string; value: number | "" };

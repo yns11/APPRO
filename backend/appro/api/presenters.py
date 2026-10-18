@@ -461,6 +461,7 @@ def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str]
         "articles": [{"article": article_ref(ar).model_dump(mode="json"), "series": series_out(ar, cols, GRID_SERIES),
                       "lanes": [lane_out(l, cols, since=start) for l in ar.lanes], "kpis": ar.kpis,
                       "suppliers": [link_out(l, supplier_names, suppliers).model_dump(mode="json") for l in ar.suppliers],
+                      "proposals": [proposal_out(p, ar, supplier_names).model_dump(mode="json") for p in ar.proposals],
                       "programs": programs_of.get(ar.article.article_id, [])}
                      for ar in arts],
     }

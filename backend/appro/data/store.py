@@ -438,10 +438,28 @@ def ensure_columns(engine) -> list[str]:
     return added
 
 
+def normalise_nullable_numerics(engine) -> int:
+    """Optional numeric columns (link caps, lead time override) : a 0 written by an earlier version
+    (missing cells were coerced to 0) means « no value » and becomes NULL.  Returns the rows fixed."""
+    n = 0
+    with engine.begin() as conn:
+        for name, schema in TABLES.items():
+            if not schema.reference:
+                continue
+            for col in schema.nullable_numeric:
+                try:
+                    res = conn.execute(text(f"UPDATE {name} SET {col} = NULL WHERE {col} IS NOT NULL AND {col} <= 0"))
+                    n += res.rowcount or 0
+                except Exception as exc:  # table or column not there yet (fresh database before create_all)
+                    log.debug("normalise %s.%s skipped: %s", name, col, exc)
+    return n
+
+
 def init_store(engine, schema: str | None = None) -> sessionmaker[Session]:
     ensure_schema(engine, schema)
     ensure_columns(engine)
     Base.metadata.create_all(engine)
+    normalise_nullable_numerics(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     with factory() as session:
         if session.get(AppMeta, DATA_VERSION_KEY) is None:

@@ -57,6 +57,9 @@ def _clean(schema: TableSchema, row: dict[str, Any]) -> dict[str, Any]:
         if c.type == "date":
             v = out[c.name]
             out[c.name] = None if v is None or (isinstance(v, float) and pd.isna(v)) else v
+        elif c.keeps_null:
+            v = out[c.name]
+            out[c.name] = None if v is None or (isinstance(v, float) and pd.isna(v)) else (float(v) if c.type == "float" else int(v))
         elif c.type in ("float", "int"):
             out[c.name] = float(out[c.name]) if c.type == "float" else int(out[c.name])
     return out

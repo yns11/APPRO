@@ -20,7 +20,7 @@ export default function ImportsPage() {
 
   const importSim = useWrite(async (file: File) => { const fd = new FormData(); fd.append("file", file); return api.upload<ImportReport>("/api/imports/simulation", fd); },
     (r) => { setReport(r as ImportReport); toast.push(`Classeur réimporté : ${(r as ImportReport).created} cellule(s)`, "success"); });
-  const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { planner: engineParams.planner, granularity, horizon_days: engineParams.horizon_days, article_ids: selection.length ? selection : undefined });
+  const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { planner: engineParams.planner, granularity, article_ids: selection.length ? selection : undefined });
 
   return (
     <div className="page">
@@ -30,7 +30,7 @@ export default function ImportsPage() {
         <Card title="Classeur de simulation" hint="Excel à formules : PARAMETRES, ARTICLES, SIMULATION (le tableau, une ligne Appro. par fournisseur), ALERTES">
           <div className="form-grid">
             <Field label="Granularité"><select className="select" value={granularity} onChange={(e) => setGranularity(e.target.value as "day" | "week")}><option value="day">Jour (réimportable)</option><option value="week">Semaine (lecture)</option></select></Field>
-            <Field label="Périmètre"><input className="input" readOnly value={`${perimeter.planner ?? "tous"} · ${engineParams.horizon_days} j`} /></Field>
+            <Field label="Périmètre"><input className="input" readOnly value={`${perimeter.planner ?? "tous"} · 52 semaines`} /></Field>
             <Field label="Articles (vide = tous)" span2>
               <select className="select" multiple size={6} value={selection} onChange={(e) => setSelection(Array.from(e.target.selectedOptions).map((o) => o.value))} style={{ height: "auto" }}>
                 {(cockpit.data?.articles ?? []).map((a) => <option key={a.article_id} value={a.article_id}>{a.article_id} · {a.designation}</option>)}

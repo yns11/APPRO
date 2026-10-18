@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowDownAZ, ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
 import { useAdjustments, useFlags, useGrid, usePlanCells, usePerimeterLists } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
+import { usePageState } from "@/lib/pageState";
 import { api } from "@/lib/api";
 import { Card, Empty, ErrorBox, Segmented, SkeletonBlock } from "@/components/ui";
 import { SimulationGrid } from "@/components/SimulationGrid";
@@ -22,9 +23,10 @@ function useDebounced<T>(value: T, ms: number): T {
  */
 export default function SupplyTablePage() {
   const { perimeter, set, engineParams } = usePerimeter();
-  const [program, setProgram] = useState("");
-  const [suppliers, setSuppliers] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
+  // filters remembered between visits (per browser)
+  const [filters, patch] = usePageState("tableau", { program: "", suppliers: [] as string[], search: "" });
+  const { program, suppliers, search } = filters;
+  const setProgram = (program: string) => patch({ program }); const setSuppliers = (suppliers: string[]) => patch({ suppliers }); const setSearch = (search: string) => patch({ search });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(() => { try { return Number(localStorage.getItem("appro.grid.pageSize")) || 20; } catch { return 20; } });
   const [sort, setSort] = useState<"article" | "supplier">(() => { try { return localStorage.getItem("appro.grid.sort") === "supplier" ? "supplier" : "article"; } catch { return "article"; } });
@@ -48,7 +50,7 @@ export default function SupplyTablePage() {
   const articles = useMemo(() => grid.data?.articles ?? [], [grid.data]);
   const total = grid.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / pageSize));
-  const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { planner: engineParams.planner, granularity: perimeter.granularity === "week" ? "week" : "day", horizon_days: engineParams.horizon_days, article_ids: articles.map((a) => a.article.article_id) });
+  const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { planner: engineParams.planner, granularity: perimeter.granularity === "week" ? "week" : "day", article_ids: articles.map((a) => a.article.article_id) });
 
   return (
     <div className="page">
@@ -63,7 +65,7 @@ export default function SupplyTablePage() {
         <div className="row wrap">
           <div className="search" style={{ minWidth: 260 }}><Search /><input className="input sm" placeholder="Article ou désignation…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
           <SearchSelect value={program} onChange={setProgram} options={programOptions} placeholder="Tous les programmes" ariaLabel="Programme" loading={lists.isLoading} />
-          <SearchSelect values={suppliers} onChangeMany={setSuppliers} options={supplierOptions} placeholder="Tous les fournisseurs" ariaLabel="Fournisseurs" loading={lists.isLoading} />
+          <SearchSelect values={suppliers} onChangeMany={setSuppliers} options={supplierOptions} placeholder="Tous les fournisseurs (code ou nom)" ariaLabel="Fournisseurs" loading={lists.isLoading} />
           <button type="button" className={`btn sm ${sort === "supplier" ? "primary" : ""}`} onClick={() => setSort(sort === "supplier" ? "article" : "supplier")} title={sort === "supplier" ? "Trié par nom de fournisseur (cliquer pour revenir à l'ordre des articles)" : "Trier les articles par nom de leur fournisseur"}><ArrowDownAZ />Trier par nom de fournisseur</button>
           <div className="pager" style={{ marginLeft: "auto" }}>
             <span>{total === 0 ? "Aucun article" : `Articles ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} sur ${total}`}</span>

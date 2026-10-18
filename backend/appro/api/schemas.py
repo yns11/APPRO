@@ -438,6 +438,7 @@ class GridArticle(BaseModel):
     lanes: list[LaneOut]
     kpis: dict[str, Any]
     suppliers: list[LinkRef]
+    proposals: list[ProposalOut] = Field(default_factory=list)
     programs: list[str]
 
 

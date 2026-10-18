@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
-import { Activity, BookOpen, CalendarRange, Factory, FileSpreadsheet, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Ribbon, Search, Settings, Sun, Table } from "lucide-react";
-import { FORCED_THEME, usePerimeter } from "@/state/PerimeterContext";
-import { useInvalidateAll } from "@/lib/queries";
+import { Link, NavLink, Outlet } from "react-router-dom";
+import { Activity, AlertTriangle, BookOpen, CalendarRange, Factory, FileSpreadsheet, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Search, Settings, Sun, Table, Truck } from "lucide-react";
+import { usePerimeter } from "@/state/PerimeterContext";
+import { useInvalidateAll, useSyncStatus } from "@/lib/queries";
 import { Button } from "@/components/ui";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtMinutes } from "@/lib/format";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/ui";
 
@@ -14,6 +14,7 @@ const NAV = [
   { to: "/", label: "Cockpit du jour", icon: LayoutDashboard, end: true },
   { to: "/tableau", label: "Tableau d'approvisionnement", icon: Table },
   { to: "/articles", label: "Fiches articles", icon: Activity },
+  { to: "/fournisseurs", label: "Fournisseurs", icon: Truck },
   { to: "/recherche", label: "Recherche", icon: Search },
   { to: "/saisies", label: "Saisies & journal", icon: PenLine },
 ];
@@ -22,7 +23,7 @@ const MORE = [
   { to: "/pdp", label: "Plan de production (PDP)", icon: CalendarRange },
   { to: "/programmes", label: "Impact programmes", icon: Factory },
   { to: "/imports", label: "Imports / exports", icon: FileSpreadsheet },
-  { to: "/parametres", label: "Paramètres & règles", icon: Settings },
+  { to: "/parametres", label: "Paramètres", icon: Settings },
 ];
 
 export default function AppShell() {
@@ -30,7 +31,9 @@ export default function AppShell() {
   const [open, setOpen] = useState(false);
   const invalidate = useInvalidateAll();
   const toast = useToast();
-  const ThemeIcon = FORCED_THEME ? Ribbon : perimeter.theme === "dark" ? Moon : perimeter.theme === "light" ? Sun : Monitor;
+  const sync = useSyncStatus();
+  const ThemeIcon = perimeter.theme === "dark" ? Moon : perimeter.theme === "light" ? Sun : Monitor;
+  const THEME_LABELS = { system: "système", light: "clair", dark: "sombre" };
   const cycleTheme = () => set({ theme: perimeter.theme === "system" ? "light" : perimeter.theme === "light" ? "dark" : "system" });
   const refresh = async () => {
     try { await api.post("/api/reference/refresh"); invalidate(); toast.push("Données ERP rechargées", "success"); }
@@ -40,6 +43,8 @@ export default function AppShell() {
   const link = (n: { to: string; label: string; icon: typeof Table; end?: boolean }) => (
     <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? "active" : "")} title={mini ? n.label : undefined} aria-label={n.label}><n.icon /><span className="lbl">{n.label}</span></NavLink>
   );
+  const late = sync.data?.mirror && sync.data.status === "late";
+  const lateTables = (sync.data?.tables ?? []).filter((t) => t.status === "late");
 
   return (
     <div className={`shell ${mini ? "collapsed" : ""}`}>
@@ -65,25 +70,19 @@ export default function AppShell() {
         <header className="topbar">
           <Button variant="ghost" icon className="no-print" style={{ display: "none" }} id="menu-btn" onClick={() => setOpen((o) => !o)} aria-label="Menu"><Menu /></Button>
           <div className="ctx">
-            <label className="field" style={{ minWidth: 150 }}>
+            <label className="field" style={{ minWidth: 170 }}>
               <span className="sr-only">Périmètre</span>
               <select className="select sm" value={perimeter.planner ?? ""} onChange={(e) => set({ planner: e.target.value || null, plannerChosen: true })}>
                 <option value="">Tous les approvisionneurs</option>
                 {(config?.planners ?? []).map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </label>
-            <label className="field" style={{ minWidth: 120 }}>
-              <span className="sr-only">Horizon</span>
-              <select className="select sm" value={perimeter.horizonDays} onChange={(e) => set({ horizonDays: Number(e.target.value) })}>
-                {[30, 60, 90, 120, 180, 270, 365].map((h) => <option key={h} value={h}>Horizon {h} j</option>)}
-              </select>
-            </label>
           </div>
           <div className="right row">
-            <span className="freshness" title="Aujourd'hui = date du calcul (passé / futur, propositions, expiration des cellules) · le stock a été initialisé en fin de journée du point zéro, la projection commence le lendemain">Aujourd'hui : <b>{config ? fmtDate(config.as_of) : "…"}</b>{config && <span className="subtle"> · stock initialisé le {fmtDate(config.init_date)}</span>}</span>
+            {late && <Link to="/parametres?tab=data" className="sync-alert" title={`Dernière copie ERP il y a ${fmtMinutes(Math.min(...lateTables.map((t) => t.age_minutes ?? 0)))} : ${lateTables.map((t) => t.table).join(", ")}`}><AlertTriangle size={14} />Synchronisation ERP en retard</Link>}
+            <span className="freshness" title="Aujourd'hui = date du calcul (passé / futur, propositions, expiration des cellules) · le stock a été initialisé en fin de journée du point zéro, la projection commence le lendemain · horizon : 52 semaines">Aujourd'hui : <b>{config ? fmtDate(config.as_of) : "…"}</b>{config && <span className="subtle"> · stock initialisé le {fmtDate(config.init_date)}</span>}</span>
             {config?.access?.can_write && <Button variant="ghost" icon title="Recharger les données ERP" onClick={refresh}><RefreshCw /></Button>}
-            {FORCED_THEME ? <span className="badge brand ribbon" title="Octobre rose : thème provisoire appliqué à tout le monde ; les thèmes habituels reviendront ensuite"><Ribbon size={13} /> Octobre rose</span>
-              : <Button variant="ghost" icon title={`Thème : ${perimeter.theme}`} onClick={cycleTheme}><ThemeIcon /></Button>}
+            <Button variant="ghost" icon title={`Thème : ${THEME_LABELS[perimeter.theme]} (cliquer pour changer)`} aria-label="Changer de thème" onClick={cycleTheme}><ThemeIcon /></Button>
           </div>
         </header>
         <main className="content"><Outlet /></main>

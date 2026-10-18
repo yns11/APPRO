@@ -100,10 +100,8 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
         consumption_source=_choice(r.get("consumption_source"), ("erp", "plan", "derived"), "erp"),
         derived_terms=terms.get(r["article_id"], []), active=bool(r["active"]),
     ) for r in _records(arts)]
-    # a derived article without any term falls back to the ERP consumption
-    for a in articles:
-        if a.consumption_source == "derived" and not a.derived_terms:
-            a.consumption_source = "erp"
+    # a derived article without any term keeps its choice (the screens show it) : the demand builder
+    # uses the article's own ERP consumption until terms are declared
     source_ids = {src for a in articles for src, _c in a.derived_terms}
 
     suppliers = [Supplier(r["supplier_id"], r["name"], r["country"], r["contact"], parse_weekdays(r["delivery_weekdays"]),

@@ -925,6 +925,16 @@ def test_link_caps_and_lead_override_are_validated(client):
     assert r.status_code == 200, r.text
     link = next(l for l in client.get("/api/reference/links", params={"article_id": AID}).json() if l["supplier_id"] == base["supplier_id"])
     assert link["lead_time_days"] == 7 and link["lead_time_override"] == 7 and link["max_qty_per_week"] == pack * 4
+    # the stored rows keep « empty » for the optional columns (never 0) : the screens show « hérité » / « – »
+    rows = client.get("/api/reference/ref_article_suppliers/rows").json()
+    untouched = [r for r in rows if r["supplier_id"] != base["supplier_id"] or r["article_id"] != AID]
+    assert untouched and all(r["lead_time_override"] is None and r["max_qty_per_delivery"] is None and r["max_qty_per_week"] is None for r in untouched)
+    mine = next(r for r in rows if r["supplier_id"] == base["supplier_id"] and r["article_id"] == AID)
+    assert mine["lead_time_override"] == 7 and mine["max_qty_per_delivery"] == pack * 2
+    # clearing the override (empty string) goes back to the supplier's lead time
+    assert put(lead_time_override="", max_qty_per_delivery="", max_qty_per_week="").status_code == 200
+    link = next(l for l in client.get("/api/reference/links", params={"article_id": AID}).json() if l["supplier_id"] == base["supplier_id"])
+    assert link["lead_time_override"] is None and link["lead_time_days"] == 5 and link["max_qty_per_week"] is None
 
 
 def test_consumption_terms_are_validated(client):

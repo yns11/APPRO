@@ -1,8 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Params } from "./api";
 import type {
-  AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, DeliveryPlanResponse, FlagOut, GridResponse, LinkRef, ParamDoc, ParamOverrideOut, PdpErpLine,
-  FlowsResponse, PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, SearchResponse, ProgramImpactResponse, ProgramRef, ProjectionResponse, RefRow, RefTableInfo, WeeklyParamsResponse,
+  AdherenceResponse, AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, ConsumptionSourceOption, DeliveryPlanResponse, FixedRule, FlagOut, GridResponse, LinkRef, OrphanRow, ParamDoc, ParamOverrideOut, PdpErpLine,
+  FlowsResponse, PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, PlantCalendar, SearchResponse, ProgramImpactResponse, ProgramRef, ProjectionResponse, RefRow, RefTableInfo, SupplierDetail, SupplierRef, SyncStatus, WeeklyParamsResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
@@ -20,8 +20,8 @@ export function useCockpit(extra?: Params) {
 }
 
 export function useProjection(articleId: string | undefined, extra?: Params) {
-  const { engineParams, perimeter } = usePerimeter();
-  const params = { granularity: perimeter.granularity, horizon_days: engineParams.horizon_days, ...extra };
+  const { perimeter, tableParams } = usePerimeter();
+  const params = { granularity: perimeter.granularity, ...tableParams, ...extra };
   return useQuery({
     queryKey: ["projection", articleId, params],
     queryFn: () => api.get<ProjectionResponse>(`/api/articles/${encodeURIComponent(articleId!)}/projection`, params),
@@ -44,16 +44,14 @@ export function useBacklog() {
 /** One page of the multi-article supply table (same columns for every article) ; the previous page
  * stays on screen while the next one loads. */
 export function useGrid(extra?: Params) {
-  const { engineParams, perimeter } = usePerimeter();
-  const params = { ...engineParams, granularity: perimeter.granularity, ...extra };
+  const { engineParams, perimeter, tableParams } = usePerimeter();
+  const params = { ...engineParams, granularity: perimeter.granularity, ...tableParams, ...extra };
   return useQuery({ queryKey: ["grid", params], queryFn: () => api.get<GridResponse>("/api/grid", params), staleTime: 30_000, placeholderData: keepPreviousData });
 }
 
 export function useDeliveryPlan(articleId: string | undefined) {
-  const { engineParams } = usePerimeter();
-  const params = { horizon_days: engineParams.horizon_days };
-  return useQuery({ queryKey: ["delivery-plan", articleId, params], enabled: !!articleId, staleTime: 30_000,
-    queryFn: () => api.get<DeliveryPlanResponse>(`/api/articles/${encodeURIComponent(articleId!)}/delivery-plan`, params) });
+  return useQuery({ queryKey: ["delivery-plan", articleId], enabled: !!articleId, staleTime: 30_000,
+    queryFn: () => api.get<DeliveryPlanResponse>(`/api/articles/${encodeURIComponent(articleId!)}/delivery-plan`) });
 }
 
 export function useProgramImpact() {
@@ -73,19 +71,30 @@ export const useWeeklyParams = (articleId: string | null) => useQuery({
 });
 
 export const useArticles = (planner?: string | null) => useQuery({ queryKey: ["ref-articles", planner], queryFn: () => api.get<ArticleRef[]>("/api/reference/articles", { planner }), staleTime: 300_000 });
-export const useLinks = (articleId?: string) => useQuery({ queryKey: ["ref-links", articleId], queryFn: () => api.get<LinkRef[]>("/api/reference/links", { article_id: articleId }), staleTime: 300_000 });
+export const useLinks = (articleId?: string, supplierId?: string) => useQuery({ queryKey: ["ref-links", articleId ?? null, supplierId ?? null], queryFn: () => api.get<LinkRef[]>("/api/reference/links", { article_id: articleId, supplier_id: supplierId }), staleTime: 300_000 });
+export const useSuppliers = () => useQuery({ queryKey: ["ref-suppliers"], queryFn: () => api.get<SupplierRef[]>("/api/reference/suppliers"), staleTime: 300_000 });
+export const useSupplier = (supplierId: string | undefined) => useQuery({ queryKey: ["supplier", supplierId], enabled: !!supplierId, staleTime: 30_000, queryFn: () => api.get<SupplierDetail>(`/api/suppliers/${encodeURIComponent(supplierId!)}`) });
 export const usePrograms = () => useQuery({ queryKey: ["ref-programs"], queryFn: () => api.get<ProgramRef[]>("/api/reference/programs"), staleTime: 300_000 });
 export const usePdpErp = (programId?: string) => useQuery({ queryKey: ["ref-pdp", programId], queryFn: () => api.get<PdpErpLine[]>("/api/reference/pdp", { program_id: programId }), staleTime: 300_000, enabled: !!programId });
 export const useRefTables = () => useQuery({ queryKey: ["ref-tables"], queryFn: () => api.get<RefTableInfo[]>("/api/reference/tables") });
 export const useRefRows = (name: string | null, planner?: string | null) => useQuery({ queryKey: ["ref-rows", name, planner ?? null], queryFn: () => api.get<RefRow[]>(`/api/reference/${name}/rows`, { planner: planner ?? undefined }), enabled: !!name });
+/** Articles eligible as consumption sources of an article (derived consumption). */
+export const useConsumptionSources = (articleId: string | undefined, enabled = true) => useQuery({ queryKey: ["consumption-sources", articleId], enabled: !!articleId && enabled, queryFn: () => api.get<ConsumptionSourceOption[]>("/api/reference/consumption-sources", { article_id: articleId }) });
 
 export const useParamSchema = () => useQuery({ queryKey: ["param-schema"], queryFn: () => api.get<ParamDoc[]>("/api/params/schema"), staleTime: Infinity });
+export const useFixedRules = () => useQuery({ queryKey: ["param-fixed"], queryFn: () => api.get<FixedRule[]>("/api/params/fixed"), staleTime: Infinity });
 export const useParamEffective = () => useQuery({ queryKey: ["param-effective"], queryFn: () => api.get<Record<string, unknown>>("/api/params/effective") });
 export const useOverrides = (params?: Params) => useQuery({ queryKey: ["overrides", params], queryFn: () => api.get<ParamOverrideOut[]>("/api/params/overrides", params) });
 export const usePerimeterLists = (planner: string | null | undefined) => useQuery({ queryKey: ["perimeter", planner ?? null], queryFn: () => api.get<PerimeterOut>("/api/reference/perimeter", { planner: planner ?? undefined }), staleTime: 300_000 });
 export const usePdpSheet = (weeks?: number, planner?: string | null) => useQuery({ queryKey: ["pdp-sheet", weeks, planner ?? null], queryFn: () => api.get<PdpSheetOut>("/api/pdp/sheet", { weeks, planner: planner ?? undefined }), placeholderData: keepPreviousData });
 export const usePdpVersions = () => useQuery({ queryKey: ["pdp-versions"], queryFn: () => api.get<PdpVersionOut[]>("/api/pdp/versions") });
 export const useAudit = (params?: Params) => useQuery({ queryKey: ["audit", params], queryFn: () => api.get<AuditOut[]>("/api/entries/audit", params) });
+
+/** Paramètres › Données */
+export const useSyncStatus = (refetchMs = 120_000) => useQuery({ queryKey: ["data-sync"], queryFn: () => api.get<SyncStatus>("/api/data/sync"), staleTime: 60_000, refetchInterval: refetchMs });
+export const useOrphans = () => useQuery({ queryKey: ["data-orphans"], queryFn: () => api.get<OrphanRow[]>("/api/data/orphans"), staleTime: 60_000 });
+export const usePlantCalendar = () => useQuery({ queryKey: ["data-calendar"], queryFn: () => api.get<PlantCalendar>("/api/data/calendar"), staleTime: 300_000 });
+export const useAdherence = (params: Params, enabled = true) => useQuery({ queryKey: ["data-adherence", params], queryFn: () => api.get<AdherenceResponse>("/api/data/adherence", params), enabled, staleTime: 60_000, placeholderData: keepPreviousData });
 
 /** Generic mutation that invalidates everything on success and shows the server message on failure
  * (a refused write – 403 outside the user's portfolio, 422 invalid value – is never silent). */

@@ -1,12 +1,17 @@
 /** API types – mirror of backend/appro/api/schemas.py */
 export type Severity = "critical" | "warning" | "info";
 
+export type ConsumptionSource = "erp" | "plan" | "derived";
+export interface DerivedTerm { source_article_id: string; coef: number; }
 export interface ArticleRef {
   article_id: string; designation: string; unit: string; family: string; planner: string;
   coverage_target_days: number; alert_red_days: number; alert_yellow_days: number; overstock_days: number;
-  safety_stock_qty: number; order_cycle_days: number; active: boolean;
+  /** open days of the week carrying the weekly requirement (1 = Monday only … 5 = whole week) */
+  demand_days: number; sourcing_policy: "quota" | "priority"; consumption_source: ConsumptionSource; derived_terms: DerivedTerm[]; active: boolean;
 }
-export interface LinkRef { article_id: string; supplier_id: string; supplier_name: string; moq: number; pack_qty: number; lead_time_days: number; quota_pct: number; priority: number; active: boolean; }
+/** ``lead_time_days`` is the effective lead time (link override, else the supplier's) ; ``lead_time_override`` is the link's own value (null = inherited). */
+export interface LinkRef { article_id: string; supplier_id: string; supplier_name: string; moq: number; pack_qty: number; lead_time_days: number; lead_time_override: number | null; quota_pct: number; priority: number; active: boolean; max_qty_per_delivery: number | null; max_qty_per_week: number | null; }
+export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; }
 export interface ProgramRef { program_id: string; name: string; family: string; active: boolean; components: number; }
 export interface PdpErpLine { program_id: string; week_start: string | null; qty: number; version: string; }
 
@@ -24,6 +29,8 @@ export interface ProposalOut {
   proposal_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string;
   delivery_date: string; order_date: string; qty: number; net_requirement: number; reason: string; urgent: boolean;
   lead_time_days: number; moq: number; pack_qty: number; projected_stock_before: number; projected_stock_after: number; ignored: boolean;
+  /** floor : inside the lead time, only what avoids the stockout ; capped : truncated by a supplier cap */
+  floor: boolean; capped: boolean;
 }
 export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; ignored: boolean; }
 export interface SeriesOut { key: string; label: string; values: number[]; }
@@ -36,24 +43,26 @@ export interface ReceiptInfo { receipt_id: string; receipt_date: string; qty: nu
 export interface LaneOut { supplier_id: string | null; name: string; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; desadv_ko: boolean[]; receipts_ko: boolean[]; receipts_booked: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; desadv: DesadvInfo[]; receipt_lines: ReceiptInfo[]; }
 
 export interface ArticleKpis {
-  stock_on_hand: number; reference_correction: number; stock_reference: number; stock_at_date: number; price: number | null; stock_value: number | null; target_value: number | null; stockout_plan_severity: Severity | null; init_date: string; shortage_policy: "backlog" | "lost";
+  stock_on_hand: number; reference_correction: number; stock_reference: number; stock_at_date: number; price: number | null; stock_value: number | null; target_value: number | null; stockout_plan_severity: Severity | null; init_date: string;
   stock_as_of_erp: number; stock_as_of_plan: number; coverage_erp_days: number; coverage_plan_days: number; coverage_target_days: number; target_stock: number;
   first_stockout_erp: string | null; first_stockout_plan: string | null; min_stock_erp: number; min_stock_plan: number; max_shortage_erp: number; max_shortage_plan: number;
-  demand_next_7d: number; demand_next_30d: number; demand_horizon: number; avg_daily_demand_30d: number; working_days_30d: number; backlog_window_start: string;
+  demand_next_7d: number; demand_next_20wd: number; demand_horizon: number; avg_daily_demand_wd: number; working_days_counted: number;
+  lead_time_days: number; demand_days: number; consumption_source: ConsumptionSource;
   open_firm_qty: number; open_forecast_qty: number; plan_qty: number; plan_cell_count: number; ignored_order_days: number; refused_proposals: number;
   backlog_qty: number; backlog_ordered: number; backlog_received: number;
-  proposed_qty: number; proposal_count: number; urgent_proposal_count: number; alert_count: number; severity: Severity | null; actual_share_30d: number; lanes: number;
+  proposed_qty: number; proposal_count: number; urgent_proposal_count: number; capped_proposal_count: number; alert_count: number; severity: Severity | null; actual_share_30d: number; lanes: number;
   next_delivery_date: string | null; next_delivery_qty: number | null; next_delivery_type: "ferme" | "cbn" | "saisie" | null;
 }
 export interface ArticleSummary {
   article_id: string; designation: string; unit: string; planner: string; suppliers: string[]; severity: Severity | null;
   kpis: ArticleKpis; alert_types: string[]; sparkline: number[];
 }
-export interface BacklogRow { article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string; ordered: number; received: number; backlog: number; }
+/** One late firm order (delivery date passed, ERP remaining quantity open). */
+export interface BacklogRow { article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; order_id: string; purch_id: string; expected_date: string | null; ordered: number; received: number; backlog: number; ignored: boolean; }
 export interface CockpitKpis {
   articles: number; critical: number; warning: number; stockouts: number; stockouts_7d: number; low_coverage: number; overstock: number;
   backlog_articles: number; backlog_qty: number; proposals: number; urgent_proposals: number; proposals_qty: number; plan_articles: number; plan_qty: number;
-  open_firm_qty: number; open_forecast_qty: number; avg_coverage_days: number | null; median_coverage_days: number | null; demand_next_30d: number;
+  open_firm_qty: number; open_forecast_qty: number; avg_coverage_days: number | null; median_coverage_days: number | null; demand_next_20wd: number;
   stock_value: number | null; target_value: number | null; priced_articles: number; unpriced_articles: number;
 }
 export interface WeeklyStockValue { week: string; week_start: string; value_plan: number; value_target: number; }
@@ -69,7 +78,7 @@ export interface ProjectionResponse {
   lanes: LaneOut[]; proposals: ProposalOut[]; alerts: AlertOut[]; kpis: ArticleKpis; suppliers: LinkRef[];
   programs: { program_id: string; name: string; qty_per: number; unit: string; production_next_30d: number }[]; diagnostics: string[];
 }
-export interface GridArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; programs: string[]; }
+export interface GridArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; proposals: ProposalOut[]; programs: string[]; }
 /** One page of the supply table (``total`` articles after filters). */
 export interface GridResponse { as_of: string; init_date: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; articles: GridArticle[]; diagnostics: string[]; total: number; page: number; page_size: number; }
 /** The Plan row as ERP delivery schedule lines. */
@@ -87,7 +96,7 @@ export interface WeeklyParamsResponse { article_id: string; fields: string[]; de
 /** The two editable rows. */
 export interface AdjustmentOut { id: string; article_id: string; date: string; expression: string; qty: number; note: string; updated_by: string; updated_at: string; }
 export interface PlanCellOut { id: string; article_id: string; supplier_id: string; date: string; expression: string; qty: number; note: string; updated_by: string; updated_at: string; }
-/** A click on a read-only cell: ignored firm-order day (supplier × day), refused CBN proposal (supplier × day, blocks its week) or hidden unreceived DESADV (supplier × day). */
+/** A click on a read-only cell: ignored firm-order day (supplier × day), refused CBN proposal (supplier × day : that day only) or hidden unreceived DESADV (supplier × day). */
 export type FlagKind = "order_ignored" | "proposal_refused" | "desadv_hidden";
 export interface FlagOut { id: string; article_id: string; supplier_id: string; date: string; kind: FlagKind; qty: number; note: string; updated_by: string; updated_at: string; }
 export interface FlagIn { article_id: string; supplier_id?: string | null; date: string; kind: FlagKind; qty?: number; note?: string; }
@@ -106,6 +115,7 @@ export interface AccessOut {
   can_edit_reference: boolean;
 }
 /** ``as_of`` = today (the real date, or the simulated one) ; ``init_date`` = stock initialisation day, point zero of the application. */
+export interface FixedRule { name: string; value: string; }
 export interface ConfigOut { title: string; data_source: Record<string, unknown>; as_of: string; init_date: string; horizon_days: number; planners: string[]; default_planner: string | null; user: string; version: string; reference_empty: boolean; access: AccessOut; }
 
 export interface PerimeterItem { id: string; name: string; }
@@ -124,6 +134,34 @@ export interface FlowsResponse {
   as_of: string; planner: string | null; first_seen_available: boolean; kpis: Record<FlowKey, number>;
   to_order: ProposalOut[]; ordered: OrderRow[]; in_transit: DesadvRow[]; to_process: DesadvRow[]; to_receive: OrderRow[]; received: ReceiptRow[]; late: BacklogRow[]; to_validate: PendingRow[];
 }
-export type SearchKind = "receipts" | "orders" | "desadv" | "pending";
+export type SearchKind = "receipts" | "orders" | "desadv";
 export interface SearchRow { article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; date: string | null; qty?: number; purch_id?: string; packing_slip?: string; status?: string; order_type?: string; qty_ordered?: number; qty_open?: number; first_seen?: string | null; state?: string; final_processing?: string; received?: boolean; journal?: boolean; days_pending?: number; receipt_id?: string; order_id?: string; desadv_id?: string; pending_id?: string; }
 export interface SearchResponse { kind: SearchKind; total: number; truncated: boolean; rows: SearchRow[]; }
+
+// ---- Paramètres › Données, supplier page, generic export
+export interface SyncTable { table: string; synced_at: string | null; age_minutes: number | null; rows: number | null; source: string; run_id?: string; status: "ok" | "late" | "unknown"; }
+export interface SyncStatus { data_source: string; mirror: boolean; status: "ok" | "late" | "unknown"; last_sync_at: string | null; late_after_minutes: number; tables: SyncTable[]; }
+export interface OrphanRow { article_id: string; orders: number; receipts: number; desadv: number; consumption: number; last_date: string | null; suppliers: string[]; }
+export interface PlantCalendar { working_weekdays: number[]; holidays: string[]; next_closures: string[]; source: string; }
+export interface AdherenceRow {
+  article_id: string; designation: string; unit: string; planner: string; consumption_source: ConsumptionSource; demand_days: number;
+  plan: number; real: number; bias_pct: number | null; net_pct: number | null; gross_pct: number | null; weekday_share: number[]; suggested_demand_days: number | null;
+  status: "ok" | "plan sans conso" | "conso sans plan" | "sans donnée";
+}
+export interface AdherenceResponse {
+  as_of: string; from: string; to: string; weeks: number; bucket: "week" | "day"; plan_mode: "monday" | "latest"; buckets: string[];
+  totals: { articles: number; plan: number; real: number; bias_pct: number | null; net_pct: number | null; gross_pct: number | null; plan_without_consumption: number; suggestion_changes: number };
+  rows: AdherenceRow[]; excluded_plan_source: string[];
+}
+export interface SupplierArticleRow {
+  article_id: string; designation: string; unit: string; planner: string; active: boolean; moq: number; pack_qty: number; lead_time_days: number; lead_time_override: number | null;
+  quota_pct: number; priority: number; max_qty_per_delivery: number | null; max_qty_per_week: number | null; supplier_count: number;
+  coverage_plan_days: number | null; stock_at_date: number | null; severity: Severity | null; first_stockout_plan: string | null; backlog_qty: number; open_firm_qty: number; planned_qty: number; proposal_count: number; urgent_count: number;
+}
+export interface SupplierDetail {
+  supplier: SupplierRef; as_of: string; kpis: Record<string, number>; articles: SupplierArticleRow[];
+  late: BacklogRow[]; in_transit: DesadvRow[]; to_process: DesadvRow[]; to_validate: PendingRow[]; to_order: ProposalOut[]; upcoming: OrderRow[];
+}
+export interface ConsumptionSourceOption { article_id: string; designation: string; unit: string; programs: string[]; shared_programs: string[]; }
+export type ExportType = "text" | "number" | "date" | "bool" | "percent";
+export interface ExportColumn { key: string; label: string; type?: ExportType; }

@@ -10,7 +10,7 @@ import { fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
 import type { AdjustmentOut, AuditOut, FlagOut, PlanCellOut } from "@/lib/types";
 
 type Tab = "plan" | "adjustments" | "flags" | "audit";
-const FLAG_LABELS: Record<string, string> = { order_ignored: "commande ferme ignorée", proposal_refused: "proposition CBN refusée", desadv_hidden: "en transit masqué (DESADV / journal d'arrivée)" };
+const FLAG_LABELS: Record<string, string> = { order_ignored: "commande ferme ignorée", proposal_refused: "proposition CBN refusée (ce jour)", desadv_hidden: "en transit masqué (DESADV / journal d'arrivée)" };
 
 const article = <T extends { article_id: string }>(): Column<T> => ({ key: "article", label: "Article", get: (r) => r.article_id, render: (r) => <Link to={`/articles/${encodeURIComponent(r.article_id)}`}><b>{r.article_id}</b></Link> });
 const who = <T extends { updated_by: string; updated_at: string }>(): Column<T> => ({ key: "who", label: "Modifié", get: (r) => `${r.updated_by} ${r.updated_at}`, render: (r) => <span className="subtle small">{r.updated_by}<br />{fmtDateTime(r.updated_at)}</span> });
@@ -50,7 +50,7 @@ export default function EntriesPage() {
     article<FlagOut>(),
     { key: "kind", label: "Type", get: (f) => FLAG_LABELS[f.kind], filter: "select", render: (f) => <Badge tone={f.kind === "order_ignored" ? "critical" : f.kind === "proposal_refused" ? "warning" : "neutral"}>{FLAG_LABELS[f.kind]}</Badge> },
     { key: "supplier", label: "Fournisseur", get: (f) => f.supplier_id, filter: "select" },
-    { key: "date", label: "Date", get: (f) => f.date, render: (f) => <>{fmtDate(f.date)}{f.kind === "proposal_refused" && <span className="sub subtle">jusqu'à la fin de la semaine</span>}</> },
+    { key: "date", label: "Date", get: (f) => f.date, render: (f) => <>{fmtDate(f.date)}{f.kind === "proposal_refused" && <span className="sub subtle">ce jour seulement</span>}</> },
     { key: "qty", label: "Quantité", get: (f) => f.qty, num: true, render: (f) => f.kind !== "order_ignored" ? fmtQty(f.qty) : <span className="subtle">–</span> },
     { key: "note", label: "Détail", get: (f) => f.note, render: (f) => <span className="subtle small">{f.note}</span> },
     who<FlagOut>(), delCol<FlagOut>("/api/entries/flags", "Rétablir"),
@@ -65,7 +65,7 @@ export default function EntriesPage() {
   ], []);
 
   const block = <T,>(q: { isLoading: boolean; isError: boolean; error: unknown; data?: T[] }, cols: Column<T>[], key: (r: T) => string, empty: string, hint?: string) => (
-    <Card flush>{q.isError ? <ErrorBox error={q.error} /> : q.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={q.data ?? []} columns={cols} rowKey={key} compact emptyTitle={empty} emptyHint={hint} />}</Card>
+    <Card flush>{q.isError ? <ErrorBox error={q.error} /> : q.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={q.data ?? []} columns={cols} rowKey={key} compact emptyTitle={empty} emptyHint={hint} storageKey={`saisies.${tab}`} exportTitle={`Saisies - ${tab}`} />}</Card>
   );
 
   return (

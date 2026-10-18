@@ -24,6 +24,12 @@ class Column:
     description: str = ""
     required: bool = False
     example: object = ""
+    #: numeric column where « empty » is a value of its own (no cap, inherited lead time) : kept NULL, never 0
+    nullable: bool = False
+
+    @property
+    def keeps_null(self) -> bool:
+        return self.nullable and self.type in ("int", "float")
 
 
 @dataclass(frozen=True)
@@ -39,6 +45,10 @@ class TableSchema:
     @property
     def column_types(self) -> dict[str, str]:
         return {c.name: c.type for c in self.columns}
+
+    @property
+    def nullable_numeric(self) -> tuple[str, ...]:
+        return tuple(c.name for c in self.columns if c.keeps_null)
 
     @property
     def column_names(self) -> tuple[str, ...]:
@@ -85,11 +95,11 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("supplier_id", "str", "Fournisseur", "", True, "S-000545"),
            Column("moq", "float", "MOQ", "quantité minimale de commande", True, 400),
            Column("pack_qty", "float", "UM", "unité de manutention (conditionnement) : les propositions sont arrondies au multiple supérieur", True, 400),
-           Column("lead_time_override", "int", "Délai spécifique (j ouvrés)", "exception au délai du fournisseur ; vide = délai du fournisseur", False, ""),
+           Column("lead_time_override", "int", "Délai spécifique (j ouvrés)", "exception au délai du fournisseur ; vide = délai du fournisseur", False, "", nullable=True),
            Column("quota_pct", "float", "Quota %", "répartition multi-sourcing (100 si mono-source)", True, 100),
            Column("priority", "int", "Priorité", "1 = fournisseur principal", True, 1),
-           Column("max_qty_per_delivery", "float", "Max / livraison", "plafond d'une livraison (multiple de l'UM, ≥ MOQ) ; vide = aucun", False, ""),
-           Column("max_qty_per_week", "float", "Max / semaine", "plafond d'une semaine ISO, fermes et plan compris (≤ max / livraison × jours de livraison) ; vide = aucun", False, ""),
+           Column("max_qty_per_delivery", "float", "Max / livraison", "plafond d'une livraison (multiple de l'UM, ≥ MOQ) ; vide = aucun", False, "", nullable=True),
+           Column("max_qty_per_week", "float", "Max / semaine", "plafond d'une semaine ISO, fermes et plan compris (≤ max / livraison × jours de livraison) ; vide = aucun", False, "", nullable=True),
            Column("active", "bool", "Actif", "", True, True),
        ]),
     _t("ref_consumption_terms", "Termes de consommation", "Articles en source de consommation « dérivée » : conso = Σ coefficient × consommation "
@@ -221,9 +231,14 @@ def _to_bool(v) -> bool:
 def coerce(df: pd.DataFrame, schema: TableSchema) -> pd.DataFrame:
     """Coerce a frame to the canonical schema (missing columns added, types normalised)."""
     out = pd.DataFrame(index=df.index)
+    nullable = set(schema.nullable_numeric)
     for col, typ in schema.column_types.items():
         s = df[col] if col in df.columns else pd.Series([None] * len(df), index=df.index, dtype=object)
-        if typ == "str":
+        if col in nullable:
+            # empty stays empty (None) ; 0 is not a value for these columns (no cap / inherited lead time)
+            nums = pd.to_numeric(s, errors="coerce")
+            out[col] = pd.Series([None if pd.isna(v) or v <= 0 else (int(v) if typ == "int" else float(v)) for v in nums], index=df.index, dtype=object)
+        elif typ == "str":
             out[col] = s.map(lambda v: "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v).strip())
         elif typ == "float":
             out[col] = pd.to_numeric(s, errors="coerce").fillna(0.0).astype(float)

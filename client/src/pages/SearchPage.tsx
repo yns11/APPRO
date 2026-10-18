@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { Search } from "lucide-react";
 import { usePerimeterLists, useSearch } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
-import { Badge, Card, ErrorBox, Segmented, SkeletonBlock } from "@/components/ui";
+import { usePageState } from "@/lib/pageState";
+import { ArticleLink, Badge, Card, ErrorBox, Segmented, SkeletonBlock, SupplierLink } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
 import { SearchSelect } from "@/components/SearchSelect";
 import { fmtDate, fmtInt, fmtQty, ORDER_TYPE_LABELS } from "@/lib/format";
 import type { SearchKind, SearchRow } from "@/lib/types";
 
 const KINDS: { id: SearchKind; label: string }[] = [
-  { id: "receipts", label: "Réceptions" }, { id: "orders", label: "Commandes" }, { id: "desadv", label: "DESADV" }, { id: "pending", label: "BL en attente" },
+  { id: "receipts", label: "Réceptions" }, { id: "orders", label: "Commandes" }, { id: "desadv", label: "DESADV" },
 ];
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -26,11 +26,9 @@ function useDebounced<T>(value: T, ms: number): T {
  */
 export default function SearchPage() {
   const { perimeter } = usePerimeter();
-  const [kind, setKind] = useState<SearchKind>("receipts");
-  const [text, setText] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [supplier, setSupplier] = useState("");
+  const [st, patch] = usePageState("recherche", { kind: "receipts" as SearchKind, text: "", from: "", to: "", supplier: "" });
+  const { kind, text, from, to, supplier } = st;
+  const setKind = (kind: SearchKind) => patch({ kind }); const setText = (text: string) => patch({ text }); const setFrom = (from: string) => patch({ from }); const setTo = (to: string) => patch({ to }); const setSupplier = (supplier: string) => patch({ supplier });
   const q = useDebounced(text.trim(), 350);
   const lists = usePerimeterLists(perimeter.planner);
   const supplierOptions = useMemo(() => (lists.data?.suppliers ?? []).map((s) => ({ id: s.id, label: s.name || s.id, hint: s.id })), [lists.data]);
@@ -38,13 +36,13 @@ export default function SearchPage() {
 
   const cols = useMemo<Column<SearchRow>[]>(() => {
     const base: Column<SearchRow>[] = [
-      { key: "article", label: "Article", get: (r) => `${r.article_id} ${r.designation}`, render: (r) => <><Link to={`/articles/${encodeURIComponent(r.article_id)}`}><b>{r.article_id}</b></Link><span className="sub">{r.designation}</span></> },
+      { key: "article", label: "Article", get: (r) => `${r.article_id} ${r.designation}`, exportGet: (r) => r.article_id, render: (r) => <ArticleLink id={r.article_id} designation={r.designation} /> },
       { key: "planner", label: "Approvisionneur", get: (r) => r.planner, filter: "select" },
-      { key: "supplier", label: "Fournisseur", get: (r) => `${r.supplier_id ?? ""} ${r.supplier_name}`, render: (r) => <>{r.supplier_id}<span className="sub">{r.supplier_name}</span></> },
+      { key: "supplier", label: "Fournisseur", get: (r) => `${r.supplier_id ?? ""} ${r.supplier_name}`, title: "Code ou nom ; cliquer pour ouvrir la fiche fournisseur", render: (r) => <SupplierLink id={r.supplier_id} name={r.supplier_name} /> },
       { key: "purch", label: "Commande", get: (r) => r.purch_id ?? "" },
     ];
     const date = (label: string): Column<SearchRow> => ({ key: "date", label, get: (r) => r.date ?? "", render: (r) => fmtDate(r.date) });
-    const qty = (label: string, get: (r: SearchRow) => number | undefined): Column<SearchRow> => ({ key: label, label, get: (r) => get(r) ?? null, num: true, render: (r) => fmtQty(get(r) ?? 0, r.unit) });
+    const qty = (label: string, get: (r: SearchRow) => number | undefined): Column<SearchRow> => ({ key: label, label, get: (r) => get(r) ?? null, num: true, sum: true, unit: (r) => r.unit, render: (r) => fmtQty(get(r) ?? 0, r.unit) });
     switch (kind) {
       case "receipts": return [...base,
         { key: "bl", label: "BL", get: (r) => r.packing_slip ?? "", render: (r) => r.packing_slip || <span className="subtle">sans BL</span> },
@@ -60,18 +58,14 @@ export default function SearchPage() {
         { key: "state", label: "État", get: (r) => `${r.state ?? ""}${r.final_processing ? ` / ${r.final_processing}` : ""}`, filter: "select" },
         { key: "received", label: "Reçu ?", get: (r) => r.received ? "reçu" : "en transit", filter: "select", render: (r) => <Badge tone={r.received ? "ok" : "info"}>{r.received ? "reçu" : "en transit"}</Badge> },
         { key: "journal", label: "Journal", get: (r) => r.journal ? "oui" : "non", filter: "select", render: (r) => r.journal ? "oui" : <Badge tone="warning">absent</Badge> }];
-      case "pending": return [...base,
-        { key: "bl", label: "BL (DESADV)", get: (r) => r.packing_slip ?? "" },
-        date("Enregistré le"), qty("Quantité", (r) => r.qty),
-        { key: "days", label: "Jours en attente", get: (r) => r.days_pending ?? 0, num: true, render: (r) => <Badge tone={(r.days_pending ?? 0) >= 14 ? "critical" : "warning"}>{fmtInt(r.days_pending)} j</Badge> }];
     }
   }, [kind]);
-  const rowKey = (r: SearchRow) => r.receipt_id ?? r.order_id ?? r.desadv_id ?? r.pending_id ?? `${r.article_id}-${r.date}`;
+  const rowKey = (r: SearchRow) => r.receipt_id ?? r.order_id ?? r.desadv_id ?? `${r.article_id}-${r.date}`;
 
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Recherche</h1><p>Réceptions, commandes, DESADV et BL en attente du périmètre. Texte libre sur tous les champs ; « ; » sépare des alternatives (<code>123;456</code>). Les filtres de colonnes acceptent aussi « ; ».</p></div>
+        <div className="title"><h1>Recherche</h1><p>Réceptions, commandes et DESADV du périmètre. Texte libre sur tous les champs ; « ; » sépare des alternatives (<code>123;456</code>). Les filtres de colonnes acceptent aussi « ; ».</p></div>
         <div className="actions"><Segmented value={kind} onChange={setKind} options={KINDS} /></div>
       </div>
       <Card tight>
@@ -85,7 +79,7 @@ export default function SearchPage() {
       </Card>
       <Card flush>
         {res.isError ? <ErrorBox error={res.error} retry={() => res.refetch()} /> : res.isLoading || !res.data ? <div style={{ padding: 20 }}><SkeletonBlock rows={8} /></div>
-          : <div className="scroll-x"><DataTable rows={res.data.rows} columns={cols} rowKey={rowKey} emptyTitle="Aucune ligne" emptyHint="Élargir la période ou le texte recherché." maxHeight="calc(100vh - 260px)" /></div>}
+          : <div className="scroll-x"><DataTable rows={res.data.rows} columns={cols} rowKey={rowKey} emptyTitle="Aucune ligne" emptyHint="Élargir la période ou le texte recherché." maxHeight="calc(100vh - 260px)" storageKey={`recherche.${kind}`} exportTitle={`Recherche - ${KINDS.find((x) => x.id === kind)?.label ?? kind}`} /></div>}
       </Card>
     </div>
   );

@@ -1,7 +1,21 @@
 import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { AlertTriangle, ChevronDown, ChevronRight, Inbox, X } from "lucide-react";
 import type { Severity } from "@/lib/types";
 import { SEVERITY_LABELS } from "@/lib/format";
+
+/* ---------------------------------------------------------------- Links to the records */
+/** Supplier code (and name) as a link to the supplier page ; ``name`` goes under the code. */
+export function SupplierLink({ id, name, inline, className }: { id: string | null | undefined; name?: string; inline?: boolean; className?: string }) {
+  if (!id) return <span className="subtle">{name || "–"}</span>;
+  const to = `/fournisseurs/${encodeURIComponent(id)}`;
+  if (inline) return <Link to={to} className={className} onClick={(e) => e.stopPropagation()} title="Ouvrir la fiche fournisseur">{id}{name ? ` · ${name}` : ""}</Link>;
+  return <><Link to={to} className={className} onClick={(e) => e.stopPropagation()} title="Ouvrir la fiche fournisseur"><b>{id}</b></Link>{name && <span className="sub"><Link to={to} className="subtle" onClick={(e) => e.stopPropagation()}>{name}</Link></span>}</>;
+}
+/** Article code (and designation) as a link to the article page. */
+export function ArticleLink({ id, designation, className }: { id: string; designation?: string; className?: string }) {
+  return <><Link to={`/articles/${encodeURIComponent(id)}`} className={className} onClick={(e) => e.stopPropagation()}><b>{id}</b></Link>{designation && <span className="sub" title={designation}>{designation}</span>}</>;
+}
 
 /* ---------------------------------------------------------------- Button */
 export function Button({ variant = "default", size, icon, className = "", children, ...rest }:
@@ -41,7 +55,7 @@ export function Kpi({ label, value, unit, meta, tone, onClick, active, icon }:
       onClick={onClick} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}>
       <div className="label">{icon}{label}</div>
-      <div className="value">{value}{unit && <small>{unit}</small>}</div>
+      <div className={`value ${typeof value === "string" && value.length > 9 ? "long" : ""}`}>{value}{unit && <small>{unit}</small>}</div>
       {meta && <div className="meta">{meta}</div>}
     </div>
   );
