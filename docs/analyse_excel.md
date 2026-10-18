@@ -65,9 +65,9 @@ saisit lui-même ses commandes en essayant de maintenir la couverture.
 
 * **Conservée** : la logique métier lisible (besoin → commandes / réceptions → stock → cible → couverture),
   les notions de stock ferme / simulé, de couverture cible par article et de production réelle prioritaire
-  sur le plan. Le moteur reproduit exactement les valeurs du classeur en mode « legacy »
-  (test `backend/tests/test_legacy_regression.py` : besoin, stock, couverture et stock cible identiques
-  sur 120 jours pour les 16 articles).
+  sur le plan. Le mode « legacy » (reproduction à l'identique des valeurs du classeur) a été retiré avec la
+  mise en jours ouvrés du moteur ; les règles du moteur sont désormais vérifiées par les scénarios du guide
+  (`docs/guide_moteur.md`, `backend/tests/test_engine_units.py`).
 * **Améliorée** : horizon glissant paramétrable, calendrier ouvré, lissage à somme exacte, commandes
   soldées par les réceptions (plus de double compte), retards fournisseurs détectés, seuils d'alerte
   paramétrables et fonctionnels, propositions de commandes (MOQ, PLA, délai, jours de livraison, quotas),

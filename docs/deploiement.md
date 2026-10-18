@@ -210,8 +210,12 @@ redéployer (`scripts/deploy.sh dev PROD --var=...`) ; l'App rejoue le `GRANT` �
    ligne d'exemple, onglet NOTICE décrivant chaque colonne). Le remplir, puis *Importer un fichier* en mode
    *remplacer la table*.
 2. **Articles** — colonnes : Article, Désignation, Unité, Famille, Approvisionneur (= périmètre),
-   Couverture cible, Seuil rouge, Seuil orange, Surstock, Stock de sécurité, Cycle de commande, Actif.
-3. **Article ↔ fournisseur** — MOQ, UM (unité de manutention), délai en jours ouvrés, quota %, priorité.
+   Couverture cible, Seuil rouge, Seuil orange, Surstock (jours ouvrés), Jours de consommation (1 à 5),
+   Multi-sourcing (`quota` / `priority`), Source conso (`erp` / `plan` / `derived`), Actif.
+3. **Article ↔ fournisseur** — MOQ, UM (unité de manutention), délai spécifique (vide = délai du fournisseur,
+   lui-même en jours ouvrés dans la table Fournisseurs, 5 par défaut), quota %, priorité, plafonds par livraison
+   et par semaine (vides = aucun). Les termes de consommation (articles sources d'une consommation dérivée) se
+   saisissent depuis la fiche article, onglet *Paramétrage*.
 4. **Programmes** — le nom doit être celui utilisé dans le fichier PDP.
 5. **Nomenclatures** — programme, composant, quantité par unité, unité, rebut %.
 6. **Approvisionneurs** — ID, prénom (= colonne *Approvisionneur* des articles), e-mail Databricks, rôle
@@ -241,8 +245,8 @@ Deux voies équivalentes ; la première est celle du bundle.
 databricks bundle run appro_sync_erp -t dev --profile PROD
 ```
 
-Le job lit `commandes_edi`, `recep_edi`, `desadv_edi`, `conso_composants`, `silver_base_article` (prix) et
-`bl_en_attente` avec le SQL de correspondance de `backend/appro/data/erp_sql.py`, remplace chaque table `erp_*`
+Le job lit `commandes_edi`, `recep_edi`, `desadv_edi`, `conso_composants` et `silver_base_article` (prix)
+avec le SQL de correspondance de `backend/appro/data/erp_sql.py`, remplace chaque table `erp_*`
 dans une transaction, puis écrit `erp_sync_log`. Pour les commandes, il pose `first_seen` (jour de première
 apparition d'un créneau), conservé d'une exécution à l'autre : le flux *Commandé* du cockpit n'a de sens
 qu'après deux exécutions au moins (à la première, tout est « apparu aujourd'hui »). Environnement serverless, dépendance `psycopg` ; l'hôte et le jeton

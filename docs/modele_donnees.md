@@ -5,8 +5,8 @@ donne la vue d'ensemble.
 
 ```
                      ┌──────────────── base applicative (Lakebase / SQLite) ────────────────┐
-  Référentiel        │ ref_articles  ref_suppliers  ref_article_suppliers                   │
-  (géré dans l'App)  │ ref_programs  ref_bom        fct_stock                              │
+  Référentiel        │ ref_articles  ref_suppliers  ref_article_suppliers  ref_consumption_terms│
+  (géré dans l'App)  │ ref_programs  ref_bom        fct_stock  ref_planners  ref_delegations│
                      │                                                                       │
   Saisies            │ app_plan_cells (article × fournisseur × jour)                         │
   (deux lignes)      │ app_adjustments (article × jour)                                      │
@@ -28,9 +28,10 @@ import *remplacer* / *fusionner*, export). Schéma canonique `backend/appro/data
 
 | Table | Clé | Rôle |
 |---|---|---|
-| `ref_articles` | article_id | identité, unité, approvisionneur (périmètre), politique de stock |
-| `ref_suppliers` | supplier_id | fournisseurs et jours de livraison |
-| `ref_article_suppliers` | article_id, supplier_id | MOQ, UM, délai, quota, priorité → **voies** du tableau |
+| `ref_articles` | article_id | identité, unité, approvisionneur (périmètre), politique de stock (jours ouvrés), jours de consommation, multi-sourcing, source de consommation |
+| `ref_suppliers` | supplier_id | fournisseurs, jours de livraison, **délai en jours ouvrés** (inclusif) |
+| `ref_article_suppliers` | article_id, supplier_id | MOQ, UM, délai spécifique (vide = fournisseur), quota, priorité, plafonds par livraison / semaine → **voies** du tableau |
+| `ref_consumption_terms` | article_id, source_article_id | consommation dérivée : coefficient par article source |
 | `ref_programs` | program_id | programmes (nom du fichier PDP) |
 | `ref_bom` | program_id, article_id | nomenclature 1 niveau |
 | `ref_planners` | planner_id | approvisionneurs : nom (= colonne *Approvisionneur* des articles), e-mail Databricks, rôle (appro / manager / admin), actif |
@@ -60,7 +61,7 @@ Deux tables seulement, à l'image des deux lignes éditables du tableau :
 |---|---|---|
 | `app_plan_cells` | article_id, supplier_id, date | quantité planifiée d'un fournisseur un jour donné (0 = rien attendu), expression, commentaire, auteur |
 | `app_adjustments` | article_id, date | ajustement signé (≤ référence : correction du stock de référence), expression, commentaire, auteur |
-| `app_cell_flags` | kind, article_id, supplier_id, date | commande ferme ignorée (hors Projeté ERP et hors Appro.), proposition CBN refusée (quantité affichée, semaine bloquée pour ce fournisseur) ou DESADV non reçu masqué |
+| `app_cell_flags` | kind, article_id, supplier_id, date | commande ferme ignorée (hors Projeté ERP et hors Appro.), proposition CBN refusée (quantité affichée, ce jour bloqué pour ce fournisseur) ou DESADV non reçu masqué |
 | `app_meta` | key | `data_version` : compteur partagé entre les workers de l'App, incrémenté à chaque écriture (invalidation des caches) |
 
 Plus les versions de PDP importées, les paramètres (`global`, `article_week`) et le journal.

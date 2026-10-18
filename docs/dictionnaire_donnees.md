@@ -9,7 +9,7 @@ Deux familles :
 
 | Famille | Tables | Source | Où elles vivent |
 |---|---|---|---|
-| **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_programs`, `ref_bom`, `fct_stock` | **gérées dans l'application** (page Référentiel : ligne par ligne, ou modèle Excel par table) | base applicative (Lakebase ; SQLite en local) |
+| **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | **gérées dans l'application** (page Référentiel : ligne par ligne, modèle Excel par table, modification en lot ; fiche article › Paramétrage) | base applicative (Lakebase ; SQLite en local) |
 | **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_desadv`, `fct_production_plan` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
 
 ## 1. Référentiel (géré dans l'application)
@@ -23,8 +23,9 @@ tables (`GET /api/reference/<table>/rows`) ; elles ne sont ni stockées, ni expo
 
 | Table | Colonnes requête | Boutons de filtre rapide (cumulables) |
 |---|---|---|
-| `ref_articles` | *Programmes* (noms des programmes dont la nomenclature utilise l'article, `programs`, `program_count`) ; `supplier_count` (règles article ↔ fournisseur actives). Les colonnes *Famille*, *Approvisionneur* et *Modifié* ne sont pas affichées (l'approvisionneur est le filtre global). | *Sans fournisseur*, *Multi-sourcing* (≥ 2 fournisseurs actifs), *Sans programme* |
-| `ref_suppliers` | *Articles* (nombre et références des articles reliés par une règle active, `articles`, `article_count`) | *Sans article* |
+| `ref_articles` | *Programmes* (noms des programmes dont la nomenclature utilise l'article, `programs`, `program_count`) ; *Fourn.* (`supplier_count`, règles article ↔ fournisseur actives). La colonne *Famille* n'est pas affichée. | *Sans fournisseur*, *Multi-sourcing* (≥ 2 fournisseurs actifs), *Sans programme*, *Conso dérivée / PDP*, *Jours conso ≠ 5* |
+| `ref_suppliers` | *Articles* (nombre et références des articles reliés par une règle active, `articles`, `article_count`) | *Sans article*, *Délai ≠ 5* |
+| `ref_article_suppliers` | — | *Plafonnés*, *Délai spécifique* |
 | `ref_programs` | *Articles* (nombre de composants de la nomenclature, `article_count`) ; `has_plan` (une quantité planifiée à partir de la semaine en cours, PDP ERP ou version active) | *Sans nomenclature*, *Sans plan* |
 
 ### 1.1 `ref_articles` — Articles
@@ -36,16 +37,18 @@ tables (`GET /api/reference/<table>/rows`) ; elles ne sont ni stockées, ni expo
 | unit | Unité | texte | oui | PCE, KG, M |
 | family | Famille | texte | non | |
 | planner | Approvisionneur | texte | oui | code approvisionneur = **périmètre** de l'application |
-| coverage_target_days | Couverture cible (j) | entier | oui | jours calendaires de besoin à couvrir |
-| alert_red_days | Seuil rouge (j) | entier | oui | couverture ≤ seuil : critique |
-| alert_yellow_days | Seuil orange (j) | entier | oui | couverture ≤ seuil : à surveiller |
-| overstock_days | Surstock (j) | entier | oui | couverture ≥ seuil : surstock |
-| safety_stock_qty | Stock de sécurité | nombre | non | quantité fixe |
-| order_cycle_days | Cycle de commande (j) | entier | non | besoin ajouté au niveau de recomplètement (défaut 7) |
+| coverage_target_days | Couverture cible (j ouvrés) | entier | oui | jours **ouvrés** de besoin à couvrir (défaut 5) |
+| alert_red_days | Seuil rouge (j ouvrés) | entier | oui | commandes ERP épuisées en ≤ n jours ouvrés : critique (défaut 2) |
+| alert_yellow_days | Seuil orange (j ouvrés) | entier | oui | ≤ n jours ouvrés : à surveiller (défaut 5) |
+| overstock_days | Surstock (j ouvrés) | entier | oui | stock à date couvrant ≥ n jours ouvrés : surstock (défaut 30) |
+| demand_days | Jours de consommation | entier | non | 1 à 5 : jours ouvrés de la semaine portant le besoin hebdomadaire (vide ou 0 = 5, toute la semaine) |
+| sourcing_policy | Multi-sourcing | texte | non | `quota` (défaut : chaque besoin partagé selon les quotas) ou `priority` |
+| consumption_source | Source conso | texte | non | `erp` (défaut : consommation déclarée), `plan` (PDP éclaté) ou `derived` (dérivée, table `ref_consumption_terms`) |
 | active | Actif | oui / non | oui | |
 
-Les paramètres de politique de stock peuvent être personnalisés par semaine ISO (bouton *Semaines*),
-sans modifier la table.
+Couverture cible, seuils et surstock peuvent être personnalisés par semaine ISO (fiche article › Paramétrage ›
+*Par semaine*, ou Référentiel), sans modifier la table. Le stock de sécurité et le cycle de commande n'existent
+plus ; les anciennes colonnes sont ignorées à l'import.
 
 ### 1.2 `ref_suppliers` — Fournisseurs
 
@@ -56,6 +59,7 @@ sans modifier la table.
 | country | Pays | texte | non | |
 | contact | Contact | texte | non | |
 | delivery_weekdays | Jours de livraison | texte | oui | jours ISO autorisés, `1,2,3,4,5` (1 = lundi) |
+| lead_time_days | Délai (j ouvrés) | entier | oui | délai du fournisseur en jours **ouvrés**, inclusif (lundi + 5 = lundi suivant) ; initialisé à 5 pour tous |
 | active | Actif | oui / non | oui | |
 
 ### 1.3 `ref_article_suppliers` — Article ↔ fournisseur
@@ -66,13 +70,27 @@ sans modifier la table.
 | supplier_id | Fournisseur | texte **clé** | oui | |
 | moq | MOQ | nombre | oui | quantité minimale de commande |
 | pack_qty | UM | nombre | oui | unité de manutention (conditionnement) : arrondi au multiple supérieur |
-| lead_time_days | Délai (j ouvrés) | entier | oui | |
+| lead_time_override | Délai spécifique (j ouvrés) | entier | non | exception au délai du fournisseur ; **vide** = délai du fournisseur (grisé « hérité » dans les écrans ; jamais 0) |
 | quota_pct | Quota % | nombre | oui | répartition multi-sourcing (100 si mono-source) |
 | priority | Priorité | entier | oui | 1 = principal |
+| max_qty_per_delivery | Max / livraison | nombre | non | plafond d'une livraison : multiple de l'UM, ≥ MOQ ; vide = aucun |
+| max_qty_per_week | Max / semaine | nombre | non | plafond d'une semaine ISO, commandes fermes et Appro. compris : multiple de l'UM, ≤ max / livraison × jours de livraison ; vide = aucun |
 | active | Actif | oui / non | oui | |
 
 Un article avec plusieurs liens actifs a **une voie par fournisseur** dans le tableau (Ferme, Prévisionnel,
-Reçu, Plan) ; les stocks sont sommés.
+Reçu, Plan) ; les stocks sont sommés. Les plafonds et le délai spécifique sont validés à la saisie et à l'import
+(HTTP 422 sinon). L'ancienne colonne *Délai* du lien est ignorée à l'import : le délai est celui du fournisseur.
+
+### 1.3 bis `ref_consumption_terms` — Termes de consommation
+
+| Colonne | Libellé | Type | Obligatoire | Description |
+|---|---|---|---|---|
+| article_id | Article | texte **clé** | oui | article en source de consommation `derived` |
+| source_article_id | Article source | texte **clé** | oui | article dont la consommation déclarée sert de base ; éligible s'il est en source `erp`, présent dans un programme de l'article et dans aucun programme où l'article est absent (`GET /api/reference/consumption-sources?article_id=`) |
+| coef | Coefficient | nombre | oui | > 0 : quantité d'article consommée par unité d'article source |
+
+Consommation dérivée = Σ coef × consommation déclarée des sources ; sans terme, la consommation ERP de
+l'article est utilisée. Les boucles sont refusées.
 
 ### 1.4 `ref_programs` — Programmes
 
@@ -180,9 +198,10 @@ Une ligne par **journal d'arrivée** (fournisseur / commande / BL / article / jo
 | status | texte | `Statut_reception` | **`En transit`** (journal créé, non validé : affiché avec une icône camion, jamais compté), **`Reçu`** (journal validé, accusé de réception non validé : compté, flux *À valider* après 7 jours), **`Comptabilisé`** (accusé de réception validé : compté, fond vert) |
 
 Contrat attendu de `recep_edi` (job amont) : `Statut_reception` dérivé de `wmsjournaltable.posted` et de la
-présence du BL dans `vend_packing_slip_trans` (ACR) ; les journaux non validés **sont conservés** avec le statut
-`En transit`. Historique souhaité : au moins la fenêtre de backlog (28 jours par défaut, `backlog_days`) et tout ce
-qui suit la date d'initialisation du stock.
+présence de l'accusé de réception (ACR) dans `vend_packing_slip_trans`, rapproché **par `inventTransId`** (la
+transaction de stock du journal, et non plus par numéro de BL : un BL partagé par plusieurs lignes ne fausse
+plus le statut) ; les journaux non validés **sont conservés** avec le statut `En transit`. Historique souhaité :
+tout ce qui suit la date d'initialisation du stock.
 
 ### 2.3 `fct_consumption_actual` ← table UC de consommation réelle par composant (facultatif)
 
@@ -295,24 +314,12 @@ cible du jour (KPI *Valeur du stock*, sous-ligne +x % / −x % de la cible, roug
 valeur du stock** (Projeté Appro., fin de chaque semaine ISO) dans le cockpit. Un article sans prix n'entre dans
 aucune valeur (compté « sans prix » sur la carte).
 
-### 2.7 `fct_bl_pending` ← `silver_erp_ye.bl_en_attente` — accusés de réception non validés (facultatif)
+### 2.7 Accusés de réception non validés
 
-Réceptions en statut *Reçu* (journal validé) depuis au moins 7 jours sans accusé de réception validé
-(`APPRO_ERP_BL_PENDING_TABLE`, variable `erp_bl_pending_table`, défaut `bl_en_attente`). Depuis le contrat à trois
-statuts de `recep_edi`, le flux **À valider** du cockpit est calculé depuis les réceptions elles-mêmes (statut
-*Reçu* depuis 7 jours ou plus) ; cette table n'alimente plus que la page *Recherche* (type « BL en attente ») et
-peut être laissée vide.
-
-| Colonne | Type | Source | Règle |
-|---|---|---|---|
-| pending_id | texte **clé** | `Fournisseur|Commande|BL_DESADV|Article|yyyyMMdd` | construit |
-| supplier_id | texte | `Fournisseur` | |
-| purch_id | texte | `Commande` | |
-| packing_slip | texte | `BL_DESADV` | un ou plusieurs BL séparés par « \| » |
-| article_id | texte | `Article` | |
-| qty | nombre | `Quantite` | |
-| registered_date | date | `Date_enregistrement` | |
-| days_pending | entier | `Jours_en_attente` | |
+La table `bl_en_attente` n'est plus lue : le flux **À valider** du cockpit et de la fiche fournisseur est calculé
+depuis les réceptions elles-mêmes (statut *Reçu* depuis 7 jours ou plus), la page *Recherche* ne propose plus
+de type « BL en attente ». Le job, la configuration (`APPRO_ERP_BL_PENDING_TABLE`) et le miroir `erp_bl_pending`
+sont retirés ; une table `erp_bl_pending` résiduelle peut être supprimée.
 
 ## 3. Base applicative (écrite par l'application)
 
@@ -322,17 +329,17 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 
 | Table | Contenu | Clé |
 |---|---|---|
-| `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) + `updated_by`, `updated_at` | clé de la table |
+| `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) + `updated_by`, `updated_at` ; les colonnes ajoutées sont créées au démarrage (`ensure_columns`), les anciennes (stock de sécurité, cycle de commande, délai du lien) ignorées puis supprimables ; un 0 hérité dans un délai spécifique ou un plafond est remis à vide au démarrage | clé de la table |
 | `app_meta` | clé / valeur partagées par tous les processus de l'App : `data_version`, incrémentée à chaque écriture pour invalider les caches mémoire de chaque worker | key |
 | `app_plan_cells` | **cellules du plan** : article, fournisseur (`""` si aucun), date, expression saisie, quantité, commentaire, auteur | (article, fournisseur, date) |
 | `app_adjustments` | **cellules d'ajustement** : article, date (toute date), expression, quantité signée, commentaire, auteur | (article, date) |
-| `app_cell_flags` | **clics sur les cellules en lecture** : `kind` = `order_ignored` (commande ferme ignorée : article, fournisseur, jour), `proposal_refused` (proposition CBN refusée : article, fournisseur, jour, quantité refusée affichée ; bloque les propositions à ce fournisseur jusqu'au dimanche) ou `desadv_hidden` (DESADV non reçu masqué : article, fournisseur, jour, BL en note), auteur | (kind, article, fournisseur, date) |
+| `app_cell_flags` | **clics sur les cellules en lecture** : `kind` = `order_ignored` (commande ferme ignorée : article, fournisseur, jour), `proposal_refused` (proposition CBN refusée : article, fournisseur, jour, quantité refusée affichée ; bloque les propositions à ce fournisseur **ce jour-là seulement**) ou `desadv_hidden` (DESADV non reçu masqué : article, fournisseur, jour, BL en note), auteur | (kind, article, fournisseur, date) |
 | `app_pdp_versions`, `app_pdp_lines` | versions de PDP importées (classeur) ou saisies dans la page *Plan de production* (`source_file` = « saisie directe ») ; une active au plus | id |
 | `app_program_scrap` | **taux de rebut par programme**, daté : `rate_pct` s'applique de `week_start` (lundi) jusqu'à la ligne suivante ; besoin = PDP × (1 + taux / 100) ; auteur | (program_id, week_start) |
-| `app_param_overrides` | règles globales du moteur (`global`) et paramètres d'article par semaine ISO (`article_week`) | (scope, key1, key2, field) |
+| `app_param_overrides` | règle commune du moteur (`global`, seul champ `target_tolerance_pct`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
 | `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_desadv`, `erp_production_plan` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
-| `erp_sync_log` | par table miroir : nombre de lignes, horodatage, source, identifiant d'exécution (affiché dans `/api/health`) | table_name |
+| `erp_sync_log` | par table miroir : nombre de lignes, horodatage, source, identifiant d'exécution (`/api/health`, `GET /api/data/sync` : âge de chaque table, état *en retard* au-delà de deux heures, bandeau dans l'application) | table_name |
 
 Volumétrie : quelques milliers de lignes par table ; le miroir des commandes suit la source (dizaines de
 milliers de lignes au plus), remplacé à chaque exécution.

@@ -23,7 +23,6 @@ recep_edi            ──┤  SQL de           Spark lit, puis par table :    
 desadv_edi           ──┤  correspondance   DELETE + COPY dans UNE             erp_desadv           ──┤  SELECT colonnes     objets moteur      séries jour
 conso_composants     ──┤  erp_sql.py       transaction, puis erp_sync_log     erp_consumption_actual┤  canoniques  ──►     (Dataset)   ──►    par article ──► API ──► écrans
 silver_base_article  ──┤                                                      erp_prices           ──┤  cache 5 min                           et par voie
-bl_en_attente        ──┤                                                      erp_bl_pending       ──┤
 (table PDP, option)  ──┘                                                      erp_production_plan  ──┘
                                                                               erp_sync_log (horodatage, lignes)
 ```
@@ -39,8 +38,8 @@ Trois points fixes structurent la chaîne :
    même schéma sert au seed CSV local, au miroir `erp_*` (une colonne Postgres par colonne canonique),
    aux fichiers Excel et à la lecture par l'application.
 3. **Un jeu d'objets moteur** : `backend/appro/data/assembler.py` transforme les tables canoniques en
-   objets Python typés (`OrderLine`, `Receipt`, `DesadvLine`, `ConsumptionLine`, `PdpLine`, `BlPending`,
-   `prices`), déjà restreints aux articles du référentiel. Le moteur (`backend/appro/engine/`) ne connaît
+   objets Python typés (`OrderLine`, `Receipt`, `DesadvLine`, `ConsumptionLine`, `PdpLine`, `prices`),
+   déjà restreints aux articles du référentiel. Le moteur (`backend/appro/engine/`) ne connaît
    que ces objets.
 
 ### 1.1 Les trois sources possibles (`APPRO_DATA_SOURCE`)
@@ -52,8 +51,9 @@ Trois points fixes structurent la chaîne :
 | `lakebase` | `LakebaseSource` | `SELECT <colonnes canoniques> FROM erp_<table>` dans la base applicative | **cible retenue** : millisecondes, aucun droit Unity Catalog nécessaire à l'App |
 
 Dans les trois cas, le résultat passe par `coerce()` (`schemas.py`) qui normalise les types : texte
-nettoyé (`""` pour une valeur absente), nombres (`0.0` pour une valeur absente ou non numérique), dates
-(`None` si non interprétable), booléens. Les tables sont ensuite mises en cache en mémoire pendant
+nettoyé (`""` pour une valeur absente), nombres (`0.0` pour une valeur absente ou non numérique ; les colonnes
+optionnelles du référentiel marquées `nullable` — délai spécifique, plafonds — restent vides), dates (`None`
+si non interprétable), booléens. Les tables sont ensuite mises en cache en mémoire pendant
 `APPRO_CACHE_TTL_SECONDS` (300 s par défaut) ; `POST /api/reference/refresh` vide ce cache.
 
 ### 1.2 Les variables qui désignent les tables source
@@ -67,7 +67,6 @@ nettoyé (`""` pour une valeur absente), nombres (`0.0` pour une valeur absente 
 | `APPRO_ERP_DESADV_TABLE` | `erp_desadv_table` / `--desadv-table` | `desadv_edi` | aucun DESADV |
 | `APPRO_ERP_CONSUMPTION_TABLE` | `erp_consumption_table` / `--consumption-table` | `conso_composants` | aucune consommation réelle |
 | `APPRO_ERP_PRICES_TABLE` | `erp_prices_table` / `--prices-table` | `silver_base_article` | aucune valorisation |
-| `APPRO_ERP_BL_PENDING_TABLE` | `erp_bl_pending_table` / `--bl-pending-table` | `bl_en_attente` | aucun BL en attente |
 | `APPRO_ERP_PDP_TABLE` | `erp_pdp_table` / `--pdp-table` | *(vide)* | PDP uniquement par fichier ou saisie |
 
 Une table facultative laissée vide n'est ni lue par le job ni attendue par l'application : la table
@@ -158,11 +157,14 @@ WHERE r.Quantite_recue IS NOT NULL AND r.Quantite_recue <> 0
 | `Statut_reception` | État ERP | `Date_reception` |
 |---|---|---|
 | `En transit` | journal d'arrivée créé, non validé (`posted = 0`) | date de la ligne du journal (`transDate`) |
-| `Reçu` | journal validé (`posted = 1`), aucun accusé de réception pour ce BL et cet article | date de validation (`postedDateTime`) |
-| `Comptabilisé` | journal validé, accusé de réception présent dans `vend_packing_slip_trans` | date de validation (`postedDateTime`) |
+| `Reçu` | journal validé (`posted = 1`), aucun accusé de réception pour la transaction de stock de la ligne | date de validation (`postedDateTime`) |
+| `Comptabilisé` | journal validé, accusé de réception présent dans `vend_packing_slip_trans` pour la même transaction | date de validation (`postedDateTime`) |
 
-Historique souhaité : au moins la fenêtre de backlog (`backlog_days`, 28 jours par défaut) avant aujourd'hui, et
-tout ce qui suit la date d'initialisation du stock.
+Le rapprochement avec l'ACR se fait **par `inventTransId`** (transaction de stock de la ligne du journal,
+`wmsjournaltrans.inventTransId` = `vend_packing_slip_trans.inventTransId`), dans le job amont : un numéro de BL
+partagé par plusieurs lignes, ou absent (réception manuelle), ne fausse plus le statut. Le BL reste porté par la
+ligne (`packing_slip`) pour l'affichage et le rapprochement avec les DESADV. Historique souhaité : tout ce qui
+suit la date d'initialisation du stock.
 
 ### 2.3 `desadv_edi` → `fct_desadv` (avis d'expédition EDI)
 
@@ -221,7 +223,7 @@ GROUP BY c.article_id, CAST(c.date AS DATE)
 
 Toute autre colonne (programme, ordre de fabrication, atelier) est tolérée et ignorée. Règles
 d'alimentation : couvrir tous les jours depuis la date d'initialisation du stock jusqu'à hier (un jour
-absent suit `missing_actual_policy`, mieux vaut un 0 explicite) ; ne jamais déclarer le jour courant ni
+absent compte 0, mieux vaut un 0 explicite) ; ne jamais déclarer le jour courant ni
 le futur.
 
 ### 2.5 `silver_base_article` → `fct_prices` (prix de revient standard)
@@ -244,22 +246,11 @@ GROUP BY a.item_id
 Un article présent ici et absent du référentiel n'est **jamais ajouté** au référentiel ; seuls les
 articles du référentiel sont valorisés.
 
-### 2.6 `bl_en_attente` → `fct_bl_pending` (accusés de réception non validés, facultatif)
+### 2.6 `bl_en_attente` — plus lue
 
-Réceptions validées depuis au moins 7 jours sans accusé de réception. Depuis le contrat à trois statuts de
-`recep_edi`, le flux *À valider* est calculé par l'application depuis les réceptions (§ 5.2) ; cette table ne sert
-plus qu'à la page *Recherche* et peut rester vide. **Grain lu** : une ligne par fournisseur, commande, BL,
-article, jour d'enregistrement.
-
-| Colonne `bl_en_attente` | Type attendu | Colonne canonique | Transformation |
-|---|---|---|---|
-| `Fournisseur` | texte | `supplier_id` | tel quel ; entre dans `pending_id` |
-| `Commande` | texte | `purch_id` | tel quel ; entre dans `pending_id` |
-| `BL_DESADV` | texte | `packing_slip` | entier ; haché sur 16 caractères dans `pending_id` au-delà de 60 caractères |
-| `Article` | texte | `article_id` | `IS NOT NULL` ; entre dans `pending_id` |
-| `Quantite` | nombre | `qty` | en double |
-| `Date_enregistrement` | date | `registered_date` | tronquée au jour ; `IS NOT NULL` ; `yyyyMMdd` dans `pending_id` |
-| `Jours_en_attente` | nombre | `days_pending` | en entier |
+Les accusés de réception non validés se déduisent du statut `Reçu` de `recep_edi` (§ 5.2) : la table
+`bl_en_attente`, le paramètre `APPRO_ERP_BL_PENDING_TABLE` et le miroir `erp_bl_pending` sont retirés du job et de
+l'application.
 
 ### 2.7 Table de PDP hebdomadaire → `fct_production_plan` (facultative, non configurée aujourd'hui)
 
@@ -312,7 +303,6 @@ colonne ajoutée par une nouvelle version de l'application est créée sur la ta
 | `erp_desadv` | `desadv_id` | `article_id`, `supplier_id`, `supplier_name`, `packing_slip`, `purch_id`, `issue_date`, `qty`, `state`, `final_processing`, `stock_trans_id` |
 | `erp_consumption_actual` | `article_id`, `date` | `qty` |
 | `erp_prices` | `article_id` | `price` |
-| `erp_bl_pending` | `pending_id` | `supplier_id`, `purch_id`, `packing_slip`, `article_id`, `qty`, `registered_date`, `days_pending` |
 | `erp_production_plan` | `program_id`, `week_start`, `version` | `qty` |
 | `erp_sync_log` | `table_name` | `row_count`, `synced_at`, `source`, `run_id` |
 
@@ -381,7 +371,6 @@ d'articles). Une ligne ERP d'un article inconnu du référentiel est silencieuse
 | `ConsumptionLine` | `fct_consumption_actual` | `article_id`, `date`, `qty` | sans date |
 | `PdpLine` | `fct_production_plan` puis versions de l'application | `program_id`, `week_start`, `qty`, `version` ; seuls les programmes dont la nomenclature touche les articles retenus | sans lundi |
 | `prices` | `fct_prices` | dictionnaire `article_id → prix` | prix vide |
-| `BlPending` | `fct_bl_pending` | toutes les colonnes | sans date d'enregistrement |
 | `StockSnapshot` | `fct_stock` (référentiel) | la ligne la plus récente par article ; plusieurs lignes à la même date sont sommées | — |
 
 Les tables de référentiel (`Article`, `Supplier`, `SupplierLink`, `Program`, `BomLine`) complètent le
@@ -393,7 +382,7 @@ l'application : cellules Appro. (`app_plan_cells`), ajustements (`app_adjustment
 
 Repères de temps (`regles_metier.md` § 1) : le **point zéro** est la date d'initialisation du stock
 (`fct_stock.snapshot_date`, unique) ; **aujourd'hui** est la date réelle ou `APPRO_AS_OF` ; la fenêtre
-de calcul va du point zéro à aujourd'hui + `horizon_days`, étendue au dimanche de la semaine en cours.
+de calcul va du point zéro à aujourd'hui + 52 semaines (horizon fixe), étendue au dimanche de la semaine en cours.
 Rien n'existe avant le point zéro : un fait daté avant lui n'entre dans aucun calcul.
 
 ---
@@ -412,10 +401,10 @@ fournisseur vide rejoint la première voie.
 
 | Colonne | Usage |
 |---|---|
-| `order_type` | `FIRM` : la commande est **ferme**, elle entre dans le Projeté ERP (paramètre `firm_sources`) et dans la ligne *Ferme* (TA) ; `FORECAST` : ligne *Prévisionnel* (TA), information seulement, jamais comptée dans un stock, datée à sa date réelle ou au lundi de sa semaine (`forecast_date_policy`) |
-| `expected_date` | jour de la commande dans le TA. Ferme **à partir d'aujourd'hui** : comptée dans le Projeté ERP et, par défaut, dans la ligne *Appro.* (sauf cellule saisie ou jour ignoré par clic). Ferme **avant aujourd'hui** : affichée dans *Ferme (passé)*, ne compte dans aucun stock, entre dans le **backlog** du fournisseur si elle date de moins de `backlog_days`. Le flux **À réceptionner** (CK) liste les fermes dont la date est aujourd'hui |
-| `qty_open` | quantité **restant à livrer** : c'est elle qui alimente le Projeté ERP et l'*Appro.* par défaut ; une ferme dont le restant est nul est « soldée » (fond vert, TA) ; le jour même, le restant est diminué des réceptions du jour du fournisseur |
-| `qty_ordered` | quantité **commandée** : affichée dans la cellule *Ferme* (TA, `restant / commandé` en cas de livraison partielle), comptée dans le backlog (Σ commandé − Σ reçu sur la fenêtre), affichée dans les flux et la recherche |
+| `order_type` | `FIRM` : la commande est **ferme**, elle entre dans le Projeté ERP et dans la ligne *Ferme* (TA) ; `FORECAST` : ligne *Prévisionnel* (TA), information seulement, jamais comptée dans un stock, datée à sa date réelle |
+| `expected_date` | jour de la commande dans le TA. Ferme **à partir d'aujourd'hui** : comptée dans le Projeté ERP et, par défaut, dans la ligne *Appro.* (sauf cellule saisie ou jour ignoré par clic) ; comptée dans le **plafond hebdomadaire** du lien. Ferme **avant aujourd'hui** : affichée dans *Ferme (passé)*, ne compte dans aucun stock ; si l'ERP garde un restant, elle est **en retard** (flux *En retard*, fiche fournisseur, KPI *En retard* de la fiche article). Le flux **À réceptionner** (CK) liste les fermes dont la date est aujourd'hui |
+| `qty_open` | quantité **restant à livrer** : c'est elle qui alimente le Projeté ERP et l'*Appro.* par défaut ; une ferme dont le restant est nul est « soldée » (fond vert, TA) ; le jour même, le restant est diminué des réceptions du jour du fournisseur ; pour une commande **passée**, c'est le **restant en retard** (mis à jour par l'ERP à la validation du journal de réception) |
+| `qty_ordered` | quantité **commandée** : affichée dans la cellule *Ferme* (TA, `restant / commandé` en cas de livraison partielle), dans les flux (reçu ERP = commandé − restant) et la recherche |
 | `purch_id` | numéros de commande d'achat en info-bulle de la cellule *Ferme* et *Prévisionnel*, colonnes des flux (CK) et de la recherche (RE) |
 | `supplier_name` | non utilisé par les écrans (le nom vient de `ref_suppliers`) ; conservé pour le diagnostic |
 | `commitment` | non utilisé |
@@ -431,7 +420,7 @@ rétablir. Dans une colonne semaine, le clic porte sur tous les jours de la sema
 | Colonne | Usage |
 |---|---|
 | `status` | **`En transit`** : la ligne n'est pas une réception. Affichée dans la ligne *Reçu* (TA) à sa date, en italique sur fond orange avec une icône camion, jamais comptée ; flux **En transit** (CK). Son BL « porte » le DESADV de même BL, qui n'est plus affiché séparément. **`Reçu`** : réception comptée, accusé de réception à valider ; après 7 jours, flux **À valider** (CK). **`Comptabilisé`** : réception comptée, **fond vert** (TA). Colonne *Statut* des flux et de la recherche |
-| `receipt_date`, `qty` | pour `Reçu` / `Comptabilisé` : ligne *Reçu* (TA) au jour de réception, sur la voie de `supplier_id` ; **entrée de stock** dans la reconstitution du passé (Projeté ERP et Projeté Appro., entre le point zéro et hier) ; réceptions de la fenêtre de backlog (`backlog_days` avant aujourd'hui) soustraites des commandes fermes passées ; réceptions du jour soustraites du restant ferme du jour ; flux **Reçu** (CK) : réceptions datées d'aujourd'hui ; les lignes antérieures au point zéro sont ignorées. Pour `En transit` : jour et quantité affichés, rien de compté |
+| `receipt_date`, `qty` | pour `Reçu` / `Comptabilisé` : ligne *Reçu* (TA) au jour de réception, sur la voie de `supplier_id` ; **entrée de stock** dans la reconstitution du passé (Projeté ERP et Projeté Appro., entre le point zéro et hier) ; réceptions du jour soustraites du restant ferme du jour ; flux **Reçu** (CK) : réceptions datées d'aujourd'hui ; les lignes antérieures au point zéro sont ignorées. Pour `En transit` : jour et quantité affichés, rien de compté |
 | `packing_slip` | numéro(s) de BL dans l'info-bulle de la cellule *Reçu* (TA), colonnes des flux et de la recherche ; **rapprochement avec les DESADV** : un BL porté par une réception marque le DESADV comme reçu, un BL porté par un journal en transit fait afficher le journal à la place du DESADV ; le **point** de la ligne est vert si un DESADV traité porte ce BL, rouge sinon ; un BL vide = « sans BL », réception manuelle, point rouge |
 | `purch_id` | info-bulle, flux, recherche |
 | `receipt_id` | identifiant technique ; identifiant des lignes *En transit* (journaux) et *À valider* |
@@ -457,7 +446,7 @@ rétablissable depuis *Saisies & journal*.
 
 | Colonne | Usage |
 |---|---|
-| `article_id`, `date`, `qty` | ligne *Besoin* (TA) des **jours passés** (du point zéro à hier) : la consommation déclarée remplace le PDP éclaté (`production_mode = actual_then_remainder`, défaut) ; un jour passé sans déclaration suit `missing_actual_policy` (0 par défaut, ou PDP). **Semaine en cours** : le reliquat du PDP éclaté de la semaine (PDP − consommation déjà déclarée cette semaine, plancher 0) est réparti sur les jours ouvrés restants, aujourd'hui compris. Les semaines suivantes suivent le PDP. Modes `actual_then_plan`, `plan_only`, `actual_only` (paramètres globaux). L'API expose la part de réel sur 30 jours (`actual_share_30d`), non affichée à l'écran |
+| `article_id`, `date`, `qty` | ligne *Besoin* (TA) des **jours passés** (du point zéro à hier) pour les articles en source de consommation `erp` : la consommation déclarée remplace le PDP éclaté ; un jour passé sans déclaration compte 0. **Semaine en cours** : le reliquat du PDP éclaté de la semaine (PDP − consommation déjà déclarée cette semaine, plancher 0) est réparti sur les jours du profil de consommation (`demand_days`) encore à venir, aujourd'hui compris, sinon sur les jours ouvrés restants. Les semaines suivantes suivent le PDP profilé. Source `derived` : la consommation de l'article est Σ coef × consommation déclarée de ses articles sources ; source `plan` : la table n'est pas lue pour cet article. Sert aussi à l'**adhérence PDP / réel** (*Paramètres › Données*) et au profil réel par jour de semaine |
 
 Cette ligne *Besoin* est l'entrée de tout le reste : projection des stocks, couvertures, stock cible,
 alertes, propositions CBN.
@@ -468,11 +457,10 @@ alertes, propositions CBN.
 |---|---|
 | `price` | **Valeur du stock** (CK, onglet *Couvertures et stocks*) = Σ prix × stock à date (stock projeté ERP à la fin d'hier), avec l'écart en % à la **valeur cible** = Σ prix × stock cible du jour ; **projection de la valeur du stock** (CK) = Σ prix × Projeté Appro. à la fin de chaque semaine ISO ; indicateurs *Prix*, *Valeur du stock*, *Valeur cible* (FA). Un article sans prix n'entre dans aucune valeur et est compté « sans prix » sur la carte |
 
-### 5.6 BL en attente (`erp_bl_pending`)
+### 5.6 BL en attente
 
-| Colonne | Usage |
-|---|---|
-| toutes | recherche (RE), type *BL en attente*, uniquement : le flux **À valider** (CK) est calculé depuis `erp_receipts` (statut `Reçu` depuis 7 jours ou plus). Aucun effet sur les calculs |
+Plus de miroir : le flux **À valider** (CK, fiche fournisseur) est calculé depuis `erp_receipts` (statut `Reçu`
+depuis 7 jours ou plus).
 
 ### 5.7 PDP ERP (`erp_production_plan`)
 
@@ -484,13 +472,15 @@ alertes, propositions CBN.
 
 | Écran | Faits ERP mobilisés |
 |---|---|
-| Tableau d'approvisionnement (TA) | *Besoin* ← consommation + PDP éclaté ; *Ferme*, *Ferme (passé)*, *Prévisionnel* ← commandes ; *Reçu* ← réceptions validées (statut, BL, ACR) et en transit (journaux non validés, DESADV annoncés) ; *Appro.* ← fermes restantes par défaut ; *Projeté ERP / Appro.* ← stock de référence + réceptions passées + fermes futures (+ saisies) − besoin ; en-tête de voie : backlog ← fermes passées − réceptions |
-| Fiche article (FA) | les mêmes, plus : stock à date, prix et valeurs, prochaine livraison (ferme, saisie ou CBN), backlog depuis la date de fenêtre |
+| Tableau d'approvisionnement (TA) | *Besoin* ← consommation + PDP éclaté (profil `demand_days`, source de consommation) ; *Ferme*, *Ferme (passé)*, *Prévisionnel* ← commandes ; *Reçu* ← réceptions validées (statut, BL, ACR) et en transit (journaux non validés, DESADV annoncés) ; *Appro.* ← fermes restantes par défaut ; *Projeté ERP / Appro.* ← stock de référence + réceptions passées + fermes futures (+ saisies) − besoin, manque cumulé ; en retard ← restant ERP des fermes passées |
+| Fiche article (FA) | les mêmes, plus : stock à date, prix et valeurs, prochaine livraison (ferme, saisie ou CBN), en retard, onglet *Paramétrage* (profil réel de consommation) |
+| Fiche fournisseur | articles et règles du fournisseur, en retard, commandes à venir, en transit, à traiter, à valider, urgences CBN : mêmes faits, restreints au fournisseur |
+| Paramètres › Données | `erp_sync_log` (âges, alerte > 2 h), articles des faits absents du référentiel (`GET /api/data/orphans`), adhérence PDP / réel ← consommation + PDP + versions de PDP |
 | Cockpit, *Couvertures et stocks* (CK) | couvertures et stocks projetés (tous faits), valeur du stock et projection ← prix |
-| Cockpit, *Flux d'approvisionnement* (CK) | À commander ← propositions CBN urgentes ; Commandé ← `first_seen` ; En transit ← journaux non validés + DESADV annoncés sans journal ; À traiter ← DESADV en erreur ou sans journal de saisie ; À réceptionner ← fermes du jour ; Reçu ← réceptions du jour ; En retard ← backlog ; À valider ← réceptions `Reçu` depuis 7 jours |
-| Recherche (RE) | réceptions, commandes, DESADV, BL en attente : toutes les lignes du périmètre, filtres texte (`;` = ou), dates, fournisseur |
-| Alertes (AL) | calculées sur les stocks projetés ; le backlog est affiché, pas alerté |
-| `GET /api/health`, `GET /api/config` | `erp_sync_log` : fraîcheur et volume de chaque table miroir |
+| Cockpit, *Flux d'approvisionnement* (CK) | À commander ← propositions CBN urgentes ; Commandé ← `first_seen` ; En transit ← journaux non validés + DESADV annoncés sans journal ; À traiter ← DESADV en erreur ou sans journal de saisie ; À réceptionner ← fermes du jour ; Reçu ← réceptions du jour ; En retard ← fermes passées avec restant ERP, une ligne par commande ; À valider ← réceptions `Reçu` depuis 7 jours |
+| Recherche (RE) | réceptions, commandes, DESADV : toutes les lignes du périmètre, filtres texte (`;` = ou), dates, fournisseur |
+| Alertes (AL) | calculées sur les stocks projetés ; le retard est affiché, pas alerté |
+| `GET /api/health`, `GET /api/data/sync` | `erp_sync_log` : fraîcheur et volume de chaque table miroir ; bandeau « synchronisation en retard » au-delà de deux heures |
 
 ---
 
@@ -500,8 +490,9 @@ alertes, propositions CBN.
   H:05 est visible dans l'application entre H:20 et H:25 environ.
 * **Pas de différentiel** : chaque exécution remplace la table entière. Une ligne disparue de la source
   disparaît du miroir ; seule `first_seen` survit, et seulement pour les créneaux encore présents.
-* **`qty_open` d'une commande passée** n'est pas fiable (l'ERP ne la solde pas) : l'application n'y lit que
-  l'affichage `restant / commandé` ; le backlog se calcule sur `qty_ordered` − réceptions.
+* **`qty_open` d'une commande passée** est le **restant en retard** : l'ERP le met à jour à la validation du
+  journal de réception ; une commande que l'ERP ne solde jamais reste en retard tant que l'approvisionneur ne la
+  fait pas solder dans l'ERP (l'application n'écrit pas dans l'ERP).
 * **Un DESADV sans BL** et une réception sans BL ne peuvent pas être rapprochés : la réception est une
   réception manuelle (point rouge), le DESADV reste en transit tant qu'il n'est pas masqué.
 * **Un journal d'arrivée non validé** n'est visible que si `recep_edi` le conserve avec le statut `En transit` ;
@@ -511,9 +502,8 @@ alertes, propositions CBN.
   du stock n'entre dans aucun calcul ; une table de faits qui ne couvre pas cette date fausse la
   reconstitution du passé.
 * **Articles inconnus** : toute ligne ERP dont l'article n'est pas dans `ref_articles` est ignorée sans
-  message. Le Référentiel (bouton *Sans fournisseur*, colonne *Programmes*) aide à repérer les articles
-  incomplets, pas les lignes ERP orphelines : une requête SQL sur Lakebase (`SELECT DISTINCT article_id
-  FROM erp_receipts EXCEPT SELECT article_id FROM ref_articles`) les liste.
+  message dans les calculs ; *Paramètres › Données › Articles hors référentiel* (`GET /api/data/orphans`) les
+  liste (commandes, réceptions, DESADV, consommation, dernière date, fournisseurs) pour les créer.
 * **Prix** : `MAX(std_cost_price)` par article ; une devise autre que l'euro ou un prix par unité
   différente de l'unité de stock fausserait la valeur affichée.
 * **Première exécution** : `first_seen` est posée à la date de cette exécution pour tous les créneaux

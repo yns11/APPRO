@@ -1,3 +1,7 @@
+> **État : toutes les décisions ci-dessous sont implémentées** (moteur, API, écrans, documentation) ; ce document
+> reste la trace des choix. Les règles en vigueur sont décrites dans `regles_metier.md` et illustrées dans
+> `guide_moteur.md`.
+
 # Recommandations : rendre l'application plus simple, plus réaliste et plus fiable
 
 Liste exhaustive, à enrichir avant implémentation. Décisions acquises au fil des échanges : jours **ouvrés**
