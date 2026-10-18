@@ -54,6 +54,47 @@ class SupplierRef(ORM):
     active: bool = True
 
 
+class SupplierArticleRow(BaseModel):
+    """One article supplied by a supplier (supplier page) : rule of the link and current situation."""
+
+    article_id: str
+    designation: str = ""
+    unit: str = ""
+    planner: str = ""
+    active: bool = True
+    moq: float
+    pack_qty: float
+    lead_time_days: int
+    lead_time_override: int | None = None
+    quota_pct: float
+    priority: int
+    max_qty_per_delivery: float | None = None
+    max_qty_per_week: float | None = None
+    supplier_count: int = 1
+    coverage_plan_days: float | None = None
+    stock_at_date: float | None = None
+    severity: str | None = None
+    first_stockout_plan: str | None = None
+    backlog_qty: float = 0.0
+    open_firm_qty: float = 0.0
+    planned_qty: float = 0.0
+    proposal_count: int = 0
+    urgent_count: int = 0
+
+
+class SupplierDetail(BaseModel):
+    supplier: SupplierRef
+    as_of: dt.date
+    kpis: dict[str, Any]
+    articles: list[SupplierArticleRow]
+    late: list["BacklogRow"]
+    in_transit: list["DesadvRow"]
+    to_process: list["DesadvRow"]
+    to_validate: list["PendingRow"]
+    to_order: list["ProposalOut"]
+    upcoming: list["OrderRow"]
+
+
 class ProgramRef(ORM):
     program_id: str
     name: str

@@ -848,3 +848,97 @@ def test_programme_scrap_rate_in_the_pdp_sheet(client):
     assert next(p for p in client.get("/api/pdp/sheet", params={"weeks": 8}).json()["programs"] if p["program_id"] == pid)["scrap_pct"] == 0
     assert client.put("/api/pdp/scrap", json={"program_id": "nope", "rate_pct": 1}).status_code == 422
     assert client.put("/api/pdp/scrap", json={"program_id": pid, "rate_pct": -1}).status_code == 422
+
+
+# ---------------------------------------------------------------- Paramètres › Données, supplier page, exports
+def test_data_sync_orphans_calendar(client):
+    sync = client.get("/api/data/sync").json()
+    assert sync["status"] == "unknown" and len(sync["tables"]) == 6 and sync["late_after_minutes"] == 120
+    assert {t["table"] for t in sync["tables"]} >= {"erp_purchase_orders", "erp_receipts", "erp_consumption_actual"}
+    orphans = client.get("/api/data/orphans").json()
+    assert isinstance(orphans, list) and all(set(o) >= {"article_id", "orders", "receipts", "consumption", "last_date"} for o in orphans)
+    cal = client.get("/api/data/calendar").json()
+    assert cal["working_weekdays"] == [1, 2, 3, 4, 5] and "holidays" in cal
+
+
+def test_adherence_net_gross_and_demand_days_suggestion(client):
+    r = client.get("/api/data/adherence", params={"weeks": 4, "planner": "QUENTIN"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["weeks"] == 4 and body["bucket"] == "week" and body["plan_mode"] == "monday" and len(body["buckets"]) == 4
+    assert body["totals"]["articles"] == len(body["rows"]) > 0
+    for row in body["rows"]:
+        assert row["consumption_source"] != "plan"
+        assert row["suggested_demand_days"] in (None, 1, 2, 3, 5)
+        if row["plan"] > 0:
+            assert row["net_pct"] is not None and row["gross_pct"] is not None and row["gross_pct"] <= row["net_pct"] + 1e-6
+        assert len(row["weekday_share"]) == 5
+    daily = client.get("/api/data/adherence", params={"weeks": 2, "bucket": "day", "plan_mode": "latest", "article_id": AID}).json()
+    assert len(daily["buckets"]) == 14 and [r["article_id"] for r in daily["rows"]] == [AID]
+
+
+def test_supplier_page(client):
+    links = client.get("/api/reference/links", params={"article_id": AID}).json()
+    sid = links[0]["supplier_id"]
+    r = client.get(f"/api/suppliers/{sid}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["supplier"]["supplier_id"] == sid and body["supplier"]["lead_time_days"] == 5
+    assert any(a["article_id"] == AID for a in body["articles"])
+    row = next(a for a in body["articles"] if a["article_id"] == AID)
+    assert row["lead_time_days"] == 5 and row["lead_time_override"] is None and row["supplier_count"] >= 1
+    assert body["kpis"]["articles"] == len(body["articles"])
+    assert all(o["supplier_id"] == sid for o in body["late"] + body["in_transit"] + body["upcoming"])
+    assert client.get("/api/suppliers/NOPE").status_code == 404
+
+
+def test_generic_table_export(client):
+    body = {"title": "Articles en retard", "sheet": "Retards",
+            "columns": [{"key": "a", "label": "Article"}, {"key": "q", "label": "Quantité", "type": "number"},
+                        {"key": "d", "label": "Date", "type": "date"}, {"key": "ok", "label": "Actif", "type": "bool"}],
+            "rows": [{"a": "P-1", "q": 1440, "d": "2026-09-19", "ok": True}, {"a": "P-2", "q": "12.5", "d": None, "ok": False}],
+            "footer": {"a": "Total", "q": 1452.5}}
+    r = client.post("/api/exports/table.xlsx", json=body)
+    assert r.status_code == 200 and "articles_en_retard_" in r.headers["content-disposition"]
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb["Retards"]
+    assert [c.value for c in ws[1]] == ["Article", "Quantité", "Date", "Actif"]
+    assert ws["B2"].value == 1440 and ws["C2"].value.date() == dt.date(2026, 9, 19) and ws["D2"].value == "oui"
+    assert ws["B3"].value == 12.5 and ws["D3"].value == "non" and ws["A4"].value == "Total" and ws["B4"].value == 1452.5
+
+
+def test_link_caps_and_lead_override_are_validated(client):
+    links = client.get("/api/reference/links", params={"article_id": AID}).json()
+    base = {k: links[0][k] for k in ("article_id", "supplier_id", "moq", "pack_qty", "quota_pct", "priority", "active")}
+    pack = base["pack_qty"]
+    put = lambda **kw: client.put("/api/reference/ref_article_suppliers/rows", json={"values": {**base, **kw}})  # noqa: E731
+    r = put(max_qty_per_delivery=pack * 2 + 1)
+    assert r.status_code == 422 and "multiple de l'UM" in r.json()["detail"]
+    r = put(max_qty_per_delivery=pack, moq=pack * 3)
+    assert r.status_code == 422 and "≥ MOQ" in r.json()["detail"]
+    r = put(max_qty_per_delivery=pack * 2, max_qty_per_week=pack * 20)
+    assert r.status_code == 422 and "jours de livraison" in r.json()["detail"]
+    r = put(lead_time_override=0)
+    assert r.status_code == 422 and "délai spécifique" in r.json()["detail"]
+    r = put(max_qty_per_delivery=pack * 2, max_qty_per_week=pack * 4, lead_time_override=7)
+    assert r.status_code == 200, r.text
+    link = next(l for l in client.get("/api/reference/links", params={"article_id": AID}).json() if l["supplier_id"] == base["supplier_id"])
+    assert link["lead_time_days"] == 7 and link["lead_time_override"] == 7 and link["max_qty_per_week"] == pack * 4
+
+
+def test_consumption_terms_are_validated(client):
+    sources = client.get("/api/reference/consumption-sources", params={"article_id": AID}).json()
+    assert all(s["article_id"] != AID and s["shared_programs"] for s in sources)
+    put = lambda src, coef=1: client.put("/api/reference/ref_consumption_terms/rows",  # noqa: E731
+                                        json={"values": {"article_id": AID, "source_article_id": src, "coef": coef}})
+    assert put(AID).status_code == 422
+    r = put("P-NOPE")
+    assert r.status_code == 422 and "consommation ERP" in r.json()["detail"]
+    if sources:
+        src = sources[0]["article_id"]
+        assert put(src, 0).status_code == 422
+        assert put(src, 2).status_code == 200
+        # the reverse term would loop (and the source is not eligible from the other side once derived)
+        rev = client.put("/api/reference/ref_consumption_terms/rows", json={"values": {"article_id": src, "source_article_id": AID, "coef": 1}})
+        assert rev.status_code == 422

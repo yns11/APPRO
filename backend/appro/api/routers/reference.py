@@ -20,7 +20,7 @@ from ...data.schemas import REFERENCE_TABLES, TABLES
 from ...data.store import REF_MODELS, ParamOverride, audit
 from ...engine.models import DatasetError, EngineParams
 from ...engine.runner import resolve_as_of, resolve_init_date
-from ...services import mrp_service
+from ...services import mrp_service, validation
 from ...services.access import ROLES, Access
 from ...services.context import AppContext
 from .. import schemas as S
@@ -78,6 +78,23 @@ def _check_stock_dates(session: Session, rows: list[dict], replace: bool) -> Non
     today = dt.date.today()
     if any(d > today for d in dates):
         raise HTTPException(422, f"La date d'initialisation du stock ne peut pas être postérieure à aujourd'hui ({today.isoformat()}).")
+
+
+def _check_rows(session: Session, name: str, rows: list[dict], replace: bool) -> None:
+    """Business validations beyond the column types (services/validation.py)."""
+    try:
+        if name == "ref_article_suppliers":
+            sups = {r["supplier_id"]: r for r in reference.rows_out(session, "ref_suppliers")}
+            validation.check_links(rows, sups)
+        elif name == "ref_consumption_terms":
+            validation.check_terms(session, rows, replace=replace)
+        elif name == "ref_suppliers":
+            for r in rows:
+                lead = r.get("lead_time_days")
+                if lead not in (None, "") and float(lead) < 1:
+                    raise ValueError(f"{r.get('supplier_id')} : le délai doit être d'au moins 1 jour ouvré")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
 
 def _schema(name: str):
@@ -173,6 +190,7 @@ def upsert_row(name: str, body: S.RefRowIn, ctx: AppContext = Depends(ctx_dep), 
         raise HTTPException(422, f"Rôle inconnu : {body.values.get('role')} (attendu : {', '.join(ROLES)})")
     if name == "fct_stock":
         _check_stock_dates(session, [body.values], replace=False)
+    _check_rows(session, name, [body.values], replace=False)
     try:
         out = reference.upsert_row(session, name, body.values, user)
     except (ValueError, KeyError) as exc:
@@ -230,6 +248,7 @@ async def import_table(name: str, file: UploadFile = File(...), mode: str = Form
         raise HTTPException(422, "Aucune ligne dans le fichier : la table n'a pas été vidée")
     if name == "fct_stock":
         _check_stock_dates(session, df.to_dict("records"), replace=(mode == "replace"))
+    _check_rows(session, name, df.to_dict("records"), replace=(mode == "replace"))
     try:
         n = reference.replace_all(session, name, df, user) if mode == "replace" else reference.merge_all(session, name, df, user)
     except ValueError as exc:
@@ -258,6 +277,12 @@ def links(article_id: str | None = None, supplier_id: str | None = None, ctx: Ap
                      quota_pct=l.quota_pct, priority=l.priority, active=l.active, max_qty_per_delivery=l.max_qty_per_delivery,
                      max_qty_per_week=l.max_qty_per_week) for l in ds.links]
     return [l for l in out if not supplier_id or l.supplier_id == supplier_id]
+
+
+@router.get("/reference/consumption-sources")
+def consumption_sources(article_id: str, session: Session = Depends(session_dep)):
+    """Articles eligible as consumption sources of ``article_id`` (derived consumption)."""
+    return validation.eligible_sources(session, article_id)
 
 
 @router.get("/reference/suppliers", response_model=list[S.SupplierRef])
