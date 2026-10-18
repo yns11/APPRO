@@ -22,8 +22,10 @@ class ArticleRef(ORM):
     alert_red_days: int
     alert_yellow_days: int
     overstock_days: int
-    safety_stock_qty: float = 0
-    order_cycle_days: int = 7
+    demand_days: int = 5
+    sourcing_policy: str = "quota"
+    consumption_source: str = "erp"
+    derived_terms: list[dict[str, Any]] = Field(default_factory=list)
     active: bool = True
 
 
@@ -33,9 +35,22 @@ class LinkRef(ORM):
     supplier_name: str = ""
     moq: float
     pack_qty: float
-    lead_time_days: int
+    lead_time_days: int                    # effective lead time (link value, else the supplier's)
+    lead_time_override: int | None = None  # the link's own value, None = inherited
     quota_pct: float
     priority: int
+    active: bool = True
+    max_qty_per_delivery: float | None = None
+    max_qty_per_week: float | None = None
+
+
+class SupplierRef(ORM):
+    supplier_id: str
+    name: str = ""
+    country: str = ""
+    contact: str = ""
+    delivery_weekdays: str = "1,2,3,4,5"
+    lead_time_days: int = 5
     active: bool = True
 
 
@@ -105,6 +120,8 @@ class ProposalOut(BaseModel):
     projected_stock_before: float
     projected_stock_after: float
     ignored: bool = False          # refused by a click : listed in the ordering flow, out of the calculations
+    floor: bool = False            # urgent proposal limited to the quantity that avoids a shortage
+    capped: bool = False           # truncated by a delivery / weekly cap of the supplier link
 
 
 class OrderInfoOut(BaseModel):
@@ -115,6 +132,7 @@ class OrderInfoOut(BaseModel):
     qty_ordered: float
     qty_open: float
     ref: str = ""
+    ignored: bool = False
 
 
 class DesadvInfoOut(BaseModel):
@@ -185,14 +203,21 @@ class ArticleSummary(BaseModel):
 
 
 class BacklogRow(BaseModel):
+    """One late firm order : delivery date passed, ERP remaining quantity still open."""
+
     article_id: str
     designation: str
     unit: str
+    planner: str = ""
     supplier_id: str | None
     supplier_name: str
+    order_id: str = ""
+    purch_id: str = ""
+    expected_date: dt.date | None = None
     ordered: float
-    received: float
-    backlog: float
+    received: float            # ordered − remaining (received so far according to the ERP)
+    backlog: float             # ERP remaining quantity
+    ignored: bool = False      # ignored by the planner (out of the projection, still late)
 
 
 class CockpitKpis(BaseModel):
@@ -214,7 +239,7 @@ class CockpitKpis(BaseModel):
     open_forecast_qty: float
     avg_coverage_days: float | None
     median_coverage_days: float | None = None     # the median reads better : the mean is pulled by a few extreme articles
-    demand_next_30d: float
+    demand_next_20wd: float          # requirement of the next 20 working days
     stock_value: float | None = None              # Σ price × stock at date (yesterday's closing stock), euros
     target_value: float | None = None             # Σ price × target stock of the day
     priced_articles: int = 0
@@ -340,7 +365,7 @@ class FlowsResponse(BaseModel):
 
 
 class SearchResponse(BaseModel):
-    kind: Literal["receipts", "orders", "desadv", "pending"]
+    kind: Literal["receipts", "orders", "desadv"]
     total: int
     truncated: bool
     rows: list[dict[str, Any]]

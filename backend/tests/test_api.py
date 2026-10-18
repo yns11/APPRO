@@ -41,6 +41,11 @@ def _series(proj: dict) -> dict[str, list[float]]:
     return {x["key"]: x["values"] for x in proj["series"]}
 
 
+def _no_cbn(client) -> None:
+    """A 100 % tolerance : no « back to target » proposal, the plan stock follows the ERP and the cells."""
+    assert client.put("/api/params/overrides", json={"scope": "global", "field": "target_tolerance_pct", "value": 100}).status_code == 200
+
+
 def test_health_and_config(client):
     h = client.get("/api/health").json()
     assert h["status"] == "ok" and h["database_status"] == "ok" and h["reference_rows"] == 16 and "lakebase_env" in h
@@ -87,7 +92,8 @@ def test_projection_day_week_and_lanes(client):
 
 
 def test_adjustment_cells_any_date_with_note(client):
-    base = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day", "generate_proposals": "false"}).json()
+    _no_cbn(client)
+    base = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
     sb = _series(base)
     i0 = base["periods"].index(AS_OF)
     r = client.put("/api/entries/adjustments", json={"article_id": AID, "date": "2026-09-23", "expression": "-(30+20)", "note": "casse"})
@@ -95,7 +101,7 @@ def test_adjustment_cells_any_date_with_note(client):
     assert client.put("/api/entries/adjustments", json={"article_id": AID, "date": "2026-09-10", "expression": "-300"}).status_code == 200
     assert client.put("/api/entries/adjustments", json={"article_id": AID, "date": "2026-09-23", "expression": "abc"}).status_code == 422
     assert client.put("/api/entries/adjustments", json={"article_id": "NOPE", "date": "2026-09-23", "expression": "1"}).status_code == 404
-    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day", "generate_proposals": "false"}).json()
+    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
     sa = _series(proj)
     j = proj["periods"].index("2026-09-23")
     # dated before the initialisation day (2026-09-18): no column, it corrects the reference stock
@@ -114,7 +120,8 @@ def test_adjustment_cells_any_date_with_note(client):
 
 
 def test_plan_cells_typed_erp_zero_and_backlog(client):
-    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day", "generate_proposals": "false"}).json()
+    _no_cbn(client)
+    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
     s0 = _series(proj)
     i = proj["periods"].index("2026-09-30")
     assert s0["orders_firm"][i] == 1600 and s0["plan"][i] == 1600           # no cell: plan = ERP
@@ -129,7 +136,7 @@ def test_plan_cells_typed_erp_zero_and_backlog(client):
     assert client.put("/api/entries/plan", json={"article_id": AID, "supplier_id": "S-000545", "date": "2026-10-05", "expression": "2*500"}).json()["qty"] == 1000
     assert client.put("/api/entries/plan", json={"article_id": AID, "date": "2026-09-01", "expression": "5"}).status_code == 422   # past
     assert client.put("/api/entries/plan", json={"article_id": AID, "date": "2026-10-01", "expression": "-5"}).status_code == 422  # negative
-    proj2 = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day", "generate_proposals": "false"}).json()
+    proj2 = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
     s2 = _series(proj2)
     i, j, k = (proj2["periods"].index(d) for d in ("2026-09-30", "2026-10-02", "2026-10-05"))
     assert s2["orders_firm"][i] == 1600 and s2["plan"][i] == 0 and s2["plan"][j] == 600 and s2["plan"][k] == 1000
@@ -143,9 +150,9 @@ def test_plan_cells_typed_erp_zero_and_backlog(client):
     assert client.get("/api/cockpit", params={"planner": "QUENTIN"}).json()["kpis"]["plan_articles"] == 1
     assert client.delete(f"/api/entries/plan/{cells[0]['id']}").status_code == 204
     assert client.delete(f"/api/entries/plan/{cells[0]['id']}").status_code == 404
-    # backlog: cumulative per supplier over the window, listed without any action to take
+    # backlog: one row per late firm order (ERP remaining quantity), no action to take
     bl = client.get("/api/backlog", params={"planner": "QUENTIN"}).json()
-    assert all(row["backlog"] > 0 and row["ordered"] >= row["received"] for row in bl)
+    assert all(row["backlog"] > 0 and row["ordered"] >= row["received"] and row["expected_date"] < AS_OF and row["order_id"] for row in bl)
     cockpit = client.get("/api/cockpit", params={"planner": "QUENTIN"}).json()
     assert cockpit["kpis"]["backlog_articles"] == len({row["article_id"] for row in bl})
 
@@ -157,11 +164,8 @@ def test_default_calendar_grid_and_program_impact(client):
     # the table starts on the stock initialisation day (2026-09-18, the seed) : nothing exists before it
     assert days[0] == "2026-09-18" and days[-1] == "2026-10-04" and len(days) == 17
     assert weeks and all(w > "2026-W40" for w in weeks) and proj["periods"][0] == "2026-09-18"
-    assert client.put("/api/params/overrides", json={"scope": "global", "field": "focus_weeks", "value": 1}).status_code == 200
-    proj1 = client.get(f"/api/articles/{AID}/projection").json()
+    proj1 = client.get(f"/api/articles/{AID}/projection", params={"focus_weeks": 1}).json()
     assert len([p for p in proj1["periods"] if "-W" not in p]) == 10   # 2026-09-18 → Sunday 2026-09-27
-    ov = [o for o in client.get("/api/params/overrides").json() if o["field"] == "focus_weeks"]
-    client.delete(f"/api/params/overrides/{ov[0]['id']}")
     grid = client.get("/api/grid", params={"planner": "QUENTIN", "granularity": "week"}).json()
     assert len(grid["articles"]) == 16 and grid["articles"][0]["article"]["article_id"] < grid["articles"][1]["article"]["article_id"]
     assert {x["key"] for x in grid["articles"][0]["series"]} >= {"demand", "stock_plan", "supply_proposed"} and grid["articles"][0]["lanes"]
@@ -178,6 +182,7 @@ def test_default_calendar_grid_and_program_impact(client):
 
 
 def test_weekly_article_parameters_api(client):
+    _no_cbn(client)
     r = client.get(f"/api/articles/{AID}/weekly-params", params={"weeks": 4}).json()
     # at least 4 weeks, and up to the last PDP week / end of horizon (90 days here = 13 weeks)
     assert r["fields"][0] == "coverage_target_days" and len(r["weeks"]) >= 13 and r["weeks"][0]["week"] == "2026-W38"
@@ -187,7 +192,7 @@ def test_weekly_article_parameters_api(client):
     assert ok.status_code == 200, ok.text
     r2 = client.get(f"/api/articles/{AID}/weekly-params", params={"weeks": 4}).json()
     assert r2["weeks"][1]["values"]["coverage_target_days"] == 20 and r2["weeks"][1]["overridden"] == ["coverage_target_days"]
-    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day", "generate_proposals": "false"}).json()
+    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
     s = _series(proj)
     i = proj["periods"].index(r2["weeks"][1]["week_start"])
     assert s["target_stock"][i] > s["target_stock"][i - 7]
@@ -195,15 +200,18 @@ def test_weekly_article_parameters_api(client):
 
 
 def test_params_overrides(client):
+    """One common rule left : the tolerance under the target ; the fixed rules are listed, not editable."""
     schema = client.get("/api/params/schema").json()
-    assert any(p["field"] == "coverage_unit" and p["options"] for p in schema)
-    assert any(p["field"] == "backlog_days" for p in schema)
-    r = client.put("/api/params/overrides", json={"scope": "global", "field": "horizon_days", "value": 45})
+    assert [p["field"] for p in schema] == ["target_tolerance_pct"] and schema[0]["default"] == 15
+    fixed = client.get("/api/params/fixed").json()
+    assert any("ouvrés" in f["value"] for f in fixed) and any("perdu" in f["value"] for f in fixed)
+    r = client.put("/api/params/overrides", json={"scope": "global", "field": "target_tolerance_pct", "value": 20})
     assert r.status_code == 200, r.text
-    assert client.get("/api/params/effective").json()["horizon_days"] == 45
-    assert client.get("/api/cockpit").json()["horizon_days"] == 45
-    assert client.put("/api/params/overrides", json={"scope": "global", "field": "not_a_field", "value": 1}).status_code == 422
-    assert client.put("/api/params/overrides", json={"scope": "global", "field": "horizon_days", "value": "abc"}).status_code == 422
+    assert client.get("/api/params/effective").json()["target_tolerance_pct"] == 20
+    assert client.get("/api/params/effective").json()["horizon_days"] == 90   # the test settings ; 364 in production
+    for field in ("horizon_days", "shortage_policy", "coverage_unit", "backlog_days", "not_a_field"):
+        assert client.put("/api/params/overrides", json={"scope": "global", "field": field, "value": 1}).status_code == 422, field
+    assert client.put("/api/params/overrides", json={"scope": "global", "field": "target_tolerance_pct", "value": "abc"}).status_code == 422
     assert client.put("/api/params/overrides", json={"scope": "article", "key1": AID, "field": "coverage_target_days", "value": 20}).status_code == 422
     rows = client.get("/api/params/overrides").json()
     assert len(rows) == 1 and client.delete(f"/api/params/overrides/{rows[0]['id']}").status_code == 204
@@ -212,10 +220,10 @@ def test_params_overrides(client):
 def test_reference_crud_template_and_import(client):
     tables = client.get("/api/reference/tables").json()
     names = {t["name"]: t for t in tables}
-    assert set(names) == {"ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_programs", "ref_bom", "fct_stock",
-                          "ref_planners", "ref_delegations"}
+    assert set(names) == {"ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_consumption_terms", "ref_programs", "ref_bom",
+                          "fct_stock", "ref_planners", "ref_delegations"}
     assert names["ref_articles"]["rows"] == 16 and names["ref_suppliers"]["rows"] == 11 and names["ref_programs"]["rows"] == 25
-    assert names["ref_articles"]["key"] == ["article_id"] and any(c["label"] == "Couverture cible (j)" for c in names["ref_articles"]["columns"])
+    assert names["ref_articles"]["key"] == ["article_id"] and any(c["label"] == "Couverture cible (j ouvrés)" for c in names["ref_articles"]["columns"])
     # edit a threshold directly: the engine sees it
     row = next(r for r in client.get("/api/reference/ref_articles/rows").json() if r["article_id"] == AID)
     assert row["coverage_target_days"] == 10
@@ -226,9 +234,13 @@ def test_reference_crud_template_and_import(client):
     assert client.put("/api/reference/ref_articles/rows", json={"values": {"designation": "x"}}).status_code == 422
     assert client.get("/api/reference/nope/rows").status_code == 404
     # create a supplier link, then delete it
-    r = client.put("/api/reference/ref_article_suppliers/rows", json={"values": {"article_id": AID, "supplier_id": "S-000599", "moq": 10, "pack_qty": 5, "lead_time_days": 3, "quota_pct": 0, "priority": 2, "active": "oui"}})
+    r = client.put("/api/reference/ref_article_suppliers/rows", json={"values": {"article_id": AID, "supplier_id": "S-000599", "moq": 10, "pack_qty": 5, "lead_time_override": 3, "quota_pct": 0, "priority": 2, "active": "oui"}})
     assert r.status_code == 200 and r.json()["active"] is True
-    assert [l["supplier_id"] for l in client.get(f"/api/articles/{AID}/projection").json()["lanes"]] == ["S-000545", "S-000599"]
+    proj = client.get(f"/api/articles/{AID}/projection").json()
+    assert [l["supplier_id"] for l in proj["lanes"]] == ["S-000545", "S-000599"]
+    links = {l["supplier_id"]: l for l in proj["suppliers"]}
+    assert links["S-000599"]["lead_time_days"] == 3 and links["S-000599"]["lead_time_override"] == 3
+    assert links["S-000545"]["lead_time_days"] == 5 and links["S-000545"]["lead_time_override"] is None   # inherited from the supplier
     assert client.post("/api/reference/ref_article_suppliers/delete", json={"key": {"article_id": AID, "supplier_id": "S-000599"}}).status_code == 204
     assert client.post("/api/reference/ref_article_suppliers/delete", json={"key": {"article_id": AID, "supplier_id": "S-000599"}}).status_code == 404
     # template: French headers + example row + notice ; filled export ; import replace / merge
@@ -237,15 +249,15 @@ def test_reference_crud_template_and_import(client):
     wb = load_workbook(io.BytesIO(t.content))
     assert wb.sheetnames == ["Fournisseurs", "NOTICE"]
     ws = wb["Fournisseurs"]
-    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Pays", "Contact", "Jours de livraison", "Actif"]
-    ws["A2"], ws["B2"], ws["E2"], ws["F2"] = "S-NEW", "New supplier", "1,3", "oui"
+    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Pays", "Contact", "Jours de livraison", "Délai (j ouvrés)", "Actif"]
+    ws["A2"], ws["B2"], ws["E2"], ws["F2"], ws["G2"] = "S-NEW", "New supplier", "1,3", 7, "oui"
     buf = io.BytesIO()
     wb.save(buf)
     rep = client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", buf.getvalue())}, data={"mode": "merge"})
     assert rep.status_code == 201, rep.text
     assert rep.json()["created"] == 1
     sups = {r["supplier_id"]: r for r in client.get("/api/reference/ref_suppliers/rows").json()}
-    assert "S-NEW" in sups and sups["S-NEW"]["delivery_weekdays"] == "1,3" and len(sups) == 12
+    assert "S-NEW" in sups and sups["S-NEW"]["delivery_weekdays"] == "1,3" and sups["S-NEW"]["lead_time_days"] == 7 and len(sups) == 12
     filled = load_workbook(io.BytesIO(client.get("/api/reference/ref_suppliers/template.xlsx", params={"filled": "true"}).content))
     assert filled["Fournisseurs"].max_row == 13
     rep2 = client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", buf.getvalue())}, data={"mode": "replace"})
@@ -274,19 +286,19 @@ def _legacy_pdp_workbook() -> bytes:
 
 
 def test_pdp_import_and_activation(client):
-    base = client.get("/api/articles/P-00043859/projection", params={"granularity": "week", "generate_proposals": "false"}).json()
+    base = client.get("/api/articles/P-00043859/projection", params={"granularity": "week"}).json()
     r = client.post("/api/pdp/import", files={"file": ("pdp.xlsx", _legacy_pdp_workbook())}, data={"name": "PDP S40"})
     assert r.status_code == 201, r.text
     rep = r.json()
     assert rep["created"] == 7 and rep["version"]["active"] and rep["version"]["programs"] == 2
     assert any("inconnu" in n for n in rep["notes"])
-    after = client.get("/api/articles/P-00043859/projection", params={"granularity": "week", "generate_proposals": "false"}).json()
+    after = client.get("/api/articles/P-00043859/projection", params={"granularity": "week"}).json()
     d_base = dict(zip(base["periods"], _series(base)["demand"]))
     d_after = dict(zip(after["periods"], _series(after)["demand"]))
     assert d_after["2026-W40"] == pytest.approx(1000) and d_after["2026-W40"] != d_base["2026-W40"]
     v = rep["version"]["id"]
     assert client.post(f"/api/pdp/versions/{v}/deactivate").json()["active"] is False
-    back = client.get("/api/articles/P-00043859/projection", params={"granularity": "week", "generate_proposals": "false"}).json()
+    back = client.get("/api/articles/P-00043859/projection", params={"granularity": "week"}).json()
     assert _series(back)["demand"] == _series(base)["demand"]
     assert len(client.get(f"/api/pdp/versions/{v}/lines").json()) == 7
     assert client.delete(f"/api/pdp/versions/{v}").status_code == 204
@@ -305,8 +317,8 @@ def test_exports_and_reimport(client):
     assert "Appro. · S-000032" in labels2 and "Appro. · S-001033" in labels2         # two supplier lanes
     assert ws.cell(1, 5).value == AS_OF
     rows = {ws.cell(r, 3).value: r for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == AID}
-    assert str(ws.cell(rows["Projeté ERP"], 5).value).startswith("=IF(PARAMETRES!$B$5")
-    assert "OFFSET" in str(ws.cell(rows["Stock cible"], 5).value) and "COUNTIF" in str(ws.cell(rows["Couverture Appro. (périodes)"], 5).value)
+    assert str(ws.cell(rows["Projeté ERP"], 5).value).startswith("=MAX(0,")
+    assert "SUMIFS" in str(ws.cell(rows["Stock cible"], 5).value) and "COUNTIFS" in str(ws.cell(rows["Couverture Appro. (périodes ouvrées)"], 5).value)
     assert wb["ARTICLES"]["A2"].value == AID and wb["ARTICLES"]["I2"].value > 0
     assert client.get("/api/exports/alerts.xlsx").status_code == 200
     assert client.get("/api/exports/plan.xlsx", params={"planner": "QUENTIN"}).status_code == 200
@@ -352,7 +364,7 @@ def test_flags_toggle_batches_and_delivery_plan(client):
     body = {"article_id": AID, "supplier_id": "S-000545", "date": "2026-09-30", "kind": "order_ignored"}
     r = client.post("/api/entries/flags/toggle", json=body)
     assert r.status_code == 200 and r.json()["kind"] == "order_ignored"
-    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day", "generate_proposals": "false"}).json()
+    proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
     s = _series(proj)
     i = proj["periods"].index("2026-09-30")
     lane = proj["lanes"][0]
@@ -364,16 +376,14 @@ def test_flags_toggle_batches_and_delivery_plan(client):
     assert client.post("/api/entries/flags/toggle", json={**body, "date": "2026-09-01"}).status_code == 422   # past
     assert client.post("/api/entries/flags/toggle", json=body).json() is None                                  # toggle back
     assert client.get("/api/entries/flags", params={"article_id": AID}).json() == []
-    # refuse a proposal: nothing proposed until the end of its week
+    # refuse a proposal: nothing proposed on that day, the need moves to the next delivery day
     proj = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
     if proj["proposals"]:
         p = proj["proposals"][0]
         flag = client.post("/api/entries/flags/toggle", json={"article_id": AID, "date": p["delivery_date"], "kind": "proposal_refused", "qty": p["qty"]}).json()
         assert flag["qty"] == p["qty"]
         proj2 = client.get(f"/api/articles/{AID}/projection", params={"granularity": "day"}).json()
-        d = dt.date.fromisoformat(p["delivery_date"])
-        end = (d + dt.timedelta(days=6 - d.weekday())).isoformat()
-        assert all(not (p["delivery_date"] <= q["delivery_date"] <= end) for q in proj2["proposals"])
+        assert all(q["delivery_date"] != p["delivery_date"] for q in proj2["proposals"])
         assert client.delete(f"/api/entries/flags/{flag['id']}").status_code == 204
     # batches (fill handle): several cells, one transaction ; past dates skipped
     cells = [{"article_id": AID, "supplier_id": "S-000545", "date": d, "expression": "250"} for d in ("2026-09-01", "2026-10-06", "2026-10-07", "2026-10-08")]
@@ -428,16 +438,16 @@ def test_data_version_is_shared_between_worker_processes(seed_source, tmp_path):
 
 def test_weekly_overrides_batch_and_reset(client):
     items = [{"key2": "2026-W40", "field": "coverage_target_days", "value": 12}, {"key2": "2026-W41", "field": "coverage_target_days", "value": 14},
-             {"key2": "2026-W41", "field": "safety_stock_qty", "value": 50}]
+             {"key2": "2026-W41", "field": "overstock_days", "value": 50}]
     r = client.put("/api/params/overrides/batch", json={"scope": "article_week", "key1": AID, "items": items})
     assert r.status_code == 200 and len(r.json()) == 3
     weeks = {w["week"]: w for w in client.get(f"/api/articles/{AID}/weekly-params").json()["weeks"]}
-    assert weeks["2026-W41"]["values"]["coverage_target_days"] == 14 and weeks["2026-W41"]["overridden"] == ["coverage_target_days", "safety_stock_qty"]
+    assert weeks["2026-W41"]["values"]["coverage_target_days"] == 14 and weeks["2026-W41"]["overridden"] == ["coverage_target_days", "overstock_days"]
     # an empty value restores the article value for that week
     r = client.put("/api/params/overrides/batch", json={"scope": "article_week", "key1": AID, "items": [{"key2": "2026-W41", "field": "coverage_target_days", "value": ""}]})
     assert r.status_code == 200 and r.json() == []
     weeks = {w["week"]: w for w in client.get(f"/api/articles/{AID}/weekly-params").json()["weeks"]}
-    assert weeks["2026-W41"]["overridden"] == ["safety_stock_qty"] and weeks["2026-W40"]["overridden"] == ["coverage_target_days"]
+    assert weeks["2026-W41"]["overridden"] == ["overstock_days"] and weeks["2026-W40"]["overridden"] == ["coverage_target_days"]
     assert client.put("/api/params/overrides/batch", json={"scope": "article_week", "key1": AID, "items": [{"key2": "2026-W41", "field": "coverage_target_days", "value": "abc"}]}).status_code == 422
     # reset everything
     assert client.delete("/api/params/overrides", params={"scope": "article_week", "key1": AID}).status_code == 204
@@ -475,7 +485,7 @@ def test_planners_delegations_and_roles(client):
     assert r.status_code == 403 and "hors de votre carnet" in r.json()["detail"]
     assert client.put("/api/entries/adjustments", json={"article_id": other["article_id"], "date": day, "expression": "-1"}).status_code == 403
     assert client.post("/api/entries/flags/toggle", json={"article_id": other["article_id"], "date": day, "kind": "proposal_refused", "qty": 1}).status_code == 403
-    assert client.put("/api/params/overrides", json={"scope": "global", "field": "frozen_days", "value": 2}).status_code == 403
+    assert client.put("/api/params/overrides", json={"scope": "global", "field": "target_tolerance_pct", "value": 2}).status_code == 403
     assert client.put("/api/params/overrides", json={"scope": "article_week", "key1": other["article_id"], "key2": "2026-W40", "field": "coverage_target_days", "value": 2}).status_code == 403
     assert client.put("/api/params/overrides", json={"scope": "article_week", "key1": AID, "key2": "2026-W40", "field": "coverage_target_days", "value": 2}).status_code == 200
     assert put({"planner_id": "PROC3", "name": "Z", "email": "z@example.com", "role": "appro", "active": True}, {}).status_code == 403
@@ -509,7 +519,7 @@ def test_planners_delegations_and_roles(client):
     assert client.get("/api/config").json()["access"]["portfolio"] == [mine.upper()]
     # manager: global rules, any article's weeks, PDP, reference tables – but not the planners
     boss = {"x-forwarded-email": "boss@example.com"}
-    assert client.put("/api/params/overrides", json={"scope": "global", "field": "frozen_days", "value": 2}, headers=boss).status_code == 200
+    assert client.put("/api/params/overrides", json={"scope": "global", "field": "target_tolerance_pct", "value": 2}, headers=boss).status_code == 200
     assert client.put("/api/params/overrides", json={"scope": "article_week", "key1": other["article_id"], "key2": "2026-W40", "field": "coverage_target_days", "value": 2}, headers=boss).status_code == 200
     assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC3", "name": "Z", "email": "z@example.com", "role": "appro", "active": True}}, headers=boss).status_code == 403
     assert client.put("/api/entries/plan", json={"article_id": other["article_id"], "date": day, "expression": "10"}, headers=boss).status_code == 403
@@ -522,15 +532,16 @@ def test_planners_delegations_and_roles(client):
 
 
 def test_zero_article_parameters_are_kept(client):
-    """0 typed in the Référentiel (order cycle, coverage, thresholds) is a value, not a missing cell."""
+    """0 typed in the Référentiel (coverage, thresholds) is a value, not a missing cell ; an empty
+    « jours de consommation » means the uniform profile."""
     row = next(r for r in client.get("/api/reference/ref_articles/rows").json() if r["article_id"] == AID)
-    r = client.put("/api/reference/ref_articles/rows", json={"values": {**row, "order_cycle_days": 0, "coverage_target_days": 0, "alert_red_days": 0}})
+    r = client.put("/api/reference/ref_articles/rows", json={"values": {**row, "coverage_target_days": 0, "alert_red_days": 0, "demand_days": 0}})
     assert r.status_code == 200, r.text
     weeks = client.get(f"/api/articles/{AID}/weekly-params").json()
-    assert weeks["defaults"]["order_cycle_days"] == 0 and weeks["defaults"]["coverage_target_days"] == 0 and weeks["defaults"]["alert_red_days"] == 0
-    assert all(w["values"]["order_cycle_days"] == 0 and w["values"]["coverage_target_days"] == 0 for w in weeks["weeks"])
+    assert weeks["defaults"]["coverage_target_days"] == 0 and weeks["defaults"]["alert_red_days"] == 0
+    assert all(w["values"]["coverage_target_days"] == 0 for w in weeks["weeks"])
     art = client.get(f"/api/articles/{AID}/projection").json()["article"]
-    assert art["order_cycle_days"] == 0 and art["coverage_target_days"] == 0
+    assert art["coverage_target_days"] == 0 and art["demand_days"] == 5 and art["consumption_source"] == "erp"
 
 
 def test_stock_initialisation_date_is_unique_and_never_in_the_future(client):
@@ -673,7 +684,7 @@ def test_search_page_queries(client):
     assert {x["status"] for x in r["rows"]} == {"Reçu", "En transit"}
     r = client.get("/api/search", params={"kind": "receipts", "date_from": "2026-09-01", "date_to": "2026-09-30"}).json()
     assert r["total"] >= 2 and all("2026-09-01" <= x["date"] <= "2026-09-30" for x in r["rows"])
-    assert client.get("/api/search", params={"kind": "pending"}).json()["total"] == 2
+    assert client.get("/api/search", params={"kind": "pending"}).status_code == 422
     d = client.get("/api/search", params={"kind": "desadv", "q": "ennovi"}).json()
     assert d["total"] == 2 and all(x["journal"] is False for x in d["rows"])
     o = client.get("/api/search", params={"kind": "orders", "supplier_id": "S-000545", "limit": 3}).json()

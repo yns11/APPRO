@@ -41,10 +41,9 @@ def _rows(ar) -> dict[str, int]:
 
 
 @pytest.mark.skipif(SOFFICE is None, reason="LibreOffice not installed")
-@pytest.mark.parametrize("policy", ["backlog", "lost"])
-def test_workbook_formulas_match_engine(seed_source, tmp_path, policy):
+def test_workbook_formulas_match_engine(seed_source, tmp_path):
     ds = erp_dataset(seed_source, planner="QUENTIN")
-    res = run_mrp(ds, EngineParams(as_of=dt.date(2026, 9, 19), horizon_days=45, shortage_policy=policy))
+    res = run_mrp(ds, EngineParams(as_of=dt.date(2026, 9, 19), horizon_days=45))
     ids = ["P-00001046", "P-00005775", "P-00003751", "P-00003759"]     # P-00005775 has two supplier lanes
     wb = _recalculate(simulation_workbook(res, ids, "day"), tmp_path)
     ws = wb["SIMULATION"]

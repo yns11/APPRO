@@ -61,12 +61,13 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("unit", "str", "Unité", "unité de stock : PCE, KG, M", True, "KG"),
            Column("family", "str", "Famille", "famille / groupe (facultatif)", False, ""),
            Column("planner", "str", "Approvisionneur", "code approvisionneur = périmètre de l'application", True, "QUENTIN"),
-           Column("coverage_target_days", "int", "Couverture cible (j)", "jours calendaires de besoin à couvrir", True, 10),
-           Column("alert_red_days", "int", "Seuil rouge (j)", "couverture ≤ seuil : critique", True, 3),
-           Column("alert_yellow_days", "int", "Seuil orange (j)", "couverture ≤ seuil : à surveiller", True, 10),
-           Column("overstock_days", "int", "Surstock (j)", "couverture ≥ seuil : surstock", True, 30),
-           Column("safety_stock_qty", "float", "Stock de sécurité", "quantité fixe (0 = aucune)", False, 0),
-           Column("order_cycle_days", "int", "Cycle de commande (j)", "besoin ajouté au niveau de recomplètement", False, 7),
+           Column("coverage_target_days", "int", "Couverture cible (j ouvrés)", "jours ouvrés de besoin à couvrir : le stock cible du jour", True, 5),
+           Column("alert_red_days", "int", "Seuil rouge (j ouvrés)", "couverture ≤ seuil : critique", True, 2),
+           Column("alert_yellow_days", "int", "Seuil orange (j ouvrés)", "couverture ≤ seuil : à surveiller", True, 5),
+           Column("overstock_days", "int", "Surstock (j ouvrés)", "couverture ≥ seuil : surstock", True, 30),
+           Column("demand_days", "int", "Jours de consommation", "le besoin de la semaine est consommé sur les n premiers jours ouvrés (1 à 5 ; 5 = uniforme)", False, 5),
+           Column("sourcing_policy", "str", "Sourcing", "quota (répartition au prorata des quotas) ou priority (fournisseur prioritaire seul)", False, "quota"),
+           Column("consumption_source", "str", "Source conso", "erp (consommation déclarée), plan (PDP éclaté : pas de consommation fiable) ou derived (dérivée d'autres articles, table Termes de consommation)", False, "erp"),
            Column("active", "bool", "Actif", "oui / non", True, True),
        ]),
     _t("ref_suppliers", "Fournisseurs", "Fournisseurs (COFOR) et leurs jours de livraison.", ("supplier_id",), [
@@ -75,6 +76,7 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
         Column("country", "str", "Pays", "", False, "IT"),
         Column("contact", "str", "Contact", "", False, ""),
         Column("delivery_weekdays", "str", "Jours de livraison", "jours ISO autorisés, ex. 1,2,3,4,5 (1 = lundi)", True, "1,2,3,4,5"),
+        Column("lead_time_days", "int", "Délai (j ouvrés)", "délai commande → livraison en jours ouvrés, inclus (lundi + 5 = lundi suivant) ; valeur par défaut des liens", True, 5),
         Column("active", "bool", "Actif", "", True, True),
     ]),
     _t("ref_article_suppliers", "Article ↔ fournisseur", "Règles d'approvisionnement de chaque couple article / fournisseur.",
@@ -83,10 +85,19 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("supplier_id", "str", "Fournisseur", "", True, "S-000545"),
            Column("moq", "float", "MOQ", "quantité minimale de commande", True, 400),
            Column("pack_qty", "float", "UM", "unité de manutention (conditionnement) : les propositions sont arrondies au multiple supérieur", True, 400),
-           Column("lead_time_days", "int", "Délai (j ouvrés)", "délai fournisseur en jours ouvrés", True, 15),
+           Column("lead_time_override", "int", "Délai spécifique (j ouvrés)", "exception au délai du fournisseur ; vide = délai du fournisseur", False, ""),
            Column("quota_pct", "float", "Quota %", "répartition multi-sourcing (100 si mono-source)", True, 100),
            Column("priority", "int", "Priorité", "1 = fournisseur principal", True, 1),
+           Column("max_qty_per_delivery", "float", "Max / livraison", "plafond d'une livraison (multiple de l'UM, ≥ MOQ) ; vide = aucun", False, ""),
+           Column("max_qty_per_week", "float", "Max / semaine", "plafond d'une semaine ISO, fermes et plan compris (≤ max / livraison × jours de livraison) ; vide = aucun", False, ""),
            Column("active", "bool", "Actif", "", True, True),
+       ]),
+    _t("ref_consumption_terms", "Termes de consommation", "Articles en source de consommation « dérivée » : conso = Σ coefficient × consommation "
+       "des articles sources (sources en mode ERP, présentes dans un programme de l'article et dans aucun autre).",
+       ("article_id", "source_article_id"), [
+           Column("article_id", "str", "Article", "article dont la consommation est dérivée", True, "P-00038992"),
+           Column("source_article_id", "str", "Article source", "article dont la consommation déclarée sert de base", True, "P-00041210"),
+           Column("coef", "float", "Coefficient", "quantité d'article consommée par unité d'article source", True, 2),
        ]),
     _t("ref_programs", "Programmes", "Programmes de production (PF / SF) tels que nommés dans le PDP.", ("program_id",), [
         Column("program_id", "str", "Programme", "identifiant (mass-000…)", True, "mass-00040633"),
@@ -192,17 +203,6 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
        ("article_id",), [
            Column("article_id", "str", "Article", "item_id", True),
            Column("price", "float", "Prix (€)", "std_cost_price, euros par unité de stock", True),
-       ], reference=False),
-    _t("fct_bl_pending", "BL en attente de validation", "Réceptions enregistrées depuis au moins 7 jours dont l'accusé de réception "
-       "n'est pas validé (bl_en_attente).", ("pending_id",), [
-           Column("pending_id", "str", "Identifiant", "fournisseur|commande|BL|article|date", True),
-           Column("supplier_id", "str", "Fournisseur", "", True),
-           Column("purch_id", "str", "N° commande", "", False),
-           Column("packing_slip", "str", "N° BL (DESADV)", "BL repris du DESADV ; plusieurs séparés par « | »", False),
-           Column("article_id", "str", "Article", "", True),
-           Column("qty", "float", "Quantité", "", True),
-           Column("registered_date", "date", "Enregistré le", "", True),
-           Column("days_pending", "int", "Jours en attente", "", False),
        ], reference=False),
 ]}
 

@@ -24,7 +24,12 @@ async def lifespan(app: FastAPI):
     then names the cause instead of the application refusing to start)."""
     try:
         from ..services.context import get_context
-        get_context()
+        from ..services.mrp_service import purge_orphan_overrides
+        ctx = get_context()
+        with ctx.session() as session:
+            n = purge_orphan_overrides(session)
+        if n:
+            logging.getLogger("appro").info("Paramètres d'une version antérieure supprimés : %d", n)
     except Exception:  # pragma: no cover - needs a broken database
         logging.getLogger("appro").exception("Initialisation différée : la base n'est pas joignable au démarrage")
     yield

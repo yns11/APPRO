@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     erp_desadv_table: str | None = Field("desadv_edi", description="despatch advices (DESADV) table ; empty = none")
     erp_pdp_table: str | None = Field(None, description="weekly PDP table (program_id, week_start, qty, version) ; empty = none")
     erp_prices_table: str | None = Field("silver_base_article", description="item master with std_cost_price (euros) ; empty = no stock valuation")
-    erp_bl_pending_table: str | None = Field("bl_en_attente", description="registered receipts waiting for validation ; empty = none")
     cache_ttl_seconds: float = Field(300.0)
 
     # --- application database ----------------------------------------------------------
@@ -44,7 +43,7 @@ class Settings(BaseSettings):
     as_of: dt.date | None = Field(None, description="Simulated « today » (demo, tests). Default: the real date of the day")
     default_planner: str | None = Field(None)
     admins: str = Field("", description="Comma separated e-mails that are always administrators, whatever the planners table (the bundle deployer by default): no lock-out possible")
-    horizon_days: int = Field(120)
+    horizon_days: int = Field(364, description="Projection horizon after today : 52 weeks (fixed in the application)")
     history_weeks: int = Field(2, description="Weeks shown before the current week in the supply table")
     working_weekdays: str = Field("1,2,3,4,5")
     holidays: str = Field("", description="Comma separated ISO dates of plant closures")
@@ -54,7 +53,7 @@ class Settings(BaseSettings):
     app_title: str = Field("Ma Routine Appro – Cockpit approvisionnement")
     log_level: str = Field("INFO")
 
-    @field_validator("seed_reference", "erp_consumption_table", "erp_desadv_table", "erp_pdp_table", "erp_prices_table", "erp_bl_pending_table", "db_url", "lakebase_branch", "sync_role",
+    @field_validator("seed_reference", "erp_consumption_table", "erp_desadv_table", "erp_pdp_table", "erp_prices_table", "db_url", "lakebase_branch", "sync_role",
                      "as_of", "default_planner", mode="before")
     @classmethod
     def _empty_is_none(cls, v):

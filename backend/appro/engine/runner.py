@@ -12,8 +12,8 @@ from .demand import DayIndex, actual_share, build_article_demand, build_program_
 from .models import Alert, ArticleResult, Dataset, DatasetError, EngineParams, MrpResult, OrderType
 from .programs import program_impact
 from .projection import Projection, coverage_days, first_shortage, project_stock, target_stock
-from .proposals import generate_proposals, in_blocked_window
-from .supply import blocked_windows, build_lanes, lane_totals
+from .proposals import generate_proposals, is_refused
+from .supply import blocked_days, build_lanes, lane_totals
 
 
 def resolve_as_of(dataset: Dataset, params: EngineParams) -> dt.date:
@@ -54,14 +54,16 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     end = max(as_of + dt.timedelta(days=int(params.horizon_days)), iso_week_monday(as_of) + dt.timedelta(days=6))
     index = DayIndex(start, end)
     diagnostics: list[str] = []
+    articles_by_id = {a.article_id: a for a in dataset.articles}
 
     # ---------------------------------------------------------------- demand
-    # PDP → daily production per programme → exploded component demand ; then the reported actual
-    # consumption (already per component) replaces the past days and drives the current-week remainder
-    program_plan, diag = build_program_daily(dataset.pdp, calendar, index, params)
+    # PDP → daily production per programme → exploded component demand, profiled per article
+    # (demand_days) ; then the reported actual consumption (already per component) replaces the past
+    # days and drives the current-week remainder, according to the consumption source of the article
+    program_plan, diag = build_program_daily(dataset.pdp, calendar, index)
     diagnostics.extend(diag)
-    demand_plan = explode_demand(program_plan, dataset.bom, index, params.consumption_offset_days)
-    demand_eff, actual_mask = build_article_demand(demand_plan, dataset.consumption, calendar, index, params, as_of)
+    demand_plan = explode_demand(program_plan, dataset.bom, index)
+    demand_eff, actual_mask = build_article_demand(demand_plan, dataset.consumption, articles_by_id, calendar, index, as_of)
 
     # ---------------------------------------------------------------- lookups
     links_by_article: dict[str, list] = defaultdict(list)
@@ -145,7 +147,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         inflow_plan = receipts_proj + plan
 
         def project(supply: np.ndarray) -> Projection:
-            proj = project_stock(stock_start, supply, adjust_proj, demand_proj, params.shortage_policy, i_snap)
+            proj = project_stock(stock_start, supply, adjust_proj, demand_proj, i_snap)
             proj.net[:i_snap + 1] = history
             proj.stock[:i_snap + 1] = np.maximum(history, 0.0)
             return proj
@@ -153,36 +155,33 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         onhand = project(np.zeros(n))
         erp = project(inflow_erp)
         plan_proj = project(inflow_plan)
-        target = target_stock(demand, article, index, calendar, params)
+        target = target_stock(demand, article, index, calendar)
 
-        proposals, supply_proposed = [], np.zeros(n)
+        # ---- proposals (always computed, always part of the plan stock)
+        blocked = blocked_days(flags_by_article.get(aid), aid)
+        lane_plan = {l.supplier_id: l.plan for l in lanes}
+        proposals, supply_proposed, _, cap_shortfalls = generate_proposals(
+            article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand, target,
+            index, calendar, as_of, params, supply_planned=lane_totals(lanes, "orders_forecast"),
+            reproject=lambda extra: project(inflow_plan + extra), blocked=blocked, lane_plan=lane_plan)
         proposals_ignored: list = []
-        if params.generate_proposals:
-            # the re-projection is only needed by the ``lost`` policy (a receipt after a lost day does
-            # not serve that day) ; with ``backlog`` adding the proposal from its day on is exact
-            blocked = blocked_windows(flags_by_article.get(aid), aid)
-            reproject = (lambda extra: project(inflow_plan + extra)) if params.shortage_policy == "lost" else None
-            proposals, supply_proposed, _ = generate_proposals(
-                article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand, target,
-                index, calendar, as_of, params, supply_planned=lane_totals(lanes, "orders_forecast"),
-                reproject=reproject, blocked=blocked)
-            if blocked:
-                # what the engine would have proposed without the refusals : the refused ones stay listed
-                # (« ignorée ») in the ordering flow, outside every calculation
-                free, _, _ = generate_proposals(article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand,
-                                                target, index, calendar, as_of, params, reproject=reproject)
-                for p in free:
-                    if in_blocked_window(blocked, p.supplier_id, p.delivery_date):
-                        p.ignored = True
-                        proposals_ignored.append(p)
-            if params.include_proposals_in_plan:
-                plan_proj = project(inflow_plan + supply_proposed)
-            by_lane = {l.supplier_id: l for l in lanes}
-            for p in proposals:
-                lane = by_lane.get(p.supplier_id) or lanes[0]
-                j = index.offset(p.delivery_date)
-                if j is not None:
-                    lane.supply_proposed[j] += p.qty
+        if blocked:
+            # what the engine would have proposed without the refusals : the refused ones stay listed
+            # (« ignorée ») in the ordering flow, outside every calculation
+            free, _, _, _ = generate_proposals(article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand,
+                                               target, index, calendar, as_of, params,
+                                               reproject=lambda extra: project(inflow_plan + extra), lane_plan=lane_plan)
+            for p in free:
+                if is_refused(blocked, p.supplier_id, p.delivery_date):
+                    p.ignored = True
+                    proposals_ignored.append(p)
+        plan_proj = project(inflow_plan + supply_proposed)
+        by_lane = {l.supplier_id: l for l in lanes}
+        for p in proposals:
+            lane = by_lane.get(p.supplier_id) or lanes[0]
+            j = index.offset(p.delivery_date)
+            if j is not None:
+                lane.supply_proposed[j] += p.qty
         # next expected delivery (Plan row + CBN complement, every supplier) : its day, quantity and nature
         next_delivery = None
         for i in range(i_as_of, n):
@@ -192,14 +191,12 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
                 firm = any(not bool(l.plan_typed[i]) and l.plan[i] > 0 for l in lanes)
                 next_delivery = (index.dates[i], qty, "saisie" if typed else "ferme" if firm else "cbn")
                 break
-        cov = {name: coverage_days(layer.net, demand, index, calendar, params.coverage_unit, params.coverage_tie_rule)
-               for name, layer in (("erp", erp), ("plan", plan_proj))}
+        cov = {name: coverage_days(layer.net, demand, index, calendar) for name, layer in (("erp", erp), ("plan", plan_proj))}
 
-        alerts = classify_alerts(article, index, as_of, erp, plan_proj, cov["plan"], stock_start, demand,
-                                 lanes, proposals, links_by_article.get(aid, []), aid in bom_articles,
-                                 snap is not None, params)
-        last = None if params.stockout_lookahead_days is None else i_as_of + params.stockout_lookahead_days
-        k = {name: first_shortage(layer.shortage, i_as_of, last) for name, layer in (("erp", erp), ("plan", plan_proj))}
+        alerts = classify_alerts(article, index, calendar, as_of, erp, plan_proj, cov["plan"], stock_start, demand,
+                                 lanes, proposals, links_by_article.get(aid, []), suppliers, aid in bom_articles,
+                                 snap is not None, cap_shortfalls)
+        k = {name: first_shortage(layer.shortage, i_as_of) for name, layer in (("erp", erp), ("plan", plan_proj))}
         horizon_slice = slice(i_as_of, n)
         typed = int(sum(int(l.plan_typed[i_as_of:].sum()) for l in lanes))
         ignored_days = int(sum(int(l.orders_ignored[i_as_of:].sum()) for l in lanes))
@@ -209,7 +206,11 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         # identical in both scenarios before today, so read on the ERP one
         stock_at_date = float(erp.stock[i_as_of - 1]) if i_as_of > 0 else float(max(stock_start, 0.0))
         plan_stockout = next((a for a in alerts if a.alert_type.value == "STOCKOUT" and a.scope == "plan"), None)
-        working_days_30d = sum(1 for i in range(i_as_of + 1, min(n, i_as_of + 31)) if calendar.is_working_day(index.dates[i]))
+        # requirement of the next 20 working days (four weeks) and its average per working day
+        wd_mask = calendar.working_mask(index.start, n)
+        future_wd = [i for i in range(i_as_of + 1, n) if wd_mask[i]][:20]
+        demand_20wd = float(demand[future_wd].sum()) if future_wd else 0.0
+        lead = min((l.lead_time(suppliers) for l in links_by_article.get(aid, []) if l.active), default=5)
         kpis = {
             "stock_on_hand": float(stock_snapshot),
             "reference_correction": reference_correction,
@@ -220,26 +221,26 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "target_value": (float(target[i_as_of]) * price) if price is not None else None,
             "stockout_plan_severity": plan_stockout.severity.value if plan_stockout else None,
             "init_date": snap_date.isoformat(),
-            "shortage_policy": params.shortage_policy,
             "stock_as_of_erp": float(erp.stock[i_as_of]),
             "stock_as_of_plan": float(plan_proj.stock[i_as_of]),
             "coverage_erp_days": int(cov["erp"][i_as_of]),
             "coverage_plan_days": int(cov["plan"][i_as_of]),
             "coverage_target_days": int(article.param_at("coverage_target_days", as_of)),
             "target_stock": float(target[i_as_of]),
+            "lead_time_days": lead,
+            "demand_days": int(article.demand_days),
+            "consumption_source": article.consumption_source,
             "first_stockout_erp": index.dates[k["erp"]].isoformat() if k["erp"] is not None else None,
             "first_stockout_plan": index.dates[k["plan"]].isoformat() if k["plan"] is not None else None,
             "min_stock_erp": float(np.min(erp.stock[horizon_slice])),
             "min_stock_plan": float(np.min(plan_proj.stock[horizon_slice])),
-            "max_shortage_erp": float(np.max(erp.shortage[horizon_slice])),
-            "max_shortage_plan": float(np.max(plan_proj.shortage[horizon_slice])),
+            "max_shortage_erp": float(np.max(erp.shortage_cum[horizon_slice])),
+            "max_shortage_plan": float(np.max(plan_proj.shortage_cum[horizon_slice])),
             "demand_next_7d": float(demand[i_as_of + 1:i_as_of + 8].sum()),
-            "demand_next_30d": float(demand[i_as_of + 1:i_as_of + 31].sum()),
+            "demand_next_20wd": demand_20wd,
             "demand_horizon": float(demand[horizon_slice].sum()),
-            # 30 calendar days of requirement, averaged over the working days of that window only
-            "avg_daily_demand_30d": float(demand[i_as_of + 1:i_as_of + 31].sum() / max(1, working_days_30d)),
-            "working_days_30d": working_days_30d,
-            "backlog_window_start": max(as_of - dt.timedelta(days=max(int(params.backlog_days), 0)), index.start).isoformat(),
+            "avg_daily_demand_wd": demand_20wd / max(1, len(future_wd)),
+            "working_days_counted": len(future_wd),
             "open_firm_qty": float(orders_firm[horizon_slice].sum()),
             "open_forecast_qty": float(lane_totals(lanes, "orders_forecast")[horizon_slice].sum()),
             "plan_qty": float(plan[horizon_slice].sum()),
@@ -252,6 +253,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "proposed_qty": float(supply_proposed.sum()),
             "proposal_count": len(proposals),
             "urgent_proposal_count": sum(1 for p in proposals if p.urgent),
+            "capped_proposal_count": sum(1 for p in proposals if p.capped),
             "alert_count": len(alerts),
             "severity": (worst_severity(alerts).value if alerts else None),
             "actual_share_30d": float(share[i_as_of - 30 if i_as_of >= 30 else 0:i_as_of + 1].mean()) if i_as_of > 0 else 0.0,
@@ -269,18 +271,19 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             adjustments=adjustments + past_adjust, reference_correction=reference_correction,
             stock_erp=erp.stock, stock_plan=plan_proj.stock,
             shortage_onhand=onhand.shortage, shortage_erp=erp.shortage, shortage_plan=plan_proj.shortage,
+            shortage_erp_cum=erp.shortage_cum, shortage_plan_cum=plan_proj.shortage_cum,
             stock_erp_net=erp.net, stock_plan_net=plan_proj.net,
             coverage_erp=cov["erp"], coverage_plan=cov["plan"], target_stock=target,
             lanes=lanes, alerts=alerts, proposals=proposals, kpis=kpis, suppliers=links_by_article.get(aid, []),
-            diagnostics=notes, proposals_ignored=proposals_ignored, price=price,
+            diagnostics=notes, proposals_ignored=proposals_ignored, price=price, cap_shortfalls=cap_shortfalls,
         )
 
     program_daily = {pid: {index.dates[i]: float(v) for i, v in enumerate(arr) if v}
                      for pid, arr in program_plan.items()}
     names = {p.program_id: p.name for p in dataset.programs}
-    impact = program_impact(results, dataset.bom, program_plan, names, index, as_of, params.shortage_policy)
+    impact = program_impact(results, dataset.bom, program_plan, names, index, as_of)
     return MrpResult(as_of=as_of, init_date=init_date, start_date=start, end_date=end, params=params, articles=results,
-                     program_daily=program_daily, diagnostics=diagnostics, program_impact=impact)
+                     program_daily=program_daily, diagnostics=diagnostics, program_impact=impact, holidays=list(dataset.holidays))
 
 
 __all__ = ["run_mrp", "resolve_as_of", "resolve_init_date", "Alert", "OrderType"]

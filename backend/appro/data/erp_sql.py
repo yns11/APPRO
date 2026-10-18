@@ -12,7 +12,6 @@ Sources (schema ``emotors_data_champions.silver_erp_ye`` by default) :
   **status** : ``En transit`` (journal created, not validated : shown, never counted), ``Reçu``
   (journal validated, acknowledgement of receipt pending) or ``Comptabilisé`` (acknowledgement of
   receipt validated) ; several BL may be joined by `` | `` ;
-* ``bl_en_attente`` – registered receipts older than 7 days still waiting for validation ;
 * ``silver_base_article`` – item master : ``std_cost_price`` (euros) values the stocks ;
 * an optional daily **actual consumption** table (``APPRO_ERP_CONSUMPTION_TABLE``) with the canonical
   columns ``article_id, date, qty`` – the consumption is given **per component, already exploded**
@@ -37,7 +36,6 @@ class ErpTables:
     desadv: str = ""              # empty: no despatch advices (DESADV) read from the ERP
     pdp: str = ""                 # empty: the PDP comes from the file imported in the application
     prices: str = ""              # empty: no article prices (no stock valuation)
-    bl_pending: str = ""          # empty: no « BL en attente » table
 
     def fqn(self, table: str) -> str:
         return f"`{self.catalog}`.`{self.schema}`.`{table}`"
@@ -135,26 +133,6 @@ GROUP BY a.item_id
 """.strip()
 
 
-def bl_pending_sql(t: ErpTables) -> str:
-    """Registered receipts waiting for validation (``bl_en_attente``) : one row per supplier / order /
-    BL / article / registration day."""
-    return f"""
-SELECT
-  CONCAT_WS('|', b.Fournisseur, b.Commande,
-            CASE WHEN LENGTH(COALESCE(b.BL_DESADV, '')) > 60 THEN LEFT(SHA2(b.BL_DESADV, 256), 16) ELSE COALESCE(b.BL_DESADV, '') END,
-            b.Article, DATE_FORMAT(b.Date_enregistrement, 'yyyyMMdd')) AS pending_id,
-  b.Fournisseur                                                   AS supplier_id,
-  b.Commande                                                      AS purch_id,
-  b.BL_DESADV                                                     AS packing_slip,
-  b.Article                                                       AS article_id,
-  CAST(b.Quantite AS DOUBLE)                                      AS qty,
-  CAST(b.Date_enregistrement AS DATE)                             AS registered_date,
-  CAST(b.Jours_en_attente AS INT)                                 AS days_pending
-FROM {t.fqn(t.bl_pending)} b
-WHERE b.Article IS NOT NULL AND b.Date_enregistrement IS NOT NULL
-""".strip()
-
-
 def carry_first_seen(previous: dict[str, dt.date | None], order_id: str, today: dt.date) -> dt.date:
     """``first_seen`` of a delivery slot : the day it was first copied by the synchronisation job,
     kept from the previous copy ; a slot unknown so far appeared today."""
@@ -173,8 +151,6 @@ def fact_queries(t: ErpTables) -> dict[str, str]:
         out["fct_production_plan"] = production_plan_sql(t)
     if t.prices:
         out["fct_prices"] = prices_sql(t)
-    if t.bl_pending:
-        out["fct_bl_pending"] = bl_pending_sql(t)
     return out
 
 
@@ -182,4 +158,4 @@ def source_of(t: ErpTables, name: str) -> str:
     """Fully qualified source table of a canonical fact table."""
     return {"fct_purchase_orders": t.fqn(t.orders), "fct_receipts": t.fqn(t.receipts),
             "fct_consumption_actual": t.fqn(t.consumption), "fct_production_plan": t.fqn(t.pdp),
-            "fct_desadv": t.fqn(t.desadv), "fct_prices": t.fqn(t.prices), "fct_bl_pending": t.fqn(t.bl_pending)}[name]
+            "fct_desadv": t.fqn(t.desadv), "fct_prices": t.fqn(t.prices)}[name]

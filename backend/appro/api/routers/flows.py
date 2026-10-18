@@ -37,7 +37,7 @@ def flows(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), sessio
 
 
 @router.get("/search", response_model=S.SearchResponse)
-def search(kind: Literal["receipts", "orders", "desadv", "pending"] = "receipts", q: str | None = None,
+def search(kind: Literal["receipts", "orders", "desadv"] = "receipts", q: str | None = None,
            date_from: dt.date | None = None, date_to: dt.date | None = None, planner: str | None = None,
            supplier_id: str | None = None, article_id: str | None = None, limit: int = Query(SEARCH_LIMIT, ge=1, le=SEARCH_LIMIT),
            ctx: AppContext = Depends(ctx_dep)):

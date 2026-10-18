@@ -32,9 +32,10 @@ from .expression import evaluate
 log = logging.getLogger(__name__)
 
 # stock-policy parameters that may be customised per ISO week (scope ``article_week``, key2 = "2026-W40")
-ARTICLE_WEEK_FIELDS = {"coverage_target_days": int, "alert_red_days": int, "alert_yellow_days": int,
-                       "overstock_days": int, "safety_stock_qty": float, "order_cycle_days": int}
+ARTICLE_WEEK_FIELDS = {"coverage_target_days": int, "alert_red_days": int, "alert_yellow_days": int, "overstock_days": int}
 GLOBAL_FIELDS = {f.name: f.type for f in dataclasses.fields(EngineParams)}
+#: the rules a user may change from the Paramètres screen (the others are display or technical)
+EDITABLE_GLOBAL_FIELDS = ("target_tolerance_pct",)
 
 
 def apply_weekly_overrides(ds: Dataset, overrides: list[ParamOverride]) -> list[str]:
@@ -71,9 +72,22 @@ def _coerce_param(field: str, value: Any) -> Any:
         return tuple(value)
     if field == "as_of" and value:
         return dt.date.fromisoformat(str(value)) if not isinstance(value, dt.date) else value
-    if default is None and field in ("proposal_lookahead_days", "stockout_lookahead_days"):
-        return None if value in (None, "", "null") else int(value)
     return value if default is None else type(default)(value)
+
+
+def purge_orphan_overrides(session: Session) -> int:
+    """Delete the overrides of rules that no longer exist (an earlier version of the application) ;
+    returns the number of rows removed.  Called at start-up."""
+    rows = session.scalars(select(ParamOverride)).all()
+    n = 0
+    for r in rows:
+        allowed = GLOBAL_FIELDS if r.scope == "global" else ARTICLE_WEEK_FIELDS if r.scope == "article_week" else {}
+        if r.field not in allowed:
+            session.delete(r)
+            n += 1
+    if n:
+        session.commit()
+    return n
 
 
 def build_params(ctx: AppContext, session: Session, **requested: Any) -> EngineParams:

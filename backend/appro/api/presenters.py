@@ -25,8 +25,8 @@ SERIES_LABELS = [
     ("adjustments", "Ajustement"),
     ("stock_erp", "Projeté ERP"),
     ("stock_plan", "Projeté Appro."),
-    ("shortage_erp", "Manque ERP"),
-    ("shortage_plan", "Manque Plan"),
+    ("shortage_erp_cum", "Manque ERP (cumul)"),
+    ("shortage_plan_cum", "Manque Plan (cumul)"),
     ("target_stock", "Stock cible"),
     ("coverage_erp", "Couverture ERP (j)"),
     ("coverage_plan", "Couverture Appro. (j)"),
@@ -36,11 +36,10 @@ LANE_SERIES = [("orders_firm", "Ferme"), ("orders_firm_hist", "Ferme (passé)"),
                ("orders_firm_ordered", "Ferme commandé"), ("orders_firm_open", "Ferme restant ERP"),
                ("desadv_open", "En transit")]
 #: series of the multi-article table (the article page gets every series)
-GRID_SERIES = {"demand", "supply_proposed", "adjustments", "stock_erp", "stock_plan", "shortage_erp", "shortage_plan",
+GRID_SERIES = {"demand", "supply_proposed", "adjustments", "stock_erp", "stock_plan", "shortage_erp_cum", "shortage_plan_cum",
                "coverage_erp", "coverage_plan", "target_stock"}
 FLOWS = {"demand", "consumed", "required", "demand_plan", "orders_firm", "orders_firm_hist", "orders_forecast",
          "receipts", "plan", "supply_proposed", "adjustments", "desadv_open", "orders_firm_ordered", "orders_firm_open"}
-SHORTAGES = {"shortage_erp", "shortage_plan"}
 
 
 def alert_out(a: Alert, designation: str = "") -> S.AlertOut:
@@ -56,21 +55,23 @@ def proposal_out(p: Proposal, ar: ArticleResult, supplier_names: dict[str, str])
         delivery_date=p.delivery_date, order_date=p.order_date, qty=p.qty, net_requirement=p.net_requirement,
         reason=p.reason, urgent=p.urgent, lead_time_days=p.lead_time_days, moq=p.moq,
         pack_qty=p.pack_qty, projected_stock_before=p.projected_stock_before,
-        projected_stock_after=p.projected_stock_after, ignored=p.ignored)
+        projected_stock_after=p.projected_stock_after, ignored=p.ignored, floor=p.floor, capped=p.capped)
 
 
-def link_out(l: SupplierLink, supplier_names: dict[str, str]) -> S.LinkRef:
+def link_out(l: SupplierLink, supplier_names: dict[str, str], suppliers: dict[str, Any] | None = None) -> S.LinkRef:
     return S.LinkRef(article_id=l.article_id, supplier_id=l.supplier_id, supplier_name=supplier_names.get(l.supplier_id, ""),
-                     moq=l.moq, pack_qty=l.pack_qty, lead_time_days=l.lead_time_days, quota_pct=l.quota_pct,
-                     priority=l.priority, active=l.active)
+                     moq=l.moq, pack_qty=l.pack_qty, lead_time_days=l.lead_time(suppliers), lead_time_override=l.lead_time_days,
+                     quota_pct=l.quota_pct, priority=l.priority, active=l.active,
+                     max_qty_per_delivery=l.max_qty_per_delivery, max_qty_per_week=l.max_qty_per_week)
 
 
 def article_ref(ar: ArticleResult) -> S.ArticleRef:
     a = ar.article
     return S.ArticleRef(article_id=a.article_id, designation=a.designation, unit=a.unit, family=a.family,
                         planner=a.planner, coverage_target_days=a.coverage_target_days, alert_red_days=a.alert_red_days,
-                        alert_yellow_days=a.alert_yellow_days, overstock_days=a.overstock_days,
-                        safety_stock_qty=a.safety_stock_qty, order_cycle_days=a.order_cycle_days, active=a.active)
+                        alert_yellow_days=a.alert_yellow_days, overstock_days=a.overstock_days, demand_days=a.demand_days,
+                        sourcing_policy=a.sourcing_policy, consumption_source=a.consumption_source,
+                        derived_terms=[{"source_article_id": src, "coef": c} for src, c in a.derived_terms], active=a.active)
 
 
 def sparkline(ar: ArticleResult, points: int = 18) -> list[float]:
@@ -89,14 +90,20 @@ def article_summary(ar: ArticleResult) -> S.ArticleSummary:
 
 
 def backlog_rows(result: MrpResult) -> list[S.BacklogRow]:
+    """Supplier backlog : one row per late firm order (ERP remaining quantity, delivery date passed)."""
     out = []
     for ar in result.articles.values():
         for l in ar.lanes:
-            if l.backlog_qty > 1e-6:
-                out.append(S.BacklogRow(article_id=ar.article.article_id, designation=ar.article.designation,
-                                        unit=ar.article.unit, supplier_id=l.supplier_id, supplier_name=l.name,
-                                        ordered=l.backlog_ordered, received=l.backlog_received, backlog=l.backlog_qty))
-    return sorted(out, key=lambda r: (-r.backlog, r.article_id))
+            if l.backlog_qty <= 1e-6:
+                continue
+            for o in l.orders:
+                if o.order_type == "FIRM" and o.expected_date < result.as_of and o.qty_open > 1e-6:
+                    out.append(S.BacklogRow(article_id=ar.article.article_id, designation=ar.article.designation,
+                                            unit=ar.article.unit, planner=ar.article.planner, supplier_id=l.supplier_id,
+                                            supplier_name=l.name, order_id=o.order_id, purch_id=o.ref, expected_date=o.expected_date,
+                                            ordered=o.qty_ordered, received=o.qty_ordered - o.qty_open, backlog=o.qty_open,
+                                            ignored=o.ignored))
+    return sorted(out, key=lambda r: (r.expected_date, -r.backlog, r.article_id))
 
 
 def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
@@ -130,7 +137,7 @@ def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
         open_forecast_qty=float(sum(r.kpis["open_forecast_qty"] for r in arts)),
         avg_coverage_days=(round(sum(cov) / len(cov), 1) if cov else None),
         median_coverage_days=(float(np.median(cov)) if cov else None),
-        demand_next_30d=float(sum(r.kpis["demand_next_30d"] for r in arts)),
+        demand_next_20wd=float(sum(r.kpis["demand_next_20wd"] for r in arts)),
         stock_value=(sum(v for v in values) if values else None),
         target_value=(sum(t for t in targets) if values else None),
         priced_articles=len(values), unpriced_articles=len(arts) - len(values),
@@ -286,7 +293,7 @@ def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], pl
 
 
 def search_rows(ds: Dataset, supplier_names: dict[str, str], kind: str) -> list[dict[str, Any]]:
-    """Every line of one kind (receipts, orders, DESADV, pending BL) of the dataset, as flat rows."""
+    """Every line of one kind (receipts, orders, DESADV) of the dataset, as flat rows."""
     arts = {a.article_id: a for a in ds.articles}
 
     def art(aid: str) -> dict[str, str]:
@@ -308,9 +315,6 @@ def search_rows(ds: Dataset, supplier_names: dict[str, str], kind: str) -> list[
         return [{"desadv_id": d.desadv_id, "article_id": d.article_id, **art(d.article_id), **sup(d.supplier_id), "date": d.issue_date,
                  "qty": d.qty, "purch_id": d.purch_id, "packing_slip": d.packing_slip, "state": d.state, "final_processing": d.final_processing,
                  "received": d.packing_slip.strip() in received, "journal": bool(d.stock_trans_id.strip())} for d in ds.desadv]
-    if kind == "pending":
-        return [{"pending_id": b.pending_id, "article_id": b.article_id, **art(b.article_id), **sup(b.supplier_id), "date": b.registered_date,
-                 "qty": b.qty, "purch_id": b.purch_id, "packing_slip": b.packing_slip, "days_pending": b.days_pending} for b in ds.bl_pending]
     raise ValueError(kind)
 
 
@@ -384,12 +388,14 @@ class Columns:
                 "period_end": [dates[i].isoformat() for i in self.lasts]}
 
 
-def _agg(key: str, raw, cols: Columns, lost: bool) -> list[float]:
-    return cols.flow(raw) if key in FLOWS or (lost and key in SHORTAGES) else cols.level(raw)
+def _agg(key: str, raw, cols: Columns) -> list[float]:
+    """Flows are summed over the days of a column ; stocks, coverages and the cumulated shortage are
+    read on the last day of the column."""
+    return cols.flow(raw) if key in FLOWS else cols.level(raw)
 
 
-def series_out(ar: ArticleResult, cols: Columns, lost: bool, keys: set[str] | None = None) -> list[dict[str, Any]]:
-    return [{"key": key, "label": label, "values": _agg(key, getattr(ar, key), cols, lost)}
+def series_out(ar: ArticleResult, cols: Columns, keys: set[str] | None = None) -> list[dict[str, Any]]:
+    return [{"key": key, "label": label, "values": _agg(key, getattr(ar, key), cols)}
             for key, label in SERIES_LABELS if keys is None or key in keys]
 
 
@@ -400,7 +406,7 @@ def lane_out(l: Lane, cols: Columns, with_orders: bool = True, since: dt.date | 
         return since is None or day >= since
     return {
         "supplier_id": l.supplier_id, "name": l.name,
-        "series": [{"key": key, "label": label, "values": _agg(key, getattr(l, key), cols, False)} for key, label in LANE_SERIES],
+        "series": [{"key": key, "label": label, "values": _agg(key, getattr(l, key), cols)} for key, label in LANE_SERIES],
         "plan_typed": cols.any(l.plan_typed), "orders_ignored": cols.any(l.orders_ignored),
         "desadv_ko": cols.any(l.desadv_ko) if l.desadv_ko is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
         "receipts_ko": cols.any(l.receipts_ko) if l.receipts_ko is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
@@ -422,17 +428,17 @@ def display_start(result: MrpResult) -> dt.date:
 
 
 def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, supplier_names: dict[str, str],
-                   programs: list[dict[str, Any]], from_date: dt.date | None = None) -> dict[str, Any]:
+                   programs: list[dict[str, Any]], from_date: dt.date | None = None,
+                   suppliers: dict[str, Any] | None = None) -> dict[str, Any]:
     start = from_date or display_start(result)
     cols = Columns.build(ar.dates, result.as_of, granularity, result.params.focus_weeks, start)
-    lost = result.params.shortage_policy == "lost"
     return {
         "article": article_ref(ar).model_dump(mode="json"), "as_of": result.as_of.isoformat(), "init_date": result.init_date.isoformat(), "granularity": granularity,
         **cols.meta(ar.dates),
-        "series": series_out(ar, cols, lost), "lanes": [lane_out(l, cols, since=start) for l in ar.lanes],
+        "series": series_out(ar, cols), "lanes": [lane_out(l, cols, since=start) for l in ar.lanes],
         "proposals": [proposal_out(p, ar, supplier_names).model_dump(mode="json") for p in ar.proposals],
         "alerts": [alert_out(a, ar.article.designation).model_dump(mode="json") for a in ar.alerts],
-        "kpis": ar.kpis, "suppliers": [link_out(l, supplier_names).model_dump(mode="json") for l in ar.suppliers],
+        "kpis": ar.kpis, "suppliers": [link_out(l, supplier_names, suppliers).model_dump(mode="json") for l in ar.suppliers],
         "programs": programs, "diagnostics": ar.diagnostics + result.diagnostics,
     }
 
@@ -440,7 +446,7 @@ def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, suppl
 def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str],
              programs_of: dict[str, list[str]], from_date: dt.date | None = None,
              articles: list[ArticleResult] | None = None, total: int | None = None, page: int = 1,
-             page_size: int | None = None) -> dict[str, Any]:
+             page_size: int | None = None, suppliers: dict[str, Any] | None = None) -> dict[str, Any]:
     """Multi-article supply table: every article on the same columns (one page of articles)."""
     start = from_date or display_start(result)
     arts = list(result.articles.values()) if articles is None else articles
@@ -450,12 +456,11 @@ def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str]
         return {**base, "periods": [], "period_start": [], "period_end": [], "articles": []}
     dates = next(iter(result.articles.values())).dates
     cols = Columns.build(dates, result.as_of, granularity, result.params.focus_weeks, start)
-    lost = result.params.shortage_policy == "lost"
     return {
         **base, **cols.meta(dates),
-        "articles": [{"article": article_ref(ar).model_dump(mode="json"), "series": series_out(ar, cols, lost, GRID_SERIES),
+        "articles": [{"article": article_ref(ar).model_dump(mode="json"), "series": series_out(ar, cols, GRID_SERIES),
                       "lanes": [lane_out(l, cols, since=start) for l in ar.lanes], "kpis": ar.kpis,
-                      "suppliers": [link_out(l, supplier_names).model_dump(mode="json") for l in ar.suppliers],
+                      "suppliers": [link_out(l, supplier_names, suppliers).model_dump(mode="json") for l in ar.suppliers],
                       "programs": programs_of.get(ar.article.article_id, [])}
                      for ar in arts],
     }

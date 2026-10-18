@@ -53,7 +53,7 @@ resources:
           - name: APPRO_ERP_RECEIPTS_TABLE
             value: ${var.erp_receipts_table}
           - name: APPRO_HORIZON_DAYS
-            value: "120"
+            value: "364"
           - name: APPRO_HISTORY_WEEKS
             value: "2"
           - name: APPRO_LOG_LEVEL

@@ -8,7 +8,6 @@ import pandas as pd
 
 from ..engine.models import (
     Article,
-    BlPending,
     BomLine,
     ConsumptionLine,
     Dataset,
@@ -44,6 +43,34 @@ def _float(v, default: float) -> float:
     return default if _missing(v) else float(v)
 
 
+def _demand_days(v) -> int:
+    """1..5 ; an empty or zero cell means the uniform profile (5)."""
+    n = _int(v, 5)
+    return 5 if n <= 0 else min(n, 5)
+
+
+def _lead(v) -> int:
+    """Supplier lead time in working days ; an empty or zero cell means the default (5)."""
+    n = _int(v, 5)
+    return 5 if n <= 0 else n
+
+
+def _optional_int(v) -> int | None:
+    """Empty or zero = no value (the link inherits the supplier's lead time)."""
+    n = _int(v, 0)
+    return n if n > 0 else None
+
+
+def _optional_float(v) -> float | None:
+    x = _float(v, 0.0)
+    return x if x > 0 else None
+
+
+def _choice(v, allowed: tuple[str, ...], default: str) -> str:
+    x = str(v or "").strip().lower()
+    return x if x in allowed else default
+
+
 def _tables(source) -> Tables:
     return source if callable(source) else source.table
 
@@ -60,18 +87,30 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
         arts = arts[arts["article_id"].isin(article_ids)]
     ids = set(arts["article_id"])
 
+    terms: dict[str, list[tuple[str, float]]] = {}
+    for r in _records(t("ref_consumption_terms")):
+        if r["article_id"] in ids and r["source_article_id"] and float(r["coef"] or 0) > 0:
+            terms.setdefault(r["article_id"], []).append((str(r["source_article_id"]), float(r["coef"])))
     articles = [Article(
         article_id=r["article_id"], designation=r["designation"], unit=r["unit"] or "PCE", family=r["family"],
-        planner=r["planner"], coverage_target_days=_int(r["coverage_target_days"], 7),
-        alert_red_days=_int(r["alert_red_days"], 3), alert_yellow_days=_int(r["alert_yellow_days"], 7),
-        overstock_days=_int(r["overstock_days"], 30), safety_stock_qty=_float(r["safety_stock_qty"], 0.0),
-        order_cycle_days=_int(r["order_cycle_days"], 7), active=bool(r["active"]),
+        planner=r["planner"], coverage_target_days=_int(r["coverage_target_days"], 5),
+        alert_red_days=_int(r["alert_red_days"], 2), alert_yellow_days=_int(r["alert_yellow_days"], 5),
+        overstock_days=_int(r["overstock_days"], 30), demand_days=_demand_days(r.get("demand_days")),
+        sourcing_policy=_choice(r.get("sourcing_policy"), ("quota", "priority"), "quota"),
+        consumption_source=_choice(r.get("consumption_source"), ("erp", "plan", "derived"), "erp"),
+        derived_terms=terms.get(r["article_id"], []), active=bool(r["active"]),
     ) for r in _records(arts)]
+    # a derived article without any term falls back to the ERP consumption
+    for a in articles:
+        if a.consumption_source == "derived" and not a.derived_terms:
+            a.consumption_source = "erp"
+    source_ids = {src for a in articles for src, _c in a.derived_terms}
 
     suppliers = [Supplier(r["supplier_id"], r["name"], r["country"], r["contact"], parse_weekdays(r["delivery_weekdays"]),
-                          bool(r["active"])) for r in _records(t("ref_suppliers"))]
+                          _lead(r.get("lead_time_days")), bool(r["active"])) for r in _records(t("ref_suppliers"))]
     links = [SupplierLink(r["article_id"], r["supplier_id"], float(r["moq"]), float(r["pack_qty"]),
-                          int(r["lead_time_days"]), float(r["quota_pct"]), _int(r["priority"], 1), bool(r["active"]))
+                          _optional_int(r.get("lead_time_override")), float(r["quota_pct"]), _int(r["priority"], 1), bool(r["active"]),
+                          _optional_float(r.get("max_qty_per_delivery")), _optional_float(r.get("max_qty_per_week")))
              for r in _records(t("ref_article_suppliers")) if r["article_id"] in ids]
     programs = [Program(r["program_id"], r["name"], r["family"], bool(r["active"])) for r in _records(t("ref_programs"))]
     bom = [BomLine(r["program_id"], r["article_id"], float(r["qty_per"]), r["unit"], _float(r["scrap_pct"], 0.0),
@@ -82,7 +121,7 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
     pdp = [PdpLine(r["program_id"], as_date(r["week_start"]), float(r["qty"]), r["version"])
            for r in _records(t("fct_production_plan")) if r["program_id"] in needed_programs and r["week_start"]]
     consumption = [ConsumptionLine(r["article_id"], as_date(r["date"]), float(r["qty"]))
-                   for r in _records(t("fct_consumption_actual")) if r["article_id"] in ids and r["date"]]
+                   for r in _records(t("fct_consumption_actual")) if (r["article_id"] in ids or r["article_id"] in source_ids) and r["date"]]
 
     orders = [OrderLine(order_id=r["order_id"], article_id=r["article_id"], supplier_id=r["supplier_id"] or None,
                         expected_date=as_date(r["expected_date"]), qty_ordered=float(r["qty_ordered"]),
@@ -98,9 +137,6 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
               for r in _records(t("fct_desadv")) if r["article_id"] in ids and r["issue_date"]]   # no BL yet : still shown
     # prices : the item master holds far more items than the reference ; only the reference articles are valued
     prices = {r["article_id"]: float(r["price"]) for r in _records(t("fct_prices")) if r["article_id"] in ids and not _missing(r["price"])}
-    bl_pending = [BlPending(r["pending_id"], r["supplier_id"] or None, str(r.get("purch_id") or ""), str(r.get("packing_slip") or ""),
-                            r["article_id"], float(r["qty"] or 0.0), as_date(r["registered_date"]), _int(r.get("days_pending"), 0))
-                  for r in _records(t("fct_bl_pending")) if r["article_id"] in ids and r["registered_date"]]
     stock: dict[str, StockSnapshot] = {}
     for r in _records(t("fct_stock")):
         if r["article_id"] not in ids or not r["snapshot_date"]:
@@ -115,4 +151,4 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
 
     return Dataset(articles=articles, suppliers=suppliers, links=links, programs=programs, bom=bom, pdp=pdp,
                    consumption=consumption, desadv=desadv, orders=orders, receipts=receipts, stock=list(stock.values()),
-                   holidays=list(holidays or []), prices=prices, bl_pending=bl_pending)
+                   holidays=list(holidays or []), prices=prices)

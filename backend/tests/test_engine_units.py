@@ -1,4 +1,4 @@
-"""Unit tests of the engine building blocks and of the business rules."""
+"""Unit tests of the engine building blocks and of the business rules (docs/regles_metier.md)."""
 from __future__ import annotations
 
 import datetime as dt
@@ -8,12 +8,13 @@ import pytest
 
 from appro.engine import run_mrp
 from appro.engine.calendar import WorkCalendar
-from appro.engine.demand import DayIndex, ceil_to_multiple, spread_week
+from appro.engine.demand import DayIndex, ceil_to_multiple, floor_to_multiple, spread_week
 from appro.engine.models import (
     AdjustCell,
     AlertType,
     Article,
     BomLine,
+    CellFlag,
     ConsumptionLine,
     Dataset,
     DesadvLine,
@@ -24,6 +25,7 @@ from appro.engine.models import (
     PlanCell,
     Program,
     Receipt,
+    Severity,
     StockSnapshot,
     Supplier,
     SupplierLink,
@@ -33,14 +35,14 @@ from appro.services.expression import evaluate
 
 MON = dt.date(2026, 9, 21)  # Monday
 D = dt.timedelta
+CAL = WorkCalendar()
 
 
 def make_dataset(**over) -> Dataset:
     base = dict(
-        articles=[Article("A1", "Widget", "PCE", coverage_target_days=5, alert_red_days=2, alert_yellow_days=5,
-                          overstock_days=30, order_cycle_days=7)],
+        articles=[Article("A1", "Widget", "PCE", coverage_target_days=5, alert_red_days=2, alert_yellow_days=5, overstock_days=30)],
         suppliers=[Supplier("S1", "Supplier 1"), Supplier("S2", "Supplier 2", delivery_weekdays=frozenset({2, 4}))],
-        links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, lead_time_days=5, quota_pct=100, priority=1)],
+        links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, quota_pct=100, priority=1)],
         programs=[Program("P1", "Line 1")],
         bom=[BomLine("P1", "A1", qty_per=2.0)],
         pdp=[PdpLine("P1", MON + D(weeks=k), 500.0) for k in range(-2, 8)],
@@ -53,8 +55,12 @@ def make_dataset(**over) -> Dataset:
     return Dataset(**base)
 
 
-def run(ds: Dataset, **params):
-    p = dict(as_of=MON, horizon_days=30, generate_proposals=False)
+def run(ds: Dataset, no_cbn: bool = False, **params):
+    """``no_cbn`` : a 100 % tolerance never triggers a « back to target » proposal ; only the floor
+    (a shortage inside the lead time) still does – handy to check the raw stock arithmetic."""
+    p = dict(as_of=MON, horizon_days=30)
+    if no_cbn:
+        p["target_tolerance_pct"] = 100.0
     p.update(params)
     return run_mrp(ds, EngineParams(**p)).articles["A1"]
 
@@ -71,21 +77,16 @@ def test_calendar_working_days_and_holidays():
     assert cal.previous_working_day(dt.date(2026, 9, 27)) == dt.date(2026, 9, 25)
     assert cal.working_days_between(MON, dt.date(2026, 9, 28)) == 4
     assert cal.next_working_day(MON, allowed_weekdays=frozenset({4})) == dt.date(2026, 9, 24)
+    assert CAL.add_working_days(MON, 5) == MON + D(days=7)        # « lundi + 5 = lundi suivant »
 
 
-def test_spread_week_policies():
+def test_spread_week_and_multiples():
     assert spread_week(500, 5, "none") == [100.0] * 5
-    assert spread_week(503, 5, "exact") == [101, 101, 101, 100, 100]
-    assert sum(spread_week(503, 5, "exact")) == 503
-    assert spread_week(503, 5, "per_day") == [101.0] * 5  # legacy: 505 in total
-    assert spread_week(2519.748, 5, "exact") == [504, 504, 504, 504, 504]
-    assert spread_week(10, 0, "exact") == []
-
-
-def test_ceil_to_multiple():
-    assert ceil_to_multiple(101, 50) == 150
-    assert ceil_to_multiple(100, 50) == 100
-    assert ceil_to_multiple(7, 0) == 7
+    assert spread_week(503, 5) == [101, 101, 101, 100, 100] and sum(spread_week(503, 5)) == 503
+    assert spread_week(2519.748, 5) == [504, 504, 504, 504, 504]
+    assert spread_week(10, 0) == []
+    assert ceil_to_multiple(101, 50) == 150 and ceil_to_multiple(100, 50) == 100 and ceil_to_multiple(7, 0) == 7
+    assert floor_to_multiple(149, 50) == 100 and floor_to_multiple(7, 0) == 7
 
 
 # ------------------------------------------------------------------ demand
@@ -101,14 +102,13 @@ def test_demand_actual_then_remainder():
     assert r.required[i + 2] == 0 and r.required[i + 3] == 0 and r.required[i + 4] == 0
     assert r.required[i + 7] == 200 and r.consumed[i + 7] == 0
     assert r.consumed[i - 3] == 0
-    # the single grid row "Besoin" is the sum of both parts
     assert r.demand[i] == 500 and r.demand[i + 7] == 200
-    # example 1: 500 + 600 done out of a 2 000 PDP on Wednesday → (2000 − 1100) / 3 = 300 units per remaining day
+    # 500 + 600 done out of a 2 000 PDP on Wednesday → (2000 − 1100) / 3 = 300 units per remaining day
     ds2 = make_dataset(pdp=[PdpLine("P1", MON + D(weeks=k), 2000.0) for k in range(-2, 8)],
                        consumption=[ConsumptionLine("A1", MON, 1000.0), ConsumptionLine("A1", MON + D(days=1), 1200.0)])
     r2 = run(ds2, as_of=wed)
     assert r2.required[i + 2] == 600 and r2.required[i + 3] == 600 and r2.required[i + 4] == 600   # 300 × 2
-    # example 2: PDP already exceeded on Monday–Tuesday, and a consumption reported on Wednesday
+    # PDP already exceeded on Monday–Tuesday, and a consumption reported on Wednesday
     ds3 = make_dataset(pdp=[PdpLine("P1", MON + D(weeks=k), 2000.0) for k in range(-2, 8)],
                        consumption=[ConsumptionLine("A1", MON, 2400.0), ConsumptionLine("A1", MON + D(days=1), 2000.0),
                                     ConsumptionLine("A1", wed, 400.0)])
@@ -117,10 +117,48 @@ def test_demand_actual_then_remainder():
     assert list(r3.consumed[i3:i3 + 3]) == [2400, 2000, 400] and r3.required[i3 + 3] == 0 and r3.required[i3 + 4] == 0
     r4 = run(ds3, as_of=wed)
     assert r4.consumed[i + 2] == 0 and r4.required[i + 2] == 0
-    r5 = run(ds, as_of=wed, production_mode="plan_only")
-    assert r5.demand[i] == 200 and r5.demand[i + 2] == 200
-    r6 = run(ds, as_of=wed, production_mode="actual_then_plan")
-    assert r6.demand[i + 1] == 600 and r6.demand[i + 2] == 200
+
+
+def test_demand_days_profile_and_current_week_remainder():
+    """``demand_days = 3`` : the weekly requirement is consumed on the first three open days ; the
+    current week spreads its remainder on the remaining profile days, then on the remaining open days."""
+    art = Article("A1", "Widget", "PCE", coverage_target_days=5, demand_days=3)
+    ds = make_dataset(articles=[art])
+    r = run(ds, no_cbn=True)
+    i = r.dates.index(MON)
+    assert list(r.demand[i + 7:i + 14]) == [334, 333, 333, 0, 0, 0, 0]          # 1 000 over Monday–Wednesday
+    assert list(r.demand[i:i + 7]) == [334, 333, 333, 0, 0, 0, 0]
+    # Tuesday : 200 consumed Monday → 800 left on Tuesday and Wednesday
+    ds.consumption = [ConsumptionLine("A1", MON, 200.0)]
+    r2 = run(make_dataset(articles=[art], consumption=ds.consumption), no_cbn=True, as_of=MON + D(days=1))
+    assert list(r2.demand[i:i + 5]) == [200, 400, 400, 0, 0]
+    # Thursday : 850 consumed, the campaign days are over → the remaining 150 go on Thursday and Friday
+    cons = [ConsumptionLine("A1", MON, 300.0), ConsumptionLine("A1", MON + D(days=1), 300.0), ConsumptionLine("A1", MON + D(days=2), 250.0)]
+    r3 = run(make_dataset(articles=[art], consumption=cons), no_cbn=True, as_of=MON + D(days=3))
+    assert list(r3.demand[i:i + 5]) == [300, 300, 250, 75, 75]
+    # a holiday on Monday : the three profile days become Tuesday–Thursday
+    r4 = run(make_dataset(articles=[art], holidays=[MON + D(days=7)]), no_cbn=True)
+    assert list(r4.demand[i + 7:i + 12]) == [0, 334, 333, 333, 0]
+    # target in quantity is unchanged : five working days of requirement is still a week
+    assert r.target_stock[i + 10] == 1000 and r.kpis["demand_days"] == 3
+
+
+def test_consumption_source_plan_and_derived():
+    """``plan`` : the past is the exploded PDP, the reports are ignored ; ``derived`` : the consumption is
+    Σ coefficient × consumption of the source articles."""
+    a1 = Article("A1", "Widget", "PCE", coverage_target_days=5)
+    a2 = Article("A2", "Derived", "PCE", coverage_target_days=5, consumption_source="derived", derived_terms=[("A1", 2.0)])
+    a3 = Article("A3", "Planned", "PCE", coverage_target_days=5, consumption_source="plan")
+    ds = make_dataset(articles=[a1, a2, a3], bom=[BomLine("P1", "A1", 2.0), BomLine("P1", "A2", 4.0), BomLine("P1", "A3", 2.0)],
+                      stock=[StockSnapshot(x, MON - D(days=1), 5000.0) for x in ("A1", "A2", "A3")],
+                      consumption=[ConsumptionLine("A1", MON, 150.0), ConsumptionLine("A3", MON, 999.0)])
+    res = run_mrp(ds, EngineParams(as_of=MON + D(days=2), horizon_days=14, target_tolerance_pct=100))
+    i = res.articles["A1"].dates.index(MON)
+    assert res.articles["A1"].consumed[i] == 150
+    assert res.articles["A2"].consumed[i] == 300 and res.articles["A2"].demand_actual_share[i] == 1.0   # 2 × 150
+    assert res.articles["A2"].consumed[i + 1] == 0                                                      # no report Tuesday
+    assert res.articles["A3"].consumed[i] == 200 and res.articles["A3"].consumed[i + 1] == 200          # the PDP, not 999
+    assert res.articles["A3"].demand_actual_share[i] == 0.0 and res.articles["A3"].kpis["consumption_source"] == "plan"
 
 
 # ------------------------------------------------------------------ scenarios
@@ -134,7 +172,7 @@ def test_two_scenarios_erp_and_plan():
         OrderLine("F2", "A1", "S1", fri, 100, qty_open=0),
         OrderLine("F3", "A1", "S1", fri, 600, order_type=OrderType.FIRM),
     ], receipts=[Receipt("R1", "A1", tue, 50)], adjustments=[AdjustCell("A1", tue, -20)])
-    r = run(ds, horizon_days=10)
+    r = run(ds, no_cbn=True, horizon_days=10)
     i = r.dates.index(MON)
     # Monday 1000 − 200 = 800 ; Tuesday +50 −20 −200 = 630 ; Wednesday +300 −200 = 730 ; Thursday −200 = 530 ; Friday +600 −200 = 930
     assert list(r.stock_erp[i:i + 5]) == [800, 630, 730, 530, 930]
@@ -142,9 +180,8 @@ def test_two_scenarios_erp_and_plan():
     assert r.orders_forecast[i + 3] == 400 and r.stock_erp[i + 3] == 530
     assert r.kpis["open_firm_qty"] == 900 and r.kpis["open_forecast_qty"] == 400 and r.kpis["plan_qty"] == 900
     assert len(r.lanes) == 1 and r.lanes[0].supplier_id == "S1" and len(r.lanes[0].orders) == 4
-    # a typed cell on the forecast day takes it into the plan scenario only
     ds.plan = [PlanCell("A1", "S1", thu, 400)]
-    r2 = run(ds, horizon_days=10)
+    r2 = run(ds, no_cbn=True, horizon_days=10)
     assert r2.stock_erp[i + 3] == 530 and r2.stock_plan[i + 3] == 930
     assert r2.lanes[0].plan_typed[i + 3] and r2.kpis["plan_cell_count"] == 1
 
@@ -154,14 +191,9 @@ def test_plan_cells_move_split_zero_and_expire():
     mon2 = MON + D(days=7)
     ds = make_dataset(orders=[OrderLine("F1", "A1", "S1", wed, 1000, order_type=OrderType.FIRM),
                               OrderLine("F2", "A1", "S1", fri, 800, order_type=OrderType.FIRM)])
-    ds.plan = [
-        PlanCell("A1", "S1", wed, 0),             # nothing expected Wednesday …
-        PlanCell("A1", "S1", fri, 400),           # … 400 Friday (instead of 800) …
-        PlanCell("A1", "S1", mon2, 600),          # … 600 next Monday
-        PlanCell("A1", "S1", MON + D(days=1), 150),  # stop-gap delivery Tuesday
-        PlanCell("A1", "S1", MON - D(days=3), 500),  # expired: ignored
-    ]
-    r = run(ds, horizon_days=12)
+    ds.plan = [PlanCell("A1", "S1", wed, 0), PlanCell("A1", "S1", fri, 400), PlanCell("A1", "S1", mon2, 600),
+               PlanCell("A1", "S1", MON + D(days=1), 150), PlanCell("A1", "S1", MON - D(days=3), 500)]
+    r = run(ds, no_cbn=True, horizon_days=12)
     i = r.dates.index(MON)
     assert r.orders_firm[i + 2] == 1000 and r.orders_firm[i + 4] == 800          # ERP as is
     assert r.plan[i + 1] == 150 and r.plan[i + 2] == 0 and r.plan[i + 4] == 400 and r.plan[i + 7] == 600
@@ -170,49 +202,39 @@ def test_plan_cells_move_split_zero_and_expire():
     assert r.lanes[0].plan_typed[i + 2] and not r.lanes[0].plan_typed[i + 3]
 
 
-def test_backlog_is_cumulative_per_supplier_and_ages_out():
-    """Past firm orders not covered by receipts over the backlog window: no order matching, no action."""
+def test_backlog_is_the_erp_remaining_quantity_of_the_late_firm_orders():
+    """Backlog of a supplier = Σ ERP remaining of its firm orders dated before today, no window, no
+    receipt matching ; an ignored late order stays in it."""
     ds = make_dataset(
-        stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],   # point zero ten days ago: the past orders exist
+        stock=[StockSnapshot("A1", MON - D(days=70), 1000.0)],
         links=[SupplierLink("A1", "S1", quota_pct=50), SupplierLink("A1", "S2", quota_pct=50, priority=2)],
-        orders=[OrderLine("L1", "A1", "S1", MON - D(days=5), 200, order_type=OrderType.FIRM),
-                OrderLine("L0", "A1", "S1", MON - D(days=60), 300, order_type=OrderType.FIRM),   # too old
-                OrderLine("R0", "A1", "S1", MON - D(days=4), 250, qty_open=0),
-                OrderLine("R2", "A1", "S2", MON - D(days=3), 100, order_type=OrderType.FIRM)],
-        receipts=[Receipt("R1", "A1", MON - D(days=4), 250, supplier_id="S1"),
-                  Receipt("R3", "A1", MON - D(days=2), 130, supplier_id="S2")])
-    r = run(ds, horizon_days=5)
-    i = r.dates.index(MON)
-    assert sum(r.orders_firm) == 0 and sum(r.plan) == 0                      # nothing in the future
-    assert r.orders_firm_hist[i - 5] == 200 and r.orders_firm_hist[i - 4] == 250 and r.receipts[i - 4] == 250
+        orders=[OrderLine("L1", "A1", "S1", MON - D(days=5), 200, qty_open=200, order_type=OrderType.FIRM),
+                OrderLine("L0", "A1", "S1", MON - D(days=60), 300, qty_open=120, order_type=OrderType.FIRM),   # old, still open
+                OrderLine("R0", "A1", "S1", MON - D(days=4), 250, qty_open=0),                                  # settled
+                OrderLine("R2", "A1", "S2", MON - D(days=3), 100, qty_open=30, order_type=OrderType.FIRM)],
+        receipts=[Receipt("R1", "A1", MON - D(days=4), 250, supplier_id="S1")])
+    r = run(ds, no_cbn=True, horizon_days=5)
     lanes = {l.supplier_id: l for l in r.lanes}
-    assert lanes["S1"].backlog_ordered == 450 and lanes["S1"].backlog_received == 250 and lanes["S1"].backlog_qty == 200
-    assert lanes["S2"].backlog_ordered == 100 and lanes["S2"].backlog_received == 130 and lanes["S2"].backlog_qty == 0
-    assert r.kpis["backlog_qty"] == 200
+    assert lanes["S1"].backlog_qty == 320 and lanes["S1"].backlog_ordered == 500 and lanes["S1"].backlog_received == 180
+    assert lanes["S2"].backlog_qty == 30 and r.kpis["backlog_qty"] == 350
+    assert sum(r.orders_firm) == 0 and sum(r.plan) == 0                      # nothing counted in the future
     assert not [a for a in r.alerts if a.alert_type == AlertType.BACKLOG]   # shown on the lane, never alerted
-    # the planner types the quantity where he expects it: plan scenario only
-    ds.plan = [PlanCell("A1", "S1", MON + D(days=2), 200)]
-    r2 = run(ds, horizon_days=5)
-    assert r2.plan[i + 2] == 200 and r2.stock_plan[i + 2] - r2.stock_erp[i + 2] == 200 and r2.kpis["backlog_qty"] == 200
-    # shorter window: the backlog ages out
-    r3 = run(ds, horizon_days=5, backlog_days=3)
-    assert r3.kpis["backlog_qty"] == 0
+    ds.flags = [CellFlag("A1", "S1", MON - D(days=5), "order_ignored")]      # the past is never ignored
+    assert run(ds, no_cbn=True, horizon_days=5).kpis["backlog_qty"] == 350
 
 
 def test_reference_day_receipts_cover_the_firm_orders_of_the_day():
     ds = make_dataset(orders=[OrderLine("F1", "A1", "S1", MON, 600, order_type=OrderType.FIRM),
                               OrderLine("F2", "A1", "S2", MON, 1000, order_type=OrderType.FIRM)],
                       receipts=[Receipt("R1", "A1", MON, 400, supplier_id="S1"), Receipt("R2", "A1", MON, 150, supplier_id="S2")])
-    r = run(ds, horizon_days=3)
+    r = run(ds, no_cbn=True, horizon_days=3)
     i = r.dates.index(MON)
     lanes = {l.supplier_id: l for l in r.lanes}
     assert lanes["S1"].orders_firm[i] == 200 and lanes["S2"].orders_firm[i] == 850
     assert r.orders_firm[i] == 1050 and r.receipts[i] == 550 and r.plan[i] == 1050
     assert r.stock_erp[i] == 1000 + 550 + 1050 - 200
-    # a typed cell that day is taken as is
     ds.plan = [PlanCell("A1", "S1", MON, 600)]
-    r2 = run(ds, horizon_days=3)
-    assert r2.plan[i] == 600 + 850
+    assert run(ds, no_cbn=True, horizon_days=3).plan[i] == 600 + 850
 
 
 def test_lanes_follow_the_active_links_then_the_data():
@@ -225,16 +247,13 @@ def test_lanes_follow_the_active_links_then_the_data():
 
 
 def test_adjustments_correct_the_reference_stock_and_the_past_is_projected_forward():
-    """The initialisation day is the point zero: its stock (corrected by the adjustments dated up to it)
-    is projected forward with the receipts, the actual consumption and the later adjustments."""
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=5), 2000.0)],
-                      consumption=[ConsumptionLine("A1", MON - D(days=k), 200.0) for k in (1, 2, 3, 4)],   # 200 components / day
+                      consumption=[ConsumptionLine("A1", MON - D(days=k), 200.0) for k in (1, 2, 3, 4)],
                       receipts=[Receipt("R1", "A1", MON - D(days=2), 500)],
-                      adjustments=[AdjustCell("A1", MON - D(days=6), -300.0),                     # before the point zero: correction
-                                   AdjustCell("A1", MON + D(days=2), 40.0)])                      # known future movement
-    r = run(ds, horizon_days=5)
+                      adjustments=[AdjustCell("A1", MON - D(days=6), -300.0), AdjustCell("A1", MON + D(days=2), 40.0)])
+    r = run(ds, no_cbn=True, horizon_days=5)
     i = r.dates.index(MON)
-    assert r.dates[0] == MON - D(days=5)                                   # nothing before the initialisation day
+    assert r.dates[0] == MON - D(days=5)
     assert r.reference_correction == -300 and r.kpis["stock_reference"] == 1700 and r.kpis["stock_on_hand"] == 2000
     assert r.kpis["init_date"] == (MON - D(days=5)).isoformat()
     assert list(r.stock_erp[i - 5:i]) == [1700, 1500, 1300, 1600, 1400]
@@ -243,228 +262,256 @@ def test_adjustments_correct_the_reference_stock_and_the_past_is_projected_forwa
     assert r.adjustments[i + 2] == 40
 
 
-def test_past_movements_are_projected_forward_from_the_init_day():
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=3), 1000.0)],
-                      consumption=[ConsumptionLine("A1", MON - D(days=2), 100.0)],
-                      receipts=[Receipt("R1", "A1", MON - D(days=1), 500)],
-                      adjustments=[AdjustCell("A1", MON - D(days=2), -30.0)])   # after the point zero: a movement
-    r = run(ds, horizon_days=3)
-    i = r.dates.index(MON)
-    assert r.stock_erp[i - 3] == 1000 and r.stock_erp[i - 2] == 870 and r.stock_erp[i - 1] == 1370
-    assert r.stock_plan[i] == 1370 - 200 and r.reference_correction == 0
-
-
 def test_one_initialisation_date_for_everybody_never_in_the_future():
     from appro.engine.models import DatasetError
     ds = make_dataset(articles=[Article("A1", "W"), Article("A2", "W2")],
                       stock=[StockSnapshot("A1", MON - D(days=1), 10.0), StockSnapshot("A2", MON - D(days=2), 10.0)])
     with pytest.raises(DatasetError, match="plusieurs dates"):
         run(ds)
-    ds = make_dataset(stock=[StockSnapshot("A1", MON + D(days=1), 10.0)])
     with pytest.raises(DatasetError, match="postérieure"):
-        run(ds)
-    # no stock row at all: point zero = today, empty stocks
+        run(make_dataset(stock=[StockSnapshot("A1", MON + D(days=1), 10.0)]))
     r = run(make_dataset(stock=[]))
     assert r.dates[0] == MON and r.kpis["stock_reference"] == 0
 
 
 def test_display_start_follows_history_weeks_but_never_the_point_zero():
     from appro.api.presenters import display_start
-    from appro.engine import run_mrp
     old = make_dataset(stock=[StockSnapshot("A1", MON - D(days=30), 100.0)])
-    res = run_mrp(old, EngineParams(as_of=MON + D(days=2), horizon_days=10, history_weeks=2))
-    assert display_start(res) == MON - D(weeks=2)                      # Monday of the current week − 2 weeks
-    res0 = run_mrp(old, EngineParams(as_of=MON + D(days=2), horizon_days=10, history_weeks=0))
-    assert display_start(res0) == MON
+    assert display_start(run_mrp(old, EngineParams(as_of=MON + D(days=2), horizon_days=10, history_weeks=2))) == MON - D(weeks=2)
+    assert display_start(run_mrp(old, EngineParams(as_of=MON + D(days=2), horizon_days=10, history_weeks=0))) == MON
     young = make_dataset(stock=[StockSnapshot("A1", MON - D(days=3), 100.0)])
-    res2 = run_mrp(young, EngineParams(as_of=MON + D(days=2), horizon_days=10, history_weeks=2))
-    assert display_start(res2) == MON - D(days=3)                       # the point zero wins
+    assert display_start(run_mrp(young, EngineParams(as_of=MON + D(days=2), horizon_days=10, history_weeks=2))) == MON - D(days=3)
 
 
-def test_shortage_policies_and_first_stockout():
+def test_lost_demand_cumulated_shortage_and_first_stockout():
+    """The unserved demand is lost ; the cells show its running sum, reset once the stock is positive."""
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 500.0)],
-                      orders=[OrderLine("F1", "A1", "S1", MON + D(days=3), 1000, order_type=OrderType.FIRM)])
-    backlog = run(ds, horizon_days=6, shortage_policy="backlog")
-    lost = run(ds, horizon_days=6)                                      # « lost » is the default policy
-    i = backlog.dates.index(MON)
-    assert list(backlog.stock_erp[i:i + 4]) == [300, 100, 0, 700]
-    assert list(backlog.stock_erp_net[i:i + 4]) == [300, 100, -100, 700]
-    assert list(backlog.shortage_erp[i:i + 4]) == [0, 0, 100, 0]
-    assert list(lost.stock_erp[i:i + 4]) == [300, 100, 0, 800]
-    assert list(lost.shortage_erp[i:i + 4]) == [0, 0, 100, 0]
-    for r in (backlog, lost):
-        assert min(r.stock_erp) >= 0
-        assert r.kpis["first_stockout_erp"] == (MON + D(days=2)).isoformat()
-        assert r.kpis["max_shortage_erp"] == 100
-    lost_p = run(ds, horizon_days=40, shortage_policy="lost", generate_proposals=True)
-    first = min(p.delivery_date for p in lost_p.proposals)
-    j = lost_p.dates.index(first)
-    assert max(lost_p.shortage_plan[j:]) == 0
+                      orders=[OrderLine("F1", "A1", "S1", MON + D(days=4), 1000, order_type=OrderType.FIRM)])
+    r = run(ds, no_cbn=True, horizon_days=6, as_of=MON)
+    i = r.dates.index(MON)
+    # the floor cannot act : the first deliverable day is tomorrow, the shortage starts Wednesday
+    assert list(r.stock_erp[i:i + 5]) == [300, 100, 0, 0, 800]
+    assert list(r.shortage_erp[i:i + 5]) == [0, 0, 100, 200, 0]
+    assert list(r.shortage_erp_cum[i:i + 5]) == [0, 0, 100, 300, 0]
+    assert r.kpis["first_stockout_erp"] == (MON + D(days=2)).isoformat() and r.kpis["max_shortage_erp"] == 300
+    assert min(r.stock_erp) >= 0 and r.kpis["lead_time_days"] == 5
 
 
-def test_coverage_days_calendar_and_working():
-    cal = WorkCalendar()
+def test_coverage_days_in_working_days():
     index = DayIndex(MON, MON + D(days=13))
-    demand = np.array([100 if cal.is_working_day(d) else 0 for d in index.dates], dtype=float)
-    stock = np.full(index.n, 250.0)
-    cov_cal = coverage_days(stock, demand, index, cal, "calendar", "covered")
-    cov_wd = coverage_days(stock, demand, index, cal, "working", "covered")
-    assert cov_cal[0] == 2 and cov_wd[0] == 2
-    assert cov_cal[4] == 4 and cov_wd[4] == 2
-    stock2 = np.full(index.n, 200.0)
-    assert coverage_days(stock2, demand, index, cal, "calendar", "covered")[0] == 2
-    assert coverage_days(stock2, demand, index, cal, "calendar", "not_covered")[0] == 1
-    neg = np.full(index.n, -5.0)
-    assert coverage_days(neg, demand, index, cal)[0] == 0
+    demand = np.array([100 if CAL.is_working_day(d) else 0 for d in index.dates], dtype=float)
+    cov = coverage_days(np.full(index.n, 250.0), demand, index, CAL)
+    assert cov[0] == 2 and cov[4] == 2                      # Friday : Monday and Tuesday of the next week
+    assert coverage_days(np.full(index.n, 200.0), demand, index, CAL)[0] == 2   # an exact match is covered
+    assert coverage_days(np.full(index.n, -5.0), demand, index, CAL)[0] == 0
 
 
 # ------------------------------------------------------------------ proposals
 def test_proposals_respect_moq_pack_lead_time_and_delivery_days():
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 2600.0)])
-    r = run(ds, horizon_days=40, generate_proposals=True)
+    r = run(ds, horizon_days=40)
     assert r.proposals
     p = r.proposals[0]
     assert p.qty >= 100 and p.qty % 50 == 0
     assert p.delivery_date.isoweekday() in (1, 2, 3, 4, 5)
-    assert not p.urgent and WorkCalendar().working_days_between(p.order_date, p.delivery_date) == 5
+    assert not p.urgent and CAL.working_days_between(p.order_date, p.delivery_date) == 5 and p.lead_time_days == 5
     assert p.delivery_date > MON
     assert max(r.shortage_plan[r.dates.index(MON):]) == 0
     assert r.kpis["proposal_count"] == len(r.proposals)
-    # proposals are placed on the lane of their supplier
     assert sum(r.lanes[0].supply_proposed) == sum(r.supply_proposed) > 0
+    # the link's own lead time wins over the supplier's
+    r2 = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 2600.0)],
+                          links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, lead_time_days=8)]), horizon_days=40)
+    assert r2.proposals[0].lead_time_days == 8 and r2.kpis["lead_time_days"] == 8
 
 
 def test_proposals_supplier_delivery_weekdays_and_quota():
     links = [SupplierLink("A1", "S1", moq=100, pack_qty=1, lead_time_days=2, quota_pct=50, priority=1),
              SupplierLink("A1", "S2", moq=100, pack_qty=1, lead_time_days=2, quota_pct=50, priority=2)]
     ds = make_dataset(links=links, stock=[StockSnapshot("A1", MON - D(days=1), 300.0)])
-    r = run(ds, horizon_days=60, generate_proposals=True)
+    r = run(ds, horizon_days=60)
     by_sup = {}
     for p in r.proposals:
         by_sup[p.supplier_id] = by_sup.get(p.supplier_id, 0) + p.qty
         if p.supplier_id == "S2":
             assert p.delivery_date.isoweekday() in (2, 4)
     assert set(by_sup) == {"S1", "S2"}
-    share = by_sup["S1"] / sum(by_sup.values())
-    assert 0.3 < share < 0.7
+    assert 0.3 < by_sup["S1"] / sum(by_sup.values()) < 0.7
     lanes = {l.supplier_id: l for l in r.lanes}
     assert abs(sum(lanes["S1"].supply_proposed) - by_sup["S1"]) < 1e-6
 
 
-def test_urgent_proposal_when_lead_time_cannot_be_met():
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100.0)],
-                      links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=15)])
-    r = run(ds, horizon_days=40, generate_proposals=True)
-    assert r.proposals and r.proposals[0].urgent
-    assert any(a.alert_type == AlertType.URGENT_PROPOSAL for a in r.alerts)
-    r2 = run(ds, horizon_days=40, respect_lead_time=True, generate_proposals=True)
-    first = min(p.delivery_date for p in r2.proposals)
-    assert first >= WorkCalendar().add_working_days(MON, 15)
-    assert not any(p.urgent for p in r2.proposals)
+HV_SAT = dt.date(2026, 10, 17)
 
 
-def test_monday_placement_gives_one_proposal_per_monday():
-    """With the Monday placement several needs of a week land on the same Monday: they are merged
-    into one proposal per supplier and day, everywhere."""
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100.0)],
-                      links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=2)])
-    r = run(ds, horizon_days=60, proposal_placement="monday", generate_proposals=True)
-    assert r.proposals and all(p.delivery_date.isoweekday() == 1 for p in r.proposals)
-    days = [p.delivery_date for p in r.proposals]
-    assert len(days) == len(set(days))
-    assert [p.proposal_id for p in r.proposals] == [f"PR-A1-{k:03d}" for k in range(1, len(days) + 1)]
-    r0 = run(ds, horizon_days=10, frozen_days=10, generate_proposals=True)
-    assert all(p.delivery_date > MON + D(days=10) for p in r0.proposals)
+def hv_dataset(stock: float = 3182.0, cap_day: float | None = None, cap_week: float | None = None, lead: int = 10):
+    """The worked example of the design review : 420 / working day, Thursday supplier, MOQ = UM = 1 440,
+    coverage 5 working days (target 2 100), lead time 10 working days, stock 3 182 on Saturday evening."""
+    monday = dt.date(2026, 10, 19)
+    return make_dataset(
+        articles=[Article("A1", "HV", "PCE", coverage_target_days=5, alert_red_days=2, alert_yellow_days=5, overstock_days=30)],
+        suppliers=[Supplier("S1", "Thursday", delivery_weekdays=frozenset({4}), lead_time_days=lead)],
+        links=[SupplierLink("A1", "S1", moq=1440, pack_qty=1440, max_qty_per_delivery=cap_day, max_qty_per_week=cap_week)],
+        bom=[BomLine("P1", "A1", 1.0)], pdp=[PdpLine("P1", monday + D(weeks=k), 2100.0) for k in range(-2, 12)],
+        stock=[StockSnapshot("A1", HV_SAT, stock)])
 
 
-def test_shortfall_tolerance_skips_short_dips():
-    thu = MON + D(days=3)
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1000.0)],
-                      orders=[OrderLine("F1", "A1", "S1", thu, 2000, order_type=OrderType.FIRM)])
-    base = run(ds, horizon_days=12, generate_proposals=True)
-    assert base.proposals and base.proposals[0].delivery_date <= thu
-    tol = run(ds, horizon_days=12, generate_proposals=True, shortfall_tolerance_days=1)
-    assert not [p for p in tol.proposals if p.delivery_date <= thu]
+def hv(ds: Dataset, **params):
+    p = dict(as_of=dt.date(2026, 10, 18), horizon_days=60)
+    p.update(params)
+    return run_mrp(ds, EngineParams(**p)).articles["A1"]
 
 
-def test_shortfall_tolerance_never_tolerates_lost_demand():
-    """``lost`` policy: the simulated stock is clamped at 0, so a tolerated dip must be judged on the
-    unserved demand, not on the sign of the stock (regression: weeks without any proposal)."""
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1000.0)],
-                      pdp=[PdpLine("P1", MON + D(weeks=k), 1000.0) for k in range(-2, 12)])
-    base = run(ds, horizon_days=60, generate_proposals=True, shortage_policy="lost", proposal_placement="monday")
-    i1 = base.dates.index(MON + D(weeks=1))
-    assert float(np.max(base.shortage_plan[i1:])) == 0.0   # first week: no Monday delivery possible yet
-    for tol in (5, 30):
-        r = run(ds, horizon_days=60, generate_proposals=True, shortage_policy="lost", shortfall_tolerance_days=tol,
-                proposal_placement="monday")
-        assert list(r.shortage_plan) == list(base.shortage_plan), tol
-        assert [(p.delivery_date, p.qty) for p in r.proposals] == [(p.delivery_date, p.qty) for p in base.proposals], tol
+def test_floor_inside_the_lead_time_then_full_target():
+    """Inside the lead time an urgent proposal only avoids the shortage (one lot), the first tenable
+    delivery brings the stock back to the target (three lots) ; no shortage anywhere."""
+    r = hv(hv_dataset())
+    got = [(p.delivery_date.isoformat(), p.qty, p.urgent, p.floor) for p in r.proposals[:4]]
+    assert got == [("2026-10-22", 1440, True, True), ("2026-10-29", 1440, True, True),
+                   ("2026-11-05", 4320, False, False), ("2026-11-12", 1440, False, False)]
+    assert max(r.shortage_plan[r.dates.index(dt.date(2026, 10, 19)):]) == 0
+    assert "Plancher" in r.proposals[0].reason and "retour à la cible" in r.proposals[2].reason
+    assert r.proposals[0].order_date == dt.date(2026, 10, 8)
+    # the urgent alert names the floor
+    assert any(a.alert_type == AlertType.URGENT_PROPOSAL and "plancher" in a.message for a in r.alerts)
 
 
-def test_forecast_monday_policy():
-    thu = MON + D(days=3)
-    ds = make_dataset(orders=[OrderLine("D1", "A1", "S1", thu, 400, order_type=OrderType.FORECAST)])
-    r = run(ds, forecast_date_policy="week_monday")
-    i = r.dates.index(MON)
-    assert r.orders_forecast[i] == 400 and r.orders_forecast[i + 3] == 0
-    r2 = run(ds)
-    assert r2.orders_forecast[i + 3] == 400
+def test_tolerance_under_the_target():
+    """A deficit smaller than 15 % of the target waits for the next delivery ; 0 % is the strict rule."""
+    r = hv(hv_dataset(stock=9655.0))                       # 2 095 projected on 11/11 for a target of 2 100
+    assert r.proposals[0].delivery_date == dt.date(2026, 11, 12) and r.proposals[0].qty == 2880
+    strict = hv(hv_dataset(stock=9655.0), target_tolerance_pct=0)
+    assert strict.proposals[0].delivery_date == dt.date(2026, 11, 5) and strict.proposals[0].qty == 1440
+    assert "85 %" in r.proposals[0].reason
+
+
+def test_cap_per_delivery_slides_the_excess_to_the_next_delivery():
+    r = hv(hv_dataset(cap_day=2880.0))
+    got = [(p.delivery_date.isoformat(), p.qty, p.capped) for p in r.proposals[:4]]
+    assert got == [("2026-10-22", 1440, False), ("2026-10-29", 1440, False), ("2026-11-05", 2880, False), ("2026-11-12", 2880, False)]
+    assert "première livraison possible le 2026-11-12" in r.proposals[3].reason   # the 05/11 is full : the rest slides
+    assert max(r.shortage_plan[r.dates.index(dt.date(2026, 10, 19)):]) == 0 and not r.cap_shortfalls
+    # a cap below the lot : the proposal itself is truncated and flagged
+    r2 = hv(hv_dataset(cap_day=1440.0))
+    p = next(x for x in r2.proposals if x.delivery_date == dt.date(2026, 11, 5))
+    assert p.qty == 1440 and p.capped and "plafond par livraison" in p.reason and r2.kpis["capped_proposal_count"] >= 1
+
+
+def test_weekly_cap_below_the_need_leaves_a_shortage_and_an_alert():
+    """A weekly cap under the weekly requirement : the days are full, the shortage stays and is alerted."""
+    r = hv(hv_dataset(cap_week=1440.0))
+    assert all(p.qty <= 1440 for p in r.proposals)
+    i = r.dates.index(dt.date(2026, 11, 5))
+    assert max(r.shortage_plan[i:]) > 0 and r.cap_shortfalls
+    assert any(a.alert_type == AlertType.CAP_REACHED for a in r.alerts)
+    # firm orders count in the weekly cap : a week already served by a firm order gets no proposal
+    ds = hv_dataset(cap_week=2880.0)
+    ds.orders = [OrderLine("F1", "A1", "S1", dt.date(2026, 11, 5), 2880, order_type=OrderType.FIRM)]
+    r2 = hv(ds)
+    assert not [p for p in r2.proposals if p.delivery_date == dt.date(2026, 11, 5)]
+
+
+def test_refusal_blocks_the_day_only_and_the_need_slides_to_the_next_delivery_day():
+    ds = hv_dataset()
+    ds.flags = [CellFlag("A1", "S1", dt.date(2026, 10, 22), "proposal_refused", qty=1440)]
+    r = hv(ds)
+    assert r.proposals[0].delivery_date == dt.date(2026, 10, 29) and r.proposals[0].qty == 2880
+    i = r.dates.index(dt.date(2026, 10, 28))
+    assert r.shortage_plan[i] == 178 and r.shortage_plan_cum[i] == 178        # the accepted shortage is shown
+    assert r.proposals_ignored and r.proposals_ignored[0].delivery_date == dt.date(2026, 10, 22) and r.proposals_ignored[0].ignored
+    assert r.kpis["refused_proposals"] == 1
+    # a Tuesday / Thursday supplier : refusing Tuesday leaves Thursday proposable
+    ds2 = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 600.0)],
+                       links=[SupplierLink("A1", "S2", moq=100, pack_qty=50, lead_time_days=1)])
+    base = run(ds2, horizon_days=21)
+    tue = next(p for p in base.proposals if p.delivery_date.isoweekday() == 2)
+    ds2.flags = [CellFlag("A1", "S2", tue.delivery_date, "proposal_refused", qty=tue.qty)]
+    r2 = run(ds2, horizon_days=21)
+    days = {p.delivery_date for p in r2.proposals}
+    assert tue.delivery_date not in days and tue.delivery_date + D(days=2) in days
+
+
+def test_quota_split_every_need_and_a_refused_or_capped_supplier_hands_its_share_over():
+    links = [SupplierLink("A1", "S1", moq=1, pack_qty=10, lead_time_days=2, quota_pct=70, priority=1),
+             SupplierLink("A1", "S2", moq=1, pack_qty=10, lead_time_days=2, quota_pct=30, priority=2)]
+    ds = make_dataset(links=links, suppliers=[Supplier("S1", "Supplier 1"), Supplier("S2", "Supplier 2")],
+                      stock=[StockSnapshot("A1", MON - D(days=1), 300.0)])
+    r = run(ds, horizon_days=42)
+    first_day = min(p.delivery_date for p in r.proposals)
+    first = {p.supplier_id: p for p in r.proposals if p.delivery_date == first_day}
+    assert set(first) == {"S1", "S2"}
+    s1, s2 = first["S1"], first["S2"]
+    assert s1.qty / (s1.qty + s2.qty) == pytest.approx(0.7, abs=0.03) and "part 70 %" in s1.reason and "part 30 %" in s2.reason
+    tot = {sid: sum(p.qty for p in r.proposals if p.supplier_id == sid) for sid in ("S1", "S2")}
+    assert tot["S1"] / (tot["S1"] + tot["S2"]) == pytest.approx(0.7, abs=0.03)
+    # refuse S1 on the first day : S2 takes the whole need of that day
+    ds.flags = [CellFlag("A1", "S1", first_day, "proposal_refused", qty=s1.qty)]
+    r2 = run(ds, horizon_days=42)
+    that_day = [p for p in r2.proposals if p.delivery_date == first_day]
+    assert that_day and all(p.supplier_id == "S2" for p in that_day)
+    assert sum(p.qty for p in that_day) >= s1.qty + s2.qty - 10
+    # cap S1 to 10 per delivery : the truncated share goes to S2
+    links[0].max_qty_per_delivery = 10.0
+    r3 = run(make_dataset(links=links, suppliers=ds.suppliers, stock=[StockSnapshot("A1", MON - D(days=1), 300.0)]), horizon_days=42)
+    day3 = {p.supplier_id: p for p in r3.proposals if p.delivery_date == first_day}
+    assert day3["S1"].qty == 10 and day3["S1"].capped and day3["S2"].qty >= s1.qty + s2.qty - 10 - 10
+    # priority policy : everything to the priority-1 supplier
+    art = Article("A1", "Widget", "PCE", coverage_target_days=5, sourcing_policy="priority")
+    r4 = run(make_dataset(articles=[art], links=links, suppliers=ds.suppliers, stock=[StockSnapshot("A1", MON - D(days=1), 300.0)]), horizon_days=42)
+    assert {p.supplier_id for p in r4.proposals} == {"S1"}
 
 
 # ------------------------------------------------------------------ alerts
 def test_alert_levels():
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100000.0)])
-    r = run(ds, horizon_days=60, generate_proposals=True)
+    r = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100000.0)]), horizon_days=60)
     assert any(a.alert_type == AlertType.OVERSTOCK for a in r.alerts)
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 350.0)])
-    r = run(ds, horizon_days=60, generate_proposals=True)
+    r = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 350.0)]), horizon_days=60)
     low = [a for a in r.alerts if a.alert_type == AlertType.LOW_COVERAGE]
-    assert low and low[0].severity.value == "critical"  # 350 -> 1 day of coverage <= red (2)
-    ds = make_dataset(stock=[])
-    r = run(ds, horizon_days=10, generate_proposals=True)
+    assert low and low[0].severity.value == "critical"  # ERP flows run out within 2 working days
+    r = run(make_dataset(stock=[]), horizon_days=10)
     assert any(a.alert_type == AlertType.MISSING_DATA for a in r.alerts)
 
 
 def test_stockout_alert_scopes():
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 500.0)],
+    """A shortage nothing can fix any more (today) is alerted on both scenarios ; a plan cell that
+    brings the order forward clears the plan one."""
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100.0)],
                       orders=[OrderLine("F1", "A1", "S1", MON + D(days=3), 2000, order_type=OrderType.FIRM)])
     r = run(ds, horizon_days=12)
     scopes = {a.scope: a for a in r.alerts if a.alert_type == AlertType.STOCKOUT}
     assert set(scopes) == {"erp", "plan"}
-    assert r.kpis["first_stockout_erp"] == r.kpis["first_stockout_plan"] == (MON + D(days=2)).isoformat()
-    # the planner brings the order forward in the plan: the plan stockout disappears, the ERP one stays
-    ds.plan = [PlanCell("A1", "S1", MON + D(days=2), 2000), PlanCell("A1", "S1", MON + D(days=3), 0)]
-    r2 = run(ds, horizon_days=12)
-    scopes2 = {a.scope for a in r2.alerts if a.alert_type == AlertType.STOCKOUT}
-    assert scopes2 == {"erp"} and r2.kpis["first_stockout_plan"] is None
+    assert r.kpis["first_stockout_erp"] == r.kpis["first_stockout_plan"] == MON.isoformat()
+    ds2 = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 500.0)],
+                       orders=[OrderLine("F1", "A1", "S1", MON + D(days=3), 2000, order_type=OrderType.FIRM)],
+                       links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, lead_time_days=30)])
+    ds2.plan = [PlanCell("A1", "S1", MON + D(days=2), 2000), PlanCell("A1", "S1", MON + D(days=3), 0)]
+    r2 = run(ds2, horizon_days=12)
+    assert {a.scope for a in r2.alerts if a.alert_type == AlertType.STOCKOUT} == {"erp"} and r2.kpis["first_stockout_plan"] is None
 
 
-# ------------------------------------------------------------------ programme impact / expressions
 def test_program_impact():
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 700.0)],
-                      orders=[OrderLine("F1", "A1", "S1", MON + D(days=4), 5000, order_type=OrderType.FIRM)])
-    res = run_mrp(ds, EngineParams(as_of=MON, horizon_days=13, generate_proposals=False))
+                      orders=[OrderLine("F1", "A1", "S1", MON + D(days=4), 5000, order_type=OrderType.FIRM)],
+                      links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, lead_time_days=30)])
+    res = run_mrp(ds, EngineParams(as_of=MON, horizon_days=13, target_tolerance_pct=100))
     imp = res.program_impact
     assert imp["weeks"][0] == "2026-W39"
     p = next(x for x in imp["programs"] if x["program_id"] == "P1")
     assert p["planned"][0] == 500
-    assert p["feasible"]["onhand"][0] == 350 and p["feasible"]["erp"][0] == 450 and p["feasible"]["plan"][0] == 450
+    assert p["feasible"]["onhand"][0] == 350 and p["feasible"]["erp"][0] == 450
     assert p["limiting"]["onhand"][0][0]["article_id"] == "A1"
     assert p["first_impact"]["onhand"] == "2026-W39" and p["first_impact"]["erp"] == "2026-W39"
 
 
 def test_weekly_article_parameters():
     week2 = MON + D(days=7)
-    art = Article("A1", "Widget", "PCE", coverage_target_days=5, alert_red_days=2, alert_yellow_days=5,
-                  overstock_days=30, order_cycle_days=7)
-    art.weekly = {"2026-W40": {"coverage_target_days": 10, "safety_stock_qty": 50}}
+    art = Article("A1", "Widget", "PCE", coverage_target_days=5, alert_red_days=2, alert_yellow_days=5, overstock_days=30)
+    art.weekly = {"2026-W40": {"coverage_target_days": 10}}
     assert art.param_at("coverage_target_days", week2) == 10 and art.param_at("coverage_target_days", MON) == 5
-    ds = make_dataset(articles=[art], stock=[StockSnapshot("A1", MON - D(days=1), 100000.0)])
-    r = run(ds)
+    r = run(make_dataset(articles=[art], stock=[StockSnapshot("A1", MON - D(days=1), 100000.0)]))
     i = r.dates.index(MON)
-    assert r.target_stock[i] == 800
-    assert r.target_stock[r.dates.index(week2)] == 1600
+    assert r.target_stock[i] == 1000                      # 5 working days of 200
+    assert r.target_stock[r.dates.index(week2)] == 2000  # 10 working days
 
 
 def test_expression_evaluator():
@@ -474,207 +521,142 @@ def test_expression_evaluator():
     assert evaluate("-500") == -500
     assert evaluate("=2*(3+4)") == 14
     for bad in ("abc", "2**8", "__import__('os')", "1/0", ""):
-        try:
+        with pytest.raises(ValueError):
             evaluate(bad)
-        except ValueError:
-            continue
-        raise AssertionError(f"{bad!r} should be rejected")
 
 
 def test_ignored_firm_orders_leave_the_erp_scenario_and_the_plan():
-    """A click on a Ferme cell: the firm orders of that supplier and day are ignored (ERP scenario,
-    plan prefill) but still displayed with their ordered / remaining quantities."""
-    from appro.engine.models import CellFlag
     wed, fri = MON + D(days=2), MON + D(days=4)
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=3), 1000.0)],
                       orders=[OrderLine("F1", "A1", "S1", wed, 1000, qty_open=400, order_type=OrderType.FIRM),
                               OrderLine("F2", "A1", "S1", fri, 800, order_type=OrderType.FIRM),
                               OrderLine("F0", "A1", "S1", MON - D(days=2), 300, qty_open=0, order_type=OrderType.FIRM)])
-    r = run(ds)
+    r = run(ds, no_cbn=True)
     i = r.dates.index(MON)
     lane = r.lanes[0]
-    assert lane.orders_firm_ordered[i + 2] == 1000 and lane.orders_firm_open[i + 2] == 400     # partial delivery
-    assert lane.orders_firm_ordered[i - 2] == 300 and lane.orders_firm_open[i - 2] == 0         # settled, past
+    assert lane.orders_firm_ordered[i + 2] == 1000 and lane.orders_firm_open[i + 2] == 400
+    assert lane.orders_firm_ordered[i - 2] == 300 and lane.orders_firm_open[i - 2] == 0
     assert r.orders_firm[i + 2] == 400 and r.plan[i + 2] == 400
     ds.flags = [CellFlag("A1", "S1", wed, "order_ignored"), CellFlag("A1", "S1", MON - D(days=2), "order_ignored")]
-    r2 = run(ds)
-    assert r2.orders_firm[i + 2] == 0 and r2.plan[i + 2] == 0 and r2.orders_firm[i + 4] == 800   # Wednesday ignored
+    r2 = run(ds, no_cbn=True)
+    assert r2.orders_firm[i + 2] == 0 and r2.plan[i + 2] == 0 and r2.orders_firm[i + 4] == 800
     assert r2.lanes[0].orders_ignored[i + 2] and not r2.lanes[0].orders_ignored[i + 4]
-    assert r2.lanes[0].orders_firm_ordered[i + 2] == 1000                                      # still displayed
+    assert r2.lanes[0].orders_firm_ordered[i + 2] == 1000
     assert r2.stock_erp[i + 2] == r.stock_erp[i + 2] - 400 and r2.kpis["ignored_order_days"] == 1
-    assert not r2.lanes[0].orders_ignored[i - 2]                                               # the past is never ignored
+    assert not r2.lanes[0].orders_ignored[i - 2]
     typed = make_dataset(stock=list(ds.stock), orders=ds.orders)
     typed.flags, typed.plan = list(ds.flags), [PlanCell("A1", "S1", wed, 250)]
-    r3 = run(typed)
-    assert r3.orders_firm[i + 2] == 0 and r3.plan[i + 2] == 250                                 # a typed cell still counts
-
-
-def test_refused_proposal_blocks_the_rest_of_its_week():
-    """A click on a Proposition CBN cell refuses it: no proposal from that day to the Sunday of its
-    week, the need is served by a later proposal (never an earlier one)."""
-    from appro.engine.models import CellFlag
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1500.0)],
-                      links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, lead_time_days=0, quota_pct=100, priority=1)])
-    r = run(ds, generate_proposals=True, horizon_days=28)
-    first = r.proposals[0]
-    assert first.delivery_date > MON
-    refused_week_end = first.delivery_date + D(days=6 - first.delivery_date.weekday())
-    ds.flags = [CellFlag("A1", None, first.delivery_date, "proposal_refused", qty=first.qty)]
-    r2 = run(ds, generate_proposals=True, horizon_days=28)
-    assert all(not (first.delivery_date <= p.delivery_date <= refused_week_end) for p in r2.proposals)
-    assert r2.proposals and r2.proposals[0].delivery_date > refused_week_end
-    assert r2.kpis["refused_proposals"] == 1
-    i = r2.dates.index(first.delivery_date)
-    assert r2.supply_proposed[i] == 0 and max(r2.supply_proposed) > 0
+    r3 = run(typed, no_cbn=True)
+    assert r3.orders_firm[i + 2] == 0 and r3.plan[i + 2] == 250
 
 
 def test_desadv_shown_in_the_receipt_row_until_received_or_hidden():
-    """Despatch advices: announced quantities of the supplier on their issue day, never counted ;
-    gone once the delivery note (BL) is received or once the planner hides the day ; green when the
-    message is « Traité / OK », red otherwise ; receipts without a processed DESADV are flagged."""
-    from appro.engine.models import CellFlag
     mon1, tue1, wed1 = MON - D(days=7), MON - D(days=6), MON - D(days=5)
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
                       receipts=[Receipt("R1", "A1", tue1, 300, supplier_id="S1", packing_slip="BL-1"),
                                 Receipt("R2", "A1", wed1, 100, supplier_id="S1", packing_slip="BL-9")])
-    ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", mon1, 300, state="Traité", final_processing="OK"),      # received
-                 DesadvLine("D2|1", "A1", "S1", "BL-2", wed1, 500, state="Traité", final_processing="OK"),      # open, ok
+    ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", mon1, 300, state="Traité", final_processing="OK"),
+                 DesadvLine("D2|1", "A1", "S1", "BL-2", wed1, 500, state="Traité", final_processing="OK"),
                  DesadvLine("D3|1", "A1", "S1", "BL-3", wed1, 50, state="Erreur", final_processing="Non traité"),
-                 DesadvLine("D4|1", "A1", "S1", "BL-4", MON, 70, state="Annulé"),                               # cancelled: ignored
-                 DesadvLine("D5|1", "A1", "S2", "BL-5", MON, 20, state="Traité", final_processing="OK")]        # another supplier → its own lane
-    r = run(ds, horizon_days=5)
+                 DesadvLine("D4|1", "A1", "S1", "BL-4", MON, 70, state="Annulé"),
+                 DesadvLine("D5|1", "A1", "S2", "BL-5", MON, 20, state="Traité", final_processing="OK")]
+    r = run(ds, no_cbn=True, horizon_days=5)
     i = r.dates.index(MON)
     lanes = {l.supplier_id: l for l in r.lanes}
     s1 = lanes["S1"]
     assert s1.desadv_open[i - 7] == 0 and s1.desadv_open[i - 5] == 550 and s1.desadv_open[i] == 0
     assert bool(s1.desadv_ko[i - 5]) and not bool(s1.desadv_ko[i - 6])
-    assert not bool(s1.receipts_ko[i - 6]) and bool(s1.receipts_ko[i - 5])          # BL-1 processed, BL-9 unknown
+    assert not bool(s1.receipts_ko[i - 6]) and bool(s1.receipts_ko[i - 5])
     assert lanes["S2"].desadv_open[i] == 20 and not bool(lanes["S2"].desadv_ko[i])
-    assert [d.received for d in s1.desadv] == [True, False, False]          # the cancelled one is not listed
-    # never counted: the stocks ignore the announced quantities
+    assert [d.received for d in s1.desadv] == [True, False, False]
     assert sum(r.receipts) == 400 and r.stock_erp[i - 5] == r.stock_erp[i - 6] + 100 - r.demand[i - 5]
-    # hidden by the planner (double-click): the day disappears, the data stays listed
     ds.flags = [CellFlag("A1", "S1", wed1, "desadv_hidden", qty=550)]
-    r2 = run(ds, horizon_days=5)
-    s1b = {l.supplier_id: l for l in r2.lanes}["S1"]
+    s1b = {l.supplier_id: l for l in run(ds, no_cbn=True, horizon_days=5).lanes}["S1"]
     assert s1b.desadv_open[i - 5] == 0 and [d.hidden for d in s1b.desadv][1:3] == [True, True]
 
 
 def test_receipt_lines_carry_the_delivery_note_and_a_missing_bl_is_never_matched():
-    """Each receipt is listed on its lane with its BL (tooltip) ; a receipt or a DESADV without BL
-    (« ACR non validé » in the ERP) is shown but can never be matched : red dot on both sides."""
     tue1, wed1 = MON - D(days=6), MON - D(days=5)
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
                       receipts=[Receipt("R1", "A1", tue1, 300, supplier_id="S1", ref="PO-1", packing_slip="BL-1"),
                                 Receipt("R2", "A1", tue1, 50, supplier_id="S1", ref="PO-2", packing_slip=""),
                                 Receipt("R3", "A1", wed1, 10, supplier_id="S1", packing_slip="   ")])
     ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", tue1, 300, state="Traité", final_processing="OK"),
-                 DesadvLine("D2|1", "A1", "S1", "", wed1, 40, state="Traité", final_processing="OK")]   # no BL yet
-    r = run(ds, horizon_days=5)
+                 DesadvLine("D2|1", "A1", "S1", "", wed1, 40, state="Traité", final_processing="OK")]
+    r = run(ds, no_cbn=True, horizon_days=5)
     i = r.dates.index(MON)
     s1 = {l.supplier_id: l for l in r.lanes}["S1"]
     assert [(x.receipt_id, x.packing_slip, x.purch_id, x.processed) for x in s1.receipt_lines] == [
         ("R1", "BL-1", "PO-1", True), ("R2", "", "PO-2", False), ("R3", "", "", False)]
-    assert bool(s1.receipts_ko[i - 6]) and bool(s1.receipts_ko[i - 5])     # R2 / R3 without BL → red
-    # the DESADV without BL stays announced (nothing can receive it) and does not « process » the empty BLs
+    assert bool(s1.receipts_ko[i - 6]) and bool(s1.receipts_ko[i - 5])
     assert [(d.packing_slip, d.received) for d in s1.desadv] == [("BL-1", True), ("", False)]
     assert s1.desadv_open[i - 5] == 40 and not bool(s1.desadv_ko[i - 5])
 
 
-def test_refused_proposal_is_per_supplier():
-    """A refusal on a supplier's CBN row blocks that supplier only ; a refusal without supplier blocks all."""
-    from appro.engine.models import CellFlag
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100.0)],
-                      links=[SupplierLink("A1", "S1", quota_pct=100, priority=1, lead_time_days=1),
-                             SupplierLink("A1", "S2", quota_pct=0, priority=2, lead_time_days=1)])
-    base = run(ds, horizon_days=21, generate_proposals=True, sourcing_policy="priority", proposal_placement="monday")
-    first = next(p for p in base.proposals if p.supplier_id == "S1")
-    end = first.delivery_date - D(days=first.delivery_date.weekday()) + D(days=6)
-    ds.flags = [CellFlag("A1", "S2", first.delivery_date, "proposal_refused", qty=first.qty)]   # other supplier: no effect
-    same = run(ds, horizon_days=21, generate_proposals=True, sourcing_policy="priority", proposal_placement="monday")
-    assert [(p.delivery_date, p.qty) for p in same.proposals] == [(p.delivery_date, p.qty) for p in base.proposals]
-    ds.flags = [CellFlag("A1", "S1", first.delivery_date, "proposal_refused", qty=first.qty)]
-    blocked = run(ds, horizon_days=21, generate_proposals=True, sourcing_policy="priority", proposal_placement="monday")
-    assert all(not (first.delivery_date <= p.delivery_date <= end) for p in blocked.proposals if p.supplier_id == "S1")
-
-
 def test_receipt_statuses_transit_received_booked():
-    """Three receipt statuses.  « En transit » (arrival journal not validated) : shown in the Reçu row like
-    an announced DESADV, green when its BL matches a processed DESADV, never counted, and the DESADV it
-    carries is listed through it.  « Reçu » : counted, green dot when announced by a processed DESADV,
-    red otherwise (manual receipt).  « Comptabilisé » : the same, plus the green background."""
     mon1, tue1, wed1, thu1 = MON - D(days=7), MON - D(days=6), MON - D(days=5), MON - D(days=4)
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
                       receipts=[Receipt("R1", "A1", tue1, 300, supplier_id="S1", packing_slip="BL-1 | BL-2", status="Reçu"),
                                 Receipt("R2", "A1", tue1, 50, supplier_id="S1", packing_slip="BL-3", status="Comptabilisé"),
-                                Receipt("J1", "A1", wed1, 500, supplier_id="S1", packing_slip="BL-4", status="En transit"),   # processed DESADV
-                                Receipt("J2", "A1", wed1, 60, supplier_id="S1", packing_slip="BL-9", status="En transit"),    # no DESADV
-                                Receipt("R3", "A1", thu1, 10, supplier_id="S1", packing_slip="", status="Comptabilisé")])     # manual, booked
+                                Receipt("J1", "A1", wed1, 500, supplier_id="S1", packing_slip="BL-4", status="En transit"),
+                                Receipt("J2", "A1", wed1, 60, supplier_id="S1", packing_slip="BL-9", status="En transit"),
+                                Receipt("R3", "A1", thu1, 10, supplier_id="S1", packing_slip="", status="Comptabilisé")])
     ds.desadv = [DesadvLine("D1|1", "A1", "S1", "BL-1", mon1, 150, state="Traité", final_processing="OK"),
                  DesadvLine("D2|1", "A1", "S1", "BL-2", mon1, 150, state="Traité", final_processing="OK"),
                  DesadvLine("D3|1", "A1", "S1", "BL-3", mon1, 50, state="Traité", final_processing="OK"),
                  DesadvLine("D4|1", "A1", "S1", "BL-4", mon1, 500, state="Traité", final_processing="OK"),
-                 DesadvLine("D5|1", "A1", "S1", "BL-5", thu1, 40, state="Créé", final_processing="Non traité")]   # announced, no journal
-    r = run(ds, horizon_days=5)
+                 DesadvLine("D5|1", "A1", "S1", "BL-5", thu1, 40, state="Créé", final_processing="Non traité")]
+    r = run(ds, no_cbn=True, horizon_days=5)
     i = r.dates.index(MON)
     s1 = {l.supplier_id: l for l in r.lanes}["S1"]
-    # counted : R1 + R2 on Tuesday, R3 on Thursday ; the journals in transit never
     assert r.receipts[i - 6] == 350 and r.receipts[i - 5] == 0 and r.receipts[i - 4] == 10 and sum(r.receipts) == 360
-    # in transit on Wednesday : both journals (560), red because J2 has no processed DESADV ; D5 announced on Thursday, red
     assert s1.desadv_open[i - 5] == 560 and bool(s1.desadv_ko[i - 5]) and s1.desadv_open[i - 4] == 40 and bool(s1.desadv_ko[i - 4])
     journals = [d for d in s1.desadv if d.source == "journal"]
     assert [(d.desadv_id, d.packing_slip, d.processed, d.state) for d in journals] == [("J1", "BL-4", True, "Journal d'arrivée non validé"), ("J2", "BL-9", False, "Journal d'arrivée non validé")]
     by_bl = {d.packing_slip: d for d in s1.desadv if d.source == "desadv"}
     assert [(bl, by_bl[bl].received, by_bl[bl].journaled) for bl in ("BL-1", "BL-2", "BL-3", "BL-4", "BL-5")] == [
         ("BL-1", True, False), ("BL-2", True, False), ("BL-3", True, False), ("BL-4", False, True), ("BL-5", False, False)]
-    # receipt lines : processed (green dot) and booked (green background)
     assert [(x.receipt_id, x.processed, x.booked, x.status) for x in s1.receipt_lines] == [
         ("R1", True, False, "Reçu"), ("R2", True, True, "Comptabilisé"), ("R3", False, True, "Comptabilisé")]
-    assert not bool(s1.receipts_ko[i - 6]) and bool(s1.receipts_ko[i - 4])          # R3 : manual receipt → red
-    assert not bool(s1.receipts_booked[i - 6]) and bool(s1.receipts_booked[i - 4])  # Tuesday holds an unbooked receipt
-    # a legacy « Enregistré » status is a plain receipt
+    assert not bool(s1.receipts_ko[i - 6]) and bool(s1.receipts_ko[i - 4])
+    assert not bool(s1.receipts_booked[i - 6]) and bool(s1.receipts_booked[i - 4])
     assert not Receipt("R9", "A1", tue1, 1, status="Enregistré").in_transit and not Receipt("R9", "A1", tue1, 1, status="Enregistré").booked
 
 
-def test_plan_stockout_severity_is_graded_like_the_erp_one():
-    """A plan stockout far away is informational, inside the firm horizon a warning, inside the lead time critical."""
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 10000.0)],
-                      links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3)],
-                      pdp=[PdpLine("P1", MON + D(weeks=k), 500.0) for k in range(0, 30)])
-    from appro.engine.models import Severity
-    r = run(ds, horizon_days=200, firm_horizon_days=28)
+def test_plan_stockout_severity_is_graded_in_working_days():
+    """Critical inside the lead time, warning inside the 20-working-day firm horizon, informational beyond."""
+    far = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 10000.0)],
+                       links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3, max_qty_per_week=1.0)],
+                       pdp=[PdpLine("P1", MON + D(weeks=k), 500.0) for k in range(0, 30)])
+    r = run(far, horizon_days=200)
     plan = [a for a in r.alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
-    assert plan and plan[0].details["days_ahead"] > 28 and plan[0].severity == Severity.INFO
-    r2 = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1400.0)],
-                          links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3)]), horizon_days=60, firm_horizon_days=28)
-    plan2 = [a for a in r2.alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
-    assert plan2 and 3 < plan2[0].details["days_ahead"] <= 28 and plan2[0].severity == Severity.WARNING
-    r3 = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 150.0)],
-                          links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3)]), horizon_days=60)
+    assert plan and plan[0].details["days_ahead"] > 20 and plan[0].severity == Severity.INFO
+    mid = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1400.0)],
+                       links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3, max_qty_per_week=1.0)])
+    plan2 = [a for a in run(mid, horizon_days=60).alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
+    assert plan2 and 3 < plan2[0].details["days_ahead"] <= 20 and plan2[0].severity == Severity.WARNING
+    near = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 150.0)],
+                        links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3, max_qty_per_week=1.0)])
+    r3 = run(near, horizon_days=60)
     plan3 = [a for a in r3.alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
     assert plan3 and plan3[0].severity == Severity.CRITICAL and r3.kpis["stockout_plan_severity"] == "critical"
 
 
 def test_refused_proposals_stay_listed_as_ignored_with_their_real_order_date():
-    """A refused (clicked) proposal leaves the calculations but is kept in ``proposals_ignored`` ; an
-    urgent proposal keeps the real day the order had to be placed, even in the past."""
-    from appro.engine.models import CellFlag
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100.0)],
                       links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=15)])
-    base = run(ds, horizon_days=40, generate_proposals=True)
+    base = run(ds, horizon_days=40)
     first = base.proposals[0]
-    assert first.urgent and first.order_date < MON and not base.proposals_ignored
+    assert first.urgent and first.floor and first.order_date < MON and not base.proposals_ignored
     ds.flags = [CellFlag("A1", "S1", first.delivery_date, "proposal_refused", qty=first.qty)]
-    r = run(ds, horizon_days=40, generate_proposals=True)
-    end = first.delivery_date - D(days=first.delivery_date.weekday()) + D(days=6)
-    assert all(not (first.delivery_date <= p.delivery_date <= end) for p in r.proposals)
+    r = run(ds, horizon_days=40)
+    assert all(p.delivery_date != first.delivery_date for p in r.proposals)
     ign = r.proposals_ignored
-    assert ign and all(p.ignored and first.delivery_date <= p.delivery_date <= end for p in ign)
+    assert ign and all(p.ignored and p.delivery_date == first.delivery_date for p in ign)
     assert any(p.urgent and p.order_date == first.order_date for p in ign)
 
 
 def test_stock_at_date_and_value_kpis():
-    """Stock « à date » = closing stock of yesterday ; valued with the article price ; target value likewise."""
     tue = MON - D(days=6)
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=8), 1000.0)], receipts=[Receipt("R1", "A1", tue, 200)])
     ds.prices = {"A1": 2.5}
@@ -686,62 +668,17 @@ def test_stock_at_date_and_value_kpis():
     assert r2.kpis["price"] is None and r2.kpis["stock_value"] is None
 
 
-def test_daily_average_over_working_days_and_backlog_window_start():
-    """« Besoin 30 j » stays a 30-calendar-day sum ; its daily average divides by the working days of
-    that window only ; the backlog KPI tells the first day of its window."""
-    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 5000.0)])
-    r = run(ds, horizon_days=60, backlog_days=28)
-    i = r.dates.index(MON)
-    total = float(r.demand[i + 1:i + 31].sum())
-    cal = WorkCalendar()
-    open_days = sum(1 for d in r.dates[i + 1:i + 31] if cal.is_working_day(d))
-    assert r.kpis["demand_next_30d"] == pytest.approx(total) and r.kpis["working_days_30d"] == open_days == 22
-    assert r.kpis["avg_daily_demand_30d"] == pytest.approx(total / open_days) and r.kpis["avg_daily_demand_30d"] > total / 30
-    assert r.kpis["backlog_window_start"] == max(MON - D(days=28), MON - D(days=1)).isoformat()
+def test_requirement_of_the_next_20_working_days():
+    r = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 5000.0)]), horizon_days=60)
+    assert r.kpis["demand_next_20wd"] == 4000 and r.kpis["working_days_counted"] == 20
+    assert r.kpis["avg_daily_demand_wd"] == 200
 
 
 def test_programme_scrap_rate_raises_the_weekly_need_before_the_bom():
-    """need = PDP × (1 + scrap_pct / 100), exploded through the bill of material ; the rate is carried
-    by each weekly line, so a dated change leaves the earlier weeks untouched."""
     base = run(make_dataset(), horizon_days=21)
     lines = [PdpLine("P1", MON + D(weeks=k), 500.0, scrap_pct=10.0 if k >= 1 else 0.0) for k in range(-2, 8)]
     r = run(make_dataset(pdp=lines), horizon_days=21)
     i0, i1 = r.dates.index(MON), r.dates.index(MON + D(weeks=1))
     week = lambda res, i: sum(res.demand[i:i + 7])  # noqa: E731
-    assert week(r, i0) == week(base, i0)                       # current week : rate 0
-    assert week(r, i1) == pytest.approx(week(base, i1) * 1.1)   # next week : +10 %, i.e. 500 × 1.1 × 2 per unit
-    assert week(r, i1) == pytest.approx(1100.0)
-
-
-def test_quota_split_every_need_and_a_refused_supplier_hands_its_share_over():
-    """With quotas, every need is split between the quota suppliers from the very first proposal
-    (70 / 30 : two proposals for one need, each lot-sized by its own MOQ / pack) ; a supplier refused
-    for a week hands its share to the other one instead of pushing the need after the window."""
-    from appro.engine.models import CellFlag
-    links = [SupplierLink("A1", "S1", moq=1, pack_qty=10, lead_time_days=2, quota_pct=70, priority=1),
-             SupplierLink("A1", "S2", moq=1, pack_qty=10, lead_time_days=2, quota_pct=30, priority=2)]
-    ds = make_dataset(links=links, suppliers=[Supplier("S1", "Supplier 1"), Supplier("S2", "Supplier 2")],
-                      stock=[StockSnapshot("A1", MON - D(days=1), 300.0)])
-    r = run(ds, horizon_days=42, generate_proposals=True)
-    first_day = min(p.delivery_date for p in r.proposals)
-    first = {p.supplier_id: p for p in r.proposals if p.delivery_date == first_day}
-    assert set(first) == {"S1", "S2"}                                   # the first need is already split
-    s1, s2 = first["S1"], first["S2"]
-    assert s1.qty / (s1.qty + s2.qty) == pytest.approx(0.7, abs=0.03) and "part 70 %" in s1.reason and "part 30 %" in s2.reason
-    tot = {sid: sum(p.qty for p in r.proposals if p.supplier_id == sid) for sid in ("S1", "S2")}
-    assert tot["S1"] / (tot["S1"] + tot["S2"]) == pytest.approx(0.7, abs=0.03)
-    # refuse S1 for the week of the first proposal : S2 takes 100 % of that week's needs, nothing is pushed
-    ds.flags = [CellFlag("A1", "S1", first_day, "proposal_refused", qty=s1.qty)]
-    r2 = run(ds, horizon_days=42, generate_proposals=True)
-    week_end = first_day + D(days=6 - first_day.weekday())
-    in_week = [p for p in r2.proposals if first_day <= p.delivery_date <= week_end]
-    assert in_week and all(p.supplier_id == "S2" for p in in_week)
-    assert sum(p.qty for p in in_week) >= s1.qty + s2.qty - 10        # the whole need, served by S2 (pack rounding aside)
-    assert not any(p.supplier_id == "S1" and first_day <= p.delivery_date <= week_end for p in r2.proposals)
-    # single quota supplier : nothing to split, the need moves after the refused window as before
-    ds1 = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 300.0)])
-    base = run(ds1, horizon_days=42, generate_proposals=True)
-    f = base.proposals[0]
-    ds1.flags = [CellFlag("A1", "S1", f.delivery_date, "proposal_refused", qty=f.qty)]
-    pushed = run(ds1, horizon_days=42, generate_proposals=True)
-    assert all(p.delivery_date > f.delivery_date + D(days=6 - f.delivery_date.weekday()) for p in pushed.proposals)
+    assert week(r, i0) == week(base, i0)
+    assert week(r, i1) == pytest.approx(week(base, i1) * 1.1) == pytest.approx(1100.0)

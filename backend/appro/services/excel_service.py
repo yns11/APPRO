@@ -10,8 +10,8 @@ Exports
   ==================  =====================================================================
   sheet               role
   ==================  =====================================================================
-  PARAMETRES          rules used by the formulas (shortage policy, target policy, tie rule)
-  ARTICLES            per-article inputs: initial stocks, coverage target, safety stock, thresholds
+  PARAMETRES          generation context (reference day, rules in force)
+  ARTICLES            per-article inputs: initial stocks, coverage target, consumption days, thresholds
   SIMULATION          one block per article ; Plan and Ajustement rows are inputs (yellow), the
                       stocks, shortage, target and coverage are formulas
   ALERTES             snapshot of the alerts at export time (values)
@@ -21,10 +21,10 @@ Exports
 
       ERP  : x = stock[p-1] + Σ Reçu + Σ Ferme + A - besoin
       Plan : x = stock[p-1] + Σ Reçu + Σ Plan + CBN + A - besoin
-      stock[p]    = IF(shortage policy = "lost", MAX(0, x), x)
+      stock[p]    = MAX(0, x)                    (the unserved demand is lost)
       shortage[p] = MAX(0, -x)
-      target[p]   = demand of the next N periods (and/or safety stock)
-      coverage[p] = number of future periods whose cumulated demand <= stock[p]
+      target[p]   = demand of the next N working-day periods
+      coverage[p] = number of future working-day periods whose cumulated demand <= stock[p]
 
 * ``alerts_workbook`` / ``plan_workbook`` – single-sheet extracts.
 * ``pdp_template_workbook`` – the template of the weekly production plan to import.
@@ -49,7 +49,7 @@ from openpyxl.formatting.rule import CellIsRule, FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from ..engine.calendar import iso_week_label, iso_week_monday
+from ..engine.calendar import WorkCalendar, iso_week_label, iso_week_monday
 from ..engine.models import ArticleResult, MrpResult
 
 HEADER_FILL = PatternFill("solid", fgColor="1F2A44")
@@ -67,11 +67,6 @@ THIN = Side(style="thin", color="D0D5DD")
 DATE_FMT = "yyyy-mm-dd"
 QTY_FMT = "#,##0.###"
 
-# Fixed cells of the PARAMETRES sheet referenced by the formulas
-P_SHORTAGE = "PARAMETRES!$B$5"
-P_TARGET = "PARAMETRES!$B$6"
-P_TIE = "PARAMETRES!$B$7"
-
 SIM_HEADER_ROWS = 3       # label / period start / period end
 SIM_FIRST_COL = 5         # E
 COL_ARTICLE, COL_DESIGNATION, COL_VARIABLE, COL_REF = 1, 2, 3, 4
@@ -80,7 +75,8 @@ LANE_ROWS = [("orders_firm", "Ferme", "value"), ("orders_forecast", "Prévisionn
 TAIL_ROWS = [("adjustments", "Ajustement", "input"),
              ("stock_erp", "Projeté ERP", "stock"), ("stock_plan", "Projeté Appro.", "stock"),
              ("shortage_plan", "Manque (plan, besoin non servi)", "formula"), ("target", "Stock cible", "formula"),
-             ("coverage", "Couverture Appro. (périodes)", "formula"), ("cum_demand", "Besoin cumulé (aide au calcul)", "helper")]
+             ("coverage", "Couverture Appro. (périodes ouvrées)", "formula"), ("cum_demand", "Besoin cumulé (aide au calcul)", "helper"),
+             ("wd", "Période ouvrée (aide au calcul)", "helper"), ("wd_cum", "Périodes ouvrées cumulées (aide au calcul)", "helper")]
 
 
 @dataclass(frozen=True)
@@ -161,17 +157,16 @@ def _parameters_sheet(ws, result: MrpResult, granularity: str, meta: dict[str, A
         ("Date de référence", result.as_of.isoformat(), "stock connu la veille au soir"),
         ("Horizon (jours)", p.horizon_days, ""),
         ("Granularité", granularity, "une colonne par jour ou par semaine ISO ; seul le jour se réimporte"),
-        ("Politique de manque", p.shortage_policy, "backlog : besoin non servi reporté (stock net négatif) ; lost : stock borné à 0, besoin perdu"),
-        ("Politique de cible", p.target_policy, "max : max(couverture, sécurité) ; coverage_days ; safety_qty"),
-        ("Règle d'égalité couverture", p.coverage_tie_rule, "covered : un besoin cumulé égal au stock est couvert ; not_covered (classeur historique)"),
-        ("Unité de couverture", p.coverage_unit, "le classeur compte des périodes (colonnes) ; l'application peut compter en jours ouvrés"),
+        ("Politique de manque", "lost", "besoin non servi perdu : stock borné à 0, le manque affiché est le cumul des jours sans stock"),
+        ("Tolérance sous la cible (%)", p.target_tolerance_pct, "le CBN remonte à la cible dès que le stock projeté passe sous (100 − n) % de la cible"),
+        ("Unité de temps", "jours ouvrés", "couverture, seuils, délais et horizon ferme sont en jours ouvrés ; le classeur compte des colonnes"),
     ]
     for k, v in (meta or {}).items():
         rows.append((k, str(v), ""))
     for r, (k, v, note) in enumerate(rows, start=1):
         ws.cell(r, 1, k).font = BOLD
         cell = ws.cell(r, 2, v)
-        if 5 <= r <= 7:
+        if r == 6:
             cell.fill = INPUT_FILL
             cell.font = BLUE_FONT
         ws.cell(r, 3, note).font = HELPER_FONT
@@ -199,7 +194,7 @@ def _layer_start(ar: ArticleResult, key: str, i_start: int) -> float:
 
 def _articles_sheet(ws, result: MrpResult, ids: list[str], start: dt.date) -> dict[str, int]:
     headers = ["Article", "Désignation", "Unité", "Fournisseur(s)", "Stock initial ERP", "Stock initial plan",
-               "Correction de référence", "Stock au", "Couverture cible (j)", "Stock de sécurité", "Seuil rouge (j)",
+               "Correction de référence", "Stock au", "Couverture cible (j ouvrés)", "Jours de consommation", "Seuil rouge (j)",
                "Seuil orange (j)", "Surstock (j)", "MOQ", "UM", "Délai (j ouvrés)", "Approvisionneur"]
     for c, h in enumerate(headers, start=1):
         ws.cell(1, c, h)
@@ -213,8 +208,8 @@ def _articles_sheet(ws, result: MrpResult, ids: list[str], start: dt.date) -> di
         values = [aid, a.designation, a.unit, " / ".join(l.supplier_id or "" for l in ar.lanes),
                   _layer_start(ar, "stock_erp_net", i_start), _layer_start(ar, "stock_plan_net", i_start),
                   ar.reference_correction, ar.dates[i_start - 1] if i_start > 0 else None,
-                  a.coverage_target_days, a.safety_stock_qty, a.alert_red_days, a.alert_yellow_days, a.overstock_days,
-                  link.moq if link else 0, link.pack_qty if link else 0, link.lead_time_days if link else 0, a.planner]
+                  a.coverage_target_days, a.demand_days, a.alert_red_days, a.alert_yellow_days, a.overstock_days,
+                  link.moq if link else 0, link.pack_qty if link else 0, ar.kpis.get("lead_time_days", 0), a.planner]
         for c, v in enumerate(values, start=1):
             cell = ws.cell(r, c, v)
             if c == 8:
@@ -252,6 +247,9 @@ def _simulation_grid(ws, result: MrpResult, ids: list[str], granularity: str, st
     _style_header(ws, 1, ncols)
     week = granularity == "week"
     i_as_of = first.dates.index(result.as_of)
+    calendar = WorkCalendar.from_spec(result.params.working_weekdays, result.holidays)
+    # a week column is « open » when it holds at least one working day ; a day column when the day is open
+    open_period = [1 if any(calendar.is_working_day(first.dates[i]) for i in idxs) else 0 for _, idxs in pers]
 
     r = SIM_HEADER_ROWS + 1
     for aid in ids:
@@ -278,7 +276,8 @@ def _simulation_grid(ws, result: MrpResult, ids: list[str], granularity: str, st
         ws.cell(row("stock_erp"), COL_REF, f"={art}E${k}").number_format = QTY_FMT
         ws.cell(row("stock_plan"), COL_REF, f"={art}F${k}").number_format = QTY_FMT
         ws.cell(row("target"), COL_REF, f"={art}I${k}").number_format = "0"
-        ws.cell(row("coverage"), COL_REF, "périodes").font = HELPER_FONT
+        ws.cell(row("coverage"), COL_REF, "périodes ouvrées").font = HELPER_FONT
+        fc0 = get_column_letter(SIM_FIRST_COL)
         lane_idx = list(range(len(ar.lanes)))
 
         for c, (_, idxs) in enumerate(pers, start=SIM_FIRST_COL):
@@ -317,21 +316,26 @@ def _simulation_grid(ws, result: MrpResult, ids: list[str], granularity: str, st
             plan_in = f"{plan_sum}+{cbn_sum}+{common}"
             for key, inflow in (("stock_erp", erp_in), ("stock_plan", plan_in)):
                 prev_ref = f"$D{row(key)}" if first_period else f"{prev}{row(key)}"
-                x = f"{prev_ref}+{inflow}"
-                cell(key, f'=IF({P_SHORTAGE}="lost",MAX(0,{x}),{x})').font = BOLD
+                cell(key, f"=MAX(0,{prev_ref}+{inflow})").font = BOLD
             prev_ref = f"$D{row('stock_plan')}" if first_period else f"{prev}{row('stock_plan')}"
             cell("shortage_plan", f"=MAX(0,-({prev_ref}+{plan_in}))")
-            n_per = f"{art}I${k}" if not week else f"ROUNDUP({art}I${k}/7,0)"
-            cov = f"IF({n_per}>0,SUM(OFFSET({col}{row('demand')},0,1,1,{n_per})),0)"
-            cell("target", f'=IF({P_TARGET}="safety_qty",{art}J${k},IF({P_TARGET}="coverage_days",{cov},MAX({cov},{art}J${k})))')
+            # working-day helpers : open period flag and its running count
+            ws.cell(row("wd"), c, open_period[c - SIM_FIRST_COL]).font = HELPER_FONT
             if first_period:
+                ws.cell(row("wd_cum"), c, f"={col}{row('wd')}").font = HELPER_FONT
                 cell("cum_demand", f"={demand_ref}").font = HELPER_FONT
             else:
+                ws.cell(row("wd_cum"), c, f"={prev}{row('wd_cum')}+{col}{row('wd')}").font = HELPER_FONT
                 cell("cum_demand", f"={prev}{row('cum_demand')}+{demand_ref}").font = HELPER_FONT
+            # target = demand of the next N working periods (N working days, or ROUNDUP(N / 5) weeks)
+            n_per = f"{art}I${k}" if not week else f"ROUNDUP({art}I${k}/5,0)"
+            dem_rng = f"${fc0}{row('demand')}:${last_col}{row('demand')}"
+            wdc_rng = f"${fc0}{row('wd_cum')}:${last_col}{row('wd_cum')}"
+            cell("target", f'=IF({n_per}>0,SUMIFS({dem_rng},{wdc_rng},">"&{col}{row("wd_cum")},{wdc_rng},"<="&{col}{row("wd_cum")}+{n_per}),0)')
             if c < ncols:
                 nxt = get_column_letter(c + 1)
-                crit = f'IF({P_TIE}="covered","<=","<")&({col}{row("cum_demand")}+{col}{row("stock_plan")})'
-                f = f'=IF({col}{row("stock_plan")}<0,0,COUNTIF({nxt}{row("cum_demand")}:{last_col}{row("cum_demand")},{crit}))'
+                f = (f'=IF({col}{row("stock_plan")}<0,0,COUNTIFS({nxt}{row("cum_demand")}:{last_col}{row("cum_demand")},'
+                     f'"<="&({col}{row("cum_demand")}+{col}{row("stock_plan")}),{nxt}{row("wd")}:{last_col}{row("wd")},1))')
             else:
                 f = 0
             ws.cell(row("coverage"), c, f).number_format = "0"

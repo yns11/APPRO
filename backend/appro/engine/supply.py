@@ -13,8 +13,9 @@ Rules (docs/regles_metier.md § 3):
 * on the **reference day** nothing links a receipt to an order: the quantity still expected from
   the firm orders of a supplier is ``max(0, open − receipts of the day)`` (a typed cell is taken as
   is, the planner knows) ;
-* the **backlog** of a supplier is ``max(0, Σ ordered firm quantity − Σ received)`` over the last
-  ``backlog_days`` before the reference day: no per-order matching, no action to take, it ages out ;
+* the **backlog** of a supplier is the Σ ERP remaining quantity of its firm orders dated before the
+  reference day (the ERP decrements the remaining quantity when the arrival journal is validated) ;
+  an order the planner ignored is out of the projection but still late : it stays in the backlog ;
 * a **receipt** is a validated arrival journal (status « Reçu », or « Comptabilisé » once the
   acknowledgement of receipt is validated) ; an arrival journal not validated yet (« En transit ») is
   shown in the Reçu row like an announced DESADV and never counted.
@@ -31,7 +32,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .calendar import iso_week_monday
 from .demand import DayIndex
 from .models import (
     CellFlag,
@@ -69,6 +69,7 @@ class _LaneAcc:
     receipts_booked: np.ndarray = field(init=False)
     backlog_ordered: float = 0.0
     backlog_received: float = 0.0
+    backlog_open: float = 0.0
     orders: list[OrderInfo] = field(default_factory=list)
     desadv: list[DesadvInfo] = field(default_factory=list)
     receipt_lines: list[ReceiptInfo] = field(default_factory=list)
@@ -121,7 +122,6 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
             if i is not None:
                 lane_of(f.supplier_id).ignored[i] = True
 
-    window_start = max(as_of - dt.timedelta(days=max(int(params.backlog_days), 0)), index.start)  # never before the point zero
     # ---- receipts : the validated arrival journals only (« Reçu », « Comptabilisé ») ; a journal not
     # validated yet (« En transit ») is on its way : shown, never counted
     posted = [r for r in receipts if r.qty and not r.in_transit]
@@ -129,8 +129,6 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     for r in posted:
         ln = lane_of(r.supplier_id)
         add(ln.receipts, r.receipt_date, r.qty)
-        if window_start <= r.receipt_date < as_of:
-            ln.backlog_received += r.qty
     # ---- ERP orders
     received_today: dict[str | None, float] = defaultdict(float)
     for r in posted:
@@ -139,10 +137,8 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     for o in sorted(orders, key=lambda o: (o.expected_date, o.order_id)):
         ln = lane_of(o.supplier_id)
         typ = o.order_type.value
-        firm = typ in params.firm_sources
+        firm = typ == "FIRM"
         day = o.expected_date
-        if not firm and params.forecast_date_policy == "week_monday":
-            day = iso_week_monday(day)
         i = index.offset(day)
         ignored = bool(firm and i is not None and ln.ignored[i])
         ln.orders.append(OrderInfo(o.order_id, o.supplier_id, typ, day, float(o.qty_ordered), float(o.qty_open or 0.0),
@@ -152,8 +148,10 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
             add(ln.open, day, float(o.qty_open or 0.0))
             if day < as_of:
                 add(ln.orders_firm_hist, day, float(o.qty_ordered))
-                if day >= window_start:
+                if o.qty_open and o.qty_open > EPS:      # late : its ERP remaining quantity is the backlog
                     ln.backlog_ordered += float(o.qty_ordered)
+                    ln.backlog_received += float(o.qty_ordered) - float(o.qty_open)
+                    ln.backlog_open += float(o.qty_open)
             elif o.qty_open and o.qty_open > EPS and not ignored:
                 add(ln.orders_firm, day, float(o.qty_open))
         elif o.qty_open and o.qty_open > EPS:
@@ -235,7 +233,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
                  desadv=ln.desadv, receipt_lines=ln.receipt_lines,
                  orders_firm_ordered=ln.ordered, orders_firm_open=ln.open, orders_ignored=ln.ignored,
                  backlog_ordered=ln.backlog_ordered, backlog_received=ln.backlog_received,
-                 backlog_qty=max(0.0, ln.backlog_ordered - ln.backlog_received), orders=ln.orders)
+                 backlog_qty=ln.backlog_open, orders=ln.orders)
             for ln in acc.values()]
 
 
@@ -248,11 +246,12 @@ def lane_totals(lanes: list[Lane], key: str) -> np.ndarray:
     return out
 
 
-def blocked_windows(flags: list[CellFlag] | None, article_id: str) -> dict[str | None, list[tuple[dt.date, dt.date]]]:
-    """Days where no CBN proposal may be placed, per supplier: from each refused proposal to the
-    Sunday of its week.  A refusal without supplier (key ``None``) applies to every supplier."""
-    out: dict[str | None, list[tuple[dt.date, dt.date]]] = {}
+def blocked_days(flags: list[CellFlag] | None, article_id: str) -> dict[str | None, set[dt.date]]:
+    """Days where no CBN proposal may be placed, per supplier : each refused proposal blocks its own
+    day only (the need moves to the next delivery day of the supplier).  A refusal without supplier
+    (key ``None``) applies to every supplier."""
+    out: dict[str | None, set[dt.date]] = {}
     for f in flags or ():
         if f.kind == "proposal_refused" and f.article_id == article_id:
-            out.setdefault(f.supplier_id or None, []).append((f.date, iso_week_monday(f.date) + dt.timedelta(days=6)))
+            out.setdefault(f.supplier_id or None, set()).add(f.date)
     return out

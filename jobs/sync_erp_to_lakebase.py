@@ -1,7 +1,6 @@
 """Job Databricks : copie des faits ERP (Unity Catalog) vers les tables ``erp_*`` de Lakebase.
 
-Pour chaque table de faits configurée (commandes, réceptions, consommation réelle, DESADV, PDP, prix,
-BL en attente) :
+Pour chaque table de faits configurée (commandes, réceptions, consommation réelle, DESADV, PDP, prix) :
 
 1. le SQL de correspondance de ``backend/appro/data/erp_sql.py`` est exécuté par Spark sur les
    extractions (``commandes_edi``, ``recep_edi``…) ;
@@ -80,7 +79,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--pdp-table", default="")
     p.add_argument("--desadv-table", default="desadv_edi", help="table UC des avis d'expédition (DESADV) ; vide = aucune")
     p.add_argument("--prices-table", default="silver_base_article", help="table UC des articles avec std_cost_price (prix en euros) ; vide = aucune")
-    p.add_argument("--bl-pending-table", default="bl_en_attente", help="table UC des BL enregistrés en attente de validation ; vide = aucune")
     p.add_argument("--branch", default="", help="projects/<projet>/branches/<branche>")
     p.add_argument("--endpoint", default="", help="projects/<projet>/branches/<branche>/endpoints/<endpoint>")
     p.add_argument("--pg-host", default="", help="hôte Lakebase si la découverte est impossible")
@@ -111,7 +109,7 @@ def _table_exists(spark, fqn: str) -> bool:
 def _check_sources(spark, tables: ErpTables) -> None:
     """Fail once, naming every missing source, rather than one table per run."""
     missing = [fqn for fqn in (tables.fqn(tables.orders), tables.fqn(tables.receipts)) if not _table_exists(spark, fqn)]
-    for opt in (tables.consumption, tables.pdp, tables.desadv, tables.prices, tables.bl_pending):
+    for opt in (tables.consumption, tables.pdp, tables.desadv, tables.prices):
         if opt and not _table_exists(spark, tables.fqn(opt)):
             missing.append(tables.fqn(opt))
     if missing:
@@ -177,7 +175,7 @@ def run(args: argparse.Namespace) -> dict[str, int]:
     import psycopg
     tables = ErpTables(catalog=args.catalog, schema=args.schema, orders=args.orders_table, receipts=args.receipts_table,
                        consumption=args.consumption_table or "", desadv=args.desadv_table or "", pdp=args.pdp_table or "",
-                       prices=args.prices_table or "", bl_pending=args.bl_pending_table or "")
+                       prices=args.prices_table or "")
     queries = fact_queries(tables)
     wanted = {t.strip() for t in args.tables.split(",") if t.strip()}
     if wanted:

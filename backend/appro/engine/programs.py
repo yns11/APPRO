@@ -7,9 +7,8 @@ share of its components that can be served on that day, in a given stock layer:
     share_p(d)   = min over the components c of p of share_c(d)
     feasible(d)  = planned(d) × share_p(d)
 
-``unserved_c(d)`` is the demand of day ``d`` that the layer cannot serve: the daily lost quantity
-(``lost`` policy) or the increase of the backlog on that day (``backlog`` policy).  Three layers are
-evaluated: on-hand stock only (nothing else arrives), ERP and plan.  Results are
+``unserved_c(d)`` is the demand of day ``d`` that the layer cannot serve (the daily lost quantity).
+Three layers are evaluated: on-hand stock only (nothing else arrives), ERP and plan.  Results are
 aggregated per ISO week from the reference date, with the limiting components of each week.
 """
 from __future__ import annotations
@@ -26,15 +25,8 @@ from .models import ArticleResult, BomLine
 LAYERS = ("onhand", "erp", "plan")
 
 
-def _unserved(shortage: np.ndarray, policy: str) -> np.ndarray:
-    if policy == "lost":
-        return shortage
-    prev = np.concatenate([[0.0], shortage[:-1]])
-    return np.maximum(0.0, shortage - prev)
-
-
 def program_impact(results: dict[str, ArticleResult], bom: list[BomLine], program_daily: dict[str, np.ndarray],
-                   program_names: dict[str, str], index: DayIndex, as_of: dt.date, policy: str) -> dict[str, Any]:
+                   program_names: dict[str, str], index: DayIndex, as_of: dt.date) -> dict[str, Any]:
     i0 = index.offset(as_of)
     if i0 is None or not program_daily:
         return {"weeks": [], "programs": []}
@@ -45,7 +37,7 @@ def program_impact(results: dict[str, ArticleResult], bom: list[BomLine], progra
         with np.errstate(divide="ignore", invalid="ignore"):
             shares[aid] = {}
             for layer, short in (("onhand", ar.shortage_onhand), ("erp", ar.shortage_erp), ("plan", ar.shortage_plan)):
-                un = _unserved(np.asarray(short), policy)
+                un = np.asarray(short)
                 sh = np.where(demand > 1e-9, 1.0 - un / np.where(demand > 1e-9, demand, 1.0), 1.0)
                 shares[aid][layer] = np.clip(sh, 0.0, 1.0)
     comps: dict[str, list[str]] = {}

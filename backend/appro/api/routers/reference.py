@@ -30,32 +30,20 @@ router = APIRouter(prefix="/api", tags=["reference"])
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
-    "horizon_days": ("Horizon de projection après la date de référence (jours)", None),
-    "history_weeks": ("Semaines affichées avant la semaine en cours dans le tableau (le tableau commence au plus tard de la date d'initialisation du stock et du lundi obtenu)", None),
-    "backlog_days": ("Âge maximal du backlog : commandes fermes passées non reçues comptées sur n jours avant la référence", None),
-    "spread_rounding": ("Lissage du PDP hebdomadaire sur les jours ouvrés", ["none", "exact", "per_day"]),
-    "production_mode": ("Besoin effectif par composant : consommation réelle pour le passé, reliquat du PDP éclaté de la semaine en cours sur les jours restants, PDP ensuite / réel puis plan / plan seul / réel seul", ["actual_then_remainder", "actual_then_plan", "plan_only", "actual_only"]),
-    "missing_actual_policy": ("Jour passé sans consommation réelle déclarée : 0 ou PDP", ["zero", "plan"]),
-    "consumption_offset_days": ("Décalage de consommation des composants vs jour de production", None),
-    "shortfall_tolerance_days": ("Tolérance de manque : un passage sous la cible qui se résorbe seul en n jours ouvrés, sans besoin non servi, ne déclenche pas de proposition", None),
-    "coverage_unit": ("Unité de couverture : jours calendaires ou ouvrés", ["calendar", "working"]),
-    "coverage_tie_rule": ("Un jour dont le besoin cumulé égale le stock est-il couvert ?", ["covered", "not_covered"]),
-    "target_policy": ("Stock cible : couverture, stock de sécurité fixe, ou le max des deux", ["coverage_days", "safety_qty", "max"]),
-    "generate_proposals": ("Calculer les propositions CBN à chaque calcul", None),
-    "include_proposals_in_plan": ("Inclure les propositions CBN dans le Projeté Appro.", None),
-    "proposal_placement": ("Livraisons proposées : tout jour ouvré (et jour de livraison fournisseur) ou lundis seulement ; une proposition par fournisseur et par jour", ["working_days", "monday"]),
-    "forecast_date_policy": ("Commandes prévisionnelles : à leur date réelle ou ramenées au lundi de leur semaine", ["actual", "week_monday"]),
-    "focus_weeks": ("Calendrier « Par défaut » : nombre de semaines détaillées jour par jour après la semaine en cours", None),
-    "frozen_days": ("Période gelée : aucune proposition livrable avant J + n", None),
-    "respect_lead_time": ("Ne jamais proposer une livraison avant J + délai fournisseur", None),
-    "delivery_shift": ("Jour de livraison non autorisé : avancer ou reculer", ["earlier", "later"]),
-    "sourcing_policy": ("Choix fournisseur : quotas ou priorité", ["quota", "priority"]),
-    "proposal_lookahead_days": ("Limiter les propositions à J + n (vide = tout l'horizon)", None),
-    "stockout_lookahead_days": ("Limiter la détection de rupture à J + n (vide = tout l'horizon)", None),
-    "firm_horizon_days": ("Horizon ferme : une rupture sur les commandes ERP au-delà est informative", None),
-    "shortage_policy": ("Besoin non servi : reporté (backlog, stock net négatif) ou perdu (stock borné à 0)", ["backlog", "lost"]),
-    "firm_sources": ("Types de commandes comptés dans le Projeté ERP (FIRM = ordre ferme)", None),
+    "target_tolerance_pct": ("Tolérance sous la cible (%) : le CBN ne remonte à la cible que si le stock projeté passe sous (100 − n) % de la cible ; la quantité proposée vise 100 %", None),
+    "horizon_days": ("Horizon de calcul après la date de référence (jours) : 52 semaines, fixé dans l'application", None),
+    "history_weeks": ("Affichage : semaines montrées avant la semaine en cours (réglage par utilisateur)", None),
+    "focus_weeks": ("Affichage : semaines détaillées jour par jour après la semaine en cours (réglage par utilisateur)", None),
 }
+#: rules fixed in the application (documented for the screens : the guide of the engine explains each one)
+FIXED_RULES: list[tuple[str, str]] = [
+    ("Unité de temps", "jours ouvrés pour la couverture, les seuils, le délai et l'horizon ferme (20 j ouvrés)"),
+    ("Besoin non servi", "perdu : le stock s'arrête à 0, le manque affiché est le cumul des jours sans stock"),
+    ("Stock cible", "besoin des n prochains jours ouvrés de couverture ; pas de stock de sécurité ni de cycle de commande"),
+    ("Propositions", "sur les jours de livraison du fournisseur, regroupées sur la livraison précédant le besoin ; plancher dans le délai, cible pleine ensuite ; plafonds du lien"),
+    ("Horizon", "52 semaines, tableau et PDP compris"),
+    ("Commandes comptées", "ordres fermes seulement (les prévisionnels sont affichés, jamais comptés)"),
+]
 
 
 @router.get("/config", response_model=S.ConfigOut)
@@ -261,12 +249,24 @@ def articles(planner: str | None = None, ctx: AppContext = Depends(ctx_dep)):
 
 
 @router.get("/reference/links", response_model=list[S.LinkRef])
-def links(article_id: str | None = None, ctx: AppContext = Depends(ctx_dep)):
+def links(article_id: str | None = None, supplier_id: str | None = None, ctx: AppContext = Depends(ctx_dep)):
     ds = erp_dataset(ctx.table, article_ids=[article_id] if article_id else None)
     names = {s.supplier_id: s.name for s in ds.suppliers}
-    return [S.LinkRef(article_id=l.article_id, supplier_id=l.supplier_id, supplier_name=names.get(l.supplier_id, ""),
-                      moq=l.moq, pack_qty=l.pack_qty, lead_time_days=l.lead_time_days, quota_pct=l.quota_pct,
-                      priority=l.priority, active=l.active) for l in ds.links]
+    sups = {s.supplier_id: s for s in ds.suppliers}
+    out = [S.LinkRef(article_id=l.article_id, supplier_id=l.supplier_id, supplier_name=names.get(l.supplier_id, ""),
+                     moq=l.moq, pack_qty=l.pack_qty, lead_time_days=l.lead_time(sups), lead_time_override=l.lead_time_days,
+                     quota_pct=l.quota_pct, priority=l.priority, active=l.active, max_qty_per_delivery=l.max_qty_per_delivery,
+                     max_qty_per_week=l.max_qty_per_week) for l in ds.links]
+    return [l for l in out if not supplier_id or l.supplier_id == supplier_id]
+
+
+@router.get("/reference/suppliers", response_model=list[S.SupplierRef])
+def suppliers_list(ctx: AppContext = Depends(ctx_dep)):
+    df = ctx.table("ref_suppliers")
+    return [S.SupplierRef(supplier_id=r["supplier_id"], name=r["name"], country=r["country"], contact=r["contact"],
+                          delivery_weekdays=r["delivery_weekdays"] or "1,2,3,4,5",
+                          lead_time_days=int(r["lead_time_days"]) if int(r["lead_time_days"] or 0) > 0 else 5,
+                          active=bool(r["active"])) for r in df.to_dict("records")]
 
 
 @router.get("/reference/programs", response_model=list[S.ProgramRef])
@@ -317,12 +317,18 @@ def refresh(ctx: AppContext = Depends(ctx_dep), access: Access = Depends(access_
 
 
 # ---------------------------------------------------------------- parameters
+@router.get("/params/fixed")
+def params_fixed():
+    """The rules fixed in the application, for the Paramètres screen."""
+    return [{"label": k, "value": v} for k, v in FIXED_RULES]
+
+
 @router.get("/params/schema", response_model=list[S.ParamDoc])
 def params_schema():
     defaults = EngineParams()
     out = []
     for f in dataclasses.fields(EngineParams):
-        if f.name in ("as_of", "working_weekdays"):
+        if f.name not in mrp_service.EDITABLE_GLOBAL_FIELDS:
             continue
         doc, options = PARAM_DOCS.get(f.name, (f.name, None))
         val = getattr(defaults, f.name)
@@ -352,7 +358,7 @@ def list_overrides(scope: str | None = None, key1: str | None = None, session: S
 
 
 def _check_override(scope: str, key2: str, field: str, value: Any) -> None:
-    allowed = {"global": set(mrp_service.GLOBAL_FIELDS), "article_week": set(mrp_service.ARTICLE_WEEK_FIELDS)}[scope]
+    allowed = {"global": set(mrp_service.EDITABLE_GLOBAL_FIELDS), "article_week": set(mrp_service.ARTICLE_WEEK_FIELDS)}[scope]
     if scope == "article_week" and not re.fullmatch(r"\d{4}-W\d{2}", key2 or ""):
         raise HTTPException(422, "key2 doit être une semaine ISO, ex. 2026-W40")
     if field not in allowed:

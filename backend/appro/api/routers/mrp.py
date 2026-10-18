@@ -22,7 +22,7 @@ from ..fastjson import json_response
 
 router = APIRouter(prefix="/api", tags=["mrp"])
 
-HORIZON = Query(None, ge=7, le=730)
+HORIZON = Query(None, ge=7, le=400)
 HISTORY = Query(None, ge=0, le=52)
 
 
@@ -33,6 +33,11 @@ def _kw(**kw):
 def _supplier_names(ctx: AppContext) -> dict[str, str]:
     df = ctx.table("ref_suppliers")
     return dict(zip(df["supplier_id"], df["name"]))
+
+
+def _suppliers(ctx: AppContext):
+    """Supplier records (lead time, delivery days) for the effective lead time of the links."""
+    return {s.supplier_id: s for s in erp_dataset(ctx.table).suppliers}
 
 
 def _programs_for(ctx: AppContext, article_id: str, result) -> list[dict]:
@@ -51,9 +56,8 @@ def _programs_for(ctx: AppContext, article_id: str, result) -> list[dict]:
 
 @router.get("/cockpit", response_model=S.CockpitResponse)
 def cockpit(planner: str | None = None, article_ids: list[str] | None = Query(None), horizon_days: int | None = HORIZON,
-            generate_proposals: bool | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    result = mrp_service.compute(ctx, session, planner=planner, article_ids=article_ids,
-                                 **_kw(horizon_days=horizon_days, generate_proposals=generate_proposals))
+            ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    result = mrp_service.compute(ctx, session, planner=planner, article_ids=article_ids, **_kw(horizon_days=horizon_days))
     names = _supplier_names(ctx)
     arts = sorted(result.articles.values(), key=lambda r: ({"critical": 0, "warning": 1, "info": 2}.get(r.kpis.get("severity") or "", 3),
                                                             r.kpis["coverage_plan_days"], r.article.article_id))
@@ -72,14 +76,15 @@ def cockpit(planner: str | None = None, article_ids: list[str] | None = Query(No
 
 @router.get("/articles/{article_id}/projection", response_model=S.ProjectionResponse)
 def projection(article_id: str, granularity: Literal["default", "day", "week"] = "default",
-               horizon_days: int | None = HORIZON, history_weeks: int | None = HISTORY, generate_proposals: bool | None = None,
+               horizon_days: int | None = HORIZON, history_weeks: int | None = HISTORY, focus_weeks: int | None = Query(None, ge=0, le=52),
                ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     result = mrp_service.compute(ctx, session, article_ids=[article_id],
-                                 **_kw(horizon_days=horizon_days, history_weeks=history_weeks, generate_proposals=generate_proposals))
+                                 **_kw(horizon_days=horizon_days, history_weeks=history_weeks, focus_weeks=focus_weeks))
     ar = result.articles.get(article_id)
     if ar is None:
         raise HTTPException(404, f"Article inconnu : {article_id}")
-    return json_response(P.projection_out(ar, result, granularity, _supplier_names(ctx), _programs_for(ctx, article_id, result)))
+    return json_response(P.projection_out(ar, result, granularity, _supplier_names(ctx), _programs_for(ctx, article_id, result),
+                                          suppliers=_suppliers(ctx)))
 
 
 @router.get("/articles/{article_id}/delivery-plan", response_model=S.DeliveryPlanResponse)
@@ -103,7 +108,7 @@ def _programs_of(ctx: AppContext) -> dict[str, list[str]]:
 @router.get("/grid", response_model=S.GridResponse)
 def grid(planner: str | None = None, article_ids: list[str] | None = Query(None), program_id: str | None = None,
          supplier_id: list[str] | None = Query(None), q: str | None = None, granularity: Literal["default", "day", "week"] = "default",
-         horizon_days: int | None = HORIZON, history_weeks: int | None = HISTORY,
+         horizon_days: int | None = HORIZON, history_weeks: int | None = HISTORY, focus_weeks: int | None = Query(None, ge=0, le=52),
          page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=200), sort: Literal["article", "supplier"] = "article",
          ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """One page of the supply table (same columns for every article).  Filters: articles, programme,
@@ -120,7 +125,7 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
         sup_ids = set(lk[lk["supplier_id"].isin(supplier_id)]["article_id"])
         ids = (ids & sup_ids if ids else sup_ids) or {"__none__"}
     result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
-                                 **_kw(horizon_days=horizon_days, history_weeks=history_weeks))
+                                 **_kw(horizon_days=horizon_days, history_weeks=history_weeks, focus_weeks=focus_weeks))
     names = _supplier_names(ctx)
     if sort == "supplier":
         def first_supplier(r) -> str:
@@ -134,12 +139,12 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
     total = len(arts)
     page_arts = arts[(page - 1) * page_size: page * page_size]
     return json_response(P.grid_out(result, granularity, names, _programs_of(ctx), articles=page_arts,
-                                    total=total, page=page, page_size=page_size))
+                                    total=total, page=page, page_size=page_size, suppliers=_suppliers(ctx)))
 
 
 @router.get("/backlog", response_model=list[S.BacklogRow])
 def backlog(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Supplier backlog: past firm ERP orders of the backlog window not covered by receipts."""
+    """Supplier backlog: the late firm ERP orders (delivery date passed, ERP remaining quantity open)."""
     return P.backlog_rows(mrp_service.compute(ctx, session, planner=planner))
 
 

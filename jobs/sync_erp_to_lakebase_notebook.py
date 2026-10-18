@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # APPRO — synchronisation des faits ERP vers Lakebase
 # MAGIC
-# MAGIC Copie `commandes_edi`, `recep_edi`, `desadv_edi`, les prix (`silver_base_article`), `bl_en_attente` (et, si configurées, la consommation réelle par composant et le PDP ERP)
+# MAGIC Copie `commandes_edi`, `recep_edi`, `desadv_edi`, les prix (`silver_base_article`) (et, si configurées, la consommation réelle par composant et le PDP ERP)
 # MAGIC dans les tables `erp_*` de la base Lakebase de l'application APPRO, avec le même SQL de
 # MAGIC correspondance que l'application (`backend/appro/data/erp_sql.py`).
 # MAGIC
@@ -39,7 +39,6 @@ dbutils.widgets.text("consumption_table", "conso_composants", "9. Table consomma
 dbutils.widgets.text("desadv_table", "desadv_edi", "9b. Table des avis d'expédition DESADV (vide = aucune)")
 dbutils.widgets.text("pdp_table", "", "10. Table PDP ERP (vide = aucune)")
 dbutils.widgets.text("prices_table", "silver_base_article", "11. Table des articles avec std_cost_price (vide = aucune)")
-dbutils.widgets.text("bl_pending_table", "bl_en_attente", "12. Table des BL enregistrés en attente de validation (vide = aucune)")
 
 # COMMAND ----------
 
@@ -54,7 +53,7 @@ logging.basicConfig(level=logging.INFO)
 LOG = logging.getLogger("appro.sync")
 W = {k: dbutils.widgets.get(k).strip() for k in ("lakebase_endpoint", "pg_host", "pg_database", "pg_schema", "erp_catalog",
                                                   "erp_schema", "orders_table", "receipts_table", "consumption_table", "pdp_table", "desadv_table",
-                                                  "prices_table", "bl_pending_table")}
+                                                  "prices_table")}
 
 # --- SQL de correspondance (copie de backend/appro/data/erp_sql.py : à tenir identique) ----------
 def fqn(t):
@@ -94,13 +93,6 @@ if W["prices_table"]:
     QUERIES["erp_prices"] = (["article_id", "price"], f"""
 SELECT a.item_id AS article_id, CAST(MAX(a.std_cost_price) AS DOUBLE) AS price FROM {fqn(W['prices_table'])} a
 WHERE a.item_id IS NOT NULL AND a.std_cost_price IS NOT NULL AND a.item_id LIKE 'P-00%' GROUP BY a.item_id""")
-if W["bl_pending_table"]:
-    QUERIES["erp_bl_pending"] = (["pending_id", "supplier_id", "purch_id", "packing_slip", "article_id", "qty", "registered_date", "days_pending"], f"""
-SELECT CONCAT_WS('|', b.Fournisseur, b.Commande, CASE WHEN LENGTH(COALESCE(b.BL_DESADV, '')) > 60 THEN LEFT(SHA2(b.BL_DESADV, 256), 16) ELSE COALESCE(b.BL_DESADV, '') END,
-                 b.Article, DATE_FORMAT(b.Date_enregistrement, 'yyyyMMdd')) AS pending_id,
-       b.Fournisseur AS supplier_id, b.Commande AS purch_id, b.BL_DESADV AS packing_slip, b.Article AS article_id,
-       CAST(b.Quantite AS DOUBLE) AS qty, CAST(b.Date_enregistrement AS DATE) AS registered_date, CAST(b.Jours_en_attente AS INT) AS days_pending
-FROM {fqn(W['bl_pending_table'])} b WHERE b.Article IS NOT NULL AND b.Date_enregistrement IS NOT NULL""")
 if W["pdp_table"]:
     QUERIES["erp_production_plan"] = (["program_id", "week_start", "qty", "version"], f"""
 SELECT p.program_id AS program_id, CAST(p.week_start AS DATE) AS week_start, CAST(p.qty AS DOUBLE) AS qty,
@@ -139,7 +131,7 @@ with conn.cursor() as cur:
 missing = [t for t in list(QUERIES) + ["erp_sync_log"] if t not in present]
 if missing:
     raise RuntimeError(f"Tables absentes de Lakebase : {missing}. Déployer et démarrer l'application APPRO d'abord.")
-for t in (W["orders_table"], W["receipts_table"], W["consumption_table"], W["pdp_table"], W["desadv_table"], W["prices_table"], W["bl_pending_table"]):
+for t in (W["orders_table"], W["receipts_table"], W["consumption_table"], W["pdp_table"], W["desadv_table"], W["prices_table"]):
     if t and not spark.catalog.tableExists(f"{W['erp_catalog']}.{W['erp_schema']}.{t}"):
         raise RuntimeError(f"Table source introuvable : {W['erp_catalog']}.{W['erp_schema']}.{t}")
 print("Contrôles OK")
