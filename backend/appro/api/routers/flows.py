@@ -39,13 +39,16 @@ def flows(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), sessio
 @router.get("/search", response_model=S.SearchResponse)
 def search(kind: Literal["receipts", "orders", "desadv"] = "receipts", q: str | None = None,
            date_from: dt.date | None = None, date_to: dt.date | None = None, planner: str | None = None,
-           supplier_id: str | None = None, article_id: str | None = None, limit: int = Query(SEARCH_LIMIT, ge=1, le=SEARCH_LIMIT),
-           ctx: AppContext = Depends(ctx_dep)):
-    """Search page : one kind of line at a time, free text (« ; » = or) over every text field, date range."""
+           supplier_id: str | None = None, article_id: str | None = None, link: Literal["active", "inactive"] | None = None,
+           limit: int = Query(SEARCH_LIMIT, ge=1, le=SEARCH_LIMIT), ctx: AppContext = Depends(ctx_dep)):
+    """Search page : one kind of line at a time, free text (« ; » = or) over every text field, date range ;
+    ``link`` keeps the lines whose article ↔ supplier link is active (« flux actif ») or not (« flux inactif »)."""
     ds = erp_dataset(ctx.table, planner=planner, article_ids=[article_id] if article_id else None)
     rows = P.search_rows(ds, _names(ctx), kind)
     if supplier_id:
         rows = [r for r in rows if (r.get("supplier_id") or "") == supplier_id]
+    if link:
+        rows = [r for r in rows if r["linked"] == (link == "active")]
     if date_from:
         rows = [r for r in rows if r["date"] and r["date"] >= date_from]
     if date_to:

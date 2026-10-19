@@ -24,21 +24,25 @@ function useDebounced<T>(value: T, ms: number): T {
  * first), free text where « ; » separates alternatives, a date range, a supplier ; the result is a
  * filterable table (column filters accept « ; » too).
  */
+/** « Flux actif » : an active article ↔ supplier link exists for the line ; « inactif » : none (former supplier, or a link to create). */
+type LinkFilter = "" | "active" | "inactive";
+
 export default function SearchPage() {
   const { perimeter } = usePerimeter();
-  const [st, patch] = usePageState("recherche", { kind: "receipts" as SearchKind, text: "", from: "", to: "", supplier: "" });
-  const { kind, text, from, to, supplier } = st;
+  const [st, patch] = usePageState("recherche", { kind: "receipts" as SearchKind, text: "", from: "", to: "", supplier: "", link: "" as LinkFilter });
+  const { kind, text, from, to, supplier, link } = st;
   const setKind = (kind: SearchKind) => patch({ kind }); const setText = (text: string) => patch({ text }); const setFrom = (from: string) => patch({ from }); const setTo = (to: string) => patch({ to }); const setSupplier = (supplier: string) => patch({ supplier });
   const q = useDebounced(text.trim(), 350);
   const lists = usePerimeterLists(perimeter.planner);
   const supplierOptions = useMemo(() => (lists.data?.suppliers ?? []).map((s) => ({ id: s.id, label: s.name || s.id, hint: s.id })), [lists.data]);
-  const res = useSearch({ kind, q: q || undefined, date_from: from || undefined, date_to: to || undefined, planner: perimeter.planner ?? undefined, supplier_id: supplier || undefined });
+  const res = useSearch({ kind, q: q || undefined, date_from: from || undefined, date_to: to || undefined, planner: perimeter.planner ?? undefined, supplier_id: supplier || undefined, link: link || undefined });
 
   const cols = useMemo<Column<SearchRow>[]>(() => {
     const base: Column<SearchRow>[] = [
       { key: "article", label: "Article", get: (r) => `${r.article_id} ${r.designation}`, exportGet: (r) => r.article_id, render: (r) => <ArticleLink id={r.article_id} designation={r.designation} /> },
       { key: "planner", label: "Approvisionneur", get: (r) => r.planner, filter: "select" },
       { key: "supplier", label: "Fournisseur", get: (r) => `${r.supplier_id ?? ""} ${r.supplier_name}`, title: "Code ou nom ; cliquer pour ouvrir la fiche fournisseur", render: (r) => <SupplierLink id={r.supplier_id} name={r.supplier_name} /> },
+      { key: "linked", label: "Flux", get: (r) => (r.linked ? "actif" : "inactif"), filter: "select", title: "Actif : un lien article ↔ fournisseur actif existe dans le Référentiel ; inactif : ancien fournisseur ou lien à créer", render: (r) => <Badge tone={r.linked ? "ok" : "neutral"}>{r.linked ? "actif" : "inactif"}</Badge> },
       { key: "purch", label: "Commande", get: (r) => r.purch_id ?? "" },
     ];
     const date = (label: string): Column<SearchRow> => ({ key: "date", label, get: (r) => r.date ?? "", render: (r) => fmtDate(r.date) });
@@ -74,6 +78,7 @@ export default function SearchPage() {
           <label className="row small subtle">du <input type="date" className="input sm" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Date de début" /></label>
           <label className="row small subtle">au <input type="date" className="input sm" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Date de fin" /></label>
           <SearchSelect value={supplier} onChange={setSupplier} options={supplierOptions} placeholder="Tous les fournisseurs" ariaLabel="Fournisseur" loading={lists.isLoading} />
+          <Segmented<LinkFilter> size="sm" value={link} onChange={(v) => patch({ link: v })} options={[{ id: "", label: "Tous les flux" }, { id: "active", label: "Flux actif" }, { id: "inactive", label: "Flux inactif" }]} />
           <span className="subtle small" style={{ marginLeft: "auto" }}>{res.data ? `${fmtInt(res.data.total)} ligne(s)${res.data.truncated ? ` · ${res.data.rows.length} affichées, affiner la recherche` : ""}` : res.isFetching ? "recherche…" : ""}</span>
         </div>
       </Card>

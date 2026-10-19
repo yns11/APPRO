@@ -142,7 +142,7 @@ export interface FlowsResponse {
   to_order: ProposalOut[]; ordered: OrderRow[]; in_transit: DesadvRow[]; to_process: DesadvRow[]; to_receive: OrderRow[]; received: ReceiptRow[]; late: BacklogRow[]; to_validate: PendingRow[];
 }
 export type SearchKind = "receipts" | "orders" | "desadv";
-export interface SearchRow { article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; date: string | null; qty?: number; purch_id?: string; packing_slip?: string; status?: string; order_type?: string; qty_ordered?: number; qty_open?: number; first_seen?: string | null; state?: string; final_processing?: string; received?: boolean; journal?: boolean; days_pending?: number; receipt_id?: string; order_id?: string; desadv_id?: string; pending_id?: string; }
+export interface SearchRow { article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; linked: boolean; date: string | null; qty?: number; purch_id?: string; packing_slip?: string; status?: string; order_type?: string; qty_ordered?: number; qty_open?: number; first_seen?: string | null; state?: string; final_processing?: string; received?: boolean; journal?: boolean; days_pending?: number; receipt_id?: string; order_id?: string; desadv_id?: string; pending_id?: string; }
 export interface SearchResponse { kind: SearchKind; total: number; truncated: boolean; rows: SearchRow[]; }
 
 // ---- Paramètres › Données, supplier page, generic export

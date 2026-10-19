@@ -375,7 +375,7 @@ l'en-tête de la table restent visibles pendant le défilement.
 
 L'ancienne page *Propositions CBN* est remplacée par le flux *À commander* (`/propositions` y redirige).
 
-**Recherche** : réceptions (par défaut), commandes ou DESADV du périmètre ; texte libre sur tous les champs
+**Recherche** : réceptions (par défaut), commandes ou DESADV du périmètre ; boutons *Flux actif* / *Flux inactif* (un lien article ↔ fournisseur actif existe, ou non, pour la ligne ; colonne *Flux*) ; texte libre sur tous les champs
 (« ; » = ou), période, fournisseur ; résultat en tableau filtrable par colonne (5 000 lignes au plus, affiner
 au-delà). Les filtres des pages (recherche, tableau, référentiel, flux) sont **mémorisés** entre deux visites.
 

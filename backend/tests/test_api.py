@@ -696,6 +696,14 @@ def test_search_page_queries(client):
     o = client.get("/api/search", params={"kind": "orders", "supplier_id": "S-000545", "limit": 3}).json()
     assert o["truncated"] is True and len(o["rows"]) == 3
     assert client.get("/api/search", params={"kind": "nope"}).status_code == 422
+    # « flux actif » = an active article ↔ supplier link exists for the line ; « flux inactif » otherwise
+    links = {(lk["article_id"], lk["supplier_id"]) for lk in client.get("/api/reference/ref_article_suppliers/rows").json() if lk["active"]}
+    every = client.get("/api/search", params={"kind": "orders", "planner": "QUENTIN"}).json()
+    assert all(x["linked"] == ((x["article_id"], x["supplier_id"]) in links) for x in every["rows"])
+    on = client.get("/api/search", params={"kind": "orders", "planner": "QUENTIN", "link": "active"}).json()
+    off = client.get("/api/search", params={"kind": "orders", "planner": "QUENTIN", "link": "inactive"}).json()
+    assert on["total"] + off["total"] == every["total"] and all(x["linked"] for x in on["rows"]) and not any(x["linked"] for x in off["rows"])
+    assert client.get("/api/search", params={"kind": "orders", "link": "nope"}).status_code == 422
     # « ; » also in the supply table free text : 123;456 = one or the other
     g = client.get("/api/grid", params={"planner": "QUENTIN", "q": "P-00001046 ; P-00003751"}).json()
     assert {a["article"]["article_id"] for a in g["articles"]} == {"P-00001046", "P-00003751"}

@@ -303,19 +303,22 @@ def search_rows(ds: Dataset, supplier_names: dict[str, str], kind: str) -> list[
         a = arts.get(aid)
         return {"designation": a.designation if a else "", "unit": a.unit if a else "", "planner": a.planner if a else ""}
 
-    def sup(sid: str | None) -> dict[str, Any]:
-        return {"supplier_id": sid, "supplier_name": supplier_names.get(sid or "", "")}
+    active_links = {(l.article_id, l.supplier_id) for l in ds.links if l.active}
+
+    def sup(sid: str | None, aid: str) -> dict[str, Any]:
+        """Supplier of the line and whether an active article ↔ supplier link exists (« flux actif »)."""
+        return {"supplier_id": sid, "supplier_name": supplier_names.get(sid or "", ""), "linked": (aid, sid) in active_links}
 
     if kind == "receipts":
-        return [{"receipt_id": r.receipt_id, "article_id": r.article_id, **art(r.article_id), **sup(r.supplier_id), "date": r.receipt_date,
+        return [{"receipt_id": r.receipt_id, "article_id": r.article_id, **art(r.article_id), **sup(r.supplier_id, r.article_id), "date": r.receipt_date,
                  "qty": r.qty, "purch_id": r.ref, "packing_slip": r.packing_slip, "status": r.status} for r in ds.receipts]
     if kind == "orders":
-        return [{"order_id": o.order_id, "article_id": o.article_id, **art(o.article_id), **sup(o.supplier_id), "date": o.expected_date,
+        return [{"order_id": o.order_id, "article_id": o.article_id, **art(o.article_id), **sup(o.supplier_id, o.article_id), "date": o.expected_date,
                  "order_type": o.order_type.value, "qty_ordered": o.qty_ordered, "qty_open": float(o.qty_open or 0.0), "purch_id": o.ref,
                  "first_seen": o.first_seen} for o in ds.orders]
     if kind == "desadv":
         received = _desadv_received(ds)
-        return [{"desadv_id": d.desadv_id, "article_id": d.article_id, **art(d.article_id), **sup(d.supplier_id), "date": d.issue_date,
+        return [{"desadv_id": d.desadv_id, "article_id": d.article_id, **art(d.article_id), **sup(d.supplier_id, d.article_id), "date": d.issue_date,
                  "qty": d.qty, "purch_id": d.purch_id, "packing_slip": d.packing_slip, "state": d.state, "final_processing": d.final_processing,
                  "received": d.packing_slip.strip() in received, "journal": bool(d.stock_trans_id.strip())} for d in ds.desadv]
     raise ValueError(kind)
