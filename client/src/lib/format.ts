@@ -85,6 +85,8 @@ export function fmtMinutes(min: number | null | undefined): string {
   return `${Math.floor(h / 24)} j`;
 }
 export const SEVERITY_LABELS: Record<string, string> = { critical: "Critique", warning: "À commander", info: "Info" };
+/** Kind of purchase order a receipt belongs to. */
+export const ORDER_KIND_LABELS: Record<string, string> = { co: "CO", po: "PO", other: "autre" };
 export const STATUS_LABELS: Record<string, string> = { critical: "Critique", to_order: "À commander", ok: "OK" };
 export const STATUS_TONE: Record<string, "critical" | "warning" | "ok"> = { critical: "critical", to_order: "warning", ok: "ok" };
 export const SCOPE_LABELS: Record<string, string> = { erp: "ERP", plan: "Appro.", data: "données" };

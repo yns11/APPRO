@@ -156,6 +156,16 @@ class OrderLine:
             self.qty_open = float(self.qty_ordered)
 
 
+def order_kind(purch_id: str | None) -> str:
+    """``co`` for an open order (``CO-…``), ``po`` for a closed purchase order (six digits), ``other``."""
+    ref = (purch_id or "").strip()
+    if ref.upper().startswith("CO-"):
+        return "co"
+    if len(ref) == 6 and ref.isdigit():
+        return "po"
+    return "other"
+
+
 @dataclass
 class Receipt:
     receipt_id: str
@@ -166,6 +176,8 @@ class Receipt:
     ref: str = ""
     packing_slip: str = ""         # delivery note number(s) (BL, several joined by " | ") : matched with the despatch advices
     status: str = ""               # En transit (arrival journal not validated) / Reçu (validated, not booked) / Comptabilisé (ACR validated)
+    order_kind: str = "co"         # co (open order CO-…) / po (closed order, six digits) / other
+    counted: bool = True           # counted in the Reçu row and the stock : open orders and the declared closed orders
 
     @property
     def in_transit(self) -> bool:
@@ -433,6 +445,7 @@ class ReceiptInfo:
     processed: bool
     status: str = ""               # Reçu / Comptabilisé
     booked: bool = False
+    order_kind: str = "co"         # co / po : a closed order has no DESADV, never flagged for it
 
 
 @dataclass

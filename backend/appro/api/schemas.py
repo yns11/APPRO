@@ -210,6 +210,7 @@ class ReceiptInfoOut(BaseModel):
     processed: bool
     status: str = ""
     booked: bool = False
+    order_kind: str = "co"     # co / po
 
 
 class LaneOut(BaseModel):
@@ -346,6 +347,8 @@ class ReceiptRow(BaseModel):
     purch_id: str = ""
     packing_slip: str = ""
     status: str = ""
+    order_kind: str = "co"     # co (open order) / po (closed order) / other
+    counted: bool = True       # counted in the Reçu row and the stock (open order, declared closed order)
 
 
 class DesadvRow(BaseModel):

@@ -19,6 +19,8 @@ Rules (docs/regles_metier.md § 3):
 * the **backlog** of a supplier is the Σ ERP remaining quantity of its firm orders dated before the
   reference day (the ERP decrements the remaining quantity when the arrival journal is validated) ;
   an order the planner ignored is out of the projection but still late : it stays in the backlog ;
+* only the receipts of an **open order** (``CO-…``) or of a **closed order declared** in the Référentiel
+  (``ref_closed_orders``) enter the Reçu row and the stock ; the others stay in the status views ;
 * a **receipt** is a validated arrival journal (status « Reçu », or « Comptabilisé » once the
   acknowledgement of receipt is validated) ; an arrival journal not validated yet (« En transit ») is
   shown in the Reçu row like an announced DESADV and never counted.
@@ -140,7 +142,7 @@ def unlinked_flows(lane_ids_: list[str | None], orders: list[OrderLine], receipt
             u.orders_open += 1
             u.open_qty += float(o.qty_open)
     for r in receipts:
-        if r.supplier_id not in shown and r.qty and not r.in_transit:
+        if r.supplier_id not in shown and r.qty and r.counted and not r.in_transit:
             of(r.supplier_id).receipts += 1
     for d in desadv or ():
         if d.supplier_id not in shown and d.state.strip().lower() != "annulé":
@@ -178,8 +180,9 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
 
     # ---- receipts : the validated arrival journals only (« Reçu », « Comptabilisé ») ; a journal not
     # validated yet (« En transit ») is on its way : shown, never counted
-    posted = [r for r in receipts if r.qty and not r.in_transit]
-    transit = [r for r in receipts if r.qty and r.in_transit]
+    # only the receipts that count (open orders, declared closed orders) reach the Reçu row and the stock
+    posted = [r for r in receipts if r.qty and r.counted and not r.in_transit]
+    transit = [r for r in receipts if r.qty and r.counted and r.in_transit]
     posted = [r for r in posted if lane_of(r.supplier_id) is not None]
     transit = [r for r in transit if lane_of(r.supplier_id) is not None]
     for r in posted:
@@ -263,8 +266,9 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         # the processed DESADV) is red ; the acknowledgement of receipt gives the green background
         processed = any(x in processed_bls for x in r.packing_slips)
         ln = lane_of(r.supplier_id)
-        ln.receipt_lines.append(ReceiptInfo(r.receipt_id, r.receipt_date, float(r.qty), bl, r.ref or "", processed, r.status, r.booked))
-        if not processed:
+        ln.receipt_lines.append(ReceiptInfo(r.receipt_id, r.receipt_date, float(r.qty), bl, r.ref or "", processed, r.status, r.booked,
+                                            order_kind=r.order_kind))
+        if not processed and r.order_kind != "po":          # a closed order has no DESADV : never red for that
             ln.receipts_ko[i] = True
         ln.receipts_booked[i] = True
         if not r.booked:

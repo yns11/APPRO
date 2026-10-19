@@ -9,7 +9,7 @@ Deux familles :
 
 | Famille | Tables | Source | Où elles vivent |
 |---|---|---|---|
-| **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | **gérées dans l'application** (page Référentiel : ligne par ligne, modèle Excel par table, modification en lot ; fiche article › Paramétrage) | base applicative (Lakebase ; SQLite en local) |
+| **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | **gérées dans l'application** (page Référentiel : ligne par ligne, modèle Excel par table, modification en lot ; fiche article › Paramétrage) | base applicative (Lakebase ; SQLite en local) |
 | **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_desadv`, `fct_production_plan` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
 
 ## 1. Référentiel (géré dans l'application)
@@ -91,6 +91,22 @@ Reçu, Plan) ; les stocks sont sommés. Les plafonds et le délai spécifique so
 
 Consommation dérivée = Σ coef × consommation déclarée des sources ; sans terme, la consommation ERP de
 l'article est utilisée. Les boucles sont refusées.
+
+### 1.3 ter `ref_closed_orders` — Commandes fermées (PO)
+
+| Colonne | Libellé | Type | Obligatoire | Description |
+|---|---|---|---|---|
+| purch_id | N° de PO | texte **clé** | oui | numéro de la commande fermée ponctuelle : **six chiffres** (`024596`) ; une commande ouverte (`CO-…`) est refusée, elle compte déjà |
+| supplier_id | Fournisseur | texte | non | information |
+| article_id | Article | texte | non | information (article principal ; vide = tous) |
+| note | Commentaire | texte | non | |
+| active | Actif | booléen | oui | inactif : la PO ne compte plus |
+
+Règle : une réception ERP n'entre dans la ligne *Reçu* et le stock que si sa commande (`fct_receipts.purch_id`)
+est une commande ouverte (`CO-…`) ou une PO déclarée ici et active. Toute autre réception (PO non déclarée,
+demande d'achat, régularisation) reste visible dans *Recherche*, les flux et la fiche fournisseur. Colonnes
+calculées dans le Référentiel : réceptions ERP portant le numéro (nombre, quantité, dernière date, articles,
+fournisseurs). Depuis *Recherche*, le bouton « Déclarer la PO » d'une réception non comptée crée la ligne.
 
 ### 1.4 `ref_programs` — Programmes
 
@@ -329,7 +345,7 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 
 | Table | Contenu | Clé |
 |---|---|---|
-| `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) + `updated_by`, `updated_at` ; les colonnes ajoutées sont créées au démarrage (`ensure_columns`), les anciennes (stock de sécurité, cycle de commande, délai du lien) ignorées puis supprimables ; un 0 hérité dans un délai spécifique ou un plafond est remis à vide au démarrage | clé de la table |
+| `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) + `updated_by`, `updated_at` ; les colonnes ajoutées sont créées au démarrage (`ensure_columns`), les anciennes (stock de sécurité, cycle de commande, délai du lien) ignorées puis supprimables ; un 0 hérité dans un délai spécifique ou un plafond est remis à vide au démarrage | clé de la table |
 | `app_meta` | clé / valeur partagées par tous les processus de l'App : `data_version`, incrémentée à chaque écriture pour invalider les caches mémoire de chaque worker | key |
 | `app_plan_cells` | **cellules du plan** : article, fournisseur (`""` si aucun), date, expression saisie, quantité, commentaire, auteur | (article, fournisseur, date) |
 | `app_adjustments` | **cellules d'ajustement** : article, date (toute date), expression, quantité signée, commentaire, auteur | (article, date) |

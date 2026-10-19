@@ -130,7 +130,7 @@ date passée.
 | Colonne `recep_edi` | Type attendu | Colonne canonique | Transformation |
 |---|---|---|---|
 | `Code_fournisseur` | texte | `supplier_id` | tel quel ; entre dans `receipt_id` |
-| `Commande` | texte | `purch_id` | tel quel ; entre dans `receipt_id` |
+| `Commande` | texte | `purch_id` | tel quel ; entre dans `receipt_id` ; **toutes** les commandes sont extraites (ouvertes `CO-…`, fermées à six chiffres, autres) : l'application décide ce qui compte dans le stock (commandes ouvertes et PO déclarées dans `ref_closed_orders`), le reste n'est visible que dans Recherche, les flux et la fiche fournisseur |
 | `BL` | texte | `packing_slip` | tel quel, **entier** ; dans `receipt_id`, remplacé par `LEFT(SHA2(BL, 256), 16)` si plus de 60 caractères (plusieurs BL séparés par ` \| `) |
 | `Article` | texte | `article_id` | tel quel ; entre dans `receipt_id` |
 | `Date_reception` | date | `receipt_date` | tronquée au jour ; `yyyyMMdd` dans `receipt_id` |

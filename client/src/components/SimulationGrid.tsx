@@ -391,7 +391,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         const inCol = (d: DesadvInfo, i: number) => columnOf(cols, d.issue_date) === i;
         const openOf = (i: number) => l.desadv.filter((d) => inCol(d, i) && !d.received && !d.hidden && !d.journaled);
         const receiptsOf = (i: number) => (l.receipt_lines ?? []).filter((x: ReceiptInfo) => columnOf(cols, x.receipt_date) === i);
-        const bl = (x: { packing_slip: string }) => (x.packing_slip ? `BL ${x.packing_slip}` : NO_BL);
+        const bl = (x: { packing_slip: string; order_kind?: string; purch_id?: string }) => `${x.packing_slip ? `BL ${x.packing_slip}` : NO_BL}${x.order_kind === "po" ? ` · PO ${x.purch_id ?? ""} (commande fermée déclarée)` : ""}`;
         const acr = (x: ReceiptInfo) => (x.booked ? "comptabilisé" : `ACR à valider${(() => { const d = Math.round((new Date(cols.as_of).getTime() - new Date(x.receipt_date).getTime()) / 86400000); return d >= 7 ? ` depuis ${d} j` : ""; })()}`);
         // why a receipt carries a red dot: manual receipt (no BL) or a BL unknown to the processed DESADV
         const recKoReason = (xs: ReceiptInfo[]) => {

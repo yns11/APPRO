@@ -226,8 +226,8 @@ def test_params_overrides(client):
 def test_reference_crud_template_and_import(client):
     tables = client.get("/api/reference/tables").json()
     names = {t["name"]: t for t in tables}
-    assert set(names) == {"ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_consumption_terms", "ref_programs", "ref_bom",
-                          "fct_stock", "ref_planners", "ref_delegations"}
+    assert set(names) == {"ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_consumption_terms", "ref_closed_orders", "ref_programs",
+                          "ref_bom", "fct_stock", "ref_planners", "ref_delegations"}
     assert names["ref_articles"]["rows"] == 16 and names["ref_suppliers"]["rows"] == 11 and names["ref_programs"]["rows"] == 25
     assert names["ref_articles"]["key"] == ["article_id"] and any(c["label"] == "Couverture cible (j ouvrés)" for c in names["ref_articles"]["columns"])
     # edit a threshold directly: the engine sees it
@@ -998,3 +998,38 @@ def test_consumption_terms_are_validated(client):
         # the reverse term would loop (and the source is not eligible from the other side once derived)
         rev = client.put("/api/reference/ref_consumption_terms/rows", json={"values": {"article_id": src, "source_article_id": AID, "coef": 1}})
         assert rev.status_code == 422
+
+
+def test_closed_orders_declared_receipts_count_in_the_stock(client):
+    """Only the receipts of an open order (CO-…) or of a closed order (PO, six digits) declared in the
+    Référentiel enter the Reçu row and the stock ; the others stay in the search and the flows."""
+    art, day = "P-00005775", "2026-09-19"
+    rows = client.get("/api/reference/ref_closed_orders/rows").json()
+    assert [r["purch_id"] for r in rows] == ["024596"] and rows[0]["receipt_count"] == 1 and rows[0]["receipt_qty"] == 1000
+    assert rows[0]["last_receipt"] == day and rows[0]["receipt_articles"] == art and rows[0]["receipt_suppliers"] == "S-000032"
+    # the search shows every receipt, with its kind and whether it counts
+    rec = client.get("/api/search", params={"kind": "receipts", "article_id": art, "date_from": day}).json()["rows"]
+    kinds = {r["purch_id"]: (r["order_kind"], r["counted"]) for r in rec}
+    assert kinds["024596"] == ("po", True) and kinds["024597"] == ("po", False)
+    assert all(v[1] for k, v in kinds.items() if k.startswith("CO-"))
+    po = client.get("/api/search", params={"kind": "receipts", "article_id": art, "order": "po"}).json()["rows"]
+    other = client.get("/api/search", params={"kind": "receipts", "article_id": art, "order": "other"}).json()["rows"]
+    assert {r["purch_id"] for r in po} == {"024596"} and {r["purch_id"] for r in other} == {"024597"}
+    # the undeclared PO does not reach the Reçu row ; declaring it adds its 500
+    def receipts_on(d: str) -> float:
+        proj = client.get(f"/api/articles/{art}/projection", params={"granularity": "day"}).json()
+        i = proj["periods"].index(d)
+        return sum(next(x["values"][i] for x in lane["series"] if x["key"] == "receipts") for lane in proj["lanes"])
+    before = receipts_on(day)
+    lanes = client.get(f"/api/articles/{art}/projection", params={"granularity": "day"}).json()["lanes"]
+    lines = {x["purch_id"]: x for lane in lanes for x in lane["receipt_lines"] if x["receipt_date"] == day}
+    assert "024596" in lines and lines["024596"]["order_kind"] == "po" and "024597" not in lines
+    assert client.put("/api/reference/ref_closed_orders/rows", json={"values": {"purch_id": "024597", "active": True}}).status_code == 200
+    assert receipts_on(day) == before + 500
+    # validation : six digits, never an open order
+    bad = client.put("/api/reference/ref_closed_orders/rows", json={"values": {"purch_id": "CO-000001", "active": True}})
+    assert bad.status_code == 422 and "commande ouverte" in bad.json()["detail"]
+    assert client.put("/api/reference/ref_closed_orders/rows", json={"values": {"purch_id": "24596", "active": True}}).status_code == 422
+    # deactivating the declaration takes the receipt out again
+    assert client.put("/api/reference/ref_closed_orders/rows", json={"values": {"purch_id": "024597", "active": False}}).status_code == 200
+    assert receipts_on(day) == before

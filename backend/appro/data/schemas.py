@@ -109,6 +109,15 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("source_article_id", "str", "Article source", "article dont la consommation déclarée sert de base", True, "P-00041210"),
            Column("coef", "float", "Coefficient", "quantité d'article consommée par unité d'article source", True, 2),
        ]),
+    _t("ref_closed_orders", "Commandes fermées (PO)", "Commandes fermées ponctuelles (PO, six chiffres) dont les réceptions comptent dans la ligne Reçu "
+       "et le stock, comme celles des commandes ouvertes (CO-…). Les réceptions de toute autre commande restent visibles "
+       "dans Recherche, les flux et la fiche fournisseur sans entrer dans le stock.", ("purch_id",), [
+           Column("purch_id", "str", "N° de PO", "numéro de la commande fermée (six chiffres)", True, "024596"),
+           Column("supplier_id", "str", "Fournisseur", "information : fournisseur de la PO", False, "S-000545"),
+           Column("article_id", "str", "Article", "information : article principal de la PO (vide = tous)", False, "P-00038992"),
+           Column("note", "str", "Commentaire", "", False, "flux dégradé en attente de CO"),
+           Column("active", "bool", "Actif", "inactif : la PO ne compte plus", True, True),
+       ]),
     _t("ref_programs", "Programmes", "Programmes de production (PF / SF) tels que nommés dans le PDP.", ("program_id",), [
         Column("program_id", "str", "Programme", "identifiant (mass-000…)", True, "mass-00040633"),
         Column("name", "str", "Nom", "nom utilisé dans le fichier PDP", True, "Stators M3"),

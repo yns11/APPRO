@@ -738,3 +738,22 @@ def test_programme_scrap_rate_raises_the_weekly_need_before_the_bom():
     week = lambda res, i: sum(res.demand[i:i + 7])  # noqa: E731
     assert week(r, i0) == week(base, i0)
     assert week(r, i1) == pytest.approx(week(base, i1) * 1.1) == pytest.approx(1100.0)
+
+
+def test_only_counted_receipts_reach_the_lanes_and_a_closed_order_is_never_flagged_for_desadv():
+    """``counted`` (open order, declared closed order) decides whether a receipt enters the Reçu row and the
+    stock ; a receipt of a closed order has no DESADV and never gets the red dot for that."""
+    from appro.engine.models import order_kind
+    assert order_kind("CO-000123") == "co" and order_kind("024596") == "po" and order_kind("PO-1") == "other" and order_kind("") == "other"
+    tue, wed = MON - D(days=6), MON - D(days=5)
+    ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=10), 1000.0)],
+                      receipts=[Receipt("R1", "A1", tue, 300, supplier_id="S1", ref="CO-1", packing_slip="", order_kind="co", counted=True),
+                                Receipt("R2", "A1", wed, 100, supplier_id="S1", ref="024596", packing_slip="", order_kind="po", counted=True),
+                                Receipt("R3", "A1", wed, 999, supplier_id="S1", ref="024597", packing_slip="", order_kind="po", counted=False)])
+    r = run(ds, no_cbn=True, horizon_days=5)
+    i = r.dates.index(MON)
+    lane = r.lanes[0]
+    assert lane.receipts[i - 6] == 300 and lane.receipts[i - 5] == 100 and sum(r.receipts) == 400
+    assert [x.purch_id for x in lane.receipt_lines] == ["CO-1", "024596"]
+    assert bool(lane.receipts_ko[i - 6]) and not bool(lane.receipts_ko[i - 5])     # manual CO receipt red, PO receipt neutral
+    assert r.stock_erp[i - 5] == r.stock_erp[i - 6] + 100 - r.demand[i - 5]

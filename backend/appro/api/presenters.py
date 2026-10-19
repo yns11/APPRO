@@ -233,7 +233,7 @@ def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], pl
     def receipt_row(r) -> S.ReceiptRow:
         return S.ReceiptRow(receipt_id=r.receipt_id, article_id=r.article_id, **art(r.article_id), supplier_id=r.supplier_id,
                             supplier_name=supplier_names.get(r.supplier_id or "", ""), receipt_date=r.receipt_date, qty=r.qty,
-                            purch_id=r.ref, packing_slip=r.packing_slip, status=r.status)
+                            purch_id=r.ref, order_kind=r.order_kind, counted=r.counted, packing_slip=r.packing_slip, status=r.status)
 
     received_bls = _desadv_received(ds)
 
@@ -311,7 +311,8 @@ def search_rows(ds: Dataset, supplier_names: dict[str, str], kind: str) -> list[
 
     if kind == "receipts":
         return [{"receipt_id": r.receipt_id, "article_id": r.article_id, **art(r.article_id), **sup(r.supplier_id, r.article_id), "date": r.receipt_date,
-                 "qty": r.qty, "purch_id": r.ref, "packing_slip": r.packing_slip, "status": r.status} for r in ds.receipts]
+                 "qty": r.qty, "purch_id": r.ref, "packing_slip": r.packing_slip, "status": r.status,
+                 "order_kind": r.order_kind, "counted": r.counted} for r in ds.receipts]
     if kind == "orders":
         return [{"order_id": o.order_id, "article_id": o.article_id, **art(o.article_id), **sup(o.supplier_id, o.article_id), "date": o.expected_date,
                  "order_type": o.order_type.value, "qty_ordered": o.qty_ordered, "qty_open": float(o.qty_open or 0.0), "purch_id": o.ref,

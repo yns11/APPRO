@@ -29,6 +29,9 @@ const QUICK_FILTERS: Record<string, { id: string; label: string; title: string; 
     { id: "caps", label: "Plafonnés", title: "Liens avec un plafond par livraison ou par semaine", test: (r) => r.max_qty_per_delivery != null && r.max_qty_per_delivery !== "" || r.max_qty_per_week != null && r.max_qty_per_week !== "" },
     { id: "override", label: "Délai spécifique", title: "Liens avec un délai différent de celui du fournisseur", test: (r) => r.lead_time_override != null && r.lead_time_override !== "" },
   ],
+  ref_closed_orders: [
+    { id: "no_receipt", label: "Sans réception", title: "PO déclarées qu'aucune réception ERP ne porte (numéro à vérifier)", test: (r) => Number(r.receipt_count ?? 0) === 0 },
+  ],
   ref_programs: [
     { id: "no_bom", label: "Sans nomenclature", title: "Programmes sans composant dans les nomenclatures", test: (r) => Number(r.article_count ?? 0) === 0 },
     { id: "no_plan", label: "Sans plan", title: "Programmes sans quantité planifiée à partir de la semaine en cours (PDP ERP ou version active)", test: (r) => !r.has_plan },
@@ -90,6 +93,10 @@ export default function ReferencePage() {
     if (table.name === "ref_articles") after("programs", { key: "supplier_count", label: "Fourn.", title: "Nombre de fournisseurs actifs (colonne calculée)", num: true, get: (r) => Number(r.supplier_count ?? 0) });
     if (table.name === "ref_suppliers") after("name", { key: "articles", label: "Articles", title: "Articles reliés au fournisseur par une règle active (colonne calculée)", get: (r) => (r.articles as string) ?? "", render: (r) => <>{Number(r.article_count ?? 0) ? <b style={{ marginRight: 6 }}>{Number(r.article_count)} ·</b> : null}{list(r.articles, 300)}</> });
     if (table.name === "ref_programs") after("name", { key: "article_count", label: "Articles", title: "Nombre de composants dans la nomenclature (colonne calculée)", num: true, get: (r) => Number(r.article_count ?? 0) });
+    if (table.name === "ref_closed_orders") {
+      after("purch_id", { key: "receipts", label: "Réceptions ERP", title: "Réceptions de l'ERP portant ce numéro de PO, journaux en transit exclus (colonne calculée)", num: true, get: (r) => Number(r.receipt_count ?? 0), render: (r) => Number(r.receipt_count ?? 0) ? <span className="cell-2l"><b>{Number(r.receipt_count)} · {fmtQty(Number(r.receipt_qty ?? 0))}</b><span className="sub">dernière le {fmtDate(String(r.last_receipt ?? ""))}</span></span> : <Badge tone="warning">aucune</Badge> });
+      after("receipts", { key: "receipt_articles", label: "Articles reçus", title: "Articles et fournisseurs des réceptions portant ce numéro (colonne calculée)", get: (r) => `${r.receipt_articles ?? ""} ${r.receipt_suppliers ?? ""}`, render: (r) => <span className="cell-2l"><span>{list(r.receipt_articles, 220)}</span><span className="sub">{String(r.receipt_suppliers ?? "")}</span></span> });
+    }
     if (table.name === "ref_articles") out.push({ key: "weeks", label: "", get: () => "", filter: "none", sortable: false, export: false, render: (r) => <Button size="sm" variant="ghost" title="Politique de stock semaine par semaine" onClick={(e) => { e.stopPropagation(); setWeeklyOf({ id: String(r.article_id), planner: r.planner == null ? null : String(r.planner) }); }}><CalendarDays /></Button> });
     if (table.name !== "ref_articles") out.push({ key: "who", label: "Modifié", get: (r) => `${r.updated_by ?? ""} ${r.updated_at ?? ""}`, render: (r) => <span className="subtle small">{r.updated_by}{r.updated_at ? <><br />{fmtDateTime(r.updated_at)}</> : null}</span> });
     if (rights.canEditTable(table.name)) out.push({ key: "del", label: "", get: () => "", filter: "none", sortable: false, export: false, render: (r) => <Button size="sm" variant="ghost" title="Supprimer" onClick={(e) => { e.stopPropagation(); if (window.confirm("Supprimer cette ligne ?")) del.mutate({ name: table.name, key: Object.fromEntries(table.key.map((k) => [k, r[k]])) }); }}><Trash2 /></Button> });
@@ -103,7 +110,7 @@ export default function ReferencePage() {
   return (
     <div className="page">
       <div className="page-header sticky">
-        <div className="title"><h1>Référentiel</h1><p>Articles, fournisseurs, règles article ↔ fournisseur, termes de consommation, programmes, nomenclatures, stock de référence, approvisionneurs et délégations : ligne par ligne, par fichier Excel (modèle à télécharger, puis importer) ou en lot sur les lignes filtrées. Le paramétrage d'un article se fait aussi depuis sa fiche (onglet Paramétrage).{rights.access && !rights.canWrite ? " Lecture seule : vous n'êtes pas déclaré comme approvisionneur." : ""}</p></div>
+        <div className="title"><h1>Référentiel</h1><p>Articles, fournisseurs, règles article ↔ fournisseur, termes de consommation, commandes fermées (PO), programmes, nomenclatures, stock de référence, approvisionneurs et délégations : ligne par ligne, par fichier Excel (modèle à télécharger, puis importer) ou en lot sur les lignes filtrées. Le paramétrage d'un article se fait aussi depuis sa fiche (onglet Paramétrage).{rights.access && !rights.canWrite ? " Lecture seule : vous n'êtes pas déclaré comme approvisionneur." : ""}</p></div>
         {tables.data && <Tabs value={tab} onChange={(t) => { setTab(t); setReport(null); }} tabs={[...tables.data.map((t) => ({ id: t.name, label: t.label, count: t.rows })), { id: "pdp_erp", label: "PDP ERP" }]} />}
       </div>
       {tables.isError ? <ErrorBox error={tables.error} /> : tables.isLoading || !tables.data ? <SkeletonBlock /> : (

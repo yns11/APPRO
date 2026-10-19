@@ -20,6 +20,7 @@ from ..engine.models import (
     StockSnapshot,
     Supplier,
     SupplierLink,
+    order_kind,
 )
 from .schemas import as_date, parse_weekdays
 
@@ -126,9 +127,17 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
                         qty_open=float(r["qty_open"]), order_type=OrderType(r["order_type"] or "FIRM"), ref=r["purch_id"],
                         first_seen=as_date(r.get("first_seen")))
               for r in _records(t("fct_purchase_orders")) if r["article_id"] in ids and r["expected_date"]]
-    receipts = [Receipt(r["receipt_id"], r["article_id"], as_date(r["receipt_date"]), float(r["qty"]),
-                        r["supplier_id"] or None, r["purch_id"], str(r.get("packing_slip") or ""), str(r.get("status") or ""))
-                for r in _records(t("fct_receipts")) if r["article_id"] in ids and r["receipt_date"]]
+    # receipts counted in the stock : those of an open order (CO-…) and of the closed orders (PO) declared in
+    # the Référentiel ; every other receipt stays visible (search, flows, supplier page) without counting
+    declared = {str(r["purch_id"]).strip() for r in _records(t("ref_closed_orders")) if bool(r.get("active", True))}
+    receipts = []
+    for r in _records(t("fct_receipts")):
+        if r["article_id"] not in ids or not r["receipt_date"]:
+            continue
+        kind = order_kind(r["purch_id"])
+        receipts.append(Receipt(r["receipt_id"], r["article_id"], as_date(r["receipt_date"]), float(r["qty"]),
+                                r["supplier_id"] or None, r["purch_id"], str(r.get("packing_slip") or ""), str(r.get("status") or ""),
+                                order_kind=kind, counted=kind == "co" or (kind == "po" and str(r["purch_id"]).strip() in declared)))
     desadv = [DesadvLine(r["desadv_id"], r["article_id"], r["supplier_id"] or None, str(r["packing_slip"] or ""),
                          as_date(r["issue_date"]), float(r["qty"] or 0.0), str(r.get("purch_id") or ""),
                          str(r.get("state") or ""), str(r.get("final_processing") or ""), str(r.get("stock_trans_id") or ""))

@@ -88,6 +88,14 @@ def _check_rows(session: Session, name: str, rows: list[dict], replace: bool) ->
             validation.check_links(rows, sups)
         elif name == "ref_consumption_terms":
             validation.check_terms(session, rows, replace=replace)
+        elif name == "ref_closed_orders":
+            for r in rows:
+                ref = str(r.get("purch_id") or "").strip()
+                if ref.upper().startswith("CO-"):
+                    raise ValueError(f"{ref} : une commande ouverte (CO-…) compte déjà, seule une commande fermée (PO) se déclare")
+                if not (len(ref) == 6 and ref.isdigit()):
+                    raise ValueError(f"{ref or '(vide)'} : un numéro de PO compte six chiffres (exemple 024596)")
+                r["purch_id"] = ref
         elif name == "ref_suppliers":
             for r in rows:
                 lead = r.get("lead_time_days")
@@ -149,7 +157,9 @@ def query_columns(ctx: AppContext, session: Session, name: str, out: list[dict])
       ``program_count``, ``supplier_count`` (active article ↔ supplier rules) ;
     * suppliers : ``articles`` (ids of the articles with an active rule for the supplier), ``article_count`` ;
     * programmes : ``article_count`` (components of the bill of material), ``has_plan`` (a quantity
-      planned from the current week on, PDP ERP or active version)."""
+      planned from the current week on, PDP ERP or active version) ;
+    * closed orders (PO) : ``receipt_count``, ``receipt_qty``, ``last_receipt``, ``receipt_suppliers``,
+      ``receipt_articles`` (the ERP receipts carrying that PO number, journals in transit excluded)."""
     if name == "ref_articles":
         names = {p["program_id"]: str(p.get("name") or p["program_id"]) for p in reference.rows_out(session, "ref_programs")}
         progs: dict[str, set[str]] = {}
@@ -170,6 +180,30 @@ def query_columns(ctx: AppContext, session: Session, name: str, out: list[dict])
         for r in out:
             found = sorted(arts.get(r["supplier_id"], ()))
             r["articles"], r["article_count"] = ", ".join(found), len(found)
+    elif name == "ref_closed_orders":
+        # receipts of the ERP carrying that PO number : count, quantity, last date, suppliers and articles
+        rec = ctx.table("fct_receipts")
+        rec = rec[rec["purch_id"].astype(str).str.strip().isin({str(r["purch_id"]).strip() for r in out})] if len(rec) else rec
+        by_po: dict[str, dict] = {}
+        for x in rec.to_dict("records"):
+            key = str(x["purch_id"]).strip()
+            d = by_po.setdefault(key, {"n": 0, "qty": 0.0, "last": None, "sup": set(), "art": set()})
+            if "transit" in str(x.get("status") or "").lower():
+                continue
+            d["n"] += 1
+            d["qty"] += float(x["qty"] or 0.0)
+            day = x.get("receipt_date")
+            d["last"] = max(d["last"], day) if d["last"] and day else (day or d["last"])
+            if x.get("supplier_id"):
+                d["sup"].add(str(x["supplier_id"]))
+            d["art"].add(str(x["article_id"]))
+        for r in out:
+            d = by_po.get(str(r["purch_id"]).strip())
+            r["receipt_count"] = d["n"] if d else 0
+            r["receipt_qty"] = d["qty"] if d else 0.0
+            r["last_receipt"] = (d["last"].isoformat() if hasattr(d["last"], "isoformat") else str(d["last"])) if d and d["last"] else None
+            r["receipt_suppliers"] = ", ".join(sorted(d["sup"])) if d else ""
+            r["receipt_articles"] = ", ".join(sorted(d["art"])) if d else ""
     elif name == "ref_programs":
         from .pdp import _sheet_frame
         counts: dict[str, int] = {}

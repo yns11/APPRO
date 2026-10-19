@@ -39,7 +39,9 @@ export interface SeriesOut { key: string; label: string; values: number[]; }
 /** An announced DESADV (``source`` desadv) or an arrival journal not validated yet (``source`` journal) : « En transit » in the Reçu row. */
 export interface DesadvInfo { desadv_id: string; packing_slip: string; issue_date: string; qty: number; state: string; final_processing: string; processed: boolean; received: boolean; hidden: boolean; purch_id: string; journaled: boolean; source: "desadv" | "journal"; }
 /** A validated receipt : ``processed`` = announced by a processed DESADV (green dot), ``booked`` = acknowledgement of receipt validated (green background). */
-export interface ReceiptInfo { receipt_id: string; receipt_date: string; qty: number; packing_slip: string; purch_id: string; processed: boolean; status: string; booked: boolean; }
+export interface ReceiptInfo { receipt_id: string; receipt_date: string; qty: number; packing_slip: string; purch_id: string; processed: boolean; status: string; booked: boolean; order_kind: OrderKind; }
+/** co : open order (CO-…) ; po : closed purchase order (six digits) ; other : anything else */
+export type OrderKind = "co" | "po" | "other";
 export interface LaneOut { supplier_id: string | null; name: string; linked: boolean; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; desadv_ko: boolean[]; receipts_ko: boolean[]; receipts_booked: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; desadv: DesadvInfo[]; receipt_lines: ReceiptInfo[]; }
 
 /** critical : coverage « à date » ≤ red + 1 working day, order date past or negative stock ; to_order : an
@@ -133,7 +135,7 @@ export interface PdpSheetOut { as_of: string; current_week: string; active_versi
 
 // ---- supply flows (cockpit tab 2) and search page
 export interface OrderRow { order_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; purch_id: string; ignored: boolean; first_seen: string | null; }
-export interface ReceiptRow { receipt_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; receipt_date: string; qty: number; purch_id: string; packing_slip: string; status: string; }
+export interface ReceiptRow { receipt_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; receipt_date: string; qty: number; purch_id: string; packing_slip: string; status: string; order_kind: OrderKind; counted: boolean; }
 export interface DesadvRow { desadv_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; packing_slip: string; purch_id: string; issue_date: string; qty: number; state: string; final_processing: string; received: boolean; journal: boolean; issue: string; }
 export interface PendingRow { pending_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; purch_id: string; packing_slip: string; qty: number; registered_date: string; days_pending: number; }
 export type FlowKey = "to_order" | "ordered" | "in_transit" | "to_process" | "to_receive" | "received" | "late" | "to_validate";
@@ -142,7 +144,7 @@ export interface FlowsResponse {
   to_order: ProposalOut[]; ordered: OrderRow[]; in_transit: DesadvRow[]; to_process: DesadvRow[]; to_receive: OrderRow[]; received: ReceiptRow[]; late: BacklogRow[]; to_validate: PendingRow[];
 }
 export type SearchKind = "receipts" | "orders" | "desadv";
-export interface SearchRow { article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; linked: boolean; date: string | null; qty?: number; purch_id?: string; packing_slip?: string; status?: string; order_type?: string; qty_ordered?: number; qty_open?: number; first_seen?: string | null; state?: string; final_processing?: string; received?: boolean; journal?: boolean; days_pending?: number; receipt_id?: string; order_id?: string; desadv_id?: string; pending_id?: string; }
+export interface SearchRow { article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; linked: boolean; date: string | null; qty?: number; purch_id?: string; order_kind?: OrderKind; counted?: boolean; packing_slip?: string; status?: string; order_type?: string; qty_ordered?: number; qty_open?: number; first_seen?: string | null; state?: string; final_processing?: string; received?: boolean; journal?: boolean; days_pending?: number; receipt_id?: string; order_id?: string; desadv_id?: string; pending_id?: string; }
 export interface SearchResponse { kind: SearchKind; total: number; truncated: boolean; rows: SearchRow[]; }
 
 // ---- Paramètres › Données, supplier page, generic export

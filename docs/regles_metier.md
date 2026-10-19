@@ -142,6 +142,14 @@ dans aucun stock). Ces jours ignorés sont listés dans *Saisies & journal* et c
 
 ### 3.3 ter La ligne Reçu : journaux d'arrivée, réceptions et avis d'expédition (DESADV)
 
+**Quelles réceptions comptent.** L'ERP fournit toutes les réceptions, quelle que soit la commande. Seules
+entrent dans la ligne *Reçu* et le stock celles d'une **commande ouverte** (`CO-…`) et celles d'une **commande
+fermée (PO, six chiffres) déclarée** dans *Référentiel › Commandes fermées (PO)* et active : c'est le flux
+dégradé (demande d'achat puis PO ponctuelle) en attendant une commande ouverte. Toute autre réception reste
+visible dans *Recherche* (filtres CO / PO déclarée / autres, bouton « Déclarer la PO »), les flux et la fiche
+fournisseur, sans entrer dans le stock. Une PO n'ayant pas de DESADV, ses réceptions ne sont jamais marquées
+rouge pour BL non annoncé, et l'info-bulle les signale « PO … (commande fermée déclarée) ».
+
 Une ligne de `recep_edi` est un **journal d'arrivée** de l'ERP, porteur d'un statut :
 
 | Statut | État ERP | Dans l'application |

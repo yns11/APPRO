@@ -27,7 +27,7 @@ ARTICLE_TABLES = ("ref_articles", "ref_article_suppliers", "ref_bom", "fct_stock
 # tables reserved to admins (a manager edits the others as a whole)
 ADMIN_TABLES = ("ref_planners",)
 # reference tables every declared user may edit and import as a whole while OPEN_REFERENCE is set
-OPEN_TABLES = ("ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_consumption_terms", "ref_programs", "ref_bom", "fct_stock")
+OPEN_TABLES = ("ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_consumption_terms", "ref_closed_orders", "ref_programs", "ref_bom", "fct_stock")
 OPEN_REFERENCE = True
 
 

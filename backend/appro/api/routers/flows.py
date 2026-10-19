@@ -40,15 +40,21 @@ def flows(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), sessio
 def search(kind: Literal["receipts", "orders", "desadv"] = "receipts", q: str | None = None,
            date_from: dt.date | None = None, date_to: dt.date | None = None, planner: str | None = None,
            supplier_id: str | None = None, article_id: str | None = None, link: Literal["active", "inactive"] | None = None,
+           order: Literal["co", "po", "other"] | None = None,
            limit: int = Query(SEARCH_LIMIT, ge=1, le=SEARCH_LIMIT), ctx: AppContext = Depends(ctx_dep)):
     """Search page : one kind of line at a time, free text (« ; » = or) over every text field, date range ;
-    ``link`` keeps the lines whose article ↔ supplier link is active (« flux actif ») or not (« flux inactif »)."""
+    ``link`` keeps the lines whose article ↔ supplier link is active (« flux actif ») or not (« flux inactif ») ;
+    ``order`` (receipts) keeps the open orders, the declared closed orders, or the receipts that do not count."""
     ds = erp_dataset(ctx.table, planner=planner, article_ids=[article_id] if article_id else None)
     rows = P.search_rows(ds, _names(ctx), kind)
     if supplier_id:
         rows = [r for r in rows if (r.get("supplier_id") or "") == supplier_id]
     if link:
         rows = [r for r in rows if r["linked"] == (link == "active")]
+    if order and kind == "receipts":
+        # co : open orders ; po : closed orders declared in the Référentiel (counted) ; other : everything that does not count
+        rows = [r for r in rows if (r["order_kind"] == "co" if order == "co" else r["order_kind"] == "po" and r["counted"] if order == "po"
+                                    else not r["counted"])]
     if date_from:
         rows = [r for r in rows if r["date"] and r["date"] >= date_from]
     if date_to:
