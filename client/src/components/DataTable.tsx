@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Download, FilterX } from "lucide-react";
+import { Columns3, Download, FilterX } from "lucide-react";
 import { Empty, useToast } from "@/components/ui";
 import { exportTable, looksLikeDate } from "@/lib/exportTable";
 import { fmtQty } from "@/lib/format";
@@ -25,6 +25,8 @@ export interface Column<T> {
   export?: ExportType | false;
   /** Excel export : value written in the cell (default : ``get``) */
   exportGet?: (row: T) => string | number | boolean | null | undefined;
+  /** hidden until the reader shows it from the « Colonnes » menu (remembered per ``storageKey``) */
+  hidden?: boolean;
 }
 
 /** Number filter: ``>100``, ``<=5``, ``100-200``, ``=0`` or a plain number (exact). */
@@ -70,11 +72,13 @@ export function applyFilters<T>(rows: T[], columns: Column<T>[], filters: Record
 }
 
 type Sort = { key: string; dir: 1 | -1 } | null;
-interface Saved { filters: Record<string, string>; sort: Sort }
+/** ``cols`` : per-column visibility chosen by the reader (absent = the column's default) */
+interface Saved { filters: Record<string, string>; sort: Sort; cols: Record<string, boolean> }
+const EMPTY: Saved = { filters: {}, sort: null, cols: {} };
 
 function loadSaved(key?: string): Saved {
-  if (!key) return { filters: {}, sort: null };
-  try { const raw = localStorage.getItem(`appro.table.${key}`); return raw ? { filters: {}, sort: null, ...(JSON.parse(raw) as Partial<Saved>) } : { filters: {}, sort: null }; } catch { return { filters: {}, sort: null }; }
+  if (!key) return EMPTY;
+  try { const raw = localStorage.getItem(`appro.table.${key}`); return raw ? { ...EMPTY, ...(JSON.parse(raw) as Partial<Saved>) } : EMPTY; } catch { return EMPTY; }
 }
 
 /**
@@ -86,15 +90,19 @@ function loadSaved(key?: string): Saved {
  * * the footer (``footer`` = "auto", the default) shows the row count and the sums of the ``sum``
  *   columns ; ``footer={null}`` hides it, a node replaces it.
  */
-export function DataTable<T>({ rows, columns, rowKey, onRowClick, rowClass, emptyTitle = "Aucune ligne", emptyHint, compact, maxHeight, footer = "auto", storageKey, exportTitle, toolbar }: {
+export function DataTable<T>({ rows, columns: allColumns, rowKey, onRowClick, rowClass, emptyTitle = "Aucune ligne", emptyHint, compact, maxHeight, footer = "auto", storageKey, exportTitle, toolbar }: {
   rows: T[]; columns: Column<T>[]; rowKey: (row: T) => string; onRowClick?: (row: T) => void; rowClass?: (row: T) => string;
   emptyTitle?: string; emptyHint?: ReactNode; compact?: boolean; maxHeight?: number | string; footer?: ReactNode | "auto" | null;
   storageKey?: string; exportTitle?: string; toolbar?: ReactNode;
 }) {
-  const [{ filters, sort }, setSaved] = useState<Saved>(() => loadSaved(storageKey));
+  const [{ filters, sort, cols: colPrefs }, setSaved] = useState<Saved>(() => loadSaved(storageKey));
   const setFilters = (f: Record<string, string>) => setSaved((s) => ({ ...s, filters: f }));
   const setSort = (fn: (s: Sort) => Sort) => setSaved((s) => ({ ...s, sort: fn(s.sort) }));
-  useEffect(() => { if (storageKey) { try { localStorage.setItem(`appro.table.${storageKey}`, JSON.stringify({ filters, sort })); } catch { /* private mode */ } } }, [filters, sort, storageKey]);
+  const setColPref = (key: string, on: boolean) => setSaved((s) => ({ ...s, cols: { ...s.cols, [key]: on } }));
+  useEffect(() => { if (storageKey) { try { localStorage.setItem(`appro.table.${storageKey}`, JSON.stringify({ filters, sort, cols: colPrefs })); } catch { /* private mode */ } } }, [filters, sort, colPrefs, storageKey]);
+  const [colsOpen, setColsOpen] = useState(false);
+  const hasHidden = allColumns.some((c) => c.hidden);
+  const columns = useMemo(() => allColumns.filter((c) => colPrefs[c.key] ?? !c.hidden), [allColumns, colPrefs]);
   const toast = useToast();
   const filtered = useMemo(() => applyFilters(rows, columns, filters), [rows, columns, filters]);
   const sorted = useMemo(() => {
@@ -139,7 +147,7 @@ export function DataTable<T>({ rows, columns, rowKey, onRowClick, rowClass, empt
     const foot = hasSums ? Object.fromEntries(exported.map((c, i) => [c.key, i === 0 ? `${sorted.length} ligne(s)` : sums[c.key] ? sums[c.key].total : null])) : null;
     try { await exportTable(exportTitle ?? "Export", cols, body, foot); } catch (e) { toast.push((e as Error).message, "error"); }
   };
-  const showTools = !!exportTitle || !!toolbar || anyFilter;
+  const showTools = !!exportTitle || !!toolbar || anyFilter || hasHidden;
 
   return (
     <div className="dt-wrap">
@@ -148,6 +156,22 @@ export function DataTable<T>({ rows, columns, rowKey, onRowClick, rowClass, empt
           {toolbar}
           <span className="subtle small">{anyFilter ? `${sorted.length} / ${rows.length} ligne(s)` : `${rows.length} ligne(s)`}</span>
           {anyFilter && <button type="button" className="btn xs ghost" onClick={() => setFilters({})} title="Effacer tous les filtres de colonnes"><FilterX />Effacer les filtres</button>}
+          {hasHidden && (
+            <span className="dt-cols-wrap">
+              <button type="button" className="btn xs ghost" onClick={() => setColsOpen((v) => !v)} aria-expanded={colsOpen} title="Choisir les colonnes affichées"><Columns3 />Colonnes</button>
+              {colsOpen && (
+                <div className="dt-cols" role="menu">
+                  {allColumns.map((c) => (
+                    <label key={c.key} className="checkbox small">
+                      <input type="checkbox" checked={colPrefs[c.key] ?? !c.hidden} onChange={(e) => setColPref(c.key, e.target.checked)} />
+                      {typeof c.label === "string" ? c.label : c.title ?? c.key}
+                    </label>
+                  ))}
+                  <button type="button" className="btn xs ghost" onClick={() => { setSaved((s) => ({ ...s, cols: {} })); setColsOpen(false); }}>Par défaut</button>
+                </div>
+              )}
+            </span>
+          )}
           {exportTitle && <button type="button" className="btn xs" onClick={doExport} title="Exporter les lignes filtrées et les colonnes affichées dans un classeur Excel" disabled={!sorted.length}><Download />Excel</button>}
         </div>
       )}

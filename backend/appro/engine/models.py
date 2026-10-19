@@ -314,7 +314,6 @@ class EngineParams:
 
 
 #: horizon (working days) under which an ERP stockout must be acted upon ; beyond it is informational
-FIRM_HORIZON_WD = 20
 
 
 # =============================================================================
@@ -331,6 +330,7 @@ class AlertType(str, Enum):
     NEGATIVE_STOCK = "NEGATIVE_STOCK"
     CAP_REACHED = "CAP_REACHED"
     UNLINKED_FLOWS = "UNLINKED_FLOWS"
+    ORDER_DUE = "ORDER_DUE"          # a CBN proposal to order within the next five working days
 
 
 class Severity(str, Enum):

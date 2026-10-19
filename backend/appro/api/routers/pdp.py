@@ -213,7 +213,7 @@ def versions(session: Session = Depends(session_dep)):
 
 @router.post("/import", response_model=S.ImportReport, status_code=201)
 async def import_pdp(file: UploadFile = File(...), name: str = Form(""), note: str = Form(""),
-                     activate: bool = Form(True), sheet: str | None = Form(None),
+                     activate: str = Form("true"), sheet: str | None = Form(None),
                      ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                      user: str = Depends(current_user), access: Access = Depends(access_dep)):
     access.require_pdp()
@@ -236,7 +236,9 @@ async def import_pdp(file: UploadFile = File(...), name: str = Form(""), note: s
     for l in lines:
         version.lines.append(PdpLine(program_id=l.program_id, week_start=l.week_start, qty=l.qty))
     session.add(version)
-    if activate:
+    # a text field on purpose : since FastAPI 0.149 a missing boolean form field reads as False, which would
+    # silently stop activating the imported version
+    if activate.strip().lower() not in ("false", "0", "no", "non", "off"):
         for v in session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))):
             v.active = False
         version.active = True

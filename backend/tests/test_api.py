@@ -65,6 +65,12 @@ def test_cockpit(client):
     assert body["kpis"]["proposals"] > 0 and body["kpis"]["plan_articles"] == 0
     for a in body["articles"]:
         assert a["kpis"]["first_stockout_plan"] is None and a["kpis"]["min_stock_plan"] >= 0, a["article_id"]
+        assert a["kpis"]["status"] in ("critical", "to_order", "ok") and a["kpis"]["coverage_at_date_days"] >= 0
+        assert isinstance(a["kpis"]["data_issues"], list)
+        if a["kpis"]["order_due_date"]:
+            assert a["kpis"]["order_due_supplier_id"] and a["kpis"]["order_due_qty"] > 0
+    k = body["kpis"]
+    assert k["critical"] + k["to_order"] + k["ok"] == k["articles"] and k["warning"] == k["to_order"]
     assert isinstance(body["backlog"], list)
 
 

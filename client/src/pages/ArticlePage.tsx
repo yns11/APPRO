@@ -214,7 +214,7 @@ function ParamsTab({ article, links, programs, canEdit, diagnostics }: { article
               <span className="small subtle">{links.length < 2 ? "mono-source : sans objet" : article.sourcing_policy === "quota" ? "chaque besoin réparti selon les quotas ; un excédent plafonné passe à l'autre fournisseur" : "le fournisseur prioritaire d'abord"}</span>
             </div>
           </div>
-          <p className="small subtle" style={{ marginTop: 10 }}>Règles communes à tous les articles : délai inclusif en jours ouvrés, plancher dans le délai, retour à la cible sous 85 % de la cible, horizon ferme 20 j ouvrés, besoin non servi perdu. Voir <Link to="/parametres">Paramètres › Règles communes</Link>.</p>
+          <p className="small subtle" style={{ marginTop: 10 }}>Règles communes à tous les articles : délai inclusif en jours ouvrés, plancher dans le délai, retour à la cible sous 85 % de la cible, besoin non servi perdu ; statut : couverture à date contre les seuils rouge et orange, date de commande des propositions. Voir <Link to="/parametres">Paramètres › Règles communes</Link>.</p>
         </Card>
 
         <Card title="Jours de consommation" hint="jours ouvrés de la semaine qui portent le besoin hebdomadaire (le PDP est hebdomadaire)">

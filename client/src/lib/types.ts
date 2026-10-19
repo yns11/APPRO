@@ -42,8 +42,15 @@ export interface DesadvInfo { desadv_id: string; packing_slip: string; issue_dat
 export interface ReceiptInfo { receipt_id: string; receipt_date: string; qty: number; packing_slip: string; purch_id: string; processed: boolean; status: string; booked: boolean; }
 export interface LaneOut { supplier_id: string | null; name: string; linked: boolean; series: SeriesOut[]; plan_typed: boolean[]; orders_ignored: boolean[]; desadv_ko: boolean[]; receipts_ko: boolean[]; receipts_booked: boolean[]; backlog_ordered: number; backlog_received: number; backlog_qty: number; orders: OrderInfo[]; desadv: DesadvInfo[]; receipt_lines: ReceiptInfo[]; }
 
+/** critical : coverage « à date » ≤ red + 1 working day, order date past or negative stock ; to_order : an
+ * order to place within five working days, or coverage ≤ orange with nothing landing before the run-out. */
+export type ArticleStatus = "critical" | "to_order" | "ok";
 export interface ArticleKpis {
-  stock_on_hand: number; reference_correction: number; stock_reference: number; stock_at_date: number; price: number | null; stock_value: number | null; target_value: number | null; stockout_plan_severity: Severity | null; init_date: string;
+  stock_on_hand: number; reference_correction: number; stock_reference: number; stock_at_date: number; price: number | null; stock_value: number | null; target_value: number | null; init_date: string;
+  alert_red_days: number; alert_yellow_days: number; overstock_days: number;
+  status: ArticleStatus; coverage_at_date_days: number; runout_date: string | null; overstock: boolean; data_issues: string[];
+  next_firm_date: string | null; next_firm_supplier_id: string | null; next_firm_supplier_name: string | null; next_firm_qty: number | null;
+  order_due_date: string | null; order_due_delivery_date: string | null; order_due_supplier_id: string | null; order_due_supplier_name: string | null; order_due_qty: number | null; order_due_late: boolean;
   stock_as_of_erp: number; stock_as_of_plan: number; coverage_erp_days: number; coverage_plan_days: number; coverage_target_days: number; target_stock: number;
   first_stockout_erp: string | null; first_stockout_plan: string | null; min_stock_erp: number; min_stock_plan: number; max_shortage_erp: number; max_shortage_plan: number;
   demand_next_7d: number; demand_next_20wd: number; demand_horizon: number; avg_daily_demand_wd: number; working_days_counted: number;
@@ -60,7 +67,7 @@ export interface ArticleSummary {
 /** One late firm order (delivery date passed, ERP remaining quantity open). */
 export interface BacklogRow { article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; order_id: string; purch_id: string; expected_date: string | null; ordered: number; received: number; backlog: number; ignored: boolean; }
 export interface CockpitKpis {
-  articles: number; critical: number; warning: number; stockouts: number; stockouts_7d: number; low_coverage: number; overstock: number;
+  articles: number; critical: number; warning: number; to_order: number; ok: number; data_issues: number; stockouts: number; stockouts_7d: number; low_coverage: number; overstock: number;
   backlog_articles: number; backlog_qty: number; proposals: number; urgent_proposals: number; proposals_qty: number; plan_articles: number; plan_qty: number;
   open_firm_qty: number; open_forecast_qty: number; avg_coverage_days: number | null; median_coverage_days: number | null; demand_next_20wd: number;
   stock_value: number | null; target_value: number | null; priced_articles: number; unpriced_articles: number;

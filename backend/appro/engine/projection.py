@@ -100,6 +100,21 @@ def coverage_days(stock: np.ndarray, demand: np.ndarray, index: DayIndex, calend
     return cov.astype(int)
 
 
+def coverage_from(stock: float, demand: np.ndarray, i_from: int, index: DayIndex, calendar: WorkCalendar) -> tuple[int, int | None]:
+    """Coverage « à date » : how many working days from ``i_from`` (included) the stock ``stock`` serves
+    on its own, with no inflow at all.  Returns ``(working days covered, index of the first day it
+    cannot serve)`` ; the second value is ``None`` when the whole window is covered."""
+    n = len(demand)
+    if i_from >= n:
+        return 0, None
+    cum = np.cumsum(demand[i_from:])
+    served = int(np.searchsorted(cum, max(float(stock), 0.0) + 1e-9, side="right"))   # days fully served
+    mask = calendar.working_mask(index.start, n)[i_from:]
+    covered = int(mask[:served].sum())
+    runout = i_from + served if served < n - i_from else None
+    return covered, runout
+
+
 def target_stock(demand: np.ndarray, article: Article, index: DayIndex, calendar: WorkCalendar) -> np.ndarray:
     """Target stock per day : the demand of the next ``coverage_target_days`` working days."""
     n = len(demand)

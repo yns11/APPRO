@@ -220,7 +220,7 @@ def guide() -> str:
     w("")
     w("**Lecture.** La couverture (en jours ouvrés) est le nombre de jours ouvrés dont le besoin cumulé tient dans le "
       "stock du jour. La première rupture est le premier jour dont le besoin n'est pas servi. Le *Besoin 20 j "
-      "ouvrés* est la somme du besoin des 20 prochains jours ouvrés (l'horizon ferme) ; sa moyenne est par jour "
+      "ouvrés* est la somme du besoin des 20 prochains jours ouvrés (quatre semaines) ; sa moyenne est par jour "
       "ouvré compté.\n")
     w(alertes(ar))
     w("")
@@ -429,17 +429,21 @@ def guide() -> str:
     w("")
 
     # ------------------------------------------------------------------ 10. alertes
-    w("## 10. Alertes : seuils rouge et orange, surstock, gradation des ruptures\n")
-    w("Les alertes de **couverture** regardent l'épuisement des flux ERP (stock + commandes fermes) : "
-      "`LOW_COVERAGE` critique si les commandes ERP sont épuisées sous `alert_red_days` jours ouvrés, avertissement "
-      "sous `alert_yellow_days`, `OVERSTOCK` (info) si le stock à date couvre `overstock_days` jours ouvrés ou plus. "
-      "Les **ruptures** (`STOCKOUT`) sont graduées sur les deux scénarios : critique dans le délai fournisseur, "
-      "avertissement dans l'**horizon ferme (20 jours ouvrés, commun à tous les articles)**, information au-delà. "
-      "`CAP_REACHED` signale un manque inévitable sous les plafonds du fournisseur (§ 8).\n")
+    w("## 10. Statut et alertes : couverture à date, date de commande, surstock\n")
+    w("Trois statuts, sans horizon commun. **Critique** : la **couverture à date** (le stock de la veille seul, "
+      "sans aucune livraison) tient au plus `alert_red_days` + 1 jours ouvrés (`LOW_COVERAGE` critique), ou une "
+      "proposition CBN a sa date de commande déjà passée (`URGENT_PROPOSAL`), ou le stock de départ est négatif "
+      "(`NEGATIVE_STOCK`). **À commander** : une proposition est à commander sous cinq jours ouvrés (`ORDER_DUE`), "
+      "ou la couverture à date tient au plus `alert_yellow_days` jours ouvrés sans livraison ferme ni Appro. saisie "
+      "avant l'épuisement (`LOW_COVERAGE` avertissement). **OK** sinon. Le reste est de l'information : `OVERSTOCK` "
+      "(couverture à date ≥ `overstock_days`), `STOCKOUT` (rupture du Projeté Appro. que le CBN n'a pas pu éviter), "
+      "`CAP_REACHED` (manque inévitable sous les plafonds, § 8), et les données (`MISSING_DATA`, `UNLINKED_FLOWS`). "
+      "En multi-sourcing chaque part de proposition porte le délai de son fournisseur : le statut suit la date de "
+      "commande la plus proche.\n")
     cases = [("Stock 150 (rupture dès demain)", dataset(stock=150.0)),
              ("Stock 450 (rupture vendredi)", dataset(stock=450.0)),
              ("Stock 8 000 (80 jours ouvrés de besoin)", dataset(stock=8000.0)),
-             ("Stock 3 000, ferme ERP 500 le 12/10 : rupture ERP à J + 32 jours ouvrés", dataset(stock=3000.0, orders=[OrderLine("CO-1", "A1", "S1", TODAY + D(days=7), 500, order_type=OrderType.FIRM)]))]
+             ("Stock 3 000, ferme ERP 500 le 12/10 : rien à faire, surstock (30 jours ouvrés de besoin)", dataset(stock=3000.0, orders=[OrderLine("CO-1", "A1", "S1", TODAY + D(days=7), 500, order_type=OrderType.FIRM)]))]
     for title, d in cases:
         ar = run(d, cbn=False, horizon_days=60).articles["A1"]
         w(f"**{title}**\n")
@@ -549,7 +553,7 @@ def guide() -> str:
         ("quota_pct / priority", "lien", "lien", "répartition multi-sourcing"),
         ("max_qty_per_delivery / max_qty_per_week", "vide (lien)", "lien", "plafonds, multiples de l'UM ; fermes et Appro. comptés ; excédent reporté, manque inévitable alerté"),
         ("target_tolerance_pct", "15", "commune", "retour à la cible dès que le stock projeté passe sous (100 − n) % de la cible ; la quantité vise 100 %"),
-        ("Règles figées", "—", "application", "jours ouvrés partout ; besoin non servi perdu ; plancher dans le délai ; cible pleine ensuite ; livraison avant le besoin, regroupée ; horizon ferme 20 j ouvrés ; horizon 52 semaines ; fermes seules comptées ; refus = jour seul"),
+        ("Règles figées", "—", "application", "jours ouvrés partout ; besoin non servi perdu ; plancher dans le délai ; cible pleine ensuite ; livraison avant le besoin, regroupée ; horizon 52 semaines ; commande à placer sous 5 j ouvrés ; fermes seules comptées ; refus = jour seul"),
         ("history_weeks / focus_weeks", "2 / 2 (utilisateur)", "affichage", "semaines passées montrées, semaines détaillées jour par jour"),
     ]
     for name, default, scope, effet in recap:

@@ -29,7 +29,7 @@ se lit.
   moins les *semaines passées* choisies par l'utilisateur [2] (la semaine en cours est toujours affichée en
   entier depuis son lundi) ; le moteur calcule la fenêtre entière, seul l'affichage est tronqué.
 * **Calendrier ouvré** : `working_weekdays` [1-5] + fermetures (`APPRO_HOLIDAYS`), visibles dans *Paramètres ›
-  Données › Calendrier usine*. Couvertures, seuils, surstock, délais, horizon ferme : tout compte en **jours
+  Données › Calendrier usine*. Couvertures, seuils, surstock, délais : tout compte en **jours
   ouvrés**. Le **délai fournisseur** (`ref_suppliers.lead_time_days` [5], remplaçable par lien :
   `lead_time_override`) est **inclusif** : commandé lundi avec un délai de 5, livrable le lundi suivant. Les
   jours de livraison autorisés sont par fournisseur (`delivery_weekdays`).
@@ -234,20 +234,40 @@ rouge foncé. Les alertes de rupture donnent le manque cumulé maximal.
 * **Stock cible** : besoin des `coverage_target_days` [5] prochains jours ouvrés (profil `demand_days`
   compris). Ni stock de sécurité ni cycle de commande.
 
-## 6. Alertes
+## 6. Statut et alertes
+
+Le **statut** d'un article répond à une seule question : que doit faire l'approvisionneur aujourd'hui ? Il se lit
+sur les données de l'article, de ses fournisseurs, de ses commandes et de son stock, sans horizon commun.
+
+* **Critique** : la **couverture à date** (stock de la veille seul, sans aucune livraison comptée) tient au plus
+  `alert_red_days` + 1 jours ouvrés ; ou une proposition CBN a sa **date de commande déjà passée** (la livraison
+  ne peut plus arriver avant la rupture) ; ou le stock de départ est négatif.
+* **À commander** : une proposition CBN est à commander dans les **5 prochains jours ouvrés** ; ou la couverture
+  à date tient au plus `alert_yellow_days` jours ouvrés et aucune livraison ferme ni cellule *Appro.* saisie
+  n'arrive avant l'épuisement.
+* **OK** : tout le reste.
+
+Le **surstock** (couverture à date ≥ `overstock_days`) est un filtre, pas un statut. Les **données à corriger**
+(pas de stock de départ, pas de lien actif, commande ferme à venir chez un fournisseur sans lien) sont une
+pastille à part, jamais dans le statut. En **multi-sourcing**, chaque part d'une proposition porte le délai du
+fournisseur que le CBN a retenu (§ 7) : le statut suit la date de commande la plus proche, et la colonne
+*Commande à placer* nomme ce fournisseur.
 
 | Type | Sévérité | Règle |
 |---|---|---|
-| `STOCKOUT` (plan) | critique si ≤ délai fournisseur, avertissement si ≤ horizon ferme (**20 jours ouvrés**, commun), info au-delà | premier manque sur le Projeté Appro. malgré le plan et les propositions (même gradation que l'ERP : une rupture à J+177 n'est pas l'urgence d'une rupture à J+3) ; manque cumulé maximal |
-| `STOCKOUT` (ERP) | critique si ≤ délai fournisseur, avertissement si ≤ 20 jours ouvrés, info au-delà | premier manque sur le Projeté ERP |
-| `LOW_COVERAGE` | critique / avertissement | épuisement des commandes ERP ≤ seuil rouge / orange (jours ouvrés) |
-| `OVERSTOCK` | info | couverture ≥ `overstock_days` |
+| `LOW_COVERAGE` | critique | couverture à date ≤ seuil rouge + 1 jour ouvré |
+| `LOW_COVERAGE` | avertissement | couverture à date ≤ seuil orange, rien de ferme ni de saisi avant l'épuisement |
+| `URGENT_PROPOSAL` | critique | proposition dont la date de commande est passée (plancher dans le délai, § 7) |
+| `ORDER_DUE` | avertissement | première proposition à commander sous 5 jours ouvrés (date, fournisseur, quantité) |
 | `NEGATIVE_STOCK` | critique | stock de référence négatif |
-| `URGENT_PROPOSAL` | critique | proposition dont la date de commande est déjà passée (plancher dans le délai, § 7) |
-| `CAP_REACHED` | avertissement | manque inévitable sous les plafonds du fournisseur (§ 7) |
-| `UNLINKED_FLOWS` | avertissement (commandes ouvertes ou en retard) / info | commandes, réceptions ou DESADV d'un fournisseur sans lien actif, exclus du tableau (§ 3) |
+| `STOCKOUT` (plan) | info | premier manque sur le Projeté Appro. malgré le plan et les propositions (plafonds, refus) ; manque cumulé maximal |
+| `OVERSTOCK` | info | couverture à date ≥ `overstock_days` |
+| `CAP_REACHED` | info | manque inévitable sous les plafonds du fournisseur (§ 7) |
 | `NO_DEMAND` | info | aucun besoin alors que du stock existe |
-| `MISSING_DATA` | avertissement / info | pas de stock de référence, pas de fournisseur, pas de nomenclature |
+| `MISSING_DATA` | info (données) | pas de stock de référence, pas de fournisseur actif, pas de nomenclature |
+| `UNLINKED_FLOWS` | info (données) | commande ferme **à venir** chez un fournisseur sans lien actif, hors tableau (§ 3) ; les réceptions et commandes passées d'un ancien fournisseur ne déclenchent rien |
+
+La rupture sur les commandes ERP seules n'est plus une alerte : c'est une colonne (*Rupture ERP*).
 
 ## 7. Propositions CBN
 
@@ -329,16 +349,15 @@ pour trois stocks : à date, Projeté ERP, Projeté Appro. (page *Impact program
 
 ## 9 bis. Cockpit du jour : deux onglets, et la page Recherche
 
-**Couvertures et stocks** : cartes *Critiques*, *À surveiller*, *Ruptures plan*, *Couverture médiane* (médiane
-des couvertures Projeté Appro. des articles avec besoin ; la moyenne, tirée par les extrêmes, est rappelée en
-sous-ligne), **Valeur du stock** (Σ prix × stock à date ; sous-ligne « +x % de la valeur cible » en rouge au-dessus
-de la cible, « −x % » neutre en dessous ; cible = Σ prix × stock cible du jour), *En-cours ERP*, *Surstock* ;
-graphique **projection de la valeur du stock** (Projeté Appro., fin de chaque semaine ISO, pointillé = valeur du
-stock cible) ; alertes prioritaires ; portefeuille (colonnes *Fournisseurs*, **Approvisionneur**, *Statut*,
-**Stock à date** = stock projeté à la fin de la veille, réceptions et consommations réelles comprises, et non le
-stock d'initialisation). Les champs de filtre acceptent des alternatives séparées par « ; » (`123;456` = contient
-123 ou 456), partout (cockpit, fiches, tableau, recherche). Les blocs *Projection de la valeur du stock* et
-*Alertes prioritaires* se plient d'un clic sur leur titre (état mémorisé dans le navigateur).
+**Couvertures et stocks** : cinq tuiles qui filtrent le portefeuille d'un clic, *Critiques*, *À commander*,
+*Surstock*, *Données*, *OK* (§ 6), puis une ligne de contexte (couverture médiane, valeur du stock contre la
+valeur cible, en-cours ERP, articles en retard). Le **portefeuille** vient en premier (pliable) : article,
+fournisseurs (liens actifs), approvisionneur, statut (pastille bleue = données à corriger), stock à date avec le
+stock cible en dessous, couverture à date avec la couverture cible en dessous, *commande en cours* (prochaine
+commande ferme attendue : date, fournisseur, restant), *commande à placer* (première proposition CBN : date limite
+de commande, fournisseur retenu, quantité, livraison), puis en retard. Les colonnes secondaires (couverture
+Appro., rupture Appro., rupture ERP, en-cours ERP, Appro., CBN, valeur, alertes) s'affichent par le menu
+*Colonnes* du tableau, mémorisé. Suivent la projection de la valeur du stock et les alertes prioritaires.
 
 **Flux d'approvisionnement** : huit cartes, un clic affiche les lignes correspondantes en dessous ; les cartes et
 l'en-tête de la table restent visibles pendant le défilement.

@@ -205,7 +205,7 @@ function CalendarCard() {
   const c = q.data;
   return (
     <div className="grid cols-2">
-      <Card title="Jours ouvrés" hint="les couvertures, seuils, délais et l'horizon ferme comptent en jours ouvrés de ce calendrier">
+      <Card title="Jours ouvrés" hint="les couvertures, seuils et délais comptent en jours ouvrés de ce calendrier">
         {!c ? <SkeletonBlock rows={3} /> : (
           <>
             <div className="day-picker" aria-label="Jours ouvrés">{[1, 2, 3, 4, 5, 6, 7].map((n) => <button key={n} type="button" disabled className={c.working_weekdays.includes(n) ? "on" : ""} title={WEEKDAY_LONG[n - 1]}>{WEEKDAY_SHORT[n - 1]}</button>)}</div>

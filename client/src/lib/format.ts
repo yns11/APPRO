@@ -52,7 +52,7 @@ export function periodLabel(p: string): string {
   return fmtDate(p, "EEE dd/MM").replace(".", "");
 }
 export const ALERT_LABELS: Record<string, string> = {
-  STOCKOUT: "Rupture", LOW_COVERAGE: "Couverture insuffisante", OVERSTOCK: "Surstock", BACKLOG: "Backlog fournisseur",
+  STOCKOUT: "Rupture Appro.", LOW_COVERAGE: "Couverture à date", OVERSTOCK: "Surstock", BACKLOG: "Backlog fournisseur", ORDER_DUE: "Commande à placer",
   URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock de départ négatif",
   CAP_REACHED: "Plafond fournisseur atteint", UNLINKED_FLOWS: "Flux hors lien actif",
 };
@@ -84,7 +84,9 @@ export function fmtMinutes(min: number | null | undefined): string {
   if (h < 48) return m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`;
   return `${Math.floor(h / 24)} j`;
 }
-export const SEVERITY_LABELS: Record<string, string> = { critical: "Critique", warning: "À surveiller", info: "Info" };
+export const SEVERITY_LABELS: Record<string, string> = { critical: "Critique", warning: "À commander", info: "Info" };
+export const STATUS_LABELS: Record<string, string> = { critical: "Critique", to_order: "À commander", ok: "OK" };
+export const STATUS_TONE: Record<string, "critical" | "warning" | "ok"> = { critical: "critical", to_order: "warning", ok: "ok" };
 export const SCOPE_LABELS: Record<string, string> = { erp: "ERP", plan: "Appro.", data: "données" };
 export const ORDER_TYPE_LABELS: Record<string, string> = { FIRM: "Ferme", FORECAST: "Prévisionnelle" };
 

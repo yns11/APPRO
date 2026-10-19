@@ -38,8 +38,8 @@ tables (`GET /api/reference/<table>/rows`) ; elles ne sont ni stockées, ni expo
 | family | Famille | texte | non | |
 | planner | Approvisionneur | texte | oui | code approvisionneur = **périmètre** de l'application |
 | coverage_target_days | Couverture cible (j ouvrés) | entier | oui | jours **ouvrés** de besoin à couvrir (défaut 5) |
-| alert_red_days | Seuil rouge (j ouvrés) | entier | oui | commandes ERP épuisées en ≤ n jours ouvrés : critique (défaut 2) |
-| alert_yellow_days | Seuil orange (j ouvrés) | entier | oui | ≤ n jours ouvrés : à surveiller (défaut 5) |
+| alert_red_days | Seuil rouge (j ouvrés) | entier | oui | couverture à date (stock de la veille seul) ≤ n + 1 jours ouvrés : critique (défaut 2) |
+| alert_yellow_days | Seuil orange (j ouvrés) | entier | oui | couverture à date ≤ n jours ouvrés sans livraison avant l'épuisement : à commander (défaut 5) |
 | overstock_days | Surstock (j ouvrés) | entier | oui | stock à date couvrant ≥ n jours ouvrés : surstock (défaut 30) |
 | demand_days | Jours de consommation | entier | non | 1 à 5 : jours ouvrés de la semaine portant le besoin hebdomadaire (vide ou 0 = 5, toute la semaine) |
 | sourcing_policy | Multi-sourcing | texte | non | `quota` (défaut : chaque besoin partagé selon les quotas) ou `priority` |

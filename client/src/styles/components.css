@@ -484,3 +484,19 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .plan-versions .pv.none { border-style: dashed; opacity: .7; }
 .plan-versions .pv-legend { margin-left: auto; display: inline-flex; gap: 10px; color: var(--fg-muted); font-size: var(--fs--2); }
 .plan-versions .pv-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; border: 1px solid var(--border); vertical-align: -1px; margin-right: 4px; }
+
+/* ---- column chooser of the tables */
+.dt-cols-wrap { position: relative; }
+.dt-cols { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 220px; max-height: 320px; overflow: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
+.dt-cols .checkbox { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.dt-cols .btn { align-self: flex-start; margin-top: 4px; }
+
+/* ---- cockpit : context line under the tiles, status cell */
+.cockpit-context { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 2px 4px 0; color: var(--fg-muted); font-size: var(--fs--1); }
+.cockpit-context b { color: var(--fg); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.status-cell { display: inline-flex; align-items: center; gap: 6px; }
+.data-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--info); cursor: help; }
+.cell-2l { display: flex; flex-direction: column; line-height: 1.2; }
+.cell-2l .sub { font-size: var(--fs--2); color: var(--fg-muted); }
+.num .cell-2l { align-items: flex-end; }
+.cell-2l .badge { align-self: flex-end; }

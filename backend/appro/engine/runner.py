@@ -6,12 +6,12 @@ from collections import defaultdict
 
 import numpy as np
 
-from .alerts import classify_alerts, worst_severity
+from .alerts import classify_alerts, status_of, worst_severity
 from .calendar import WorkCalendar, iso_week_monday
 from .demand import DayIndex, actual_share, build_article_demand, build_program_daily, explode_demand
 from .models import Alert, ArticleResult, Dataset, DatasetError, EngineParams, MrpResult, OrderType
 from .programs import program_impact
-from .projection import Projection, coverage_days, first_shortage, project_stock, target_stock
+from .projection import Projection, coverage_days, coverage_from, first_shortage, project_stock, target_stock
 from .proposals import generate_proposals, is_refused
 from .supply import blocked_days, build_lanes, lane_totals, unlinked_flows
 
@@ -195,19 +195,30 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
                 break
         cov = {name: coverage_days(layer.net, demand, index, calendar) for name, layer in (("erp", erp), ("plan", plan_proj))}
 
-        alerts = classify_alerts(article, index, calendar, as_of, erp, plan_proj, cov["plan"], stock_start, demand,
-                                 lanes, proposals, links_by_article.get(aid, []), suppliers, aid in bom_articles,
-                                 snap is not None, cap_shortfalls, unlinked)
+        # stock « à date » = the stock at the end of yesterday (the reference day itself is not over) ;
+        # identical in both scenarios before today, so read on the ERP one.  Its coverage counts no inflow.
+        stock_at_date = float(erp.stock[i_as_of - 1]) if i_as_of > 0 else float(max(stock_start, 0.0))
+        cov_at_date, runout = coverage_from(stock_at_date, demand, i_as_of, index, calendar)
+        end_check = runout if runout is not None else n - 1
+        inflow_before_runout = bool(float(orders_firm[i_as_of:end_check + 1].sum() + plan[i_as_of:end_check + 1].sum()) > 1e-9)
+
+        alerts = classify_alerts(article, index, calendar, as_of, plan_proj, stock_start, stock_at_date, cov_at_date, runout,
+                                 inflow_before_runout, demand, proposals, links_by_article.get(aid, []), supplier_names,
+                                 aid in bom_articles, snap is not None, cap_shortfalls, unlinked)
         k = {name: first_shortage(layer.shortage, i_as_of) for name, layer in (("erp", erp), ("plan", plan_proj))}
         horizon_slice = slice(i_as_of, n)
         typed = int(sum(int(l.plan_typed[i_as_of:].sum()) for l in lanes))
         ignored_days = int(sum(int(l.orders_ignored[i_as_of:].sum()) for l in lanes))
         refused = sum(1 for f in flags_by_article.get(aid, []) if f.kind == "proposal_refused")
         price = dataset.prices.get(aid)
-        # stock « à date » = the stock at the end of yesterday (the reference day itself is not over) ;
-        # identical in both scenarios before today, so read on the ERP one
-        stock_at_date = float(erp.stock[i_as_of - 1]) if i_as_of > 0 else float(max(stock_start, 0.0))
-        plan_stockout = next((a for a in alerts if a.alert_type.value == "STOCKOUT" and a.scope == "plan"), None)
+        # next firm delivery expected (ERP, not ignored) and first order to place (CBN), with their supplier
+        firm_next = sorted((o for l in lanes for o in l.orders
+                            if o.order_type == "FIRM" and o.expected_date >= as_of and o.qty_open > 1e-9 and not o.ignored),
+                           key=lambda o: (o.expected_date, o.supplier_id or ""))
+        next_firm = firm_next[0] if firm_next else None
+        due = sorted(proposals, key=lambda p: (p.order_date, p.delivery_date, p.supplier_id or ""))
+        order_due = due[0] if due else None
+        data_issues = sorted({a.alert_type.value for a in alerts if a.scope == "data"})
         # requirement of the next 20 working days (four weeks) and its average per working day
         wd_mask = calendar.working_mask(index.start, n)
         future_wd = [i for i in range(i_as_of + 1, n) if wd_mask[i]][:20]
@@ -221,13 +232,30 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "price": price,
             "stock_value": (stock_at_date * price) if price is not None else None,
             "target_value": (float(target[i_as_of]) * price) if price is not None else None,
-            "stockout_plan_severity": plan_stockout.severity.value if plan_stockout else None,
+            "status": status_of(alerts),
+            "coverage_at_date_days": int(cov_at_date),
+            "runout_date": index.dates[runout].isoformat() if runout is not None else None,
+            "overstock": any(a.alert_type.value == "OVERSTOCK" for a in alerts),
+            "data_issues": data_issues,
+            "next_firm_date": next_firm.expected_date.isoformat() if next_firm else None,
+            "next_firm_supplier_id": next_firm.supplier_id if next_firm else None,
+            "next_firm_supplier_name": supplier_names.get(next_firm.supplier_id or "", "") if next_firm else None,
+            "next_firm_qty": float(next_firm.qty_open) if next_firm else None,
+            "order_due_date": order_due.order_date.isoformat() if order_due else None,
+            "order_due_delivery_date": order_due.delivery_date.isoformat() if order_due else None,
+            "order_due_supplier_id": order_due.supplier_id if order_due else None,
+            "order_due_supplier_name": supplier_names.get(order_due.supplier_id or "", "") if order_due else None,
+            "order_due_qty": float(order_due.qty) if order_due else None,
+            "order_due_late": bool(order_due and (order_due.urgent or order_due.order_date < as_of)),
             "init_date": snap_date.isoformat(),
             "stock_as_of_erp": float(erp.stock[i_as_of]),
             "stock_as_of_plan": float(plan_proj.stock[i_as_of]),
             "coverage_erp_days": int(cov["erp"][i_as_of]),
             "coverage_plan_days": int(cov["plan"][i_as_of]),
             "coverage_target_days": int(article.param_at("coverage_target_days", as_of)),
+            "alert_red_days": float(article.param_at("alert_red_days", as_of)),
+            "alert_yellow_days": float(article.param_at("alert_yellow_days", as_of)),
+            "overstock_days": float(article.param_at("overstock_days", as_of) or 0),
             "target_stock": float(target[i_as_of]),
             "lead_time_days": lead,
             "demand_days": int(article.demand_days),

@@ -265,7 +265,10 @@ class BacklogRow(BaseModel):
 class CockpitKpis(BaseModel):
     articles: int
     critical: int
-    warning: int
+    warning: int                 # « à commander » (status to_order)
+    to_order: int = 0
+    ok: int = 0
+    data_issues: int = 0         # articles with a data issue (no reference stock, no active link, unlinked firm orders)
     stockouts: int
     stockouts_7d: int
     low_coverage: int

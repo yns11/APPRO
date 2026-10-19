@@ -12,7 +12,7 @@ du tableau se saisissent, *Appro.* (une par fournisseur) et *Ajustement* ; deux 
 
 | Page | Contenu |
 |---|---|
-| Cockpit du jour | onglet *Couvertures et stocks* (KPI dont valeur du stock et couverture médiane, projection de la valeur du stock, alertes, portefeuille) et onglet *Flux d'approvisionnement* (à commander, commandé, en transit, à traiter, à réceptionner, reçu, en retard, à valider) |
+| Cockpit du jour | onglet *Couvertures et stocks* (tuiles Critiques / À commander / Surstock / Données / OK, portefeuille avec couverture à date, commande en cours et commande à placer, projection de la valeur du stock, alertes) et onglet *Flux d'approvisionnement* (à commander, commandé, en transit, à traiter, à réceptionner, reçu, en retard, à valider) |
 | Tableau d'approvisionnement | le tableau des articles du périmètre, **par pages** (filtres programme / fournisseur / recherche, **période affichée** par semaines), grille virtualisée : 500 articles × 1 000 jours restent fluides |
 | Fiche article | tableau (Besoin ; par fournisseur : Ferme **cliquable** (commandé / restant, en cours / soldée / ignorée), Prévisionnel, Reçu, **Appro.** ; Proposition CBN **cliquable** (refus du jour ; **!** urgente = plancher, **▲** plafonnée) ; **Ajustement** ; Projeté ERP ; Projeté Appro. avec couverture en jours ouvrés et manque cumulé dans les cellules ; poignée de **recopie** sur Plan et Ajustement), KPI, courbes, **planning de livraison** (lignes ERP copiables, FR / EN), onglet **Paramétrage** (politique de stock et par semaine, jours de consommation avec profil réel et suggestion, source de consommation ERP / PDP / dérivée, fournisseurs et règles : délai hérité ou spécifique, plafonds), commandes ERP, propositions, alertes |
 | Fournisseurs | liste des fournisseurs (état de leurs articles) et **fiche fournisseur** (articles et règles, en retard par commande, commandes à venir, en transit, à traiter, à valider, urgences CBN) ; code et nom cliquables partout |
@@ -25,7 +25,7 @@ du tableau se saisissent, *Appro.* (une par fournisseur) et *Ajustement* ; deux 
 
 Tout tableau porte un bouton **Excel** (colonnes affichées, lignes filtrées) et un pied de totaux ; les filtres
 de chaque page sont mémorisés entre deux visites. Le moteur compte en **jours ouvrés** (délai fournisseur
-inclusif, couvertures, seuils, horizon ferme de 20 jours ouvrés), l'horizon est fixe (52 semaines), le besoin
+inclusif, couvertures, seuils), l'horizon est fixe (52 semaines), le besoin
 non servi est perdu et affiché en cumul, les propositions suivent un **plancher dans le délai** puis la cible
 pleine (déclenchement sous 85 % de la cible), avec **plafonds** par livraison et par semaine et quotas ;
 détail dans `docs/guide_moteur.md`.

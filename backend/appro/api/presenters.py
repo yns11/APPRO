@@ -120,12 +120,15 @@ def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
             stockouts_7d += 1
     return S.CockpitKpis(
         articles=len(arts),
-        critical=sum(1 for r in arts if r.kpis.get("severity") == "critical"),
-        warning=sum(1 for r in arts if r.kpis.get("severity") == "warning"),
+        critical=sum(1 for r in arts if r.kpis.get("status") == "critical"),
+        warning=sum(1 for r in arts if r.kpis.get("status") == "to_order"),
+        to_order=sum(1 for r in arts if r.kpis.get("status") == "to_order"),
+        ok=sum(1 for r in arts if r.kpis.get("status") == "ok"),
+        data_issues=sum(1 for r in arts if r.kpis.get("data_issues")),
         stockouts=sum(1 for r in arts if r.kpis.get("first_stockout_plan")),
         stockouts_7d=stockouts_7d,
         low_coverage=sum(1 for a in alerts if a.alert_type.value == "LOW_COVERAGE"),
-        overstock=sum(1 for a in alerts if a.alert_type.value == "OVERSTOCK"),
+        overstock=sum(1 for r in arts if r.kpis.get("overstock")),
         backlog_articles=sum(1 for r in arts if r.kpis["backlog_qty"] > 1e-6),
         backlog_qty=float(sum(r.kpis["backlog_qty"] for r in arts)),
         proposals=len(props),

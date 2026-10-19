@@ -1,19 +1,20 @@
 import { useMemo } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { AlertOctagon, AlertTriangle, ArrowDownToLine, Coins, Download, Layers, PackageSearch, Truck } from "lucide-react";
+import { AlertOctagon, ArrowDownToLine, CheckCircle2, Database, Download, ShoppingCart } from "lucide-react";
 import { useCockpit } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { api } from "@/lib/api";
-import { ALERT_LABELS, SCOPE_LABELS, fmtDate, fmtEur, fmtInt, fmtPct, fmtQty, daysFrom } from "@/lib/format";
-import { Badge, Card, Empty, ErrorBox, Kpi, SeverityBadge, Skeleton, SkeletonBlock, SupplierLink, Tabs } from "@/components/ui";
+import { ALERT_LABELS, SCOPE_LABELS, STATUS_LABELS, STATUS_TONE, fmtDate, fmtEur, fmtInt, fmtPct, fmtQty, daysFrom } from "@/lib/format";
+import { Badge, Card, Empty, ErrorBox, Kpi, Skeleton, SkeletonBlock, SupplierLink, Tabs } from "@/components/ui";
 import { useRemembered } from "@/lib/pageState";
 import { DataTable, type Column } from "@/components/DataTable";
 import { StockValueChart } from "@/components/charts/StockValueChart";
 import { FlowsPanel } from "@/components/FlowsPanel";
 import type { ArticleSummary, Severity } from "@/lib/types";
 
-type Filter = "all" | "critical" | "warning" | "stockout" | "proposals" | "overstock" | "ok";
+type Filter = "all" | "critical" | "to_order" | "overstock" | "data" | "ok";
 type CockpitTab = "stocks" | "flux";
+const FILTERS: Filter[] = ["all", "critical", "to_order", "overstock", "data", "ok"];
 
 export default function CockpitPage() {
   const { perimeter, engineParams, config } = usePerimeter();
@@ -22,48 +23,53 @@ export default function CockpitPage() {
   const [params, setParams] = useSearchParams();
   const tab: CockpitTab = params.get("tab") === "flux" ? "flux" : "stocks";
   const setTab = (t: CockpitTab) => setParams(t === "stocks" ? {} : { tab: t }, { replace: true });
-  const [filter, setFilter] = useRemembered<Filter>("cockpit.filter", "all");
+  const [savedFilter, setFilter] = useRemembered<Filter>("cockpit.filter2", "all");
+  const filter: Filter = FILTERS.includes(savedFilter) ? savedFilter : "all";
+  const toggle = (f: Filter) => setFilter(filter === f ? "all" : f);
   const asOf = q.data?.as_of;
 
   const rows = useMemo(() => (q.data?.articles ?? []).filter((a) => {
     switch (filter) {
-      case "critical": return a.severity === "critical";
-      case "warning": return a.severity === "warning";
-      case "stockout": return !!a.kpis.first_stockout_erp || !!a.kpis.first_stockout_plan;
-      case "proposals": return a.kpis.proposal_count > 0;
-      case "overstock": return a.alert_types.includes("OVERSTOCK");
-      case "ok": return !a.severity;
+      case "critical": return a.kpis.status === "critical";
+      case "to_order": return a.kpis.status === "to_order";
+      case "overstock": return a.kpis.overstock;
+      case "data": return a.kpis.data_issues.length > 0;
+      case "ok": return a.kpis.status === "ok";
       default: return true;
     }
   }), [q.data, filter]);
 
   const cols = useMemo<Column<ArticleSummary>[]>(() => [
     { key: "article", label: "Article", get: (a) => `${a.article_id} ${a.designation}`, render: (a) => <><b>{a.article_id}</b><span className="sub" title={a.designation}>{a.designation.length > 30 ? `${a.designation.slice(0, 30)}…` : a.designation}</span></> },
-    { key: "suppliers", label: "Fournisseurs", get: (a) => a.suppliers.join(" / "), title: "Code fournisseur : cliquer pour ouvrir la fiche fournisseur", render: (a) => <span className="subtle">{a.suppliers.map((sid) => <span key={sid} style={{ display: "block" }}><SupplierLink id={sid} inline className="subtle" /></span>)}</span> },
+    { key: "suppliers", label: "Fournisseurs", get: (a) => a.suppliers.join(" / "), title: "Liens actifs ; cliquer pour ouvrir la fiche fournisseur", render: (a) => <span className="subtle">{a.suppliers.map((sid) => <span key={sid} style={{ display: "block" }}><SupplierLink id={sid} inline className="subtle" /></span>)}</span> },
     { key: "planner", label: "Approvisionneur", get: (a) => a.planner, filter: "select" },
-    { key: "severity", label: "Statut", get: (a) => a.severity ?? "ok", filter: "select", render: (a) => <SeverityBadge severity={a.severity} /> },
-    { key: "stock", label: "Stock à date", get: (a) => a.kpis.stock_at_date, num: true, title: "Stock projeté à la fin de la veille (réceptions et consommations réelles comprises)", render: (a) => <>{fmtQty(a.kpis.stock_at_date, a.unit)} <span className="subtle">{a.unit}</span>{a.kpis.stock_value !== null && <span className="sub">{fmtEur(a.kpis.stock_value)}</span>}</> },
-    { key: "cov", label: "Couverture Appro.", get: (a) => a.kpis.coverage_plan_days, num: true, render: (a) => <CoverageCell days={a.kpis.coverage_plan_days} a={a} /> },
-    { key: "target", label: "Cible", get: (a) => a.kpis.coverage_target_days, num: true, render: (a) => <span className="subtle">{a.kpis.coverage_target_days} j</span> },
-    { key: "stockout", label: "Rupture ERP", get: (a) => a.kpis.first_stockout_erp ?? "", render: (a) => { const d = daysFrom(a.kpis.first_stockout_erp, asOf ?? a.kpis.init_date); return a.kpis.first_stockout_erp ? <Badge tone={d !== null && d <= 7 ? "critical" : "warning"}>{fmtDate(a.kpis.first_stockout_erp)} · J+{d}</Badge> : <span className="subtle">–</span>; } },
-    { key: "stockout_plan", label: "Rupture Appro.", get: (a) => a.kpis.first_stockout_plan ?? "", render: (a) => { const d = daysFrom(a.kpis.first_stockout_plan, asOf ?? a.kpis.init_date); return a.kpis.first_stockout_plan ? <Badge tone={a.kpis.stockout_plan_severity ?? "critical"}>{fmtDate(a.kpis.first_stockout_plan)} · J+{d}</Badge> : <span className="subtle">–</span>; } },
-    { key: "open", label: "En-cours ERP", get: (a) => a.kpis.open_firm_qty, num: true, render: (a) => <>{fmtQty(a.kpis.open_firm_qty, a.unit)}{a.kpis.open_forecast_qty > 0 && <span className="sub">+ {fmtQty(a.kpis.open_forecast_qty, a.unit)} prév.</span>}</> },
+    { key: "status", label: "Statut", get: (a) => STATUS_LABELS[a.kpis.status], filter: "select", exportGet: (a) => `${STATUS_LABELS[a.kpis.status]}${a.kpis.data_issues.length ? " · données" : ""}`, render: (a) => <StatusCell a={a} /> },
+    { key: "stock", label: "Stock à date", get: (a) => a.kpis.stock_at_date, num: true, title: "Stock à la fin de la veille ; en dessous, le stock cible du jour", render: (a) => <span className="cell-2l"><span>{fmtQty(a.kpis.stock_at_date, a.unit)} <span className="subtle">{a.unit}</span></span><span className="sub">cible {fmtQty(a.kpis.target_stock, a.unit)}</span></span> },
+    { key: "cov_date", label: "Couverture à date", get: (a) => a.kpis.coverage_at_date_days, num: true, title: "Jours ouvrés de besoin couverts par le stock de la veille seul, sans aucune livraison ; en dessous, la couverture cible", render: (a) => <span className="cell-2l"><CoverageAtDate a={a} /><span className="sub">cible {a.kpis.coverage_target_days} j</span></span> },
+    { key: "next_firm", label: "Commande en cours", get: (a) => a.kpis.next_firm_date ?? "", title: "Prochaine commande ferme attendue (ERP) : date, fournisseur, restant à livrer", render: (a) => a.kpis.next_firm_date ? <span className="cell-2l"><span>{fmtDate(a.kpis.next_firm_date)} <span className="subtle">· J+{daysFrom(a.kpis.next_firm_date, asOf ?? a.kpis.init_date)}</span></span><span className="sub"><SupplierLink id={a.kpis.next_firm_supplier_id ?? ""} inline className="subtle" /> · {fmtQty(a.kpis.next_firm_qty ?? 0, a.unit)}</span></span> : <span className="subtle">–</span>, exportGet: (a) => a.kpis.next_firm_date ? `${a.kpis.next_firm_date} ${a.kpis.next_firm_supplier_id ?? ""} ${a.kpis.next_firm_qty ?? ""}` : "" },
+    { key: "order_due", label: "Commande à placer", get: (a) => a.kpis.order_due_date ?? "", title: "Première proposition CBN : date limite de commande, fournisseur retenu, quantité", render: (a) => a.kpis.order_due_date ? <span className="cell-2l"><span style={a.kpis.order_due_late ? { color: "var(--critical-fg)", fontWeight: 600 } : undefined}>{fmtDate(a.kpis.order_due_date)} <span className={a.kpis.order_due_late ? "" : "subtle"}>· {a.kpis.order_due_late ? (a.kpis.order_due_date < (asOf ?? a.kpis.init_date) ? "dépassée" : "aujourd'hui, sans marge") : `J+${daysFrom(a.kpis.order_due_date, asOf ?? a.kpis.init_date)}`}</span></span><span className="sub"><SupplierLink id={a.kpis.order_due_supplier_id ?? ""} inline className="subtle" /> · {fmtQty(a.kpis.order_due_qty ?? 0, a.unit)} · livraison {fmtDate(a.kpis.order_due_delivery_date ?? "")}</span></span> : <span className="subtle">–</span>, exportGet: (a) => a.kpis.order_due_date ? `${a.kpis.order_due_date} ${a.kpis.order_due_supplier_id ?? ""} ${a.kpis.order_due_qty ?? ""}` : "" },
+    { key: "cov", label: "Couverture Appro.", hidden: true, get: (a) => a.kpis.coverage_plan_days, num: true, title: "Jours ouvrés couverts par le Projeté Appro. (plan de livraison et CBN compris)", render: (a) => <span>{a.kpis.coverage_plan_days} j</span> },
+    { key: "stockout_plan", label: "Rupture Appro.", hidden: true, get: (a) => a.kpis.first_stockout_plan ?? "", render: (a) => a.kpis.first_stockout_plan ? <Badge tone="warning">{fmtDate(a.kpis.first_stockout_plan)} · J+{daysFrom(a.kpis.first_stockout_plan, asOf ?? a.kpis.init_date)}</Badge> : <span className="subtle">–</span> },
+    { key: "stockout", label: "Rupture ERP", hidden: true, get: (a) => a.kpis.first_stockout_erp ?? "", title: "Premier jour non servi par le stock et les commandes fermes seuls", render: (a) => a.kpis.first_stockout_erp ? <span>{fmtDate(a.kpis.first_stockout_erp)} <span className="subtle">· J+{daysFrom(a.kpis.first_stockout_erp, asOf ?? a.kpis.init_date)}</span></span> : <span className="subtle">–</span> },
+    { key: "open", label: "En-cours ERP", hidden: true, get: (a) => a.kpis.open_firm_qty, num: true, render: (a) => <>{fmtQty(a.kpis.open_firm_qty, a.unit)}{a.kpis.open_forecast_qty > 0 && <span className="sub">+ {fmtQty(a.kpis.open_forecast_qty, a.unit)} prév.</span>}</> },
+    { key: "plan", label: "Appro.", hidden: true, get: (a) => a.kpis.plan_qty, num: true, render: (a) => <>{fmtQty(a.kpis.plan_qty, a.unit)}{a.kpis.plan_cell_count > 0 && <span className="sub">{a.kpis.plan_cell_count} cellule(s)</span>}</> },
+    { key: "cbn", label: "CBN", hidden: true, get: (a) => a.kpis.proposal_count, num: true, render: (a) => a.kpis.proposal_count > 0 ? <>{a.kpis.proposal_count} <span className="subtle">({fmtQty(a.kpis.proposed_qty, a.unit)})</span>{a.kpis.capped_proposal_count > 0 && <span className="sub" style={{ color: "var(--warning-fg)" }}>{a.kpis.capped_proposal_count} plafonnée(s)</span>}</> : <span className="subtle">–</span> },
+    { key: "value", label: "Valeur", hidden: true, get: (a) => a.kpis.stock_value, num: true, export: "number", render: (a) => a.kpis.stock_value === null ? <span className="subtle">–</span> : <span>{fmtEur(a.kpis.stock_value)}</span> },
+    { key: "alerts", label: "Alertes", hidden: true, get: (a) => a.alert_types.map((t) => ALERT_LABELS[t] ?? t).join(" "), render: (a) => <div className="chip-list">{a.alert_types.map((t) => <span key={t} className="chip">{ALERT_LABELS[t] ?? t}</span>)}</div> },
     { key: "backlog", label: "En retard", title: "Restant ERP des commandes fermes dont la date de livraison est passée", get: (a) => a.kpis.backlog_qty, num: true, render: (a) => a.kpis.backlog_qty > 0 ? <span style={{ color: "var(--warning-fg)" }}>{fmtQty(a.kpis.backlog_qty, a.unit)}</span> : <span className="subtle">–</span> },
-    { key: "plan", label: "Appro.", get: (a) => a.kpis.plan_qty, num: true, render: (a) => <>{fmtQty(a.kpis.plan_qty, a.unit)}{a.kpis.plan_cell_count > 0 && <span className="sub">{a.kpis.plan_cell_count} cellule(s)</span>}</> },
-    { key: "cbn", label: "CBN", get: (a) => a.kpis.proposal_count, num: true, render: (a) => a.kpis.proposal_count > 0 ? <>{a.kpis.proposal_count} <span className="subtle">({fmtQty(a.kpis.proposed_qty, a.unit)})</span>{a.kpis.urgent_proposal_count > 0 && <span className="sub" style={{ color: "var(--critical-fg)" }}>{a.kpis.urgent_proposal_count} urgent (plancher)</span>}{a.kpis.capped_proposal_count > 0 && <span className="sub" style={{ color: "var(--warning-fg)" }}>{a.kpis.capped_proposal_count} plafonnée(s)</span>}</> : <span className="subtle">–</span> },
-    { key: "alerts", label: "Alertes", get: (a) => a.alert_types.map((t) => ALERT_LABELS[t] ?? t).join(" "), render: (a) => <div className="chip-list">{a.alert_types.filter((t) => t !== "URGENT_PROPOSAL").map((t) => <span key={t} className="chip">{ALERT_LABELS[t] ?? t}</span>)}</div> },
   ], [asOf]);
 
   if (q.isError) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   const k = q.data?.kpis;
   const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { planner: engineParams.planner, granularity: perimeter.granularity === "week" ? "week" : "day" });
+  const gap = k && k.stock_value !== null && k.target_value ? (k.stock_value - k.target_value) / k.target_value : null;
 
   return (
     <div className="page">
       <div className="page-header">
         <div className="title">
           <h1>Cockpit du jour</h1>
-          <p>{asOf ? <>Aujourd'hui <b>{fmtDate(asOf)}</b> · stock initialisé le {fmtDate(q.data!.init_date)} · horizon 52 semaines · {q.data?.kpis.articles} articles{perimeter.planner ? ` · ${perimeter.planner}` : ""}</> : <Skeleton w={280} />}</p>
+          <p>{asOf ? <>Aujourd'hui <b>{fmtDate(asOf)}</b> · stock initialisé le {fmtDate(q.data!.init_date)} · {q.data?.kpis.articles} articles{perimeter.planner ? ` · ${perimeter.planner}` : ""}</> : <Skeleton w={280} />}</p>
         </div>
         <div className="actions">
           <a className="btn" href={api.downloadUrl("/api/exports/alerts.xlsx", { planner: engineParams.planner })}><Download />Alertes (xlsx)</a>
@@ -76,51 +82,61 @@ export default function CockpitPage() {
       {config?.reference_empty && <div className="note">Le référentiel est vide : chargez d'abord les articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures et le stock de référence dans la page <Link to="/referentiel">Référentiel</Link> (modèles Excel à télécharger).</div>}
 
       <div className="grid kpis sticky-kpis">
-        <Kpi label="Critiques" icon={<AlertOctagon size={14} />} tone="critical" value={k ? fmtInt(k.critical) : <Skeleton w={40} h={28} />} meta="rupture ou couverture rouge" onClick={() => setFilter(filter === "critical" ? "all" : "critical")} active={filter === "critical"} />
-        <Kpi label="À surveiller" icon={<AlertTriangle size={14} />} tone="warning" value={k ? fmtInt(k.warning) : <Skeleton w={40} h={28} />} meta="couverture orange, données manquantes" onClick={() => setFilter(filter === "warning" ? "all" : "warning")} active={filter === "warning"} />
-        <Kpi label="Ruptures Appro." icon={<PackageSearch size={14} />} tone={k && k.stockouts_7d > 0 ? "critical" : "info"} value={k ? fmtInt(k.stockouts) : <Skeleton w={40} h={28} />} meta={k ? `${k.stockouts_7d} sous 7 jours` : ""} onClick={() => setFilter(filter === "stockout" ? "all" : "stockout")} active={filter === "stockout"} />
-        <Kpi label="Couverture médiane" icon={<Layers size={14} />} value={k ? (k.median_coverage_days ?? "–") : <Skeleton w={40} h={28} />} unit="jours" meta={k ? `Projeté Appro., articles avec besoin · moyenne ${k.avg_coverage_days ?? "–"} j` : ""} />
-        <Kpi label="Valeur du stock" icon={<Coins size={14} />} tone="brand" value={k ? fmtEur(k.stock_value, true) : <Skeleton w={60} h={28} />} meta={k ? <StockValueMeta value={k.stock_value} target={k.target_value} unpriced={k.unpriced_articles} /> : ""} />
-        <Kpi label="En-cours ERP" icon={<Truck size={14} />} value={k ? fmtQty(k.open_firm_qty) : <Skeleton w={40} h={28} />} meta={k ? `+ ${fmtQty(k.open_forecast_qty)} prévisionnel · Appro. ${fmtQty(k.plan_qty)} (${k.plan_articles} article(s) avec saisie) · ${k.backlog_articles} article(s) en retard` : ""} />
-        <Kpi label="Surstock" icon={<ArrowDownToLine size={14} />} tone="info" value={k ? fmtInt(k.overstock) : <Skeleton w={40} h={28} />} meta="articles au-dessus du seuil" onClick={() => setFilter(filter === "overstock" ? "all" : "overstock")} active={filter === "overstock"} />
+        <Kpi label="Critiques" icon={<AlertOctagon size={14} />} tone="critical" value={k ? fmtInt(k.critical) : <Skeleton w={40} h={28} />} meta="couverture rouge, commande dépassée" onClick={() => toggle("critical")} active={filter === "critical"} />
+        <Kpi label="À commander" icon={<ShoppingCart size={14} />} tone="warning" value={k ? fmtInt(k.to_order) : <Skeleton w={40} h={28} />} meta="commande sous 5 jours ouvrés" onClick={() => toggle("to_order")} active={filter === "to_order"} />
+        <Kpi label="Surstock" icon={<ArrowDownToLine size={14} />} tone="info" value={k ? fmtInt(k.overstock) : <Skeleton w={40} h={28} />} meta="au-dessus du seuil" onClick={() => toggle("overstock")} active={filter === "overstock"} />
+        <Kpi label="Données" icon={<Database size={14} />} tone="brand" value={k ? fmtInt(k.data_issues) : <Skeleton w={40} h={28} />} meta="stock, lien ou commande à corriger" onClick={() => toggle("data")} active={filter === "data"} />
+        <Kpi label="OK" icon={<CheckCircle2 size={14} />} tone="ok" value={k ? fmtInt(k.ok) : <Skeleton w={40} h={28} />} meta="rien à faire aujourd'hui" onClick={() => toggle("ok")} active={filter === "ok"} />
       </div>
+      {k && (
+        <div className="cockpit-context">
+          <span>Couverture médiane <b>{k.median_coverage_days ?? "–"} j</b></span>
+          <span>Valeur du stock <b>{fmtEur(k.stock_value, true)}</b>{gap !== null && <span style={gap > 0 ? { color: "var(--critical-fg)" } : undefined}> ({gap > 0 ? "+" : "−"}{fmtPct(Math.abs(gap))} de la cible {fmtEur(k.target_value, true)})</span>}{k.unpriced_articles > 0 && <> · {k.unpriced_articles} sans prix</>}</span>
+          <span>En-cours ERP <b>{fmtQty(k.open_firm_qty)}</b></span>
+          <span>En retard <b>{k.backlog_articles}</b> article(s)</span>
+        </div>
+      )}
+
+      <Card flush title="Portefeuille" hint="cliquer sur une tuile ou filtrer chaque colonne ; une ligne ouvre la fiche article ; « Colonnes » affiche les colonnes secondaires" collapsible storageKey="cockpit.portfolio.card"
+        actions={<select className="select sm" value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="Filtre du portefeuille">
+          <option value="all">Tous</option><option value="critical">Critiques</option><option value="to_order">À commander</option>
+          <option value="overstock">Surstock</option><option value="data">Données à corriger</option><option value="ok">OK</option>
+        </select>}>
+        {q.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock rows={8} /></div> : (
+          <DataTable rows={rows} columns={cols} rowKey={(a) => a.article_id} onRowClick={(a) => nav(`/articles/${encodeURIComponent(a.article_id)}`)} emptyTitle="Aucun article" maxHeight="calc(100vh - 260px)" storageKey="cockpit.portfolio2" exportTitle="Portefeuille" />
+        )}
+      </Card>
 
       <div className="grid cols-3">
         <Card title="Projection de la valeur du stock" hint="Σ prix × stock en fin de semaine, Projeté Appro., articles valorisés ; pointillé : valeur du stock cible" className="span-2" collapsible storageKey="cockpit.value">
           {q.isLoading ? <Skeleton h={220} /> : q.data?.weekly_stock_value.length ? <StockValueChart data={q.data.weekly_stock_value} /> : <Empty title="Aucun article valorisé" hint="Les prix viennent de la table des prix synchronisée depuis l'ERP (std_cost_price)." />}
         </Card>
-        <Card title="Alertes prioritaires" hint={q.data ? `${q.data.alerts.length} alertes` : ""} actions={<button className="btn sm" onClick={() => setTab("flux")}>À commander</button>} collapsible storageKey="cockpit.alerts">
-          {q.isLoading ? <SkeletonBlock /> : <AlertList alerts={(q.data?.alerts ?? []).filter((a) => a.severity !== "info" && a.alert_type !== "BACKLOG").slice(0, 8)} asOf={asOf} />}
+        <Card title="Alertes prioritaires" hint={q.data ? `${q.data.alerts.filter((a) => a.severity !== "info").length} alertes` : ""} actions={<button className="btn sm" onClick={() => setTab("flux")}>À commander</button>} collapsible storageKey="cockpit.alerts">
+          {q.isLoading ? <SkeletonBlock /> : <AlertList alerts={(q.data?.alerts ?? []).filter((a) => a.severity !== "info").slice(0, 8)} asOf={asOf} />}
         </Card>
       </div>
-
-      <Card flush title="Portefeuille" hint="filtrer chaque colonne ; cliquer sur une ligne pour ouvrir la fiche"
-        actions={<select className="select sm" value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
-          <option value="all">Tous</option><option value="critical">Critiques</option><option value="warning">À surveiller</option>
-          <option value="stockout">Ruptures</option><option value="proposals">Avec proposition CBN</option>
-          <option value="overstock">Surstock</option><option value="ok">Sans alerte</option>
-        </select>}>
-        {q.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock rows={8} /></div> : (
-          <DataTable rows={rows} columns={cols} rowKey={(a) => a.article_id} onRowClick={(a) => nav(`/articles/${encodeURIComponent(a.article_id)}`)} emptyTitle="Aucun article" maxHeight="calc(100vh - 200px)" storageKey="cockpit.portfolio" exportTitle="Portefeuille" />
-        )}
-      </Card>
       {q.data?.diagnostics?.length ? <p className="small subtle">{q.data.diagnostics.slice(-1)[0]}</p> : null}
       </>}
     </div>
   );
 }
 
-/** Sub-line of the « Valeur du stock » tile : gap to the target value, red when above it. */
-function StockValueMeta({ value, target, unpriced }: { value: number | null; target: number | null; unpriced: number }) {
-  if (value === null || target === null) return <>aucun article valorisé</>;
-  const gap = target > 0 ? (value - target) / target : null;
-  const above = gap !== null && gap > 0;
+/** Status badge plus a blue dot when the article carries a data issue (never part of the status). */
+function StatusCell({ a }: { a: ArticleSummary }) {
+  const issues = a.kpis.data_issues.map((t) => ALERT_LABELS[t] ?? t).join(", ");
   return (
-    <>
-      {gap === null ? <>cible {fmtEur(target, true)}</> : <span style={above ? { color: "var(--critical-fg)", fontWeight: 600 } : undefined}>{above ? "+" : "−"}{fmtPct(Math.abs(gap))} de la valeur cible ({fmtEur(target, true)})</span>}
-      {unpriced > 0 && <span className="sub">{unpriced} article(s) sans prix</span>}
-    </>
+    <span className="status-cell">
+      <Badge tone={STATUS_TONE[a.kpis.status]}><span className={`dot ${STATUS_TONE[a.kpis.status]}`} />{STATUS_LABELS[a.kpis.status]}</Badge>
+      {issues && <span className="data-dot" title={`Données à corriger : ${issues}`} aria-label={`Données à corriger : ${issues}`} />}
+    </span>
   );
+}
+
+/** Coverage « à date » coloured by the article thresholds : red ≤ red + 1, orange ≤ orange, grey when overstock. */
+function CoverageAtDate({ a }: { a: ArticleSummary }) {
+  const d = a.kpis.coverage_at_date_days;
+  const tone: Severity | "ok" | "neutral" = a.kpis.overstock ? "neutral" : d <= a.kpis.alert_red_days + 1 ? "critical" : d <= a.kpis.alert_yellow_days ? "warning" : "ok";
+  return <Badge tone={tone}>{d} j</Badge>;
 }
 
 export function CoverageCell({ days, a }: { days: number; a: { kpis: { coverage_target_days: number }; alert_types: string[] } }) {

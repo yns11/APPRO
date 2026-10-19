@@ -37,7 +37,7 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
 }
 #: rules fixed in the application (documented for the screens : the guide of the engine explains each one)
 FIXED_RULES: list[tuple[str, str]] = [
-    ("Unité de temps", "jours ouvrés pour la couverture, les seuils, le délai et l'horizon ferme (20 j ouvrés)"),
+    ("Unité de temps", "jours ouvrés pour la couverture, les seuils et le délai"),
     ("Besoin non servi", "perdu : le stock s'arrête à 0, le manque affiché est le cumul des jours sans stock"),
     ("Stock cible", "besoin des n prochains jours ouvrés de couverture ; pas de stock de sécurité ni de cycle de commande"),
     ("Propositions", "sur les jours de livraison du fournisseur, regroupées sur la livraison précédant le besoin ; plancher dans le délai, cible pleine ensuite ; plafonds du lien"),

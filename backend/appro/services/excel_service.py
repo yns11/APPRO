@@ -159,7 +159,7 @@ def _parameters_sheet(ws, result: MrpResult, granularity: str, meta: dict[str, A
         ("Granularité", granularity, "une colonne par jour ou par semaine ISO ; seul le jour se réimporte"),
         ("Politique de manque", "lost", "besoin non servi perdu : stock borné à 0, le manque affiché est le cumul des jours sans stock"),
         ("Tolérance sous la cible (%)", p.target_tolerance_pct, "le CBN remonte à la cible dès que le stock projeté passe sous (100 − n) % de la cible"),
-        ("Unité de temps", "jours ouvrés", "couverture, seuils, délais et horizon ferme sont en jours ouvrés ; le classeur compte des colonnes"),
+        ("Unité de temps", "jours ouvrés", "couverture, seuils et délais sont en jours ouvrés ; le classeur compte des colonnes"),
     ]
     for k, v in (meta or {}).items():
         rows.append((k, str(v), ""))

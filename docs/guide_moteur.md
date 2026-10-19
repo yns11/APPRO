@@ -27,9 +27,9 @@ Sans aucune commande (et sans retour à la cible : tolérance mise à 100 % pour
 | Besoin 20 j ouvrés | 1 500 |
 | Besoin / jour ouvré | 100 |
 
-**Lecture.** La couverture (en jours ouvrés) est le nombre de jours ouvrés dont le besoin cumulé tient dans le stock du jour. La première rupture est le premier jour dont le besoin n'est pas servi. Le *Besoin 20 j ouvrés* est la somme du besoin des 20 prochains jours ouvrés (l'horizon ferme) ; sa moyenne est par jour ouvré compté.
+**Lecture.** La couverture (en jours ouvrés) est le nombre de jours ouvrés dont le besoin cumulé tient dans le stock du jour. La première rupture est le premier jour dont le besoin n'est pas servi. Le *Besoin 20 j ouvrés* est la somme du besoin des 20 prochains jours ouvrés (quatre semaines) ; sa moyenne est par jour ouvré compté.
 
-- **STOCKOUT** (avertissement, erp) : Rupture sur les commandes ERP le 2026-10-16 (J+9 ouvrés) : livraison à planifier ou commande à passer
+_Aucune alerte._
 
 ## 2. Commandes ERP, ligne Appro. et commande ignorée
 
@@ -134,9 +134,9 @@ Stock de départ 350 et délai de **10 jours ouvrés** (première livraison tena
 | ven 16/10 | S1 | 200 | 50 | ven 02/10 | **oui** | oui | non | Plancher : besoin non servi de 50 le 2026-10-16, lot minimal pour l'éviter ; délai fournisseur (10 j ouvrés) non tenable, commande à passer immédiatement |
 | lun 19/10 | S1 | 450 | 450 | lun 05/10 | non | non | non | Stock projeté 50 < 85 % de la cible (425) le 2026-10-19 : retour à la cible 500 |
 
-- **STOCKOUT** (critique, erp) : Rupture sur les commandes ERP le 2026-10-08 (J+3 ouvrés) : livraison à planifier ou commande à passer
-- **LOW_COVERAGE** (avertissement, erp) : Commandes ERP épuisées dans 3 j ouvrés (≤ seuil orange 5 j) ; stock à date : 2 j de besoin
-- **URGENT_PROPOSAL** (critique, plan) : 4 proposition(s) hors délai fournisseur – première livraison requise le 2026-10-08 (200, plancher : le minimum qui évite la rupture)
+- **LOW_COVERAGE** (critique, erp) : Le stock à date (350) couvre 3 j ouvrés de besoin, seuil rouge 2 j + 1 ; épuisé le 2026-10-08
+- **URGENT_PROPOSAL** (critique, plan) : 4 proposition(s) dont la date de commande est passée – S1 Fournisseur A, livraison requise le 2026-10-08 (200, plancher : le minimum qui évite la rupture)
+- **ORDER_DUE** (avertissement, plan) : Commande à placer avant le 2026-10-05 chez S1 Fournisseur A : 450 à livrer le 2026-10-19
 
 **Lecture.** Le plancher est strict : la tolérance de 15 % ne s'applique qu'au déclenchement du retour à la cible, jamais au plancher. Si l'approvisionneur **refuse** une proposition plancher (clic), le besoin non servi devient une rupture affichée et alertée, et le CBN reporte le besoin à la livraison suivante.
 
@@ -215,10 +215,10 @@ Un lien peut porter un **plafond par livraison** (multiple de l'UM, ≥ MOQ) et 
 | Projeté Appro. | **250** | **150** | **50** | **150** | **50** | **·** (−50) | **100** | **·** | **100** | **·** |
 | Cible | 500 | 500 | 500 | 500 | 500 | 500 | 500 | 500 | 500 | 500 |
 
-- **STOCKOUT** (avertissement, plan) : Rupture Projeté Appro. le 2026-10-12 (J+5 ouvrés) malgré le plan de livraison et le complément CBN, manque cumulé max 100
-- **STOCKOUT** (critique, erp) : Rupture sur les commandes ERP le 2026-10-08 (J+3 ouvrés) : livraison à planifier ou commande à passer
-- **LOW_COVERAGE** (avertissement, erp) : Commandes ERP épuisées dans 3 j ouvrés (≤ seuil orange 5 j) ; stock à date : 2 j de besoin
-- **CAP_REACHED** (avertissement, plan) : Plafond fournisseur atteint : 50 non livrables le 2026-10-09 (2 jour(s)), manque inévitable affiché dans le Projeté Appro.
+- **LOW_COVERAGE** (critique, erp) : Le stock à date (350) couvre 3 j ouvrés de besoin, seuil rouge 2 j + 1 ; épuisé le 2026-10-08
+- **ORDER_DUE** (avertissement, plan) : Commande à placer avant le 2026-10-05 chez S1 Fournisseur A : 200 à livrer le 2026-10-08 (3 propositions sous 5 j ouvrés)
+- **STOCKOUT** (info, plan) : Rupture Projeté Appro. le 2026-10-12 (J+5 ouvrés) malgré le plan de livraison et le complément CBN, manque cumulé max 100
+- **CAP_REACHED** (info, plan) : Plafond fournisseur atteint : 50 non livrables le 2026-10-09 (2 jour(s)), manque inévitable affiché dans le Projeté Appro.
 
 ## 9. Multi-sourcing : quotas, priorité, plafond reporté, refus d'un jour
 
@@ -294,33 +294,32 @@ Priorité :
 | ven 06/11 | S1 | 200 | 70 | mar 03/11 | non | non | non | Stock projeté 400 < 85 % de la cible (425) le 2026-11-06 : retour à la cible 500 ; part 70 % du quota (70 sur 100) |
 | ven 06/11 | S2 | 200 | 30 | ven 30/10 | non | non | non | Stock projeté 400 < 85 % de la cible (425) le 2026-11-06 : retour à la cible 500 ; part 30 % du quota (30 sur 100) |
 
-## 10. Alertes : seuils rouge et orange, surstock, gradation des ruptures
+## 10. Statut et alertes : couverture à date, date de commande, surstock
 
-Les alertes de **couverture** regardent l'épuisement des flux ERP (stock + commandes fermes) : `LOW_COVERAGE` critique si les commandes ERP sont épuisées sous `alert_red_days` jours ouvrés, avertissement sous `alert_yellow_days`, `OVERSTOCK` (info) si le stock à date couvre `overstock_days` jours ouvrés ou plus. Les **ruptures** (`STOCKOUT`) sont graduées sur les deux scénarios : critique dans le délai fournisseur, avertissement dans l'**horizon ferme (20 jours ouvrés, commun à tous les articles)**, information au-delà. `CAP_REACHED` signale un manque inévitable sous les plafonds du fournisseur (§ 8).
+Trois statuts, sans horizon commun. **Critique** : la **couverture à date** (le stock de la veille seul, sans aucune livraison) tient au plus `alert_red_days` + 1 jours ouvrés (`LOW_COVERAGE` critique), ou une proposition CBN a sa date de commande déjà passée (`URGENT_PROPOSAL`), ou le stock de départ est négatif (`NEGATIVE_STOCK`). **À commander** : une proposition est à commander sous cinq jours ouvrés (`ORDER_DUE`), ou la couverture à date tient au plus `alert_yellow_days` jours ouvrés sans livraison ferme ni Appro. saisie avant l'épuisement (`LOW_COVERAGE` avertissement). **OK** sinon. Le reste est de l'information : `OVERSTOCK` (couverture à date ≥ `overstock_days`), `STOCKOUT` (rupture du Projeté Appro. que le CBN n'a pas pu éviter), `CAP_REACHED` (manque inévitable sous les plafonds, § 8), et les données (`MISSING_DATA`, `UNLINKED_FLOWS`). En multi-sourcing chaque part de proposition porte le délai de son fournisseur : le statut suit la date de commande la plus proche.
 
 **Stock 150 (rupture dès demain)**
 
-- **STOCKOUT** (critique, erp) : Rupture sur les commandes ERP le 2026-10-06 (J+1 ouvrés) : livraison à planifier ou commande à passer
-- **LOW_COVERAGE** (critique, erp) : Commandes ERP épuisées dans 1 j ouvrés (≤ seuil rouge 2 j) ; stock à date : 0 j de besoin
-- **URGENT_PROPOSAL** (critique, plan) : 1 proposition(s) hors délai fournisseur – première livraison requise le 2026-10-06 (200, plancher : le minimum qui évite la rupture)
+- **LOW_COVERAGE** (critique, erp) : Le stock à date (150) couvre 1 j ouvrés de besoin, seuil rouge 2 j + 1 ; épuisé le 2026-10-06
+- **URGENT_PROPOSAL** (critique, plan) : 1 proposition(s) dont la date de commande est passée – S1 Fournisseur A, livraison requise le 2026-10-06 (200, plancher : le minimum qui évite la rupture)
+- **ORDER_DUE** (avertissement, plan) : Commande à placer avant le 2026-10-05 chez S1 Fournisseur A : 550 à livrer le 2026-10-08
 
 **Stock 450 (rupture vendredi)**
 
-- **STOCKOUT** (avertissement, erp) : Rupture sur les commandes ERP le 2026-10-09 (J+4 ouvrés) : livraison à planifier ou commande à passer
-- **LOW_COVERAGE** (avertissement, erp) : Commandes ERP épuisées dans 4 j ouvrés (≤ seuil orange 5 j) ; stock à date : 3 j de besoin
+- **LOW_COVERAGE** (avertissement, erp) : Le stock à date couvre 4 j ouvrés de besoin (seuil orange 5 j) et aucune livraison ferme ni Appro. saisie n'arrive avant le 2026-10-09
+- **ORDER_DUE** (avertissement, plan) : Commande à placer avant le 2026-10-06 chez S1 Fournisseur A : 550 à livrer le 2026-10-09
 
 **Stock 8 000 (80 jours ouvrés de besoin)**
 
-- **OVERSTOCK** (info, plan) : Surstock : le stock à date couvre 44 j ouvrés de besoin (≥ 30 j)
+- **OVERSTOCK** (info, plan) : Surstock : le stock à date couvre 45 j ouvrés de besoin (≥ 30 j)
 
-**Stock 3 000, ferme ERP 500 le 12/10 : rupture ERP à J + 32 jours ouvrés**
+**Stock 3 000, ferme ERP 500 le 12/10 : rien à faire, surstock (30 jours ouvrés de besoin)**
 
-- **STOCKOUT** (info, erp) : Rupture sur les commandes ERP le 2026-11-23 (J+35 ouvrés) : livraison à planifier ou commande à passer
+- **OVERSTOCK** (info, plan) : Surstock : le stock à date couvre 30 j ouvrés de besoin (≥ 30 j)
 
 **Données manquantes** (pas de fournisseur lié) :
 
-- **MISSING_DATA** (avertissement, data) : Aucun fournisseur actif lié à l'article (MOQ / délai inconnus)
-- **STOCKOUT** (avertissement, erp) : Rupture sur les commandes ERP le 2026-10-16 (J+9 ouvrés) : livraison à planifier ou commande à passer
+- **MISSING_DATA** (info, data) : Aucun fournisseur actif lié à l'article (MOQ / délai inconnus)
 
 ## 11. Consommation réelle, semaine en cours, réceptions et commandes en retard
 
@@ -401,7 +400,7 @@ Les paramètres de l'article (couverture cible, seuils rouge et orange, surstock
 | `quota_pct / priority` | lien | lien | répartition multi-sourcing |
 | `max_qty_per_delivery / max_qty_per_week` | vide (lien) | lien | plafonds, multiples de l'UM ; fermes et Appro. comptés ; excédent reporté, manque inévitable alerté |
 | `target_tolerance_pct` | 15 | commune | retour à la cible dès que le stock projeté passe sous (100 − n) % de la cible ; la quantité vise 100 % |
-| `Règles figées` | — | application | jours ouvrés partout ; besoin non servi perdu ; plancher dans le délai ; cible pleine ensuite ; livraison avant le besoin, regroupée ; horizon ferme 20 j ouvrés ; horizon 52 semaines ; fermes seules comptées ; refus = jour seul |
+| `Règles figées` | — | application | jours ouvrés partout ; besoin non servi perdu ; plancher dans le délai ; cible pleine ensuite ; livraison avant le besoin, regroupée ; horizon 52 semaines ; commande à placer sous 5 j ouvrés ; fermes seules comptées ; refus = jour seul |
 | `history_weeks / focus_weeks` | 2 / 2 (utilisateur) | affichage | semaines passées montrées, semaines détaillées jour par jour |
 
 La règle commune se règle dans *Paramètres › Règles communes* (managers, administrateurs) ; les paramètres de l'article dans sa fiche (onglet *Paramétrage*, avec les surcharges hebdomadaires et les liens fournisseurs) ou dans le *Référentiel* ; ceux du fournisseur dans le *Référentiel* et sa fiche.

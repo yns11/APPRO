@@ -260,7 +260,8 @@ def test_lanes_are_the_active_links_only_and_other_flows_are_reported():
     assert [x.supplier_id for x in u] == ["S9"] and u[0].orders_open == 1 and u[0].open_qty == 10
     assert u[0].orders_late == 1 and u[0].late_qty == 30 and u[0].receipts == 1
     alert = next(a for a in r.alerts if a.alert_type.value == "UNLINKED_FLOWS")
-    assert "S9 Other" in alert.message and alert.severity.value == "warning" and r.kpis["unlinked_flows"] == 3
+    assert "S9 Other" in alert.message and alert.severity.value == "info" and r.kpis["unlinked_flows"] == 3
+    assert r.kpis["data_issues"] == ["UNLINKED_FLOWS"] and r.kpis["status"] != "critical"
     # typed cells of a supplier without active link : his lane stays, flagged
     ds.plan = [PlanCell("A1", "S9", wed, 25)]
     r2 = run(ds, no_cbn=True, horizon_days=5)
@@ -498,21 +499,22 @@ def test_alert_levels():
     assert any(a.alert_type == AlertType.MISSING_DATA for a in r.alerts)
 
 
-def test_stockout_alert_scopes():
-    """A shortage nothing can fix any more (today) is alerted on both scenarios ; a plan cell that
-    brings the order forward clears the plan one."""
+def test_plan_stockout_is_information_and_erp_stockout_is_a_kpi_only():
+    """A shortage the plan cannot fix is reported on the plan scenario only, as information ; the ERP
+    scenario stockout is a KPI (column), never an alert."""
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 100.0)],
                       orders=[OrderLine("F1", "A1", "S1", MON + D(days=3), 2000, order_type=OrderType.FIRM)])
     r = run(ds, horizon_days=12)
-    scopes = {a.scope: a for a in r.alerts if a.alert_type == AlertType.STOCKOUT}
-    assert set(scopes) == {"erp", "plan"}
+    stockouts = [a for a in r.alerts if a.alert_type == AlertType.STOCKOUT]
+    assert [(a.scope, a.severity.value) for a in stockouts] == [("plan", "info")]
     assert r.kpis["first_stockout_erp"] == r.kpis["first_stockout_plan"] == MON.isoformat()
     ds2 = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 500.0)],
                        orders=[OrderLine("F1", "A1", "S1", MON + D(days=3), 2000, order_type=OrderType.FIRM)],
                        links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, lead_time_days=30)])
     ds2.plan = [PlanCell("A1", "S1", MON + D(days=2), 2000), PlanCell("A1", "S1", MON + D(days=3), 0)]
     r2 = run(ds2, horizon_days=12)
-    assert {a.scope for a in r2.alerts if a.alert_type == AlertType.STOCKOUT} == {"erp"} and r2.kpis["first_stockout_plan"] is None
+    assert not [a for a in r2.alerts if a.alert_type == AlertType.STOCKOUT] and r2.kpis["first_stockout_plan"] is None
+    assert r2.kpis["first_stockout_erp"] == (MON + D(days=2)).isoformat()
 
 
 def test_program_impact():
@@ -650,23 +652,50 @@ def test_receipt_statuses_transit_received_booked():
     assert not Receipt("R9", "A1", tue1, 1, status="Enregistré").in_transit and not Receipt("R9", "A1", tue1, 1, status="Enregistré").booked
 
 
-def test_plan_stockout_severity_is_graded_in_working_days():
-    """Critical inside the lead time, warning inside the 20-working-day firm horizon, informational beyond."""
+def test_three_statuses_from_the_stock_at_date_and_the_order_dates():
+    """critical : coverage « à date » ≤ red + 1 working day, or an order date already past ; to order : an
+    order date within five working days, or coverage ≤ orange with nothing landing before the run-out ;
+    ok otherwise.  No common horizon is involved ; the data issues never change the status."""
+    # 1. coverage at date (stock of yesterday, no inflow) : 350 serves one working day of 200 → ≤ red (2) + 1
+    r = run(make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 350.0)]), horizon_days=30)
+    assert r.kpis["status"] == "critical" and r.kpis["coverage_at_date_days"] == 1 and r.kpis["runout_date"] == (MON + D(days=1)).isoformat()
+    low = next(a for a in r.alerts if a.alert_type == AlertType.LOW_COVERAGE)
+    assert low.severity == Severity.CRITICAL and "seuil rouge" in low.message
+    # 2. order date already past : 1 500 covers 7 working days but the lead time is 10 → floor proposal, urgent
+    late = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1500.0)],
+                        links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, lead_time_days=10)])
+    r2 = run(late, horizon_days=40)
+    assert r2.kpis["status"] == "critical" and r2.kpis["order_due_late"] and r2.kpis["order_due_supplier_id"] == "S1"
+    assert any(a.alert_type == AlertType.URGENT_PROPOSAL and "date de commande est passée" in a.message for a in r2.alerts)
+    assert not any(a.alert_type == AlertType.LOW_COVERAGE for a in r2.alerts)
+    # 3. order to place within five working days : 2 400 covers 12 days, the CBN orders this week (lead 5)
+    soon = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 2400.0)])
+    r3 = run(soon, horizon_days=40)
+    assert r3.kpis["status"] == "to_order" and r3.kpis["coverage_at_date_days"] == 12
+    due = next(a for a in r3.alerts if a.alert_type == AlertType.ORDER_DUE)
+    assert due.severity == Severity.WARNING and "S1" in due.message
+    assert MON <= dt.date.fromisoformat(r3.kpis["order_due_date"]) <= MON + D(days=7) and r3.kpis["order_due_qty"] > 0
+    assert not r3.kpis["order_due_late"]
+    # 4. coverage ≤ orange (5) with nothing landing before the run-out → to order ; a firm order before it → ok
+    orange = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 900.0)],
+                          links=[SupplierLink("A1", "S1", moq=100, pack_qty=50, lead_time_days=3)])   # lead 5 : the order date would be past
+    r4 = run(orange, no_cbn=True, horizon_days=30)
+    assert r4.kpis["coverage_at_date_days"] == 4 and r4.kpis["status"] == "to_order"
+    assert any(a.alert_type == AlertType.LOW_COVERAGE and a.severity == Severity.WARNING for a in r4.alerts)
+    orange.orders = [OrderLine("F1", "A1", "S1", MON + D(days=2), 5000, order_type=OrderType.FIRM)]
+    r5 = run(orange, no_cbn=True, horizon_days=30)
+    assert not any(a.alert_type == AlertType.LOW_COVERAGE for a in r5.alerts) and r5.kpis["status"] == "ok"
+    assert r5.kpis["next_firm_date"] == (MON + D(days=2)).isoformat() and r5.kpis["next_firm_qty"] == 5000 and r5.kpis["next_firm_supplier_id"] == "S1"
+    # 5. data issues are information only
+    r6 = run(make_dataset(stock=[]), no_cbn=True, horizon_days=10)
+    assert "MISSING_DATA" in r6.kpis["data_issues"] and all(a.severity == Severity.INFO for a in r6.alerts if a.scope == "data")
+    # 6. no horizon in the gradation : a far plan stockout stays information whatever its distance
     far = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 10000.0)],
                        links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3, max_qty_per_week=1.0)],
                        pdp=[PdpLine("P1", MON + D(weeks=k), 500.0) for k in range(0, 30)])
-    r = run(far, horizon_days=200)
-    plan = [a for a in r.alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
-    assert plan and plan[0].details["days_ahead"] > 20 and plan[0].severity == Severity.INFO
-    mid = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1400.0)],
-                       links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3, max_qty_per_week=1.0)])
-    plan2 = [a for a in run(mid, horizon_days=60).alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
-    assert plan2 and 3 < plan2[0].details["days_ahead"] <= 20 and plan2[0].severity == Severity.WARNING
-    near = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 150.0)],
-                        links=[SupplierLink("A1", "S1", moq=1, pack_qty=1, lead_time_days=3, max_qty_per_week=1.0)])
-    r3 = run(near, horizon_days=60)
-    plan3 = [a for a in r3.alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
-    assert plan3 and plan3[0].severity == Severity.CRITICAL and r3.kpis["stockout_plan_severity"] == "critical"
+    r7 = run(far, horizon_days=200)
+    plan = [a for a in r7.alerts if a.alert_type == AlertType.STOCKOUT and a.scope == "plan"]
+    assert plan and plan[0].severity == Severity.INFO and r7.kpis["overstock"]
 
 
 def test_refused_proposals_stay_listed_as_ignored_with_their_real_order_date():
