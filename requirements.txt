@@ -1,14 +1,16 @@
 # Runtime dependencies of the Databricks App (Python 3.11 runtime).
-fastapi>=0.115,<1
-uvicorn[standard]>=0.30,<1
-pydantic>=2.7,<3
-pydantic-settings>=2.3,<3
-python-multipart>=0.0.9
-sqlalchemy>=2.0,<3
-numpy>=1.26,<3
-pandas>=2.2,<4
-openpyxl>=3.1,<4
-databricks-sdk>=0.30
-databricks-sql-connector>=3.3
-psycopg[binary]>=3.1,<4
-orjson>=3.9
+# Versions pinned to the set validated by the test suite (pytest, Playwright) ; bump them together.
+fastapi==0.149.0
+starlette==1.9.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.16.0
+python-multipart==0.0.32
+sqlalchemy==2.1.5
+numpy==2.4.6
+pandas==3.0.6
+openpyxl==3.1.5
+databricks-sdk==0.154.0
+databricks-sql-connector==4.6.0
+psycopg[binary]==3.3.6
+orjson==3.13.0
