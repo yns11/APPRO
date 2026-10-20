@@ -46,8 +46,8 @@ se lit.
    (1 + `scrap_pct` %).
 2 bis. **Jours de consommation de l'article** (`demand_days` [5], 1 à 5) : le besoin hebdomadaire est porté par
    les `demand_days` premiers jours ouvrés de la semaine (3 = lundi, mardi, mercredi ; 5 = toute la semaine).
-   Cible et couverture suivent ce profil. Le profil réel observé et une suggestion sont donnés dans *Paramètres ›
-   Données › Adhérence* (premier jour où 75 % de la consommation réelle de la semaine est atteinte ; jeudi ou
+   Cible et couverture suivent ce profil. Le profil réel observé et une suggestion sont donnés dans *Plan de production ›
+   Adhérence PDP / réel* (premier jour où 75 % de la consommation réelle de la semaine est atteinte ; jeudi ou
    vendredi → 5).
 3. **Besoin effectif par composant** selon sa **source de consommation** (`consumption_source` [`erp`]) :
    * `erp` : **jours passés** = consommation réelle déclarée du composant (`fct_consumption_actual`, **déjà
@@ -353,7 +353,7 @@ par semaine de l'article (`DELETE /api/params/overrides?scope=article_week&key1=
 ## 9. Impact sur les programmes
 
 Production **réalisable** par programme et semaine = PDP × part servable du composant le plus contraint,
-pour trois stocks : à date, Projeté ERP, Projeté Appro. (page *Impact programmes*).
+pour trois stocks : à date, Projeté ERP, Projeté Appro. (page *Plan de production*, onglet *Impact programmes*).
 
 ## 9 bis. Cockpit du jour : deux onglets, et la page Recherche
 
@@ -398,7 +398,9 @@ classeur de simulation (§ 11).
 
 **Paramètres › Données** : journal de synchronisation ERP (âge de chaque table miroir, alerte au-delà de deux
 heures, bandeau en haut de page si la dernière copie est en retard), articles présents dans l'ERP et absents
-du référentiel, calendrier usine, **adhérence PDP / réel** (nette = 1 − |Σ réel − Σ plan| / Σ plan ; brute =
+du référentiel, calendrier usine.
+
+**Plan de production › Adhérence PDP / réel** : **adhérence PDP / réel** (nette = 1 − |Σ réel − Σ plan| / Σ plan ; brute =
 1 − Σ par semaine ou par jour |réel − plan| / Σ plan ; biais ; profil réel par jour de semaine et suggestion de
 jours de consommation, applicable d'un clic). La période se choisit avec le **sélecteur de semaines** du
 tableau d'approvisionnement (les 26 semaines complètes avant la semaine en cours, mémorisé). Le **plan de

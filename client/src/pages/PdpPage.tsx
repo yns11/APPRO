@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { CheckCircle2, Download, FileUp, History, Power, PowerOff, RotateCcw, Save, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { usePdpSheet, usePdpVersions, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
-import { Badge, Button, Card, Empty, ErrorBox, Field, SkeletonBlock, useToast } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorBox, Field, SkeletonBlock, Tabs, useToast } from "@/components/ui";
+import { AdherenceCard } from "@/components/AdherencePanel";
+import { ProgramsImpact } from "@/components/ProgramsImpact";
 import { SearchSelect } from "@/components/SearchSelect";
 import { WeekRangeBar, type WeekChip, type WeekRange } from "@/components/WeekRangeBar";
 import { SheetGrid, type Pos, type SheetCell, type SheetChange } from "@/components/SheetGrid";
@@ -22,7 +24,13 @@ const ORIGIN_LABELS: Record<string, string> = {
  * paste a block from Excel) and save: the changes become a new active version.  Import of a
  * workbook and the list of versions live here too.
  */
+type PdpTab = "sheet" | "adherence" | "impact";
+const TABS: { id: PdpTab; label: string }[] = [{ id: "sheet", label: "Plan de production" }, { id: "adherence", label: "Adhérence PDP / réel" }, { id: "impact", label: "Impact programmes" }];
+
 export default function PdpPage() {
+  const [params, setParams] = useSearchParams();
+  const tab: PdpTab = (["sheet", "adherence", "impact"] as PdpTab[]).find((t) => t === params.get("tab")) ?? "sheet";
+  const setTab = (t: PdpTab) => setParams(t === "sheet" ? {} : { tab: t }, { replace: true });
   const toast = useToast();
   const { rights, perimeter } = usePerimeter();
   const canEdit = rights.canImportPdp;
@@ -122,14 +130,17 @@ export default function PdpPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Plan de production (PDP)</h1><p>Quantités hebdomadaires par programme, telles que le moteur les éclate en besoins de composants. {canEdit ? "Saisir directement les semaines à venir (ou coller un bloc Excel), puis enregistrer : la saisie devient une nouvelle version active." : "Lecture seule : la saisie du PDP est réservée aux managers et administrateurs."}</p></div>
-        <div className="actions">
+        <div className="title"><h1>Plan de production (PDP)</h1><p>{tab === "sheet" ? <>Quantités hebdomadaires par programme, telles que le moteur les éclate en besoins de composants. {canEdit ? "Saisir directement les semaines à venir (ou coller un bloc Excel), puis enregistrer : la saisie devient une nouvelle version active." : "Lecture seule : la saisie du PDP est réservée aux managers et administrateurs."}</> : tab === "adherence" ? "Consommation déclarée contre PDP éclaté, par article : adhérence nette et brute, biais, profil réel par jour et jours de consommation suggérés." : "Production réalisable par programme et par semaine, d'après les stocks de composants."}</p></div>
+        {tab === "sheet" && <div className="actions">
           <select className="select sm" value={weeks} onChange={(e) => setWeeks(Number(e.target.value))} aria-label="Nombre de semaines">{WEEK_CHOICES.map((w) => <option key={w} value={w}>{w} semaines</option>)}</select>
           <a className="btn sm primary" href={api.downloadUrl("/api/pdp/export.xlsx", { weeks })} title="Le PDP effectif complet (depuis le point zéro) au format d'import : à corriger puis réimporter tel quel"><Download />Exporter (Excel)</a>
           <a className="btn sm" href={api.downloadUrl("/api/pdp/template.xlsx", { weeks })} title="Classeur vide (semaine en cours et suivantes) à remplir puis importer"><Download />Modèle vide</a>
-          <Link className="btn sm" to="/programmes">Impact programmes</Link>
-        </div>
+        </div>}
       </div>
+      <Tabs<PdpTab> tabs={TABS} value={tab} onChange={setTab} />
+      {tab === "adherence" && <AdherenceCard />}
+      {tab === "impact" && <ProgramsImpact />}
+      {tab === "sheet" && <>
 
       <Card flush tight title={d ? <>PDP effectif · semaine en cours {d.current_week.replace("-W", " S")}{d.active_version ? <> · version active <b>{d.active_version.name}</b></> : " · aucune version active"}</> : "PDP effectif"}
         hint={canEdit ? `Cliquer une cellule et saisir ; Entrée / Tab / flèches ; Ctrl+C / Ctrl+V (bloc Excel) ; tirer le carré pour recopier ; Suppr = 0 ; glisser la poignée ⋮⋮ pour réordonner les lignes. La semaine en cours est surlignée ; les semaines passées (depuis ${d?.first_week ? d.first_week.replace("-W", " S") : "le point zéro"}) sont grisées${isAdmin ? " et modifiables par un administrateur" : " et en lecture seule"}.` : undefined}
@@ -199,6 +210,7 @@ export default function PdpPage() {
           )}
         </Card>
       </div>
+      </>}
     </div>
   );
 }
