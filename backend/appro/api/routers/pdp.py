@@ -4,13 +4,13 @@ from __future__ import annotations
 import datetime as dt
 import json
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...data.store import AppMeta, PdpLine, PdpVersion, ProgramScrap, audit
-from ...services import excel_service, mrp_service
+from ...services import actions, excel_service, mrp_service
 from ...services.access import Access
 from ...services.context import AppContext
 from .. import schemas as S
@@ -143,7 +143,7 @@ def sheet(weeks: int = Query(26, ge=4, le=160), planner: str | None = None, ctx:
 
 
 @router.put("/sheet", response_model=S.PdpVersionOut, status_code=201)
-def save_sheet(body: S.PdpSheetIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+def save_sheet(body: S.PdpSheetIn, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                user: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Direct entry of the PDP.  The changed cells are applied on the effective plan and saved as a **new
     active version** holding every line of the previous active version plus the cells typed.  The current
@@ -167,6 +167,8 @@ def save_sheet(body: S.PdpSheetIn, ctx: AppContext = Depends(ctx_dep), session: 
                 raise HTTPException(422, f"Semaine {c.week_start.isoformat()} : une semaine passée n'est modifiable que par un administrateur")
             past_weeks.add(c.week_start)
     active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
+    rec = actions.Recorder(session, user)
+    rec.before(actions.PDP_ACTIVE, {})
     lines: dict[str, dict[dt.date, float]] = {}
     if active:
         for l in active.lines:
@@ -190,14 +192,16 @@ def save_sheet(body: S.PdpSheetIn, ctx: AppContext = Depends(ctx_dep), session: 
     audit(session, user, "edit", "pdp_version", version.id, None,
           {"name": version.name, "cells": len(body.cells), "programs": sorted({c.program_id for c in body.cells}),
            "past_weeks": sorted(w.isoformat() for w in past_weeks), "from_version": active.id if active else None})
+    # undo = the previous version becomes active again (the new one stays in the list, inactive)
+    rec.done("pdp_sheet", f"Saisie PDP : {len(body.cells)} cellule(s) → version « {version.name} »", None, response)
     session.commit()
     ctx.bump()
     return _out(session, version)
 
 
 @router.put("/scrap", response_model=S.PdpSheetProgram | None)
-def save_scrap(body: S.PdpScrapIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-               user: str = Depends(current_user), access: Access = Depends(access_dep)):
+def save_scrap(body: S.PdpScrapIn, request: Request, response: Response, ctx: AppContext = Depends(ctx_dep),
+               session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Programme scrap rate (%) : the weekly need becomes PDP × (1 + rate / 100) before the bill of
     material.  The rate is **dated on the current week's Monday** : it applies to the current and the
     following weeks, the weeks before keep the rate they had."""
@@ -209,6 +213,8 @@ def save_scrap(body: S.PdpScrapIn, ctx: AppContext = Depends(ctx_dep), session: 
     if body.program_id not in {p.program_id for p in ds.programs}:
         raise HTTPException(422, f"Programme inconnu : {body.program_id}")
     monday = iso_week_monday(resolve_as_of(ds, mrp_service.build_params(ctx, session)))
+    rec = actions.Recorder(session, user, actions.group_of(request))
+    rec.before("program_scrap", {"program_id": body.program_id, "week_start": monday})
     row = session.get(ProgramScrap, (body.program_id, monday))
     if row is None:
         row = ProgramScrap(program_id=body.program_id, week_start=monday, rate_pct=0.0)
@@ -217,13 +223,14 @@ def save_scrap(body: S.PdpScrapIn, ctx: AppContext = Depends(ctx_dep), session: 
     row.rate_pct, row.updated_by = float(body.rate_pct), user
     audit(session, user, "edit", "program_scrap", f"{body.program_id}|{monday.isoformat()}", None,
           {"program_id": body.program_id, "week_start": monday.isoformat(), "rate_pct": float(body.rate_pct), "previous": previous})
+    rec.done("pdp_scrap", f"Rebut {body.program_id} : {float(body.rate_pct):g} %", None, response, group_label="Rebuts : {n} programmes")
     session.commit()
     ctx.bump()
     return None
 
 
 @router.put("/order", response_model=list[str])
-def save_order(body: S.PdpOrderIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+def save_order(body: S.PdpOrderIn, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                user: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Row order of the PDP sheet (drag and drop), shared by every user ; programmes absent from the
     list follow, in alphabetical order."""
@@ -232,12 +239,15 @@ def save_order(body: S.PdpOrderIn, ctx: AppContext = Depends(ctx_dep), session: 
     for pid in body.program_ids:
         if pid not in seen:
             seen.append(pid)
+    rec = actions.Recorder(session, user)
+    rec.before("meta", {"key": PROGRAM_ORDER_KEY})
     row = session.get(AppMeta, PROGRAM_ORDER_KEY)
     if row is None:
         row = AppMeta(key=PROGRAM_ORDER_KEY, value="[]")
         session.add(row)
     row.value = json.dumps(seen)
     audit(session, user, "reorder", "pdp_sheet", PROGRAM_ORDER_KEY, None, {"programs": len(seen)})
+    rec.done("pdp_order", "Ordre des programmes du PDP", None, response)
     session.commit()
     ctx.bump()
     return seen
@@ -249,7 +259,7 @@ def versions(session: Session = Depends(session_dep)):
 
 
 @router.post("/import", response_model=S.ImportReport, status_code=201)
-async def import_pdp(file: UploadFile = File(...), name: str = Form(""), note: str = Form(""),
+async def import_pdp(response: Response, file: UploadFile = File(...), name: str = Form(""), note: str = Form(""),
                      activate: str = Form("true"), sheet: str | None = Form(None),
                      ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                      user: str = Depends(current_user), access: Access = Depends(access_dep)):
@@ -281,6 +291,8 @@ async def import_pdp(file: UploadFile = File(...), name: str = Form(""), note: s
                          imported_by=user, active=False)
     for l in lines:
         version.lines.append(PdpLine(program_id=l.program_id, week_start=l.week_start, qty=l.qty))
+    rec = actions.Recorder(session, user)
+    rec.before(actions.PDP_ACTIVE, {})
     session.add(version)
     # a text field on purpose : since FastAPI 0.149 a missing boolean form field reads as False, which would
     # silently stop activating the imported version
@@ -289,34 +301,41 @@ async def import_pdp(file: UploadFile = File(...), name: str = Form(""), note: s
             v.active = False
         version.active = True
     audit(session, user, "import", "pdp_version", version.id, None, {"name": version.name, "lines": len(lines)})
+    # undo = the previous version becomes active again (the imported one stays in the list, inactive)
+    rec.done("pdp_import", f"Import PDP « {version.name} » ({len(lines)} lignes)", None, response)
     session.commit()
     ctx.bump()
     return S.ImportReport(created=len(lines), ignored=len(notes), notes=notes, version=_out(session, version))
 
 
 @router.post("/versions/{version_id}/activate", response_model=S.PdpVersionOut)
-def activate(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+def activate(version_id: str, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
              user: str = Depends(current_user), access: Access = Depends(access_dep)):
     access.require_pdp()
     v = session.get(PdpVersion, version_id)
     if v is None:
         raise HTTPException(404, "Version inconnue")
+    rec = actions.Recorder(session, user)
+    rec.before(actions.PDP_ACTIVE, {})
     for other in session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))):
         other.active = False
     v.active = True
     audit(session, user, "activate", "pdp_version", v.id, None, {"name": v.name})
+    rec.done("pdp_version", f"Activation du PDP « {v.name} »", None, response)
     session.commit()
     ctx.bump()
     return _out(session, v)
 
 
 @router.post("/versions/{version_id}/deactivate", response_model=S.PdpVersionOut)
-def deactivate(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+def deactivate(version_id: str, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                user: str = Depends(current_user), access: Access = Depends(access_dep)):
     access.require_pdp()
     v = session.get(PdpVersion, version_id)
     if v is None:
         raise HTTPException(404, "Version inconnue")
+    rec = actions.Recorder(session, user)
+    rec.before(actions.PDP_ACTIVE, {})
     was_active = v.active
     v.active = False
     # « back to the previous state » : the most recent other version takes over (there is no ERP plan)
@@ -326,20 +345,23 @@ def deactivate(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Ses
         if fallback is not None:
             fallback.active = True
     audit(session, user, "deactivate", "pdp_version", v.id, None, {"name": v.name, "now_active": fallback.id if fallback else None})
+    rec.done("pdp_version", f"Désactivation du PDP « {v.name} »", None, response)
     session.commit()
     ctx.bump()
     return _out(session, v)
 
 
 @router.delete("/versions/{version_id}", status_code=204)
-def delete_version(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+def delete_version(version_id: str, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                    user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """Deletes the version and its lines – **not undoable** (the screen asks for a confirmation)."""
     access.require_pdp()
     v = session.get(PdpVersion, version_id)
     if v is None:
         raise HTTPException(404, "Version inconnue")
     audit(session, user, "delete", "pdp_version", v.id, None, {"name": v.name})
     session.delete(v)
+    actions.record_fixed(session, user, "pdp_version", f"Suppression du PDP « {v.name} »", response=response)
     session.commit()
     ctx.bump()
 

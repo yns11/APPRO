@@ -224,6 +224,30 @@ class AuditLog(Base):
         return json.loads(self.payload_json or "{}")
 
 
+class AppAction(Base):
+    """One **gesture** of a user (a cell typed, a fill or a paste of the grid, a reference row, a weekly
+    parameter, a PDP save…) with the state of every touched row **before and after** : the unit of
+    « annuler / rétablir » (services/actions.py).  Kept :data:`appro.services.actions.RETENTION_DAYS` days."""
+
+    __tablename__ = "app_actions"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("AC"))
+    ts: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    user: Mapped[str] = mapped_column(String(120), default="", index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    label: Mapped[str] = mapped_column(String(255), default="")
+    article_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    group_id: Mapped[str] = mapped_column(String(60), default="", index=True)   # one gesture spread over several requests
+    items_json: Mapped[str] = mapped_column(Text, default="[]")                 # [{entity, key, before, after}]
+    undoable: Mapped[bool] = mapped_column(Boolean, default=True)
+    state: Mapped[str] = mapped_column(String(12), default="applied")           # applied | undone | discarded
+    changed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    changed_by: Mapped[str] = mapped_column(String(120), default="")
+
+    @property
+    def items(self) -> list[dict[str, Any]]:
+        return json.loads(self.items_json or "[]")
+
+
 def audit(session: Session, user: str, action: str, entity_type: str, entity_id: str = "",
           article_id: str | None = None, payload: dict | None = None) -> None:
     session.add(AuditLog(user=user, action=action, entity_type=entity_type, entity_id=entity_id,

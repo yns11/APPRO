@@ -435,6 +435,30 @@ Chaque écriture (cellule, référentiel, import, paramètre) est journalisée a
 | Stock de référence | une seule date pour tous les articles, jamais après aujourd'hui (point zéro) |
 | Autres tables du référentiel | sans date |
 
+### 10 bis. Annuler / rétablir
+
+Chaque **geste** d'un utilisateur est une *action* gardée **7 jours** avec, pour chaque ligne touchée,
+son état **avant** et **après** : une cellule saisie, une recopie ou un collage (une seule action pour
+toutes les cellules), un lot de cellules, une ligne du référentiel (création, modification, suppression,
+modification en lot = une action), un import par fusion, une déclaration de PO, un paramètre par semaine
+(valeur, lot, réinitialisation), une règle commune, un taux de rebut, l'ordre des programmes, une
+sauvegarde ou un import de la feuille PDP, l'activation ou la désactivation d'une version.
+
+| Règle | Détail |
+|---|---|
+| Annuler | réécrit l'état *avant* de chaque ligne touchée ; rétablir réécrit l'état *après* |
+| Ordre strict | les actions d'un utilisateur s'annulent de la plus récente à la plus ancienne : annuler une action ancienne annule d'abord les plus récentes (« annuler jusqu'ici ») ; rétablir va dans l'autre sens |
+| Nouvelle action | efface la pile des actions annulées de l'utilisateur (pas de branches) |
+| Conflit | une ligne modifiée depuis par quelqu'un d'autre bloque l'annulation (« modifié depuis par X ») : rien n'est écrit, tout ou rien sur la chaîne |
+| Qui | chacun annule ses propres actions ; un **administrateur** peut annuler celles de n'importe qui (page Saisies & journal, onglet Actions) |
+| PDP | annuler une saisie ou un import de feuille **réactive la version précédente** ; la nouvelle version reste dans la liste, inactive |
+| Non annulable | une table du référentiel **remplacée** par un fichier et la **suppression** d'une version de PDP : journalisées, mais l'écran demande une confirmation à la place |
+| Rétention | 7 jours ; au-delà l'action disparaît du journal et ne peut plus être annulée ni rétablie |
+
+Dans l'application : boutons ↶ / ↷ de l'en-tête (le badge compte les actions annulables), historique
+« Mes actions » avec « Annuler jusqu'ici », raccourcis **Ctrl+Z** / **Ctrl+Y** (ou Ctrl+Shift+Z) hors d'un
+champ de saisie, toast « Annuler » (8 s) après chaque écriture, cellules réécrites surlignées un instant.
+
 ## 11. Classeur Excel « vivant »
 
 L'export *Simulation* reproduit le tableau : par article, *Besoin*, puis *Ferme / Prévisionnel / Reçu /

@@ -724,6 +724,38 @@ class ImportReport(BaseModel):
     version: PdpVersionOut | None = None
 
 
+class ActionOut(BaseModel):
+    """One gesture of a user in the undo journal (services/actions.py)."""
+    id: str
+    ts: dt.datetime
+    user: str
+    kind: str
+    label: str
+    article_id: str | None
+    group_id: str
+    items: int
+    state: Literal["applied", "undone", "discarded"]
+    undoable: bool
+    changed_at: dt.datetime | None
+    changed_by: str
+    mine: bool
+    can_act: bool
+    conflict: str | None
+
+
+class TouchedCell(BaseModel):
+    entity: Literal["plan_cell", "adjustment", "flag"]
+    article_id: str | None
+    supplier_id: str | None
+    date: str | None
+
+
+class ActionResultOut(BaseModel):
+    kind: Literal["undo", "redo"]
+    actions: list[ActionOut]
+    cells: list[TouchedCell] = []
+
+
 class AuditOut(BaseModel):
     id: int
     ts: dt.datetime

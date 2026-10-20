@@ -12,6 +12,7 @@ donne la vue d'ensemble.
   (deux lignes)      │ app_adjustments (article × jour)                                      │
   Clics             │ app_cell_flags (commande ferme ignorée, proposition CBN refusée)       │
                      │ app_pdp_versions / app_pdp_lines   app_param_overrides   app_audit_log │
+                     │ app_actions (annuler / rétablir : état avant / après, 7 jours)          │
                      │                                                                       │
   Faits ERP          │ erp_purchase_orders  erp_receipts  erp_consumption_actual             │
   (miroir, job)      │ erp_sync_log                                              │

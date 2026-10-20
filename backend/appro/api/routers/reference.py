@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,7 +20,7 @@ from ...data.schemas import REFERENCE_TABLES, TABLES
 from ...data.store import REF_MODELS, ParamOverride, audit
 from ...engine.models import DatasetError, EngineParams
 from ...engine.runner import resolve_as_of, resolve_init_date
-from ...services import mrp_service, validation
+from ...services import actions, mrp_service, validation
 from ...services.access import ROLES, Access
 from ...services.context import AppContext
 from .. import schemas as S
@@ -216,35 +216,41 @@ def query_columns(ctx: AppContext, session: Session, name: str, out: list[dict])
 
 
 @router.put("/reference/{name}/rows")
-def upsert_row(name: str, body: S.RefRowIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-               user: str = Depends(current_user), access: Access = Depends(access_dep)):
-    _schema(name)
+def upsert_row(name: str, body: S.RefRowIn, request: Request, response: Response, ctx: AppContext = Depends(ctx_dep),
+               session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    t = _schema(name)
     access.require_row(name, body.values)
     if name == "ref_planners" and str(body.values.get("role", "")).lower() not in ROLES:
         raise HTTPException(422, f"Rôle inconnu : {body.values.get('role')} (attendu : {', '.join(ROLES)})")
     if name == "fct_stock":
         _check_stock_dates(session, [body.values], replace=False)
     _check_rows(session, name, [body.values], replace=False)
+    rec = actions.Recorder(session, user, actions.group_of(request))
     try:
-        out = reference.upsert_row(session, name, body.values, user)
+        out = reference.upsert_row(session, name, body.values, user, rec)
     except (ValueError, KeyError) as exc:
         raise HTTPException(422, f"Ligne invalide : {exc}")
+    rec.done("reference", f"{t.label} : {' | '.join(str(out[k]) for k in t.key)}", out.get("article_id") if "article_id" in out else None,
+             response, group_label=f"{t.label} : {{n}} lignes")
     session.commit()
     ctx.bump()
     return out
 
 
 @router.post("/reference/{name}/delete", status_code=204)
-def delete_row(name: str, body: S.RefKeyIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-               user: str = Depends(current_user), access: Access = Depends(access_dep)):
-    _schema(name)
+def delete_row(name: str, body: S.RefKeyIn, request: Request, response: Response, ctx: AppContext = Depends(ctx_dep),
+               session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    t = _schema(name)
     access.require_row(name, body.key)
+    rec = actions.Recorder(session, user, actions.group_of(request))
     try:
-        found = reference.delete_row(session, name, body.key, user)
+        found = reference.delete_row(session, name, body.key, user, rec)
     except (ValueError, KeyError) as exc:
         raise HTTPException(422, f"Clé invalide : {exc}")
     if not found:
         raise HTTPException(404, "Ligne inconnue")
+    rec.done("reference", f"{t.label} : suppression de {' | '.join(str(body.key.get(k, '')) for k in t.key)}",
+             str(body.key["article_id"]) if body.key.get("article_id") else None, response, group_label=f"{t.label} : {{n}} lignes supprimées")
     session.commit()
     ctx.bump()
 
@@ -260,12 +266,12 @@ def template(name: str, filled: bool = False, session: Session = Depends(session
 
 
 @router.post("/reference/{name}/import", response_model=S.ImportReport, status_code=201)
-async def import_table(name: str, file: UploadFile = File(...), mode: str = Form("replace"),
+async def import_table(name: str, response: Response, file: UploadFile = File(...), mode: str = Form("replace"),
                        ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                        user: str = Depends(current_user), access: Access = Depends(access_dep)):
-    """Load an Excel file built on the template.  ``mode`` = ``replace`` (the table is replaced) or
-    ``merge`` (rows are created / updated by key)."""
-    _schema(name)
+    """Load an Excel file built on the template.  ``mode`` = ``replace`` (the table is replaced, **not
+    undoable**) or ``merge`` (rows are created / updated by key, one undoable action)."""
+    t = _schema(name)
     access.require_table(name)
     content = await file.read()
     if not content:
@@ -283,12 +289,17 @@ async def import_table(name: str, file: UploadFile = File(...), mode: str = Form
     if name == "fct_stock":
         _check_stock_dates(session, df.to_dict("records"), replace=(mode == "replace"))
     _check_rows(session, name, df.to_dict("records"), replace=(mode == "replace"))
+    rec = actions.Recorder(session, user)
     try:
-        n = reference.replace_all(session, name, df, user) if mode == "replace" else reference.merge_all(session, name, df, user)
+        n = reference.replace_all(session, name, df, user) if mode == "replace" else reference.merge_all(session, name, df, user, rec)
     except ValueError as exc:
         session.rollback()
         raise HTTPException(422, f"Ligne invalide : {exc}")
     audit(session, user, "import", name, file.filename or "", None, {"rows": n, "mode": mode})
+    if mode == "replace":
+        actions.record_fixed(session, user, "import", f"{t.label} : table remplacée par un fichier ({n} lignes)", response=response)
+    else:
+        rec.done("import", f"{t.label} : import par fusion ({n} lignes)", None, response)
     session.commit()
     ctx.bump()
     return S.ImportReport(created=n, ignored=len(notes), notes=notes)
@@ -426,8 +437,10 @@ def _check_override(scope: str, key2: str, field: str, value: Any) -> None:
 
 
 def _write_override(session: Session, user: str, scope: str, key1: str, key2: str, field: str,
-                    value: Any) -> ParamOverride | None:
+                    value: Any, rec: actions.Recorder | None = None) -> ParamOverride | None:
     """Upsert one override ; ``None`` / empty value for an article week deletes it (back to the article value)."""
+    if rec is not None:
+        rec.before("param_override", {"scope": scope, "key1": key1, "key2": key2, "field": field})
     row = session.scalars(select(ParamOverride).where(ParamOverride.scope == scope, ParamOverride.key1 == key1,
                                                       ParamOverride.key2 == key2, ParamOverride.field == field)).first()
     if scope == "article_week" and (value is None or value == ""):
@@ -454,19 +467,23 @@ def _authorize_override(access: Access, scope: str, key1: str) -> None:
 
 
 @router.put("/params/overrides", response_model=S.ParamOverrideOut | None)
-def upsert_override(body: S.ParamOverrideIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-                    user: str = Depends(current_user), access: Access = Depends(access_dep)):
+def upsert_override(body: S.ParamOverrideIn, request: Request, response: Response, ctx: AppContext = Depends(ctx_dep),
+                    session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):
     _authorize_override(access, body.scope, body.key1)
     _check_override(body.scope, body.key2, body.field, body.value)
-    row = _write_override(session, user, body.scope, body.key1, body.key2, body.field, body.value)
+    rec = actions.Recorder(session, user, actions.group_of(request))
+    row = _write_override(session, user, body.scope, body.key1, body.key2, body.field, body.value, rec)
+    shown = "vide" if body.value in (None, "") else str(body.value)
+    rec.done("param", f"Règle {body.field} : {shown}" if body.scope == "global" else f"Paramètre {body.field} {body.key1} · {body.key2} : {shown}",
+             body.key1 if body.scope == "article_week" else None, response, group_label="Paramètres : {n} valeurs")
     session.commit()
     ctx.bump()
     return row
 
 
 @router.put("/params/overrides/batch", response_model=list[S.ParamOverrideOut])
-def upsert_overrides(body: S.ParamOverrideBatchIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-                     user: str = Depends(current_user), access: Access = Depends(access_dep)):
+def upsert_overrides(body: S.ParamOverrideBatchIn, request: Request, response: Response, ctx: AppContext = Depends(ctx_dep),
+                     session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Several weekly values of one article in one transaction (paste / fill of the weekly grid) ;
     an empty value restores the article value for that week."""
     _authorize_override(access, body.scope, body.key1)
@@ -475,11 +492,15 @@ def upsert_overrides(body: S.ParamOverrideBatchIn, ctx: AppContext = Depends(ctx
     from sqlalchemy.exc import IntegrityError
     for attempt in range(2):     # two clients writing the same week at once: the second pass finds the rows
         out = []
+        rec = actions.Recorder(session, user, actions.group_of(request))
         try:
             for it in body.items:
-                row = _write_override(session, user, body.scope, body.key1, it.key2, it.field, it.value)
+                row = _write_override(session, user, body.scope, body.key1, it.key2, it.field, it.value, rec)
                 if row is not None:
                     out.append(row)
+            rec.done("param", f"Paramètres {body.key1} : {len(body.items)} valeurs" if body.scope == "article_week"
+                     else f"Règles : {len(body.items)} valeurs", body.key1 if body.scope == "article_week" else None, response,
+                     group_label="Paramètres : {n} valeurs")
             session.commit()
             break
         except IntegrityError:
@@ -491,27 +512,35 @@ def upsert_overrides(body: S.ParamOverrideBatchIn, ctx: AppContext = Depends(ctx
 
 
 @router.delete("/params/overrides", status_code=204)
-def reset_overrides(scope: str, key1: str = "", ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-                    user: str = Depends(current_user), access: Access = Depends(access_dep)):
+def reset_overrides(scope: str, response: Response, key1: str = "", ctx: AppContext = Depends(ctx_dep),
+                    session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Remove every override of a scope / key (all the weekly values of an article, or all the global rules)."""
     if scope not in ("global", "article_week"):
         raise HTTPException(422, "scope : global ou article_week")
     _authorize_override(access, scope, key1)
     rows = session.scalars(select(ParamOverride).where(ParamOverride.scope == scope, ParamOverride.key1 == key1)).all()
+    rec = actions.Recorder(session, user)
     for row in rows:
+        rec.before("param_override", {"scope": row.scope, "key1": row.key1, "key2": row.key2, "field": row.field})
         session.delete(row)
     audit(session, user, "reset_params", "param_override", f"{scope}/{key1}", key1 or None, {"rows": len(rows)})
+    rec.done("param", f"Paramètres {key1} : retour aux valeurs de l'article ({len(rows)} valeurs)" if scope == "article_week"
+             else f"Règles : retour aux valeurs par défaut ({len(rows)} valeurs)", key1 or None, response)
     session.commit()
     ctx.bump()
 
 
 @router.delete("/params/overrides/{override_id}", status_code=204)
-def delete_override(override_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+def delete_override(override_id: str, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                     user: str = Depends(current_user)):
     row = session.get(ParamOverride, override_id)
     if row is None:
         raise HTTPException(404, "Paramètre inconnu")
+    rec = actions.Recorder(session, user)
+    rec.before("param_override", {"scope": row.scope, "key1": row.key1, "key2": row.key2, "field": row.field})
     audit(session, user, "delete_param", "param_override", row.id, None, {"field": row.field})
     session.delete(row)
+    rec.done("param", f"Paramètre {row.field}" + (f" {row.key1} · {row.key2}" if row.scope == "article_week" else "") + " : retiré",
+             row.key1 if row.scope == "article_week" else None, response)
     session.commit()
     ctx.bump()

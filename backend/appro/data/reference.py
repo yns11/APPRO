@@ -65,12 +65,15 @@ def _clean(schema: TableSchema, row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def upsert_row(session: Session, name: str, row: dict[str, Any], user: str) -> dict[str, Any]:
-    """Create or update one row identified by the key columns.  Does not commit."""
+def upsert_row(session: Session, name: str, row: dict[str, Any], user: str, rec: Any = None) -> dict[str, Any]:
+    """Create or update one row identified by the key columns.  Does not commit.
+    ``rec`` : the :class:`appro.services.actions.Recorder` of the request (undo), when any."""
     schema = schema_of(name)
     model = REF_MODELS[name]
     clean = _clean(schema, row)
     key = tuple(clean[k] for k in schema.key)
+    if rec is not None:
+        rec.before(f"ref:{name}", {k: clean[k] for k in schema.key})
     obj = session.get(model, key if len(key) > 1 else key[0])
     action = "update" if obj is not None else "create"
     if obj is None:
@@ -83,13 +86,15 @@ def upsert_row(session: Session, name: str, row: dict[str, Any], user: str) -> d
     return clean
 
 
-def delete_row(session: Session, name: str, key: dict[str, Any], user: str) -> bool:
+def delete_row(session: Session, name: str, key: dict[str, Any], user: str, rec: Any = None) -> bool:
     schema = schema_of(name)
     model = REF_MODELS[name]
     values = tuple(_clean(schema, {**{c: "" for c in schema.column_names}, **key})[k] for k in schema.key)
     obj = session.get(model, values if len(values) > 1 else values[0])
     if obj is None:
         return False
+    if rec is not None:
+        rec.before(f"ref:{name}", dict(zip(schema.key, values)))
     audit(session, user, "delete", name, "|".join(str(v) for v in values), key.get("article_id"), key)
     session.delete(obj)
     return True
@@ -113,10 +118,10 @@ def replace_all(session: Session, name: str, df: pd.DataFrame, user: str) -> int
     return n
 
 
-def merge_all(session: Session, name: str, df: pd.DataFrame, user: str) -> int:
+def merge_all(session: Session, name: str, df: pd.DataFrame, user: str, rec: Any = None) -> int:
     n = 0
     for row in df.to_dict("records"):
-        upsert_row(session, name, row, user)
+        upsert_row(session, name, row, user, rec)
         n += 1
     return n
 

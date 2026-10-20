@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from ...data.store import audit
-from ...services import excel_service, mrp_service
+from ...services import actions, excel_service, mrp_service
 from ...services.access import Access
 from ...services.context import AppContext
 from .. import schemas as S
@@ -47,7 +47,7 @@ def export_plan(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), 
 
 
 @router.post("/imports/simulation", response_model=S.ImportReport, status_code=201)
-async def import_simulation(file: UploadFile = File(...), ctx: AppContext = Depends(ctx_dep),
+async def import_simulation(response: Response, file: UploadFile = File(...), ctx: AppContext = Depends(ctx_dep),
                             session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Re-import the *Plan* and *Ajustement* rows of an exported ``SIMULATION`` sheet (day
     granularity): the plan cells and adjustments of every article present in the workbook replace
@@ -62,6 +62,7 @@ async def import_simulation(file: UploadFile = File(...), ctx: AppContext = Depe
     known = set(ctx.table("ref_articles")["article_id"])
     as_of = mrp_service.compute(ctx, session).as_of
     created = 0
+    rec = actions.Recorder(session, user)
     for aid, items in cells.items():
         if aid not in known:
             notes.append(f"article inconnu : {aid}")
@@ -73,13 +74,16 @@ async def import_simulation(file: UploadFile = File(...), ctx: AppContext = Depe
             if c.kind == "PLAN":
                 if c.date < as_of:
                     continue
+                rec.before("plan_cell", {"article_id": aid, "supplier_id": c.supplier_id or "", "date": c.date})
                 row = mrp_service.set_plan_cell(session, user, aid, c.supplier_id, c.date,
                                                 "" if c.qty is None else str(c.qty))
             else:
+                rec.before("adjustment", {"article_id": aid, "date": c.date})
                 row = mrp_service.set_adjustment(session, user, aid, c.date, "" if c.qty is None else str(c.qty))
             if row is not None:
                 created += 1
     audit(session, user, "import", "simulation", file.filename or "", None, {"cells": created, "articles": len(cells)})
+    rec.done("import", f"Import de saisies « {file.filename or 'classeur'} » ({created} cellules)", None, response)
     session.commit()
     ctx.bump()
     return S.ImportReport(created=created, ignored=len(notes), notes=notes)

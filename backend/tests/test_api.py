@@ -1103,3 +1103,194 @@ def test_closed_orders_declared_receipts_count_in_the_stock(client):
     # deactivating the declaration takes the receipt out again
     assert client.put("/api/reference/ref_closed_orders/rows", json={"values": {"purch_id": "024597", "active": False}}).status_code == 200
     assert receipts_on(day) == before
+
+
+# ---------------------------------------------------------------- annuler / rétablir
+def _acts(client, **params):
+    return client.get("/api/actions", params=params).json()
+
+
+def test_undo_redo_plan_cell_and_shortcuts(client):
+    """A typed cell is one action : the response names it, Ctrl+Z puts the cell back, Ctrl+Y re-applies it."""
+    _no_cbn(client)
+    day = "2026-09-23"
+    r = client.put("/api/entries/plan", json={"article_id": AID, "supplier_id": "S-000545", "date": day, "expression": "600"})
+    assert r.status_code == 200 and r.headers["X-Action-Id"].startswith("AC-")
+    assert "Plan%20P-00001046" in r.headers["X-Action-Label"]
+    aid = r.headers["X-Action-Id"]
+    acts = _acts(client, mine=True)
+    assert acts[0]["id"] == aid and acts[0]["state"] == "applied" and acts[0]["items"] == 1 and acts[0]["conflict"] is None
+    assert acts[0]["mine"] and acts[0]["can_act"] and acts[0]["article_id"] == AID
+    # a second write of the same cell is another action (no group)
+    r2 = client.put("/api/entries/plan", json={"article_id": AID, "supplier_id": "S-000545", "date": day, "expression": "650"})
+    assert r2.headers["X-Action-Id"] != aid
+    # the older action of the chain is not « modifié depuis » : undoing « jusqu'ici » restores the cell first
+    assert [(a["id"], a["conflict"]) for a in _acts(client, mine=True)[:2]] == [(r2.headers["X-Action-Id"], None), (aid, None)]
+    # Ctrl+Z : back to 600 ; Ctrl+Z again : the cell disappears
+    out = client.post("/api/actions/undo-last").json()
+    assert out["kind"] == "undo" and [a["id"] for a in out["actions"]] == [r2.headers["X-Action-Id"]]
+    cells = client.get("/api/entries/plan", params={"article_id": AID}).json()
+    assert [c["qty"] for c in cells if c["date"] == day] == [600.0]
+    assert client.post("/api/actions/undo-last").status_code == 200
+    assert [c for c in client.get("/api/entries/plan", params={"article_id": AID}).json() if c["date"] == day] == []
+    assert client.post("/api/actions/undo-last").json()["actions"][0]["kind"] == "param"     # the tolerance rule of _no_cbn
+    assert client.post("/api/actions/undo-last").status_code == 409      # nothing left
+    # Ctrl+Y : the rule, then 600, then 650 ; a fourth one has nothing to redo
+    assert client.post("/api/actions/redo-last").json()["actions"][0]["kind"] == "param"
+    assert [a["id"] for a in client.post("/api/actions/redo-last").json()["actions"]] == [aid]
+    assert [c["qty"] for c in client.get("/api/entries/plan", params={"article_id": AID}).json() if c["date"] == day] == [600.0]
+    client.post("/api/actions/redo-last")
+    assert [c["qty"] for c in client.get("/api/entries/plan", params={"article_id": AID}).json() if c["date"] == day] == [650.0]
+    assert client.post("/api/actions/redo-last").status_code == 409
+    # the journal keeps both, applied again ; the audit log holds the undo / redo lines
+    states = {a["id"]: a["state"] for a in _acts(client, mine=True)}
+    assert states[aid] == "applied" and states[r2.headers["X-Action-Id"]] == "applied"
+    assert {e["action"] for e in client.get("/api/entries/audit").json()} >= {"undo", "redo"}
+    # a write without change records nothing
+    n = len(_acts(client))
+    r3 = client.put("/api/entries/plan", json={"article_id": AID, "supplier_id": "S-000545", "date": day, "expression": "650"})
+    assert "X-Action-Id" not in r3.headers and len(_acts(client)) == n
+
+
+def test_undo_until_here_strict_order_and_new_action_clears_redo(client):
+    """Undoing an older action undoes the newer ones first (« annuler jusqu'ici ») ; a new action discards
+    the undone ones."""
+    _no_cbn(client)
+    days = ["2026-09-23", "2026-09-24", "2026-09-25"]
+    ids = []
+    for i, day in enumerate(days):
+        r = client.put("/api/entries/adjustments", json={"article_id": AID, "date": day, "expression": str(-10 * (i + 1))})
+        ids.append(r.headers["X-Action-Id"])
+    out = client.post(f"/api/actions/{ids[0]}/undo").json()
+    assert [a["id"] for a in out["actions"]] == [ids[2], ids[1], ids[0]]
+    assert client.get("/api/entries/adjustments", params={"article_id": AID}).json() == []
+    # redo of the middle one redoes the first one too
+    out = client.post(f"/api/actions/{ids[1]}/redo").json()
+    assert [a["id"] for a in out["actions"]] == [ids[0], ids[1]]
+    assert sorted(c["qty"] for c in client.get("/api/entries/adjustments", params={"article_id": AID}).json()) == [-20.0, -10.0]
+    # a new action : the third one can no longer be redone
+    client.put("/api/entries/adjustments", json={"article_id": AID, "date": "2026-09-26", "expression": "-5"})
+    states = {a["id"]: a["state"] for a in _acts(client)}
+    assert states[ids[2]] == "discarded"
+    r = client.post(f"/api/actions/{ids[2]}/redo")
+    assert r.status_code == 409 and "ne peut plus être rétablie" in r.json()["detail"]
+    assert client.post("/api/actions/redo-last").status_code == 409
+
+
+def test_undo_batch_is_one_action_and_detects_conflicts(client):
+    """A fill of the grid is one action ; a cell changed since by someone else blocks the undo without
+    writing anything (« modifié depuis par X »)."""
+    _no_cbn(client)
+    cells = [{"article_id": AID, "supplier_id": "S-000545", "date": d, "expression": "100"} for d in ("2026-09-23", "2026-09-24", "2026-09-25")]
+    r = client.put("/api/entries/plan/batch", json={"cells": cells})
+    aid = r.headers["X-Action-Id"]
+    act = next(a for a in _acts(client) if a["id"] == aid)
+    assert act["items"] == 3 and "3 cellules" in act["label"]
+    other = {"x-forwarded-email": "alice@example.com"}
+    client.put("/api/entries/plan", json={"article_id": AID, "supplier_id": "S-000545", "date": "2026-09-24", "expression": "999"}, headers=other)
+    act = next(a for a in _acts(client) if a["id"] == aid)
+    assert act["conflict"] == "modifié depuis par alice@example.com"
+    r = client.post(f"/api/actions/{aid}/undo")
+    assert r.status_code == 409 and "alice@example.com" in r.json()["detail"]
+    qty = {c["date"]: c["qty"] for c in client.get("/api/entries/plan", params={"article_id": AID}).json()}
+    assert qty["2026-09-23"] == 100.0 and qty["2026-09-24"] == 999.0      # nothing was written
+    # alice undoes her own cell : the fill is consistent again and can be undone
+    assert client.post("/api/actions/undo-last", headers=other).status_code == 200
+    assert client.post(f"/api/actions/{aid}/undo").status_code == 200
+    assert client.get("/api/entries/plan", params={"article_id": AID}).json() == []
+
+
+def test_undo_group_header_merges_a_bulk_edit(client):
+    """The reference screen edits rows one request at a time : the ``X-Action-Group`` header makes them
+    one action, undone as a whole."""
+    rows = client.get("/api/reference/ref_suppliers/rows").json()
+    two = rows[:2]
+    hdr = {"X-Action-Group": "bulk-1"}
+    for r in two:
+        assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**r, "country": "ZZ"}}, headers=hdr).status_code == 200
+    acts = _acts(client)
+    assert acts[0]["items"] == 2 and acts[0]["label"] == "Fournisseurs : 2 lignes" and acts[0]["group_id"] == "bulk-1"
+    assert client.post(f"/api/actions/{acts[0]['id']}/undo").status_code == 200
+    after = {r["supplier_id"]: r["country"] for r in client.get("/api/reference/ref_suppliers/rows").json()}
+    assert [after[r["supplier_id"]] for r in two] == [r["country"] for r in two]
+    # a deleted row comes back on undo, with every column
+    victim = {k: v for k, v in rows[-1].items() if k not in ("updated_by", "updated_at")}
+    assert client.post("/api/reference/ref_suppliers/delete", json={"key": {"supplier_id": victim["supplier_id"]}}).status_code == 204
+    assert victim["supplier_id"] not in {r["supplier_id"] for r in client.get("/api/reference/ref_suppliers/rows").json()}
+    assert client.post("/api/actions/undo-last").status_code == 200
+    back = next(r for r in client.get("/api/reference/ref_suppliers/rows").json() if r["supplier_id"] == victim["supplier_id"])
+    assert {k: back[k] for k in victim} == victim
+
+
+def test_undo_params_scrap_order_and_pdp_versions(client):
+    """Weekly parameters, scrap rates, the programme order and the active PDP version are undoable ; a
+    version deleted is journalised but not undoable."""
+    # weekly parameter (batch) then reset
+    body = {"scope": "article_week", "key1": AID, "items": [{"key2": "2026-W40", "field": "coverage_target_days", "value": 12}]}
+    assert client.put("/api/params/overrides/batch", json=body).status_code == 200
+    assert client.delete("/api/params/overrides", params={"scope": "article_week", "key1": AID}).status_code == 204
+    assert client.get("/api/params/overrides", params={"scope": "article_week", "key1": AID}).json() == []
+    assert client.post("/api/actions/undo-last").status_code == 200      # the reset
+    assert [o["value"] for o in client.get("/api/params/overrides", params={"scope": "article_week", "key1": AID}).json()] == ["12"]
+    assert client.post("/api/actions/undo-last").status_code == 200      # the batch
+    assert client.get("/api/params/overrides", params={"scope": "article_week", "key1": AID}).json() == []
+    # scrap rate
+    prog = client.get("/api/pdp/sheet").json()["programs"][0]["program_id"]
+    assert client.put("/api/pdp/scrap", json={"program_id": prog, "rate_pct": 7.5}).status_code == 200
+    assert client.post("/api/actions/undo-last").status_code == 200
+    assert next(p for p in client.get("/api/pdp/sheet").json()["programs"] if p["program_id"] == prog)["scrap_pct"] == 0
+    # programme order
+    order = [p["program_id"] for p in client.get("/api/pdp/sheet").json()["programs"]]
+    assert client.put("/api/pdp/order", json={"program_ids": order[::-1]}).status_code == 200
+    assert [p["program_id"] for p in client.get("/api/pdp/sheet").json()["programs"]] == order[::-1]
+    assert client.post("/api/actions/undo-last").status_code == 200
+    assert [p["program_id"] for p in client.get("/api/pdp/sheet").json()["programs"]] == order
+    # a PDP sheet save : undo = the previous version is active again, the new one stays (inactive)
+    before = next(v for v in client.get("/api/pdp/versions").json() if v["active"])
+    r = client.put("/api/pdp/sheet", json={"name": "Essai", "cells": [{"program_id": prog, "week_start": "2026-09-28", "qty": 42}]})
+    assert r.status_code == 201 and "Saisie%20PDP" in r.headers["X-Action-Label"]
+    new = r.json()["id"]
+    assert client.post("/api/actions/undo-last").status_code == 200
+    versions = {v["id"]: v["active"] for v in client.get("/api/pdp/versions").json()}
+    assert versions[before["id"]] is True and versions[new] is False
+    assert client.post("/api/actions/redo-last").status_code == 200
+    assert {v["id"]: v["active"] for v in client.get("/api/pdp/versions").json()}[new] is True
+    # the version deleted : journalised, not undoable ; its undo now conflicts (the version is gone)
+    r = client.delete(f"/api/pdp/versions/{new}")
+    assert r.status_code == 204
+    acts = _acts(client)
+    assert acts[0]["undoable"] is False and acts[0]["can_act"] is False and "Suppression" in acts[0]["label"]
+    assert client.post(f"/api/actions/{acts[0]['id']}/undo").status_code == 409
+    sheet_action = next(a for a in acts if a["kind"] == "pdp_sheet")
+    assert sheet_action["conflict"] is not None
+    r = client.post(f"/api/actions/{sheet_action['id']}/undo")
+    assert r.status_code == 409
+
+
+def test_undo_ownership_and_retention(client, monkeypatch):
+    """A planner undoes their own actions only ; an administrator anyone's ; actions older than 7 days
+    are purged."""
+    import appro.services.actions as act
+    from appro.data.store import AppAction, utcnow
+    from appro.services.context import get_context
+    _no_cbn(client)
+    # declare the planners : root admin, quentin appro (bootstrap over)
+    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC0", "name": "ROOT", "email": "root@example.com", "role": "admin", "active": True}}).status_code == 200
+    root = {"x-forwarded-email": "root@example.com"}
+    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC1", "name": "QUENTIN", "email": "quentin@example.com", "role": "appro", "active": True}}, headers=root).status_code == 200
+    r = client.put("/api/entries/adjustments", json={"article_id": AID, "date": "2026-09-23", "expression": "-3"})
+    aid = r.headers["X-Action-Id"]
+    alice = {"x-forwarded-email": "alice@example.com"}
+    acts = client.get("/api/actions", headers=alice).json()
+    mine = next(a for a in acts if a["id"] == aid)
+    assert mine["mine"] is False and mine["can_act"] is False
+    assert client.post(f"/api/actions/{aid}/undo", headers=alice).status_code == 403
+    assert client.post(f"/api/actions/{aid}/undo", headers=root).status_code == 200       # admin
+    assert client.get("/api/entries/adjustments", params={"article_id": AID}).json() == []
+    # retention : an action dated 8 days ago vanishes from the list and cannot be undone
+    with get_context().session() as s:
+        a = s.get(AppAction, aid)
+        a.ts = utcnow() - dt.timedelta(days=act.RETENTION_DAYS + 1)
+        s.commit()
+    assert aid not in {a["id"] for a in client.get("/api/actions").json()}
+    assert client.post(f"/api/actions/{aid}/redo").status_code == 404

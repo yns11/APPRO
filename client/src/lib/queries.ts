@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Params } from "./api";
 import type {
-  AdherenceResponse, AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, ConsumptionSourceOption, DeliveryPlanResponse, FixedRule, FlagOut, GridResponse, LinkRef, OrphanRow, ParamDoc, ParamOverrideOut,
+  ActionOut, AdherenceResponse, AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, ConsumptionSourceOption, DeliveryPlanResponse, FixedRule, FlagOut, GridResponse, LinkRef, OrphanRow, ParamDoc, ParamOverrideOut,
   FlowsResponse, PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, PlantCalendar, SearchResponse, ProgramImpactResponse, ProgramRef, ProjectionResponse, RefRow, RefTableInfo, SupplierDetail, SupplierRef, SyncStatus, WeeklyParamsResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -88,6 +88,8 @@ export const usePerimeterLists = (planner: string | null | undefined) => useQuer
 export const usePdpSheet = (weeks?: number, planner?: string | null) => useQuery({ queryKey: ["pdp-sheet", weeks, planner ?? null], queryFn: () => api.get<PdpSheetOut>("/api/pdp/sheet", { weeks, planner: planner ?? undefined }), placeholderData: keepPreviousData });
 export const usePdpVersions = () => useQuery({ queryKey: ["pdp-versions"], queryFn: () => api.get<PdpVersionOut[]>("/api/pdp/versions") });
 export const useAudit = (params?: Params) => useQuery({ queryKey: ["audit", params], queryFn: () => api.get<AuditOut[]>("/api/entries/audit", params) });
+/** The undo journal (7 days) ; ``mine`` = the caller's own actions. */
+export const useActions = (params?: Params) => useQuery({ queryKey: ["actions", params], queryFn: () => api.get<ActionOut[]>("/api/actions", params), staleTime: 10_000 });
 
 /** Paramètres › Données */
 export const useSyncStatus = (refetchMs = 120_000) => useQuery({ queryKey: ["data-sync"], queryFn: () => api.get<SyncStatus>("/api/data/sync"), staleTime: 60_000, refetchInterval: refetchMs });

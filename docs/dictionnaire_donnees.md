@@ -348,6 +348,7 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `app_program_scrap` | **taux de rebut par programme**, daté : `rate_pct` s'applique de `week_start` (lundi) jusqu'à la ligne suivante ; besoin = PDP × (1 + taux / 100) ; auteur | (program_id, week_start) |
 | `app_param_overrides` | règle commune du moteur (`global`, seul champ `target_tolerance_pct`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
+| `app_actions` | annuler / rétablir : un geste utilisateur (horodatage, utilisateur, type, libellé, article, groupe), les lignes touchées avec leur état avant / après (JSON), annulable ou non, état `applied` / `undone` / `discarded`, qui l'a annulée ou rétablie et quand ; purge après 7 jours | id |
 | `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_desadv` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
 | `erp_sync_log` | par table miroir : nombre de lignes, horodatage, source, identifiant d'exécution (`/api/health`, `GET /api/data/sync` : âge de chaque table, état *en retard* au-delà de deux heures, bandeau dans l'application) | table_name |
 

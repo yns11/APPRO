@@ -160,11 +160,12 @@ function BulkEditor({ table, rows, onClose }: { table: RefTableInfo; rows: RefRo
   const col = fields.find((c) => c.name === field);
   const apply = useWrite(async () => {
     let n = 0;
+    const group = api.newGroup();     // the whole bulk edit is one undoable action
     for (const r of rows) {
       const values: Record<string, unknown> = {};
       table.columns.forEach((c) => { values[c.name] = r[c.name] === undefined ? null : r[c.name]; });
       values[field] = col?.type === "bool" ? value === "oui" : value === "" ? null : value;
-      await api.put(`/api/reference/${table.name}/rows`, { values });
+      await api.put(`/api/reference/${table.name}/rows`, { values }, { group });
       n += 1;
     }
     return n;

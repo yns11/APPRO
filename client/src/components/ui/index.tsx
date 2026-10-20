@@ -140,21 +140,36 @@ export function Field({ label, help, children, span2 }: { label: string; help?: 
 }
 
 /* ---------------------------------------------------------------- Toast */
-interface Toast { id: number; text: string; tone: "info" | "error" | "success" }
-const ToastCtx = createContext<{ push: (text: string, tone?: Toast["tone"]) => void } | null>(null);
+/** ``action`` : a button in the toast (« Annuler ») ; ``key`` : a toast replacing the previous one of the same key ;
+ *  ``ms`` : how long it stays (a progress bar shows the countdown when there is an action). */
+export interface ToastOpts { action?: { label: string; onClick: () => void }; key?: string; ms?: number }
+interface Toast { id: number; text: string; tone: "info" | "error" | "success"; opts?: ToastOpts }
+const ToastCtx = createContext<{ push: (text: string, tone?: Toast["tone"], opts?: ToastOpts) => void; dismiss: (key: string) => void } | null>(null);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Toast[]>([]);
   const seq = useRef(0);
-  const push = useCallback((text: string, tone: Toast["tone"] = "info") => {
+  const dismiss = useCallback((key: string) => setItems((l) => l.filter((t) => t.opts?.key !== key)), []);
+  const lastAction = useRef(0);
+  const push = useCallback((text: string, tone: Toast["tone"] = "info", opts?: ToastOpts) => {
+    // a write that produced an undoable action already shows its own toast (label + « Annuler ») : the plain
+    // confirmation the screen pushes right after would say the same thing twice
+    if (opts?.action) lastAction.current = Date.now();
+    else if (tone !== "error" && Date.now() - lastAction.current < 1500) return;
     const id = ++seq.current;
-    setItems((l) => [...l, { id, text, tone }]);
-    setTimeout(() => setItems((l) => l.filter((t) => t.id !== id)), tone === "error" ? 7000 : 3500);
+    setItems((l) => [...(opts?.key ? l.filter((t) => t.opts?.key !== opts.key) : l), { id, text, tone, opts }]);
+    setTimeout(() => setItems((l) => l.filter((t) => t.id !== id)), opts?.ms ?? (tone === "error" ? 7000 : opts?.action ? 8000 : 3500));
   }, []);
-  const value = useMemo(() => ({ push }), [push]);
+  const value = useMemo(() => ({ push, dismiss }), [push, dismiss]);
   return (
     <ToastCtx.Provider value={value}>
       {children}
-      <div className="toasts" aria-live="polite">{items.map((t) => <div key={t.id} className={`toast ${t.tone}`}>{t.text}</div>)}</div>
+      <div className="toasts" aria-live="polite">{items.map((t) => (
+        <div key={t.id} className={`toast ${t.tone} ${t.opts?.action ? "with-action" : ""}`}>
+          <span className="toast-text">{t.text}</span>
+          {t.opts?.action && <button type="button" className="toast-action" onClick={() => { t.opts!.action!.onClick(); setItems((l) => l.filter((x) => x.id !== t.id)); }}>{t.opts.action.label}</button>}
+          {t.opts?.action && <span className="toast-progress" style={{ animationDuration: `${t.opts.ms ?? 8000}ms` }} />}
+        </div>
+      ))}</div>
     </ToastCtx.Provider>
   );
 }

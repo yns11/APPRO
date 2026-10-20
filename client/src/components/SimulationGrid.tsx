@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ChevronDown, ChevronRight, Eye, EyeOff, Lock, Truck } from "lucide-react";
 import { api } from "@/lib/api";
 import { useWrite } from "@/lib/queries";
+import { isFlashed, useFlashedCells } from "@/lib/actionsBus";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
 import { ORDER_TYPE_LABELS, fmtCellQty, fmtDate, fmtQty, isDecimalArticle, isSaturday, isSunday, isWeekKey, isWeekend, isoWeekKey, isoWeekOf, periodLabel } from "@/lib/format";
@@ -304,6 +305,9 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   );
 
   /* ---------------- cells */
+  const flashed = useFlashedCells();
+  const flash = (entity: "plan_cell" | "adjustment", aid: string, sid: string | null, i: number) =>
+    flashed.length && isFlashed(flashed, entity, aid, sid, cols.period_start[i], cols.period_end[i]) ? "flash" : "";
   const cellBase = (i: number): string[] => {
     const p = cols.periods[i];
     const past = i < asOfIdx;
@@ -447,7 +451,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const isEd = editing?.aid === aid && editing.key === "plan" && editing.lane === li && editing.i === i;
               const isActive = !isEd && active?.aid === aid && active.key === "plan" && active.lane === li && active.i === i;
               const ghost = !past && !typed && v === 0 && cbn > 0;
-              const cls = [...cellBase(i), past || locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", typed ? "typed" : "erp", ghost ? "ghost" : "", cell?.note ? "noted" : "", inFill(aid, "plan", li, i) ? "fill-range" : ""].filter(Boolean).join(" ");
+              const cls = [...cellBase(i), past || locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", typed ? "typed" : "erp", ghost ? "ghost" : "", cell?.note ? "noted" : "", inFill(aid, "plan", li, i) ? "fill-range" : "", flash("plan_cell", aid, l.supplier_id, i)].filter(Boolean).join(" ");
               const shown = shownOf(i);
               const initial = ghost ? String(cbn) : shown;
               const title = past ? "" : [typed ? `Saisi : ${fmtQty(v, unit)}${cell?.note ? ` – ${cell.note}` : ""} (vider = retour à l'ERP)` : v ? `ERP : ${fmtQty(v, unit)} – taper une quantité pour décider (0 = rien attendu)` : "Vide = rien dans l'ERP – taper une quantité pour planifier une livraison",
@@ -502,7 +506,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const wk = weekCol(i);
               const isEd = editing?.aid === aid && editing.key === "adjustments" && editing.i === i;
               const isActive = !isEd && active?.aid === aid && active.key === "adjustments" && active.i === i;
-              const cls = [...cellBase(i), locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", cell || (wk && v !== 0) ? "typed" : "", v < 0 ? "neg-val" : "", cell?.note ? "noted" : "", inFill(aid, "adjustments", 0, i) ? "fill-range" : ""].filter(Boolean).join(" ");
+              const cls = [...cellBase(i), locked ? "" : "editable", isEd ? "editing" : "", isActive ? "active" : "", cell || (wk && v !== 0) ? "typed" : "", v < 0 ? "neg-val" : "", cell?.note ? "noted" : "", inFill(aid, "adjustments", 0, i) ? "fill-range" : "", flash("adjustment", aid, null, i)].filter(Boolean).join(" ");
               const initial = initialOf(i);
               const title = [cell && !wk ? `${cell.expression || cell.qty} = ${fmtQty(cell.qty, unit)}${cell.note ? ` – ${cell.note}` : ""}` : i <= initIdx ? "Quantité signée : corrige le stock initial (point zéro)" : "Quantité signée ou formule (ex. -(30+20)) : mouvement, passé ou prévu",
                 wk ? `Colonne semaine : la saisie se place au ${fmtDate(editDate(i, "adjustments"), "EEEE dd/MM")} (total de la semaine affiché)${cell ? ` – ce jour : ${cell.expression || cell.qty}${cell.note ? ` – ${cell.note}` : ""}` : ""}` : "", "Clic droit : commentaire · tirer le carré pour recopier"].filter(Boolean).join("\n");

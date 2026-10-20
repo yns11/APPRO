@@ -113,6 +113,20 @@ export interface ParamDoc { field: string; default: unknown; type: string; descr
 export interface ParamOverrideOut { id: string; scope: string; key1: string; key2: string; field: string; value: string; updated_by: string; updated_at: string; }
 export interface PdpVersionOut { id: string; name: string; source_file: string; note: string; active: boolean; imported_by: string; imported_at: string; line_count: number; programs: number; first_week: string | null; last_week: string | null; }
 export interface ImportReport { created: number; ignored: number; notes: string[]; version: PdpVersionOut | null; }
+/** One gesture of a user in the undo journal (backend/appro/services/actions.py). */
+export type ActionState = "applied" | "undone" | "discarded";
+export interface ActionOut {
+  id: string; ts: string; user: string; kind: string; label: string; article_id: string | null; group_id: string; items: number;
+  state: ActionState; undoable: boolean; changed_at: string | null; changed_by: string;
+  /** the caller's own action */
+  mine: boolean;
+  /** the caller may undo / redo it (own action, or anyone's for an administrator ; undoable ; less than 7 days old) */
+  can_act: boolean;
+  /** « modifié depuis par X » : a touched row has changed since, the action can no longer be undone / redone as is */
+  conflict: string | null;
+}
+export interface TouchedCell { entity: "plan_cell" | "adjustment" | "flag"; article_id: string | null; supplier_id: string | null; date: string | null; }
+export interface ActionResultOut { kind: "undo" | "redo"; actions: ActionOut[]; cells: TouchedCell[]; }
 export interface AuditOut { id: number; ts: string; user: string; action: string; entity_type: string; entity_id: string; article_id: string | null; payload: Record<string, unknown>; }
 /** Rights of the signed-in user (backend/appro/services/access.py). */
 export type Role = "reader" | "appro" | "manager" | "admin";

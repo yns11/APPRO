@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, BookOpen, CalendarRange, FileSpreadsheet, Layo
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useInvalidateAll, useSyncStatus } from "@/lib/queries";
 import { Button } from "@/components/ui";
+import { ActionsBar } from "@/components/ActionsBar";
 import { fmtDate, fmtMinutes } from "@/lib/format";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/ui";
@@ -80,6 +81,7 @@ export default function AppShell() {
           <div className="right row">
             {late && <Link to="/parametres?tab=data" className="sync-alert" title={`Dernière copie ERP il y a ${fmtMinutes(Math.min(...lateTables.map((t) => t.age_minutes ?? 0)))} : ${lateTables.map((t) => t.table).join(", ")}`}><AlertTriangle size={14} />Synchronisation ERP en retard</Link>}
             <span className="freshness" title="Aujourd'hui = date du calcul (passé / futur, propositions, expiration des cellules) · le stock a été initialisé en fin de journée du point zéro, la projection commence le lendemain · horizon : 52 semaines">Aujourd'hui : <b>{config ? fmtDate(config.as_of) : "…"}</b>{config && <span className="subtle"> · stock initialisé le {fmtDate(config.init_date)}</span>}</span>
+            <ActionsBar />
             {config?.access?.can_write && <Button variant="ghost" icon title="Recharger les données ERP" onClick={refresh}><RefreshCw /></Button>}
             <Button variant="ghost" icon title={`Thème : ${THEME_LABELS[perimeter.theme]} (cliquer pour changer)`} aria-label="Changer de thème" onClick={cycleTheme}><ThemeIcon /></Button>
           </div>
