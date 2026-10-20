@@ -108,7 +108,7 @@ def _table_exists(spark, fqn: str) -> bool:
 def _check_sources(spark, tables: ErpTables) -> None:
     """Fail once, naming every missing source, rather than one table per run."""
     missing = [fqn for fqn in (tables.fqn(tables.orders), tables.fqn(tables.receipts)) if not _table_exists(spark, fqn)]
-    for opt in (tables.consumption, tables.pdp, tables.desadv, tables.prices):
+    for opt in (tables.consumption, tables.desadv, tables.prices):
         if opt and not _table_exists(spark, tables.fqn(opt)):
             missing.append(tables.fqn(opt))
     if missing:

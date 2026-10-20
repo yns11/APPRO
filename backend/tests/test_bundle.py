@@ -106,3 +106,35 @@ def test_chaque_requete_lit_sa_table() -> None:
                    consumption=args.consumption_table or "", desadv=args.desadv_table or "")
     q = fact_queries(tj)
     assert "`desadv`" in q["fct_desadv"] and "`conso`" in q["fct_consumption_actual"]
+
+
+def test_le_job_verifie_les_sources_sans_table_de_pdp() -> None:
+    """La vérification des tables sources du job ne nomme que les tables qui existent encore dans
+    ``ErpTables`` (le plan de production ERP a été retiré) : exécutée avec un Spark factice."""
+    import importlib.util
+    from appro.data.erp_sql import ErpTables
+    spec = importlib.util.spec_from_file_location("sync_job", RACINE / "jobs" / "sync_erp_to_lakebase.py")
+    job = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(job)
+
+    class _Catalog:
+        def __init__(self, present: set[str]) -> None:
+            self.present = present
+
+        def tableExists(self, name: str) -> bool:  # noqa: N802 (Spark API)
+            return name in self.present
+
+    class _Spark:
+        def __init__(self, present: set[str]) -> None:
+            self.catalog = _Catalog(present)
+
+    t = ErpTables(catalog="c", schema="s", orders="o", receipts="r", consumption="k", desadv="d", prices="p")
+    plain = lambda name: t.fqn(name).replace("`", "")   # noqa: E731 (Spark receives the name without backticks)
+    job._check_sources(_Spark({plain(x) for x in ("o", "r", "k", "d", "p")}), t)
+    try:
+        job._check_sources(_Spark({plain("o")}), t)
+    except RuntimeError as exc:
+        assert "`r`" in str(exc) and "`k`" in str(exc)
+    else:
+        raise AssertionError("les tables manquantes doivent être signalées")
