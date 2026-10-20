@@ -103,7 +103,7 @@ export function PerimeterProvider({ children }: { children: ReactNode }) {
     const a = config?.access;
     const portfolio = new Set((a?.portfolio ?? []).map((p) => p.toUpperCase()));
     const ARTICLE_TABLES = ["ref_articles", "ref_article_suppliers", "ref_bom", "fct_stock", "ref_delegations", "ref_consumption_terms"];
-    const OPEN_TABLES = ["ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_programs", "ref_bom", "fct_stock", "ref_consumption_terms"];
+    const OPEN_TABLES = ["ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_consumption_terms", "ref_closed_orders", "ref_programs", "ref_bom", "fct_stock"];
     const openTo = (name: string) => !!a?.can_edit_reference && OPEN_TABLES.includes(name);
     return {
       access: a,

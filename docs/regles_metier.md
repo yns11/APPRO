@@ -522,7 +522,7 @@ verrouille ce qui n'est pas permis (cellules non éditables, cadenas sur l'artic
 | Qui | Peut écrire |
 |---|---|
 | utilisateur non déclaré, ou inactif (**lecteur**) | rien : lecture seule partout |
-| **appro** | les cellules Plan / Ajustement / Ferme / CBN et les paramètres hebdomadaires **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations ; **pour le moment, toutes les tables du référentiel** (articles, fournisseurs, article ↔ fournisseur, programmes, nomenclatures, stock), ligne par ligne ou par import, carnet ou non (`OPEN_REFERENCE` dans `services/access.py` ; remettre à `False` pour revenir au carnet) |
+| **appro** | les cellules Plan / Ajustement / Ferme / CBN et les paramètres hebdomadaires **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations ; **pour le moment, toutes les tables du référentiel** (articles, fournisseurs, article ↔ fournisseur, termes de consommation, **commandes fermées (PO)** : déclaration depuis Recherche ou le Référentiel, programmes, nomenclatures, stock), ligne par ligne ou par import, carnet ou non (`OPEN_REFERENCE` dans `services/access.py` ; remettre à `False` pour revenir au carnet) |
 | **manager** | comme un appro, **plus** la règle commune du moteur (tolérance), les paramètres hebdomadaires de tout article, la saisie, l'import et l'activation des PDP |
 | **admin** | tout, y compris la table des approvisionneurs |
 

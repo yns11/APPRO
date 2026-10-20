@@ -1294,3 +1294,19 @@ def test_undo_ownership_and_retention(client, monkeypatch):
         s.commit()
     assert aid not in {a["id"] for a in client.get("/api/actions").json()}
     assert client.post(f"/api/actions/{aid}/redo").status_code == 404
+
+
+def test_a_planner_declares_closed_orders(client):
+    """Declaring a PO is the planner's job, not only the managers' : an ``appro`` adds, edits and
+    deletes rows of ref_closed_orders (a reader cannot)."""
+    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC0", "name": "ROOT", "email": "root@example.com", "role": "admin", "active": True}}).status_code == 200
+    root = {"x-forwarded-email": "root@example.com"}
+    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC1", "name": "QUENTIN", "email": "quentin@example.com", "role": "appro", "active": True}}, headers=root).status_code == 200
+    cfg = client.get("/api/config").json()["access"]
+    assert cfg["role"] == "appro" and cfg["can_edit_reference"] is True
+    row = {"purch_id": "031234", "supplier_id": "S-000545", "article_id": AID, "note": "déclarée par l'appro", "active": True}
+    assert client.put("/api/reference/ref_closed_orders/rows", json={"values": row}).status_code == 200
+    assert client.put("/api/reference/ref_closed_orders/rows", json={"values": {**row, "active": False}}).status_code == 200
+    assert client.post("/api/reference/ref_closed_orders/delete", json={"key": {"purch_id": "031234"}}).status_code == 204
+    reader = {"x-forwarded-email": "nobody@example.com"}     # not declared = reader
+    assert client.put("/api/reference/ref_closed_orders/rows", json={"values": row}, headers=reader).status_code == 403
