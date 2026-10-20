@@ -6,7 +6,7 @@ import { usePerimeter } from "@/state/PerimeterContext";
 import { useRemembered } from "@/lib/pageState";
 import { api } from "@/lib/api";
 import { ArticleLink, Badge, Button, Card, Empty, ErrorBox, Kpi, Segmented, SeverityBadge, Skeleton, SkeletonBlock, SupplierLink, Tabs, useToast } from "@/components/ui";
-import { StockChart, CoverageChart } from "@/components/charts/StockChart";
+import { ArticleCharts } from "@/components/charts/StockChart";
 import { SimulationGrid } from "@/components/SimulationGrid";
 import { DeliveryPlan } from "@/components/DeliveryPlan";
 import { DataTable, type Column } from "@/components/DataTable";
@@ -112,7 +112,7 @@ export default function ArticlePage() {
         { id: "alerts", label: "Alertes", count: d?.alerts.length },
       ]} />
 
-      {tab === "chart" && (q.isLoading || !d ? <Skeleton h={300} /> : <Card><StockChart data={d} /><div style={{ marginTop: 8 }}><CoverageChart data={d} /></div></Card>)}
+      {tab === "chart" && (q.isLoading || !d ? <Skeleton h={300} /> : <Card tight><ArticleCharts data={d} /></Card>)}
 
       {tab === "delivery" && <DeliveryPlan articleId={articleId} />}
 

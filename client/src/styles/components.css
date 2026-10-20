@@ -506,3 +506,7 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .chip-week.past.sel { opacity: .9; }
 .pdp-sheet .past-week { background: var(--bg-subtle); color: var(--fg-muted); }
 .pdp-sheet .past-week.editable-past { background: var(--warning-soft); color: var(--fg); }
+
+/* ---- article charts */
+.charts .recharts-legend-item-text { color: var(--fg-muted) !important; }
+.tooltip-box .sep { height: 1px; background: var(--border); margin: 4px 0; }
