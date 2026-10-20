@@ -78,9 +78,6 @@ variables:
   erp_desadv_table:
     description: Table UC des avis d'expédition EDI (DESADV, DespatchAdvice-Purchase). Vide = aucune.
     default: desadv_edi
-  erp_pdp_table:
-    description: Table de PDP hebdomadaire (program_id, week_start, qty, version). Vide = aucune (PDP importé par fichier).
-    default: ""
   erp_prices_table:
     description: Table UC des articles avec le prix standard (item_id, std_cost_price en euros), pour valoriser les stocks. Vide = aucune.
     default: silver_base_article

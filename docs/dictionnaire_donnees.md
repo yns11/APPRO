@@ -10,7 +10,7 @@ Deux familles :
 | Famille | Tables | Source | Où elles vivent |
 |---|---|---|---|
 | **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | **gérées dans l'application** (page Référentiel : ligne par ligne, modèle Excel par table, modification en lot ; fiche article › Paramétrage) | base applicative (Lakebase ; SQLite en local) |
-| **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_desadv`, `fct_production_plan` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
+| **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_desadv` | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
 
 ## 1. Référentiel (géré dans l'application)
 
@@ -26,7 +26,7 @@ tables (`GET /api/reference/<table>/rows`) ; elles ne sont ni stockées, ni expo
 | `ref_articles` | *Programmes* (noms des programmes dont la nomenclature utilise l'article, `programs`, `program_count`) ; *Fourn.* (`supplier_count`, règles article ↔ fournisseur actives). La colonne *Famille* n'est pas affichée. | *Sans fournisseur*, *Multi-sourcing* (≥ 2 fournisseurs actifs), *Sans programme*, *Conso dérivée / PDP*, *Jours conso ≠ 5* |
 | `ref_suppliers` | *Articles* (nombre et références des articles reliés par une règle active, `articles`, `article_count`) | *Sans article*, *Délai ≠ 5* |
 | `ref_article_suppliers` | — | *Plafonnés*, *Délai spécifique* |
-| `ref_programs` | *Articles* (nombre de composants de la nomenclature, `article_count`) ; `has_plan` (une quantité planifiée à partir de la semaine en cours, PDP ERP ou version active) | *Sans nomenclature*, *Sans plan* |
+| `ref_programs` | *Articles* (nombre de composants de la nomenclature, `article_count`) ; `has_plan` (une quantité planifiée à partir de la semaine en cours dans le PDP effectif) | *Sans nomenclature*, *Sans plan* |
 
 ### 1.1 `ref_articles` — Articles
 
@@ -301,17 +301,11 @@ sur fond orange, dans la ligne *Reçu* du fournisseur au jour d'émission, avec 
 confirmé, drapeau `desadv_hidden`). Les réceptions portent un point vert si leur BL correspond à un DESADV
 traité, rouge sinon.
 
-### 2.5 `fct_production_plan` — PDP hebdomadaire ERP (facultatif)
+### 2.5 PDP hebdomadaire
 
-Le PDP est le plus souvent **importé par fichier** (modèle dans *Imports / exports*, le jeudi ou le
-vendredi) ; une version importée et active remplace cette table pour ses programmes.
-
-| Colonne | Type | Description |
-|---|---|---|
-| program_id | texte **clé** | |
-| week_start | date **clé** | lundi de la semaine ISO |
-| qty | nombre | |
-| version | texte **clé** | la plus récente gagne |
+Pas de table ERP : le PDP est une **version de l'application** (`app_pdp_versions`, `app_pdp_lines`), importée
+(classeur au format du modèle / de l'export) ou saisie dans la feuille PDP. Le jeu de démonstration charge
+`data/seed/pdp_seed.csv` comme première version active.
 
 ### 2.6 `fct_prices` ← `silver_erp_ye.silver_base_article` — prix des articles
 
@@ -354,7 +348,7 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `app_program_scrap` | **taux de rebut par programme**, daté : `rate_pct` s'applique de `week_start` (lundi) jusqu'à la ligne suivante ; besoin = PDP × (1 + taux / 100) ; auteur | (program_id, week_start) |
 | `app_param_overrides` | règle commune du moteur (`global`, seul champ `target_tolerance_pct`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
-| `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_desadv`, `erp_production_plan` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
+| `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_desadv` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
 | `erp_sync_log` | par table miroir : nombre de lignes, horodatage, source, identifiant d'exécution (`/api/health`, `GET /api/data/sync` : âge de chaque table, état *en retard* au-delà de deux heures, bandeau dans l'application) | table_name |
 
 Volumétrie : quelques milliers de lignes par table ; le miroir des commandes suit la source (dizaines de

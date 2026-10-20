@@ -23,7 +23,6 @@ recep_edi            ──┤  SQL de           Spark lit, puis par table :    
 desadv_edi           ──┤  correspondance   DELETE + COPY dans UNE             erp_desadv           ──┤  SELECT colonnes     objets moteur      séries jour
 conso_composants     ──┤  erp_sql.py       transaction, puis erp_sync_log     erp_consumption_actual┤  canoniques  ──►     (Dataset)   ──►    par article ──► API ──► écrans
 silver_base_article  ──┤                                                      erp_prices           ──┤  cache 5 min                           et par voie
-(table PDP, option)  ──┘                                                      erp_production_plan  ──┘
                                                                               erp_sync_log (horodatage, lignes)
 ```
 
@@ -67,7 +66,6 @@ si non interprétable), booléens. Les tables sont ensuite mises en cache en mé
 | `APPRO_ERP_DESADV_TABLE` | `erp_desadv_table` / `--desadv-table` | `desadv_edi` | aucun DESADV |
 | `APPRO_ERP_CONSUMPTION_TABLE` | `erp_consumption_table` / `--consumption-table` | `conso_composants` | aucune consommation réelle |
 | `APPRO_ERP_PRICES_TABLE` | `erp_prices_table` / `--prices-table` | `silver_base_article` | aucune valorisation |
-| `APPRO_ERP_PDP_TABLE` | `erp_pdp_table` / `--pdp-table` | *(vide)* | PDP uniquement par fichier ou saisie |
 
 Une table facultative laissée vide n'est ni lue par le job ni attendue par l'application : la table
 canonique correspondante est simplement vide, et les écrans qui en dépendent l'indiquent (par exemple
@@ -252,18 +250,12 @@ Les accusés de réception non validés se déduisent du statut `Reçu` de `rece
 `bl_en_attente`, le paramètre `APPRO_ERP_BL_PENDING_TABLE` et le miroir `erp_bl_pending` sont retirés du job et de
 l'application.
 
-### 2.7 Table de PDP hebdomadaire → `fct_production_plan` (facultative, non configurée aujourd'hui)
+### 2.7 PDP hebdomadaire
 
-Si `APPRO_ERP_PDP_TABLE` est renseignée, la table doit porter les colonnes canoniques `program_id`,
-`week_start` (lundi ISO), `qty`, `version` (texte, vide accepté). Le PDP vient aujourd'hui de la page
-*Plan de production* (saisie directe ou import d'un classeur), dont la version active **remplace** cette
-table pour ses programmes.
-
-```sql
-SELECT p.program_id AS program_id, CAST(p.week_start AS DATE) AS week_start, CAST(p.qty AS DOUBLE) AS qty,
-       COALESCE(CAST(p.version AS STRING), '') AS version
-FROM <catalogue>.<schéma>.<table> p
-```
+Il n'existe **aucune table ERP de PDP** : le plan de production est une **version de l'application** (import d'un
+classeur ou saisie dans la feuille PDP), voir `docs/regles_metier.md` § 11 bis. Le PDP effectif d'une semaine passée
+vient de l'historique des versions (version active si elle contient la semaine, sinon version connue à son lundi,
+sinon première version importée ensuite).
 
 ### 2.8 Ce qui n'est pas lu
 
@@ -303,7 +295,6 @@ colonne ajoutée par une nouvelle version de l'application est créée sur la ta
 | `erp_desadv` | `desadv_id` | `article_id`, `supplier_id`, `supplier_name`, `packing_slip`, `purch_id`, `issue_date`, `qty`, `state`, `final_processing`, `stock_trans_id` |
 | `erp_consumption_actual` | `article_id`, `date` | `qty` |
 | `erp_prices` | `article_id` | `price` |
-| `erp_production_plan` | `program_id`, `week_start`, `version` | `qty` |
 | `erp_sync_log` | `table_name` | `row_count`, `synced_at`, `source`, `run_id` |
 
 ### 3.2 Droits
@@ -369,7 +360,7 @@ d'articles). Une ligne ERP d'un article inconnu du référentiel est silencieuse
 | `Receipt` | `fct_receipts` | `receipt_id`, `article_id`, `receipt_date`, `qty`, `supplier_id`, `ref` = `purch_id`, `packing_slip`, `status` ; propriétés `registered` (statut commençant par « enregistr ») et `packing_slips` (liste des BL séparés par ` \| `) | sans date |
 | `DesadvLine` | `fct_desadv` | toutes les colonnes ; propriété `processed` = état *Traité* et traitement final *OK* | sans date d'émission (un BL vide est gardé) |
 | `ConsumptionLine` | `fct_consumption_actual` | `article_id`, `date`, `qty` | sans date |
-| `PdpLine` | `fct_production_plan` puis versions de l'application | `program_id`, `week_start`, `qty`, `version` ; seuls les programmes dont la nomenclature touche les articles retenus | sans lundi |
+| `PdpLine` | versions de l'application (PDP effectif) | `program_id`, `week_start`, `qty`, `version` ; seuls les programmes dont la nomenclature touche les articles retenus | sans lundi |
 | `prices` | `fct_prices` | dictionnaire `article_id → prix` | prix vide |
 | `StockSnapshot` | `fct_stock` (référentiel) | la ligne la plus récente par article ; plusieurs lignes à la même date sont sommées | — |
 
@@ -462,11 +453,9 @@ alertes, propositions CBN.
 Plus de miroir : le flux **À valider** (CK, fiche fournisseur) est calculé depuis `erp_receipts` (statut `Reçu`
 depuis 7 jours ou plus).
 
-### 5.7 PDP ERP (`erp_production_plan`)
+### 5.7 PDP
 
-| Colonne | Usage |
-|---|---|
-| `program_id`, `week_start`, `qty`, `version` | PDP par défaut d'un programme, éclaté par la nomenclature en besoin journalier (lissage `spread_rounding`) ; remplacé, programme par programme, par la version active saisie ou importée dans la page *Plan de production* ; la version la plus récente gagne |
+Aucune table ERP : versions importées ou saisies dans l'application (§ 2.7).
 
 ### 5.8 Synthèse par écran
 

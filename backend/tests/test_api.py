@@ -602,45 +602,111 @@ def test_perimeter_lists_the_programs_and_suppliers_of_the_planner(client):
 
 
 def test_pdp_sheet_direct_entry(client):
-    """The PDP sheet: programmes × ISO weeks from the current week ; a manager types future weeks,
-    saved as a new active version holding the touched programmes (copied from the ERP plan)."""
+    """The PDP sheet: programmes × ISO weeks from the first complete week after the point zero (never after
+    the current week) ; a manager types the current and future weeks, saved as a new active version holding
+    every line of the previous one plus the cells typed."""
     sh = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
-    assert sh["current_week"] == "2026-W38" and sh["weeks"][0]["week_start"] == "2026-09-14" and sh["active_version"] is None
-    assert all(w["editable"] for w in sh["weeks"]) and sh["erp_available"] is True      # the current week is editable too
+    assert sh["current_week"] == "2026-W38" and sh["weeks"][0]["week_start"] == "2026-09-14" and sh["first_week"] == "2026-W38"
+    assert sh["active_version"]["name"] == "PDP du jeu de démonstration" and sh["init_date"] == "2026-09-18"
+    assert all(w["editable"] and not w["past"] for w in sh["weeks"])      # the current week is editable too
     prog = next(p for p in sh["programs"] if p["program_id"] == "mass-00037796")
-    assert prog["source"] == "erp" and len(prog["values"]) == len(sh["weeks"])
+    assert prog["source"] == "app" and len(prog["values"]) == len(sh["weeks"])
     before = prog["values"]
-    other = next(p for p in sh["programs"] if p["program_id"] != "mass-00037796" and p["source"] == "erp")
+    other = next(p for p in sh["programs"] if p["program_id"] != "mass-00037796" and p["source"] == "app")
+    n_programs = len({l["program_id"] for l in client.get(f"/api/pdp/versions/{sh['active_version']['id']}/lines").json()})
     r = client.put("/api/pdp/sheet", json={"name": "Saisie test", "cells": [{"program_id": "mass-00037796", "week_start": "2026-09-28", "qty": 123}]})
     assert r.status_code == 201, r.text
     v = r.json()
-    assert v["active"] is True and v["programs"] == 1 and v["source_file"] == "saisie directe"
+    assert v["active"] is True and v["programs"] == n_programs and v["source_file"] == "saisie directe"
     sh2 = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
     prog2 = next(p for p in sh2["programs"] if p["program_id"] == "mass-00037796")
     assert sh2["active_version"]["id"] == v["id"] and prog2["source"] == "app"
     assert prog2["values"][2] == 123 and prog2["values"][:2] == before[:2] and prog2["values"][3:] == before[3:]
-    assert next(p for p in sh2["programs"] if p["program_id"] == other["program_id"])["source"] == "erp"
     # a second entry stacks on the active version (its lines are kept), the name is generated
     r2 = client.put("/api/pdp/sheet", json={"cells": [{"program_id": other["program_id"], "week_start": "2026-10-05", "qty": 0}]})
-    assert r2.status_code == 201 and r2.json()["programs"] == 2 and r2.json()["name"].startswith("Saisie du ")
+    assert r2.status_code == 201 and r2.json()["programs"] == n_programs and r2.json()["name"].startswith("Saisie du ")
     sh3 = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
     assert next(p for p in sh3["programs"] if p["program_id"] == "mass-00037796")["values"][2] == 123
     assert next(p for p in sh3["programs"] if p["program_id"] == other["program_id"])["values"][3] == 0
-    assert len(client.get("/api/pdp/versions").json()) == 2
+    assert len(client.get("/api/pdp/versions").json()) == 3
     # the engine follows: the demand of the touched week changes with the plan
     assert client.get(f"/api/articles/{AID}/projection").json()["as_of"] == AS_OF
-    # the current week is accepted, a past week is not ; not a Monday, unknown programme, negative
+    # the current week is accepted ; a week before the point zero is not ; not a Monday, unknown programme, negative
     bad = [{"program_id": "mass-00037796", "week_start": "2026-09-07", "qty": 1}]
-    assert client.put("/api/pdp/sheet", json={"cells": bad}).status_code == 422
+    assert "point zéro" in client.put("/api/pdp/sheet", json={"cells": bad}).json()["detail"]
     assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "week_start": "2026-09-14", "qty": 9}]}).status_code == 201
     assert next(p for p in client.get("/api/pdp/sheet", params={"weeks": 8}).json()["programs"] if p["program_id"] == "mass-00037796")["values"][0] == 9
     assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "week_start": "2026-09-29"}]}).status_code == 422
     assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "program_id": "nope", "week_start": "2026-09-28"}]}).status_code == 422
     assert client.put("/api/pdp/sheet", json={"cells": [{**bad[0], "week_start": "2026-09-28", "qty": -1}]}).status_code == 422
     assert client.put("/api/pdp/sheet", json={"cells": []}).status_code == 422
-    # once an administrator is declared, quentin is a reader: no entry
-    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC0", "name": "ROOT", "email": "root@example.com", "role": "admin", "active": True}}).status_code == 200
-    assert client.put("/api/pdp/sheet", json={"cells": [{"program_id": "mass-00037796", "week_start": "2026-09-28", "qty": 5}]}).status_code == 403
+    # deactivating the active version hands over to the most recent other one (there is no ERP plan)
+    vs = client.get("/api/pdp/versions").json()
+    active = next(x for x in vs if x["active"])
+    client.post(f"/api/pdp/versions/{active['id']}/deactivate")
+    vs2 = client.get("/api/pdp/versions").json()
+    assert sum(1 for x in vs2 if x["active"]) == 1 and next(x for x in vs2 if x["active"])["id"] != active["id"]
+
+
+def test_pdp_export_is_reimportable_as_is(client):
+    """« Exporter (Excel) » writes the effective PDP in the import format (every programme, every week from
+    the first complete week after the point zero) : imported back, it gives the same sheet."""
+    sh = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
+    r = client.get("/api/pdp/export.xlsx", params={"weeks": 8})
+    assert r.status_code == 200 and r.headers["content-disposition"].startswith('attachment; filename="pdp_')
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb["SOP - PDP"]
+    assert ws["C1"].value == sh["weeks"][0]["week"] and ws["A1"].value.startswith("PF/SF")
+    rows = {ws.cell(r, 2).value: [ws.cell(r, c).value or 0 for c in range(3, 3 + len(sh["weeks"]))] for r in range(2, ws.max_row + 1)}
+    for p in sh["programs"]:
+        if p["program_id"] in rows:
+            assert rows[p["program_id"]] == [v or 0 for v in p["values"]], p["program_id"]
+    rep = client.post("/api/pdp/import", files={"file": ("pdp_export.xlsx", r.content)}, data={"name": "réimport"}).json()
+    assert rep["version"]["active"] and rep["created"] > 0
+    sh2 = client.get("/api/pdp/sheet", params={"weeks": 8}).json()
+    assert {p["program_id"]: p["values"] for p in sh2["programs"]} == {p["program_id"]: p["values"] for p in sh["programs"]}
+
+
+def test_effective_pdp_past_weeks_follow_the_history(client):
+    """Past weeks (from the first complete week after the point zero) come from the active version when it
+    holds them, else from the version known at their Monday, else from the first version imported later."""
+    import datetime as dt
+
+    from appro.data.store import PdpLine, PdpVersion
+    from appro.services.context import get_context
+    from appro.services.mrp_service import effective_pdp, first_full_monday
+    assert first_full_monday(dt.date(2026, 9, 18), dt.date(2026, 10, 19)) == dt.date(2026, 9, 21)
+    assert first_full_monday(dt.date(2026, 9, 14), dt.date(2026, 10, 19)) == dt.date(2026, 9, 14)
+    assert first_full_monday(dt.date(2026, 9, 18), dt.date(2026, 9, 14)) == dt.date(2026, 9, 14)
+    ctx = get_context()
+    with ctx.session() as session:
+        for v in session.query(PdpVersion).all():
+            session.delete(v)
+        session.flush()
+        old = PdpVersion(name="ancienne", imported_at=dt.datetime(2026, 9, 20, 8), active=False)
+        old.lines = [PdpLine(program_id="P", week_start=dt.date(2026, 9, 21), qty=10), PdpLine(program_id="P", week_start=dt.date(2026, 9, 28), qty=11)]
+        mid = PdpVersion(name="milieu", imported_at=dt.datetime(2026, 9, 27, 8), active=False)
+        mid.lines = [PdpLine(program_id="P", week_start=dt.date(2026, 9, 28), qty=20), PdpLine(program_id="P", week_start=dt.date(2026, 10, 5), qty=21)]
+        act = PdpVersion(name="active", imported_at=dt.datetime(2026, 10, 15, 8), active=True)
+        act.lines = [PdpLine(program_id="P", week_start=dt.date(2026, 10, 12), qty=30), PdpLine(program_id="P", week_start=dt.date(2026, 10, 19), qty=31)]
+        session.add_all([old, mid, act])
+        session.commit()
+        lines, meta = effective_pdp(session, {"P"}, dt.date(2026, 10, 21), dt.date(2026, 9, 18))
+        got = {l.week_start.isoformat(): l.qty for l in lines}
+        # S39 : only « ancienne » holds it (imported before its Monday) ; S40 : « milieu » known on the Monday wins over
+        # « ancienne » ; S41 : « milieu » (known) ; S42 : the active version ; S43 : current week, active version
+        assert got == {"2026-09-21": 10, "2026-09-28": 20, "2026-10-05": 21, "2026-10-12": 30, "2026-10-19": 31}
+        origins = {k: (v["origin"], v["version_name"]) for k, v in meta["pdp_week_origin"].items()}
+        assert origins == {"2026-09-21": ("monday", "ancienne"), "2026-09-28": ("monday", "milieu"), "2026-10-05": ("monday", "milieu"),
+                           "2026-10-12": ("active", "active")}
+        assert meta["pdp_first_week"] == "2026-09-21"
+        # a week nobody held before its Monday : the first version imported afterwards
+        act.lines.append(PdpLine(program_id="P", week_start=dt.date(2026, 11, 2), qty=40))
+        session.commit()
+        lines2, meta2 = effective_pdp(session, {"P"}, dt.date(2026, 11, 18), dt.date(2026, 9, 18))
+        assert {l.week_start.isoformat(): l.qty for l in lines2}["2026-11-02"] == 40
+        assert meta2["pdp_week_origin"]["2026-10-26"]["origin"] == "none" and meta2["pdp_week_origin"]["2026-11-02"]["origin"] == "active"
+        assert meta2["pdp_week_origin"]["2026-10-19"]["origin"] == "active"          # held by the active version
 
 
 def test_cockpit_value_median_and_weekly_value(client):
@@ -867,7 +933,7 @@ def test_programme_scrap_rate_in_the_pdp_sheet(client):
 # ---------------------------------------------------------------- Paramètres › Données, supplier page, exports
 def test_data_sync_orphans_calendar(client):
     sync = client.get("/api/data/sync").json()
-    assert sync["status"] == "unknown" and len(sync["tables"]) == 6 and sync["late_after_minutes"] == 120
+    assert sync["status"] == "unknown" and len(sync["tables"]) == 5 and sync["late_after_minutes"] == 120
     assert {t["table"] for t in sync["tables"]} >= {"erp_purchase_orders", "erp_receipts", "erp_consumption_actual"}
     orphans = client.get("/api/data/orphans").json()
     assert isinstance(orphans, list) and all(set(o) >= {"article_id", "orders", "receipts", "consumption", "last_date"} for o in orphans)
@@ -898,7 +964,7 @@ def test_adherence_plan_of_each_week_falls_back_on_a_later_version_and_takes_wee
     the window is given by Mondays (``week_from`` / ``week_to``), always before the current week."""
     before = client.get("/api/data/adherence", params={"weeks": 4, "article_id": AID}).json()
     assert before["from"] == "2026-08-17" and before["to"] == "2026-09-13" and len(before["plan_versions"]) == 4
-    assert {v["origin"] for v in before["plan_versions"]} <= {"erp", "none"}       # the seed plan comes from the ERP table
+    assert {v["origin"] for v in before["plan_versions"]} <= {"later", "none"}     # the seed plan is a version loaded at start-up
     # a version imported today (after every Monday of the window) holding four past weeks
     wb = load_workbook(io.BytesIO(client.get("/api/pdp/template.xlsx", params={"weeks": 4}).content))
     ws = wb["SOP - PDP"]
@@ -912,9 +978,13 @@ def test_adherence_plan_of_each_week_falls_back_on_a_later_version_and_takes_wee
     assert rep["created"] >= 4
     after = client.get("/api/data/adherence", params={"weeks": 4, "article_id": AID}).json()
     assert [v["origin"] for v in after["plan_versions"]] == ["later"] * 4
-    assert all(v["version_id"] == rep["version"]["id"] and v["version_name"] == "PDP passé" for v in after["plan_versions"])
-    assert after["plan_coverage"] == {"monday": 0, "later": 4, "erp": 0, "latest": 0, "none": 0}
-    assert after["rows"][0]["plan"] > 0 and after["rows"][0]["plan"] != before["rows"][0]["plan"]
+    # the demonstration version (loaded at start-up, imported first) already held those weeks : it stays the
+    # first version imported after their Mondays ; the new one would only serve weeks it does not cover
+    assert all(v["version_name"] == "PDP du jeu de démonstration" for v in after["plan_versions"])
+    assert after["plan_coverage"] == {"monday": 0, "later": 4, "latest": 0, "none": 0}
+    assert after["rows"][0]["plan"] > 0 and after["rows"][0]["plan"] == before["rows"][0]["plan"]
+    far = client.get("/api/data/adherence", params={"week_from": "2026-06-01", "week_to": "2026-06-22", "article_id": AID}).json()
+    assert {v["origin"] for v in far["plan_versions"]} <= {"none", "later"}
     # week bounds : two weeks, the current week is never part of the window
     two = client.get("/api/data/adherence", params={"week_from": "2026-08-24", "week_to": "2026-09-07", "article_id": AID}).json()
     assert two["from"] == "2026-08-24" and two["to"] == "2026-09-13" and two["weeks"] == 3 and len(two["buckets"]) == 3

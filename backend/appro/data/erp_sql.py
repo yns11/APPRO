@@ -15,8 +15,7 @@ Sources (schema ``emotors_data_champions.silver_erp_ye`` by default) :
 * ``silver_base_article`` – item master : ``std_cost_price`` (euros) values the stocks ;
 * an optional daily **actual consumption** table (``APPRO_ERP_CONSUMPTION_TABLE``) with the canonical
   columns ``article_id, date, qty`` – the consumption is given **per component, already exploded**
-  through the bill of material (unlike the PDP, exploded by the engine) ; an optional weekly PDP
-  table (``APPRO_ERP_PDP_TABLE``).
+  through the bill of material (unlike the PDP, exploded by the engine).
 """
 from __future__ import annotations
 
@@ -34,7 +33,6 @@ class ErpTables:
     receipts: str = "recep_edi"
     consumption: str = ""         # empty: no actual consumption read from the ERP
     desadv: str = ""              # empty: no despatch advices (DESADV) read from the ERP
-    pdp: str = ""                 # empty: the PDP comes from the file imported in the application
     prices: str = ""              # empty: no article prices (no stock valuation)
 
     def fqn(self, table: str) -> str:
@@ -114,14 +112,6 @@ WHERE d.Code_article IS NOT NULL AND d.Date_emission IS NOT NULL
 """.strip()
 
 
-def production_plan_sql(t: ErpTables) -> str:
-    return f"""
-SELECT p.program_id AS program_id, CAST(p.week_start AS DATE) AS week_start, CAST(p.qty AS DOUBLE) AS qty,
-       COALESCE(CAST(p.version AS STRING), '') AS version
-FROM {t.fqn(t.pdp)} p
-""".strip()
-
-
 def prices_sql(t: ErpTables) -> str:
     """Standard cost price per article (euros).  The item master holds far more items than the
     application : the engine only values the articles of its reference table."""
@@ -147,8 +137,6 @@ def fact_queries(t: ErpTables) -> dict[str, str]:
         out["fct_consumption_actual"] = consumption_actual_sql(t)
     if t.desadv:
         out["fct_desadv"] = desadv_sql(t)
-    if t.pdp:
-        out["fct_production_plan"] = production_plan_sql(t)
     if t.prices:
         out["fct_prices"] = prices_sql(t)
     return out
@@ -157,5 +145,5 @@ def fact_queries(t: ErpTables) -> dict[str, str]:
 def source_of(t: ErpTables, name: str) -> str:
     """Fully qualified source table of a canonical fact table."""
     return {"fct_purchase_orders": t.fqn(t.orders), "fct_receipts": t.fqn(t.receipts),
-            "fct_consumption_actual": t.fqn(t.consumption), "fct_production_plan": t.fqn(t.pdp),
+            "fct_consumption_actual": t.fqn(t.consumption),
             "fct_desadv": t.fqn(t.desadv), "fct_prices": t.fqn(t.prices)}[name]

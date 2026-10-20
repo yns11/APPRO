@@ -62,8 +62,8 @@ def test_le_job_et_l_application_partagent_le_sql_de_correspondance() -> None:
     """Le notebook duplique le SQL de erp_sql.py : les deux doivent nommer les mêmes colonnes."""
     from appro.data.erp_sql import ErpTables, fact_queries
     from appro.data.schemas import TABLES
-    q = fact_queries(ErpTables(consumption="prod", pdp="pdp", desadv="desadv_edi", prices="silver_base_article"))
-    assert set(q) == {"fct_purchase_orders", "fct_receipts", "fct_consumption_actual", "fct_production_plan", "fct_desadv", "fct_prices"}
+    q = fact_queries(ErpTables(consumption="prod", desadv="desadv_edi", prices="silver_base_article"))
+    assert set(q) == {"fct_purchase_orders", "fct_receipts", "fct_consumption_actual", "fct_desadv", "fct_prices"}
     job_filled = {"fct_purchase_orders": {"first_seen"}}      # columns the job computes (carried over between two copies)
     for name, sql in q.items():
         for col in TABLES[name].column_names:
@@ -95,15 +95,14 @@ def test_chaque_requete_lit_sa_table() -> None:
 
     from appro.data.erp_sql import ErpTables, fact_queries
     from appro.services.context import erp_tables
-    t = erp_tables(Settings(data_source="local", erp_consumption_table="conso", erp_desadv_table="desadv", erp_pdp_table="pdp_erp"))
-    assert (t.consumption, t.desadv, t.pdp) == ("conso", "desadv", "pdp_erp")
+    t = erp_tables(Settings(data_source="local", erp_consumption_table="conso", erp_desadv_table="desadv"))
+    assert (t.consumption, t.desadv) == ("conso", "desadv")
     spec = importlib.util.spec_from_file_location("sync_job", RACINE / "jobs" / "sync_erp_to_lakebase.py")
     job = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(job)
-    args = job.build_arg_parser().parse_args(["--consumption-table", "conso", "--desadv-table", "desadv", "--pdp-table", "pdp_erp"])
+    args = job.build_arg_parser().parse_args(["--consumption-table", "conso", "--desadv-table", "desadv"])
     assert isinstance(args, argparse.Namespace)
     tj = ErpTables(catalog=args.catalog, schema=args.schema, orders=args.orders_table, receipts=args.receipts_table,
-                   consumption=args.consumption_table or "", desadv=args.desadv_table or "", pdp=args.pdp_table or "")
+                   consumption=args.consumption_table or "", desadv=args.desadv_table or "")
     q = fact_queries(tj)
-    assert "`desadv`" in q["fct_desadv"] and "`pdp_erp`" in q["fct_production_plan"] and "`conso`" in q["fct_consumption_actual"]
-    assert "`desadv`" not in q["fct_production_plan"]
+    assert "`desadv`" in q["fct_desadv"] and "`conso`" in q["fct_consumption_actual"]

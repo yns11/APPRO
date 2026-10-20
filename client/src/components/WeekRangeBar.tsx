@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 
-export interface WeekChip { key: string; label: string; start: string; current?: boolean }
+export interface WeekChip { key: string; label: string; start: string; current?: boolean; past?: boolean }
 export type WeekRange = { from: string; to: string } | null;
 
 /**
@@ -31,8 +31,8 @@ export function WeekRangeBar({ weeks, range, onChange }: { weeks: WeekChip[]; ra
           const sel = inRange(w.key);
           const first = sel && shown?.from === w.key, last = sel && shown?.to === w.key;
           return (
-            <button key={w.key} type="button" className={["chip-week", sel ? "sel" : "", first ? "first" : "", last ? "last" : "", w.current ? "current" : ""].filter(Boolean).join(" ")}
-              title={`${w.label} · du ${w.start}${w.current ? " · semaine en cours" : ""} — cliquer ou glisser pour choisir la période`}
+            <button key={w.key} type="button" className={["chip-week", sel ? "sel" : "", first ? "first" : "", last ? "last" : "", w.current ? "current" : "", w.past ? "past" : ""].filter(Boolean).join(" ")}
+              title={`${w.label} · du ${w.start}${w.current ? " · semaine en cours" : w.past ? " · semaine passée" : ""} — cliquer ou glisser pour choisir la période`}
               onMouseDown={(e) => { e.preventDefault(); if (e.shiftKey && anchor) { onChange(ordered(anchor, w.key)); return; } dragging.current = true; setAnchor(w.key); setDrag({ from: w.key, to: w.key }); }}
               onMouseEnter={() => { if (dragging.current && anchor) setDrag(ordered(anchor, w.key)); }}>
               {w.label}

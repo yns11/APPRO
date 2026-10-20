@@ -192,7 +192,7 @@ a déjà accordé l'écriture sur ses tables `erp_*` (et rien d'autre).
 SELECT table_name, string_agg(privilege_type, ', ' ORDER BY privilege_type) AS droits
 FROM information_schema.role_table_grants
 WHERE grantee = 'prenom.nom@exemple.com' AND table_schema = 'appro' GROUP BY table_name ORDER BY table_name;
--- attendu : erp_consumption_actual, erp_desadv, erp_production_plan, erp_purchase_orders, erp_receipts, erp_sync_log : DELETE, INSERT, SELECT, TRUNCATE, UPDATE
+-- attendu : erp_consumption_actual, erp_desadv, erp_purchase_orders, erp_receipts, erp_sync_log : DELETE, INSERT, SELECT, TRUNCATE, UPDATE
 -- vide ? vérifier d'abord que les tables existent : SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'appro';
 -- puis que le rôle existe :                     SELECT rolname FROM pg_roles WHERE rolname = 'prenom.nom@exemple.com';
 ```

@@ -210,13 +210,6 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("final_processing", "str", "Traitement final", "Non traité, OK", False),
            Column("stock_trans_id", "str", "Transaction de stock", "ID_transaction_stock : vide pour un message traité = aucun journal de saisie créé", False),
        ], reference=False),
-    _t("fct_production_plan", "PDP ERP", "Plan de production hebdomadaire (facultatif : le PDP est importé par fichier).",
-       ("program_id", "week_start", "version"), [
-           Column("program_id", "str", "Programme", "", True),
-           Column("week_start", "date", "Lundi", "lundi de la semaine ISO", True),
-           Column("qty", "float", "Quantité", "", True),
-           Column("version", "str", "Version", "la plus récente gagne", False),
-       ], reference=False),
     _t("fct_prices", "Prix des articles", "Prix de revient standard par article (silver_base_article.std_cost_price, en euros). "
        "Sert à valoriser les stocks ; un article absent n'est pas valorisé, un article présent n'est pas ajouté au référentiel.",
        ("article_id",), [

@@ -161,15 +161,15 @@ def programs_impact(planner: str | None = None, horizon_days: int | None = HORIZ
 def weekly_params(article_id: str, weeks: int = Query(26, ge=1, le=104), ctx: AppContext = Depends(ctx_dep),
                   session: Session = Depends(session_dep)):
     """Stock-policy parameters per ISO week from the reference week (article values, weekly overrides).
-    The calendar runs at least ``weeks`` weeks and up to the last week of the loaded PDP (ERP table or
-    imported version) and to the end of the horizon, whichever is later."""
+    The calendar runs at least ``weeks`` weeks and up to the last week of the effective PDP and to the end
+    of the horizon, whichever is later."""
     ds = erp_dataset(ctx.table, article_ids=[article_id])
     if not ds.articles:
         raise HTTPException(404, f"Article inconnu : {article_id}")
-    mrp_service.app_entries_into_dataset(ds, session)
+    params = mrp_service.build_params(ctx, session)
+    mrp_service.app_entries_into_dataset(ds, session, params)
     mrp_service.apply_weekly_overrides(ds, session.scalars(select(ParamOverride).where(ParamOverride.scope == "article_week")).all())
     a = ds.articles[0]
-    params = mrp_service.build_params(ctx, session)
     as_of = resolve_as_of(ds, params)
     monday = iso_week_monday(as_of)
     last = max([p.week_start for p in ds.pdp] + [as_of + dt.timedelta(days=params.horizon_days)])

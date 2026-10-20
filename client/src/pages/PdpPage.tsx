@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, Download, FileUp, Power, PowerOff, RotateCcw, Save, Trash2 } from "lucide-react";
+import { CheckCircle2, Download, FileUp, History, Power, PowerOff, RotateCcw, Save, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { usePdpSheet, usePdpVersions, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -12,8 +12,8 @@ import { fmtDate, fmtDateTime, fmtInt, fmtQty } from "@/lib/format";
 import type { ImportReport, PdpSheetProgram, PdpVersionOut } from "@/lib/types";
 
 const WEEK_CHOICES = [26, 52, 78, 104];
-const SOURCE: Record<string, { label: string; tone: "ok" | "neutral" | "brand" | "outline" }> = {
-  app: { label: "saisie / import", tone: "brand" }, erp: { label: "ERP", tone: "neutral" }, none: { label: "aucun plan", tone: "outline" },
+const ORIGIN_LABELS: Record<string, string> = {
+  active: "version active", monday: "version connue au lundi de la semaine", later: "version importée après coup (aucune ne la contenait au lundi)", none: "aucune version ne contient cette semaine",
 };
 
 /**
@@ -26,6 +26,7 @@ export default function PdpPage() {
   const toast = useToast();
   const { rights, perimeter } = usePerimeter();
   const canEdit = rights.canImportPdp;
+  const isAdmin = rights.isAdmin;
   const [program, setProgram] = useState("");
   const [onlyNoBom, setOnlyNoBom] = useState(false);
   const [onlyNoPlan, setOnlyNoPlan] = useState(false);
@@ -58,15 +59,19 @@ export default function PdpPage() {
   const allPrograms = useMemo(() => d?.programs ?? [], [d]);
   const allWeeks = useMemo(() => d?.weeks ?? [], [d]);
   const programOptions = useMemo(() => allPrograms.map((p) => ({ id: p.program_id, label: p.name || p.program_id, hint: p.program_id })), [allPrograms]);
-  const weekChips = useMemo<WeekChip[]>(() => allWeeks.map((w) => ({ key: w.week, label: w.week.replace(/^\d{4}-W/, "S"), start: fmtDate(w.week_start), current: w.week === d?.current_week })), [allWeeks, d?.current_week]);
-  /** the stored week range applies only when it overlaps the loaded weeks */
+  const weekChips = useMemo<WeekChip[]>(() => allWeeks.map((w) => ({ key: w.week, label: w.week.replace(/^\d{4}-W/, "S"), start: fmtDate(w.week_start), current: w.week === d?.current_week, past: w.past })), [allWeeks, d?.current_week]);
+  const pastCount = useMemo(() => allWeeks.filter((w) => w.past).length, [allWeeks]);
+  /** the stored week range applies only when it overlaps the loaded weeks ; without a stored range the
+   * past weeks (point zero → last week) stay hidden : the sheet opens on the current week */
   const effRange = useMemo(() => {
-    if (!range) return null;
     const keys = allWeeks.map((w) => w.week);
+    if (!keys.length) return null;
+    if (!range) return pastCount && d?.current_week ? { from: d.current_week, to: keys[keys.length - 1] } : null;
     const a = keys.indexOf(range.from), b = keys.indexOf(range.to);
     if (a < 0 && b < 0) return null;
     return { from: a < 0 ? keys[0] : range.from, to: b < 0 ? keys[keys.length - 1] : range.to };
-  }, [range, allWeeks]);
+  }, [range, allWeeks, pastCount, d?.current_week]);
+  const showingPast = !!effRange && allWeeks.findIndex((w) => w.week === effRange.from) < pastCount;
   const colIdx = useMemo(() => {
     const keys = allWeeks.map((w) => w.week);
     const lo = effRange ? keys.indexOf(effRange.from) : 0, hi = effRange ? keys.indexOf(effRange.to) : keys.length - 1;
@@ -90,8 +95,9 @@ export default function PdpPage() {
     const base = valueAt(p, c);
     const value = pending ?? base;
     const current = w.week === d?.current_week;
-    const title = `${p.name} · ${w.week.replace("-W", " S")} (${fmtDate(w.week_start)})${pending !== undefined ? ` · modifié : ${fmtQty(base)} → ${fmtQty(pending)} (non enregistré)` : ""}${current ? " · semaine en cours" : ""}${!w.editable ? " · lecture seule" : ""}`;
-    return { value, text: value === 0 ? "·" : fmtQty(value), over: pending !== undefined, ro: !w.editable, title, cls: current ? "current-week" : p.source === "app" ? "from-app" : "" };
+    const origin = w.past ? ` · semaine passée : ${ORIGIN_LABELS[w.origin ?? "none"]}${w.origin_version ? ` (« ${w.origin_version} »)` : ""}${w.editable ? " · modifiable (administrateur)" : " · lecture seule"}` : !w.editable ? " · lecture seule" : "";
+    const title = `${p.name} · ${w.week.replace("-W", " S")} (${fmtDate(w.week_start)})${pending !== undefined ? ` · modifié : ${fmtQty(base)} → ${fmtQty(pending)} (non enregistré)` : ""}${current ? " · semaine en cours" : ""}${origin}`;
+    return { value, text: value === 0 ? "·" : fmtQty(value), over: pending !== undefined, ro: !w.editable, title, cls: current ? "current-week" : w.past ? `past-week${w.editable ? " editable-past" : ""}` : "" };
   })), [programs, cols, edits, d?.current_week]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const apply = (changes: SheetChange[]) => {
@@ -119,13 +125,14 @@ export default function PdpPage() {
         <div className="title"><h1>Plan de production (PDP)</h1><p>Quantités hebdomadaires par programme, telles que le moteur les éclate en besoins de composants. {canEdit ? "Saisir directement les semaines à venir (ou coller un bloc Excel), puis enregistrer : la saisie devient une nouvelle version active." : "Lecture seule : la saisie du PDP est réservée aux managers et administrateurs."}</p></div>
         <div className="actions">
           <select className="select sm" value={weeks} onChange={(e) => setWeeks(Number(e.target.value))} aria-label="Nombre de semaines">{WEEK_CHOICES.map((w) => <option key={w} value={w}>{w} semaines</option>)}</select>
-          <a className="btn sm" href={api.downloadUrl("/api/pdp/template.xlsx", { weeks })} title="Classeur vide à remplir puis importer"><Download />Modèle</a>
+          <a className="btn sm primary" href={api.downloadUrl("/api/pdp/export.xlsx", { weeks })} title="Le PDP effectif complet (depuis le point zéro) au format d'import : à corriger puis réimporter tel quel"><Download />Exporter (Excel)</a>
+          <a className="btn sm" href={api.downloadUrl("/api/pdp/template.xlsx", { weeks })} title="Classeur vide (semaine en cours et suivantes) à remplir puis importer"><Download />Modèle vide</a>
           <Link className="btn sm" to="/programmes">Impact programmes</Link>
         </div>
       </div>
 
-      <Card flush tight title={d ? <>PDP effectif · semaine en cours {d.current_week.replace("-W", " S")}{d.active_version ? <> · version active <b>{d.active_version.name}</b></> : d.erp_available ? " · PDP ERP" : ""}</> : "PDP effectif"}
-        hint={canEdit ? "Cliquer une cellule et saisir ; Entrée / Tab / flèches ; Ctrl+C / Ctrl+V (bloc Excel) ; tirer le carré pour recopier ; Suppr = 0 ; glisser la poignée ⋮⋮ pour réordonner les lignes. La semaine en cours est surlignée." : undefined}
+      <Card flush tight title={d ? <>PDP effectif · semaine en cours {d.current_week.replace("-W", " S")}{d.active_version ? <> · version active <b>{d.active_version.name}</b></> : " · aucune version active"}</> : "PDP effectif"}
+        hint={canEdit ? `Cliquer une cellule et saisir ; Entrée / Tab / flèches ; Ctrl+C / Ctrl+V (bloc Excel) ; tirer le carré pour recopier ; Suppr = 0 ; glisser la poignée ⋮⋮ pour réordonner les lignes. La semaine en cours est surlignée ; les semaines passées (depuis ${d?.first_week ? d.first_week.replace("-W", " S") : "le point zéro"}) sont grisées${isAdmin ? " et modifiables par un administrateur" : " et en lecture seule"}.` : undefined}
         actions={canEdit && <div className="row">
           <input className="input sm" style={{ width: 220 }} placeholder="Nom de la version (facultatif)" value={name} onChange={(e) => setName(e.target.value)} aria-label="Nom de la version" />
           <Button size="sm" disabled={!edits.size} onClick={() => setEdits(new Map())}><RotateCcw />Annuler</Button>
@@ -135,6 +142,8 @@ export default function PdpPage() {
           <SearchSelect value={program} onChange={setProgram} options={programOptions} placeholder="Tous les programmes" ariaLabel="Programme" width={260} />
           <button type="button" className={`btn sm ${onlyNoBom ? "primary" : ""}`} onClick={() => setOnlyNoBom((v) => !v)} title="N'afficher que les programmes sans nomenclature">Sans nomenclature{allPrograms.length ? ` (${allPrograms.filter((p) => !p.has_bom).length})` : ""}</button>
           <button type="button" className={`btn sm ${onlyNoPlan ? "primary" : ""}`} onClick={() => setOnlyNoPlan((v) => !v)} title="N'afficher que les programmes sans aucune quantité planifiée">Sans plan{allPrograms.length ? ` (${allPrograms.filter((p) => p.source === "none" || p.values.every((v) => v === 0)).length})` : ""}</button>
+          {pastCount > 0 && <button type="button" className={`btn sm ${showingPast ? "primary" : ""}`} title={showingPast ? "Revenir à la semaine en cours et aux suivantes" : `Afficher les ${pastCount} semaine(s) passée(s) depuis le point zéro (${d?.first_week?.replace("-W", " S") ?? ""})`}
+            onClick={() => setRange(showingPast ? { from: d!.current_week, to: allWeeks[allWeeks.length - 1].week } : { from: allWeeks[0].week, to: allWeeks[allWeeks.length - 1].week })}><History />{showingPast ? "Masquer le passé" : `Depuis le point zéro (${pastCount})`}</button>}
           <span className="subtle small" style={{ marginLeft: "auto" }}>{programs.length} / {allPrograms.length} programme(s){perimeter.planner ? ` · approvisionneur ${perimeter.planner}` : ""}</span>
         </div>
         {weekChips.length > 1 && <WeekRangeBar weeks={weekChips} range={effRange} onChange={setRange} />}
@@ -142,14 +151,14 @@ export default function PdpPage() {
           : programs.length === 0 ? <Empty title="Aucun programme" hint={allPrograms.length ? "Aucun programme ne correspond aux filtres." : "Déclarer des programmes et leurs nomenclatures dans le Référentiel, ou importer un PDP."} /> : (
             <SheetGrid ariaLabel="Plan de production" className="pdp-sheet" canEdit={canEdit} cells={cells} onCommit={apply} onClear={clear} fillAxis="both" colWidth={78}
               onReorder={canEdit ? moveRow : undefined}
-              corner="Programme" colClass={(c) => (cols[c].week === d?.current_week ? "current-week" : "")}
+              corner="Programme" colClass={(c) => (cols[c].week === d?.current_week ? "current-week" : cols[c].past ? "past-week" : "")}
               sideHeader={<span title="Taux de rebut du programme : besoin de la semaine = PDP × (1 + taux / 100), avant l'éclatement par la nomenclature. Un changement s'applique à la semaine en cours et aux suivantes ; les semaines passées gardent leur taux.">Taux rebut (%)</span>}
               rowSides={programs.map((p) => <ScrapInput key={p.program_id} value={p.scrap_pct} canEdit={canEdit} onSave={(v) => saveScrap.mutate({ program_id: p.program_id, rate_pct: v })} />)}
-              colHeaders={cols.map((w) => <>{w.week.replace("-W", " S")}<span className="sub">{fmtDate(w.week_start, "dd/MM")}</span></>)}
-              rowHeaders={programs.map((p) => <><b>{p.name}</b> <span className="subtle mono small">{p.program_id}</span> <Badge tone={SOURCE[p.source].tone} title="Origine des quantités affichées">{SOURCE[p.source].label}</Badge>{!p.active && <Badge tone="outline">inactif</Badge>}{!p.has_bom && <Badge tone="warning" title="Aucune nomenclature : ce plan n'éclate en aucun besoin de composant (Référentiel › Nomenclatures)">sans nomenclature</Badge>}</>)} />
+              colHeaders={cols.map((w) => <span title={w.past ? `Semaine passée : ${ORIGIN_LABELS[w.origin ?? "none"]}${w.origin_version ? ` (« ${w.origin_version} »)` : ""}` : undefined}>{w.week.replace("-W", " S")}<span className="sub">{fmtDate(w.week_start, "dd/MM")}{w.past && w.origin && w.origin !== "active" && w.origin !== "none" ? " · hist." : ""}</span></span>)}
+              rowHeaders={programs.map((p) => <><b>{p.name}</b> <span className="subtle mono small">{p.program_id}</span>{p.source === "none" && <Badge tone="outline" title="Aucune quantité planifiée sur les semaines affichées">aucun plan</Badge>}{!p.active && <Badge tone="outline">inactif</Badge>}{!p.has_bom && <Badge tone="warning" title="Aucune nomenclature : ce plan n'éclate en aucun besoin de composant (Référentiel › Nomenclatures)">sans nomenclature</Badge>}</>)} />
           )}
         {save.error && <div className="error-box" style={{ margin: 12 }}>{(save.error as Error).message}</div>}
-        <p className="small subtle" style={{ padding: "8px 12px" }}>Une version active remplace le PDP ERP pour les programmes qu'elle contient ; les autres programmes suivent l'ERP. Une saisie reprend les programmes de la version active et y ajoute ceux modifiés (copiés depuis l'ERP puis corrigés). Désactiver la version revient à l'état précédent.</p>
+        <p className="small subtle" style={{ padding: "8px 12px" }}>Semaine en cours et suivantes : la version active. Semaines passées : la version active si elle les contient, sinon la version connue au lundi de la semaine, sinon la première importée ensuite (« hist. » dans l'en-tête, détail au survol). Une saisie crée une nouvelle version active à partir de la précédente ; une semaine passée modifiée par un administrateur y est enregistrée entière. Désactiver la version revient à l'état précédent.</p>
       </Card>
 
       <div className="grid cols-2">
@@ -160,6 +169,7 @@ export default function PdpPage() {
           </div>
           <input ref={fileInput} type="file" accept=".xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importPdp.mutate(f); e.target.value = ""; }} />
           {!canEdit && <div className="note" style={{ marginTop: 12 }}>L'import du PDP est réservé aux managers et administrateurs (Référentiel › Approvisionneurs).</div>}
+          {canEdit && !isAdmin && <p className="small subtle" style={{ marginTop: 8 }}>Les semaines passées d'un classeur sont ignorées (réservées à un administrateur).</p>}
           {canEdit && <div className="dropzone" style={{ marginTop: 12 }} onClick={() => fileInput.current?.click()} onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("over"); }} onDragLeave={(e) => e.currentTarget.classList.remove("over")} onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove("over"); const f = e.dataTransfer.files?.[0]; if (f) importPdp.mutate(f); }}>
             <FileUp /><div>{importPdp.isPending ? "Import en cours…" : "Déposer le classeur PDP ici ou cliquer"}</div>
           </div>}
@@ -169,7 +179,7 @@ export default function PdpPage() {
         </Card>
 
         <Card flush title="Versions (imports et saisies)">
-          {versions.isError ? <ErrorBox error={versions.error} /> : versions.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : !versions.data?.length ? <Empty title="Aucune version" hint="Le PDP ERP est utilisé s'il est configuré." /> : (
+          {versions.isError ? <ErrorBox error={versions.error} /> : versions.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : !versions.data?.length ? <Empty title="Aucune version" hint="Importer un classeur ou saisir la feuille : la première version devient le PDP effectif." /> : (
             <table className="tbl">
               <thead><tr><th>Version</th><th>Origine</th><th className="num">Lignes</th><th className="num">Prog.</th><th>Semaines</th><th>Par</th><th>Statut</th><th></th></tr></thead>
               <tbody>{versions.data.map((v) => (

@@ -13,7 +13,6 @@ export interface ArticleRef {
 export interface LinkRef { article_id: string; supplier_id: string; supplier_name: string; moq: number; pack_qty: number; lead_time_days: number; lead_time_override: number | null; quota_pct: number; priority: number; active: boolean; max_qty_per_delivery: number | null; max_qty_per_week: number | null; }
 export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; }
 export interface ProgramRef { program_id: string; name: string; family: string; active: boolean; components: number; }
-export interface PdpErpLine { program_id: string; week_start: string | null; qty: number; version: string; }
 
 /** Reference tables managed in the application (generic CRUD). */
 export type RefValue = string | number | boolean | null;
@@ -129,9 +128,9 @@ export interface ConfigOut { title: string; data_source: Record<string, unknown>
 
 export interface PerimeterItem { id: string; name: string; }
 export interface PerimeterOut { planner: string | null; articles: number; programs: PerimeterItem[]; suppliers: PerimeterItem[]; }
-export interface PdpSheetWeek { week: string; week_start: string; editable: boolean; }
-export interface PdpSheetProgram { program_id: string; name: string; active: boolean; source: "app" | "erp" | "none"; has_bom: boolean; scrap_pct: number; values: number[]; }
-export interface PdpSheetOut { as_of: string; current_week: string; active_version: PdpVersionOut | null; erp_available: boolean; weeks: PdpSheetWeek[]; programs: PdpSheetProgram[]; }
+export interface PdpSheetWeek { week: string; week_start: string; editable: boolean; past: boolean; origin: "active" | "monday" | "later" | "none" | null; origin_version: string | null; }
+export interface PdpSheetProgram { program_id: string; name: string; active: boolean; source: "app" | "none"; has_bom: boolean; scrap_pct: number; values: number[]; }
+export interface PdpSheetOut { as_of: string; current_week: string; active_version: PdpVersionOut | null; first_week: string; init_date: string | null; weeks: PdpSheetWeek[]; programs: PdpSheetProgram[]; }
 
 // ---- supply flows (cockpit tab 2) and search page
 export interface OrderRow { order_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; purch_id: string; ignored: boolean; first_seen: string | null; }

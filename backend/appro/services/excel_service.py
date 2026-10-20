@@ -607,10 +607,12 @@ def parse_simulation_workbook(content: bytes) -> tuple[dict[str, list[ParsedCell
 # =============================================================================
 # PDP template
 # =============================================================================
-def pdp_template_workbook(programs: list[tuple[str, str]], first_monday: dt.date, weeks: int = 26) -> bytes:
+def pdp_template_workbook(programs: list[tuple[str, str]], first_monday: dt.date, weeks: int = 26,
+                          values: dict[tuple[str, dt.date], float] | None = None) -> bytes:
     """Template of the weekly production plan to import: sheet ``SOP - PDP`` with one row per
     programme (name in column A, id in column B) and one column per ISO week (``2026-W40``), plus a
-    ``NOTICE`` sheet.  ``programs`` = [(program_id, name), …]."""
+    ``NOTICE`` sheet.  ``programs`` = [(program_id, name), …] ; ``values`` fills the cells (export of the
+    effective plan, re-importable as is)."""
     wb = Workbook()
     ws = wb.active
     ws.title = "SOP - PDP"
@@ -624,7 +626,12 @@ def pdp_template_workbook(programs: list[tuple[str, str]], first_monday: dt.date
         ws.cell(r, 1, name)
         ws.cell(r, 2, pid).font = HELPER_FONT
         for k in range(weeks):
-            ws.cell(r, 3 + k).fill = INPUT_FILL
+            cell = ws.cell(r, 3 + k)
+            cell.fill = INPUT_FILL
+            if values:
+                v = values.get((pid, first_monday + dt.timedelta(days=7 * k)))
+                if v:
+                    cell.value = v
     ws.freeze_panes = "C2"
     _widths(ws, [30, 18] + [11] * weeks)
     notice = wb.create_sheet("NOTICE")
@@ -633,7 +640,8 @@ def pdp_template_workbook(programs: list[tuple[str, str]], first_monday: dt.date
         "Onglet « SOP - PDP » : une ligne par programme (colonne A = nom du programme tel que connu dans le référentiel ; colonne B = identifiant, facultatif), une colonne par semaine ISO.",
         "En-têtes de semaine acceptés : 2026-W40, S40-26, 2026W40, W40-2026 ou une date de la semaine.",
         "Cellules : quantité à produire dans la semaine (vide = 0 / inchangé). Les programmes inconnus sont ignorés et signalés dans le rapport d'import.",
-        "Une version importée et activée remplace le PDP ERP pour les programmes qu'elle contient ; les versions précédentes restent consultables.",
+        "Une version importée et activée devient le PDP effectif ; les versions précédentes restent consultables. Les semaines passées du fichier ne sont prises en compte que pour un administrateur.",
+        "Le classeur exporté depuis la page PDP (bouton Exporter) a exactement ce format : il se corrige et se réimporte tel quel.",
         "Le PDP de la semaine en cours n'est utilisé que pour son reliquat : PDP éclaté − consommation réelle déjà déclarée, réparti sur les jours ouvrés restants.",
     ]
     for i, t in enumerate(lines, start=1):

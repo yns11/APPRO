@@ -115,10 +115,8 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
     bom = [BomLine(r["program_id"], r["article_id"], float(r["qty_per"]), r["unit"], _float(r["scrap_pct"], 0.0),
                    as_date(r["valid_from"]), as_date(r["valid_to"]))
            for r in _records(t("ref_bom")) if r["article_id"] in ids]
-    needed_programs = {b.program_id for b in bom}
 
-    pdp = [PdpLine(r["program_id"], as_date(r["week_start"]), float(r["qty"]), r["version"])
-           for r in _records(t("fct_production_plan")) if r["program_id"] in needed_programs and r["week_start"]]
+    pdp: list[PdpLine] = []        # the production plan comes from the application's versions (mrp_service.app_entries_into_dataset)
     consumption = [ConsumptionLine(r["article_id"], as_date(r["date"]), float(r["qty"]))
                    for r in _records(t("fct_consumption_actual")) if (r["article_id"] in ids or r["article_id"] in source_ids) and r["date"]]
 

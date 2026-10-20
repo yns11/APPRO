@@ -4,11 +4,11 @@ import { CalendarDays, Download, Plus, Trash2, Upload, Wand2 } from "lucide-reac
 import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { RefRowEditor } from "@/components/RefRowEditor";
 import { DataTable, type Column } from "@/components/DataTable";
-import { usePdpErp, usePrograms, useRefRows, useRefTables, useWrite } from "@/lib/queries";
+import { useRefRows, useRefTables, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useRemembered } from "@/lib/pageState";
 import { api } from "@/lib/api";
-import { Badge, Button, Card, Drawer, Empty, ErrorBox, Field, SkeletonBlock, SupplierLink, Tabs, useToast } from "@/components/ui";
+import { Badge, Button, Card, Drawer, ErrorBox, Field, SkeletonBlock, SupplierLink, Tabs, useToast } from "@/components/ui";
 import { CONSUMPTION_SOURCE_SHORT, SOURCING_LABELS, fmtDate, fmtDateTime, fmtDemandDays, fmtQty, fmtWeekdays } from "@/lib/format";
 import type { ImportReport, RefColumn, RefRow, RefTableInfo, RefValue } from "@/lib/types";
 
@@ -54,7 +54,6 @@ export default function ReferencePage() {
   const [editing, setEditing] = useState<RefRow | null>(null);
   const [weeklyOf, setWeeklyOf] = useState<{ id: string; planner: string | null } | null>(null);
   const [report, setReport] = useState<ImportReport | null>(null);
-  const [program, setProgram] = useState("");
   const [bulk, setBulk] = useState(false);
   const toast = useToast();
   const table = tables.data?.find((t) => t.name === tab);
@@ -103,19 +102,17 @@ export default function ReferencePage() {
     return out;
   }, [table, del, rights]);
 
-  const programs = usePrograms();
-  const pdp = usePdpErp(program || undefined);
   const toggleFlag = (id: string) => setFlags(flags.includes(id) ? flags.filter((x) => x !== id) : [...flags, id]);
 
   return (
     <div className="page">
       <div className="page-header sticky">
         <div className="title"><h1>Référentiel</h1><p>Articles, fournisseurs, règles article ↔ fournisseur, termes de consommation, commandes fermées (PO), programmes, nomenclatures, stock de référence, approvisionneurs et délégations : ligne par ligne, par fichier Excel (modèle à télécharger, puis importer) ou en lot sur les lignes filtrées. Le paramétrage d'un article se fait aussi depuis sa fiche (onglet Paramétrage).{rights.access && !rights.canWrite ? " Lecture seule : vous n'êtes pas déclaré comme approvisionneur." : ""}</p></div>
-        {tables.data && <Tabs value={tab} onChange={(t) => { setTab(t); setReport(null); }} tabs={[...tables.data.map((t) => ({ id: t.name, label: t.label, count: t.rows })), { id: "pdp_erp", label: "PDP ERP" }]} />}
+        {tables.data && <Tabs value={tab} onChange={(t) => { setTab(t); setReport(null); }} tabs={[...tables.data.map((t) => ({ id: t.name, label: t.label, count: t.rows }))]} />}
       </div>
       {tables.isError ? <ErrorBox error={tables.error} /> : tables.isLoading || !tables.data ? <SkeletonBlock /> : (
         <>
-          {table && tab !== "pdp_erp" && (
+          {table && (
             <Card flush title={table.label} hint={table.description}
               actions={<>
                 {rights.canImportTable(table.name) && <>
@@ -144,24 +141,6 @@ export default function ReferencePage() {
                   emptyTitle={flags.length && rows.data?.length ? "Aucune ligne ne correspond aux filtres" : `Aucune ligne dans « ${table.label} »`} emptyHint={flags.length && rows.data?.length ? undefined : table.name === "ref_planners" ? "Tant que cette table est vide, tout utilisateur est administrateur : commencez par vous déclarer avec le rôle admin." : "Télécharger le modèle, le remplir, l'importer ; ou ajouter une ligne."} />
               )}
             </Card>
-          )}
-          {tab === "pdp_erp" && (
-            <div className="grid cols-2">
-              <Card flush title="Programmes" hint="cliquer pour voir le PDP lu de l'ERP (si une table est configurée)">
-                {programs.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : (
-                  <table className="tbl compact"><thead><tr><th>Programme</th><th className="num">Composants</th></tr></thead>
-                    <tbody>{(programs.data ?? []).map((p) => <tr key={p.program_id} className={`clickable ${program === p.program_id ? "selected" : ""}`} onClick={() => setProgram(p.program_id)}><td><b>{p.name}</b><span className="sub mono">{p.program_id}</span></td><td className="num">{p.components}</td></tr>)}</tbody></table>
-                )}
-              </Card>
-              <Card flush title={program ? `PDP ERP – ${program}` : "PDP ERP"} hint="le PDP importé par fichier (page Plan de production) remplace cette table pour ses programmes">
-                {!program ? <Empty title="Sélectionnez un programme" /> : pdp.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : !pdp.data?.length ? <Empty title="Aucun PDP ERP pour ce programme" hint="Le PDP vient du fichier importé." /> : (
-                  <div style={{ maxHeight: 520, overflow: "auto" }}>
-                    <table className="tbl compact"><thead><tr><th>Lundi</th><th className="num">Quantité</th><th>Version</th></tr></thead>
-                      <tbody>{pdp.data.map((l, i) => <tr key={i}><td>{fmtDate(l.week_start)}</td><td className="num">{fmtQty(l.qty)}</td><td className="subtle">{l.version}</td></tr>)}</tbody></table>
-                  </div>
-                )}
-              </Card>
-            </div>
           )}
         </>
       )}

@@ -500,3 +500,9 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .cell-2l .sub { font-size: var(--fs--2); color: var(--fg-muted); }
 .num .cell-2l { align-items: flex-end; }
 .cell-2l .badge { align-self: flex-end; }
+
+/* ---- PDP : past weeks (read-only, greyed) */
+.chip-week.past { opacity: .6; border-style: dashed; }
+.chip-week.past.sel { opacity: .9; }
+.pdp-sheet .past-week { background: var(--bg-subtle); color: var(--fg-muted); }
+.pdp-sheet .past-week.editable-past { background: var(--warning-soft); color: var(--fg); }

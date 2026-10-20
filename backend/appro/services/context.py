@@ -1,6 +1,7 @@
 """Process-wide application context: settings, fact source, session factory, reference frames, cache."""
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import threading
 import time
@@ -20,6 +21,8 @@ from ..data.sources import FactSource, LakebaseSource, LocalCsvSource, UnityCata
 from ..data.store import (
     REF_MODELS,
     LakebaseCredentials,
+    PdpLine,
+    PdpVersion,
     bump_data_version,
     grant_sync_role,
     init_store,
@@ -33,7 +36,7 @@ log = logging.getLogger(__name__)
 def erp_tables(settings: Settings) -> ErpTables:
     return ErpTables(catalog=settings.uc_catalog, schema=settings.uc_schema, orders=settings.erp_orders_table,
                      receipts=settings.erp_receipts_table, consumption=settings.erp_consumption_table or "",
-                     desadv=settings.erp_desadv_table or "", pdp=settings.erp_pdp_table or "",
+                     desadv=settings.erp_desadv_table or "",
                      prices=settings.erp_prices_table or "")
 
 
@@ -137,8 +140,30 @@ def bootstrap_reference(session_factory: sessionmaker[Session], seed_dir: Path) 
                 continue
             df = coerce(pd.read_csv(path, dtype=str, keep_default_na=False), TABLES[name])
             total += reference.replace_all(session, name, df, user="seed")
+        total += seed_pdp_version(session, seed_dir)
         session.commit()
     return total
+
+
+def seed_pdp_version(session: Session, seed_dir: Path) -> int:
+    """The production plan of the demonstration set is an imported version like any other (there is no
+    ERP plan) : ``pdp_seed.csv`` (program_id, week_start, qty) becomes the active version when the
+    application holds none yet."""
+    path = seed_dir / "pdp_seed.csv"
+    if not path.exists() or session.scalars(select(PdpVersion).limit(1)).first() is not None:
+        return 0
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    version = PdpVersion(name="PDP du jeu de démonstration", source_file=path.name, note="chargé au premier démarrage",
+                         imported_by="seed", active=True)
+    n = 0
+    for r in df.to_dict("records"):
+        if not r.get("program_id") or not r.get("week_start"):
+            continue
+        version.lines.append(PdpLine(program_id=str(r["program_id"]), week_start=dt.date.fromisoformat(str(r["week_start"])[:10]),
+                                     qty=float(r["qty"] or 0)))
+        n += 1
+    session.add(version)
+    return n
 
 
 def get_context() -> AppContext:

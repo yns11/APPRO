@@ -209,7 +209,7 @@ def query_columns(ctx: AppContext, session: Session, name: str, out: list[dict])
         counts: dict[str, int] = {}
         for b in reference.rows_out(session, "ref_bom"):
             counts[b["program_id"]] = counts.get(b["program_id"], 0) + 1
-        ds, _erp, _as_of, monday = _sheet_frame(ctx, session)
+        ds, _as_of, monday = _sheet_frame(ctx, session)
         planned = {p.program_id for p in ds.pdp if p.qty > 0 and p.week_start >= monday}
         for r in out:
             r["article_count"], r["has_plan"] = counts.get(r["program_id"], 0), r["program_id"] in planned
@@ -356,15 +356,6 @@ def perimeter(planner: str | None = None, ctx: AppContext = Depends(ctx_dep)):
         planner=planner, articles=len(ids),
         programs=[S.PerimeterItem(id=str(r["program_id"]), name=str(r["name"] or "")) for r in programs.to_dict("records")],
         suppliers=[S.PerimeterItem(id=str(r["supplier_id"]), name=str(r["name"] or "")) for r in suppliers.to_dict("records")])
-
-
-@router.get("/reference/pdp")
-def pdp(program_id: str | None = None, ctx: AppContext = Depends(ctx_dep)):
-    df = ctx.table("fct_production_plan")
-    if program_id:
-        df = df[df["program_id"] == program_id]
-    return [{"program_id": r["program_id"], "week_start": r["week_start"].isoformat() if r["week_start"] else None,
-             "qty": float(r["qty"]), "version": r["version"]} for r in df.to_dict("records")]
 
 
 @router.post("/reference/refresh")

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..data.assembler import erp_dataset
 from ..data.schemas import FACT_TABLES
-from ..data.store import ErpSyncLog, PdpLine, PdpVersion
+from ..data.store import ErpSyncLog, PdpLine
 from ..engine.calendar import WorkCalendar, iso_week_label, iso_week_monday
 from ..engine.demand import DayIndex, apply_profile, build_program_daily, explode_demand
 from ..engine.models import PdpLine as EnginePdpLine
@@ -103,45 +103,7 @@ def plant_calendar(ctx: AppContext, session: Session, weeks: int = 26) -> dict[s
 # =============================================================================
 # Adherence of the plan to the actual consumption
 # =============================================================================
-def plan_versions_by_week(session: Session, mondays: list[dt.date]) -> list[dict[str, Any]]:
-    """For each past week, the imported PDP version the adherence takes as « the plan of that week » :
-
-    * ``monday`` : the **latest version imported before the Monday** of the week **that holds a line
-      for that week** (what the CBN saw on that Monday) ;
-    * ``later`` : no version imported before the Monday holds the week (the application was not yet in
-      use, or every earlier version stopped before it) → the **first version imported afterwards** that
-      holds the week is taken instead (flagged : it was not known on the Monday) ;
-    * ``none`` : no imported version holds the week (the ERP plan, when configured, is the fallback).
-    The versions are matched on their content, never on their active flag : an old version stays
-    the plan of its weeks after a newer import."""
-    if not mondays:
-        return []
-    weeks = sorted(set(mondays))
-    rows = session.execute(
-        select(PdpLine.week_start, PdpVersion.id, PdpVersion.name, PdpVersion.imported_at)
-        .join(PdpVersion, PdpVersion.id == PdpLine.version_id)
-        .where(PdpLine.week_start >= weeks[0], PdpLine.week_start <= weeks[-1])
-        .group_by(PdpLine.week_start, PdpVersion.id, PdpVersion.name, PdpVersion.imported_at)).all()
-    by_week: dict[dt.date, list[tuple[dt.datetime, str, str]]] = defaultdict(list)
-    for week_start, vid, name, imported_at in rows:
-        by_week[week_start].append((imported_at, vid, name))
-    out = []
-    for monday in weeks:
-        cutoff = dt.datetime.combine(monday, dt.time.min)
-        cands = sorted(by_week.get(monday, []))
-        before = [c for c in cands if c[0] < cutoff]
-        after = [c for c in cands if c[0] >= cutoff]
-        if before:
-            imported_at, vid, name = before[-1]
-            origin = "monday"
-        elif after:
-            imported_at, vid, name = after[0]
-            origin = "later"
-        else:
-            imported_at, vid, name, origin = None, None, None, "none"
-        out.append({"week": iso_week_label(monday), "week_start": monday.isoformat(), "version_id": vid, "version_name": name,
-                    "imported_at": imported_at.isoformat(timespec="minutes") if imported_at else None, "origin": origin})
-    return out
+plan_versions_by_week = mrp_service.plan_versions_by_week
 
 
 def adherence(ctx: AppContext, session: Session, weeks: int = 12, bucket: str = "week", plan_mode: str = "monday",
@@ -155,15 +117,14 @@ def adherence(ctx: AppContext, session: Session, weeks: int = 12, bucket: str = 
     * net adherence = 1 − |Σ real − Σ plan| / Σ plan (volume) and the signed bias (real − plan) / plan ;
     * gross adherence = 1 − Σ per bucket |real − plan| / Σ plan (timing : ``week`` or ``day`` buckets) ;
     * ``plan_mode`` : ``monday`` takes, for each week, the PDP version known at its Monday (see
-      :func:`plan_versions_by_week` – a later version is taken when none was imported before), ``latest``
+      :func:`mrp_service.plan_versions_by_week` – a later version is taken when none was imported before), ``latest``
       the current effective plan ;
     * suggested ``demand_days`` : the first weekday (Mon = 1 … Fri = 5) where the cumulated real share
       of the week reaches 75 %, 5 when it is Thursday or Friday.
     Articles in ``plan`` consumption source are excluded (their past *is* the plan) ; derived ones are flagged."""
     ds = erp_dataset(ctx.table, planner=planner, article_ids=[article_id] if article_id else None, holidays=ctx.settings.holiday_dates)
-    erp_pdp = list(ds.pdp)
-    mrp_service.app_entries_into_dataset(ds, session)
     params = mrp_service.build_params(ctx, session)
+    mrp_service.app_entries_into_dataset(ds, session, params)
     as_of = params.as_of or dt.date.today()
     calendar = WorkCalendar.from_spec(params.working_weekdays, ds.holidays)
     this_monday = iso_week_monday(as_of)
@@ -201,14 +162,10 @@ def adherence(ctx: AppContext, session: Session, weeks: int = 12, bucket: str = 
         plan_daily = defaultdict(lambda: np.zeros(index.n))
         plan_versions = plan_versions_by_week(session, mondays)
         for monday, pv in zip(mondays, plan_versions):
-            lines = [p for p in erp_pdp if p.week_start == monday]
+            lines: list[EnginePdpLine] = []
             if pv["version_id"] is not None:
                 rows = session.scalars(select(PdpLine).where(PdpLine.version_id == pv["version_id"], PdpLine.week_start == monday)).all()
-                covered = {r.program_id for r in rows}
-                lines = [p for p in lines if p.program_id not in covered]
-                lines += [EnginePdpLine(r.program_id, r.week_start, r.qty, version=f"APP:{pv['version_id']}") for r in rows if r.program_id in programs]
-            elif lines:
-                pv["origin"] = "erp"
+                lines = [EnginePdpLine(r.program_id, r.week_start, r.qty, version=f"APP:{pv['version_id']}") for r in rows if r.program_id in programs]
             for aid, arr in exploded(lines).items():
                 plan_daily[aid] = plan_daily[aid] + arr
     for aid, art in articles.items():
@@ -281,6 +238,5 @@ def adherence(ctx: AppContext, session: Session, weeks: int = 12, bucket: str = 
             "plan_versions": plan_versions,
             "plan_coverage": {"monday": sum(1 for v in plan_versions if v["origin"] == "monday"),
                               "later": sum(1 for v in plan_versions if v["origin"] == "later"),
-                              "erp": sum(1 for v in plan_versions if v["origin"] == "erp"),
                               "latest": sum(1 for v in plan_versions if v["origin"] == "latest"),
                               "none": sum(1 for v in plan_versions if v["origin"] == "none")}}

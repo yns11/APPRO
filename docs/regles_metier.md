@@ -60,7 +60,7 @@ se lit.
    * `derived` : consommation = Σ coefficient × consommation déclarée des **articles sources** (table
      `ref_consumption_terms`) ; sources éligibles : en source `erp`, présentes dans un programme de l'article et
      dans aucun programme où il est absent ; sans terme, la consommation ERP de l'article est utilisée.
-4. Un PDP importé ou saisi et **actif** remplace le PDP ERP pour les programmes qu'il contient (§ 11 bis).
+4. Le PDP est une version de l'application, importée ou saisie, **active** ; les semaines passées suivent l'historique des versions (§ 11 bis).
 
 La ligne *Besoin* affiche le consommé (passé, réel) puis le requis (futur, PDP) ; le classeur exporté les
 distingue par la date de référence.
@@ -406,7 +406,7 @@ référence** est, au choix, le *PDP actuel* ou le ***PDP du lundi*** : pour cha
 importée **avant son lundi qui contient cette semaine** (ce que le CBN a vu) ; quand aucune version
 antérieure ne la contient (application pas encore en service, versions trop courtes), la **première version
 importée ensuite** qui la contient sert de plan, et la semaine est signalée « importée après coup » ; sans
-aucune version, le plan ERP s'il est configuré, sinon « aucun plan ». Une bande sous le sélecteur montre,
+aucune version, « aucun plan ». Une bande sous le sélecteur montre,
 semaine par semaine, la version retenue et sa date d'import.
 
 **Fiches articles** (liste) : en-tête fixe ; colonnes *Prochaine livraison* (quantité), *Attendue le* et *Nature*
@@ -447,28 +447,45 @@ au moteur.
 fournisseur devient une cellule saisie, une valeur égale vaut « ERP » ; chaque valeur d'*Ajustement* devient
 une cellule. Les cellules des articles présents dans le classeur remplacent celles de l'application.
 
-### 11 bis. Plan de production : saisie directe
+### 11 bis. Plan de production : versions, historique et saisie directe
 
-La page *Plan de production (PDP)* montre le **PDP effectif** (ERP, remplacé programme par programme par la
-version active) en une feuille : tous les programmes actifs du Référentiel (un programme ajouté y figure aussitôt,
-badge « sans nomenclature » tant qu'il n'en a pas, plus tout programme planifié) en lignes, semaines ISO en colonnes, de la semaine en cours à 26 semaines (choix 26 à 104) ou à la dernière semaine
-planifiée. Les **managers et administrateurs** saisissent les **semaines à venir** (la semaine en cours est
-grisée, non modifiable) comme dans Excel (saisie, flèches, Ctrl+C / Ctrl+V d'un bloc, recopie par le carré,
-Suppr = 0), puis **enregistrent** : les cellules modifiées sont appliquées au plan effectif et forment une
-**nouvelle version active** (`source_file` = « saisie directe », nom libre ou « Saisie du jj/mm/aaaa hh:mm »).
-Cette version reprend les programmes de la version active précédente et y ajoute les programmes modifiés
-(copiés depuis l'ERP puis corrigés) ; les autres programmes continuent de suivre l'ERP. Désactiver la version
-revient à l'état précédent. L'import d'un classeur et la liste des versions (activer, désactiver, supprimer)
-sont sur la même page.
+Il n'existe **aucune table ERP de PDP** : le plan de production est une **version de l'application**, importée
+(classeur) ou saisie dans la feuille, dont une seule est **active**. Le **PDP effectif** suit une règle unique,
+pour la feuille, le moteur et l'adhérence en mode « PDP actuel » :
+
+* **semaine en cours et suivantes** : la version active ;
+* **semaines passées**, depuis la **première semaine complète après le point zéro** du stock (jamais après la
+  semaine en cours) : la version active si elle contient la semaine ; sinon la version **connue au lundi** de
+  la semaine (dernière importée avant ce lundi qui la contient, ce que le CBN a vu) ; sinon la **première
+  version importée ensuite** qui la contient ; sinon rien. L'en-tête de la feuille signale « hist. » et nomme
+  la version au survol.
+
+La page *Plan de production (PDP)* montre ce PDP effectif en une feuille : tous les programmes actifs du
+Référentiel (un programme ajouté y figure aussitôt, badge « sans nomenclature » tant qu'il n'en a pas, plus tout
+programme planifié) en lignes, semaines ISO en colonnes, du point zéro à 26 semaines (choix 26 à 104) ou à la
+dernière semaine planifiée. Les semaines passées sont **grisées et masquées par défaut** (bouton « Depuis le
+point zéro », période mémorisée). Les **managers et administrateurs** saisissent la semaine en cours et les
+semaines à venir comme dans Excel (saisie, flèches, Ctrl+C / Ctrl+V d'un bloc, recopie par le carré, Suppr = 0),
+puis **enregistrent** : les cellules modifiées sont appliquées au plan effectif et forment une **nouvelle
+version active** (`source_file` = « saisie directe », nom libre ou « Saisie du jj/mm/aaaa hh:mm ») qui reprend
+toutes les lignes de la version active précédente. Une **semaine passée** n'est modifiable que par un
+**administrateur** : la nouvelle version l'enregistre alors entière (valeurs effectives de l'historique, puis
+les cellules saisies), pour que la semaine reste complète ; les autres semaines passées continuent de suivre
+l'historique. Désactiver la version active rend la main à la version la plus récente restante. L'import d'un
+classeur et la liste des versions (activer, désactiver, supprimer) sont sur la même page ; les semaines passées
+d'un classeur importé par un manager sont ignorées (signalées dans le rapport), conservées pour un
+administrateur.
+
+**Exporter (Excel)** écrit le PDP effectif complet (tous les programmes, du point zéro à la dernière semaine
+planifiée) dans le format d'import, onglet `SOP - PDP` : le classeur se corrige et se **réimporte tel quel**.
+Le **modèle vide** (semaine en cours et suivantes) reste disponible ; les **modèles du référentiel** (un par
+table) sont dans *Référentiel*.
 
 La colonne **Taux rebut (%)**, juste après le programme, porte le taux de rebut du programme (0 par défaut) :
 le besoin hebdomadaire éclaté par la nomenclature est PDP × (1 + taux / 100) (§ 2). Saisi par un manager ou un
 administrateur (Entrée ou sortie de la cellule), il est enregistré aussitôt, hors des versions de PDP, et
 **daté du lundi de la semaine en cours** : il s'applique à la semaine en cours et aux suivantes, les semaines
 passées conservent le taux en vigueur à l'époque. Les quantités affichées dans la feuille restent le PDP brut.
-
-Le **modèle du fichier PDP** (onglet `SOP - PDP`, une ligne par programme, une colonne par semaine ISO)
-se télécharge dans *Plan de production (PDP)* ; les **modèles du référentiel** (un par table) dans *Référentiel*.
 
 ## 12. Approvisionneurs, délégations et droits
 

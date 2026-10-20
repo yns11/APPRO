@@ -664,14 +664,17 @@ class PerimeterOut(BaseModel):
 class PdpSheetWeek(BaseModel):
     week: str
     week_start: dt.date
-    editable: bool          # the current week and the weeks after it, for managers and administrators
+    editable: bool          # current and future weeks for managers and administrators ; past weeks for administrators only
+    past: bool = False      # before the current week (greyed)
+    origin: str | None = None        # past weeks : "active", "monday", "later" or "none" (where the values come from)
+    origin_version: str | None = None   # name of the version the past week comes from
 
 
 class PdpSheetProgram(BaseModel):
     program_id: str
     name: str
     active: bool = True
-    source: Literal["app", "erp", "none"]   # where the displayed quantities come from
+    source: Literal["app", "none"]   # a quantity planned (any week) or nothing at all
     has_bom: bool = True                    # without a bill of material the plan explodes into nothing
     scrap_pct: float = 0.0                  # programme scrap rate in force from the current week (need = PDP × (1 + rate / 100))
     values: list[float]
@@ -683,7 +686,8 @@ class PdpSheetOut(BaseModel):
     as_of: dt.date
     current_week: str
     active_version: PdpVersionOut | None = None
-    erp_available: bool = False
+    first_week: str = ""             # first complete ISO week after the point zero (start of the sheet)
+    init_date: dt.date | None = None
     weeks: list[PdpSheetWeek]
     programs: list[PdpSheetProgram]
 

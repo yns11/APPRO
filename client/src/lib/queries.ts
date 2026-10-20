@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Params } from "./api";
 import type {
-  AdherenceResponse, AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, ConsumptionSourceOption, DeliveryPlanResponse, FixedRule, FlagOut, GridResponse, LinkRef, OrphanRow, ParamDoc, ParamOverrideOut, PdpErpLine,
+  AdherenceResponse, AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, ConsumptionSourceOption, DeliveryPlanResponse, FixedRule, FlagOut, GridResponse, LinkRef, OrphanRow, ParamDoc, ParamOverrideOut,
   FlowsResponse, PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, PlantCalendar, SearchResponse, ProgramImpactResponse, ProgramRef, ProjectionResponse, RefRow, RefTableInfo, SupplierDetail, SupplierRef, SyncStatus, WeeklyParamsResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -75,7 +75,6 @@ export const useLinks = (articleId?: string, supplierId?: string) => useQuery({ 
 export const useSuppliers = () => useQuery({ queryKey: ["ref-suppliers"], queryFn: () => api.get<SupplierRef[]>("/api/reference/suppliers"), staleTime: 300_000 });
 export const useSupplier = (supplierId: string | undefined) => useQuery({ queryKey: ["supplier", supplierId], enabled: !!supplierId, staleTime: 30_000, queryFn: () => api.get<SupplierDetail>(`/api/suppliers/${encodeURIComponent(supplierId!)}`) });
 export const usePrograms = () => useQuery({ queryKey: ["ref-programs"], queryFn: () => api.get<ProgramRef[]>("/api/reference/programs"), staleTime: 300_000 });
-export const usePdpErp = (programId?: string) => useQuery({ queryKey: ["ref-pdp", programId], queryFn: () => api.get<PdpErpLine[]>("/api/reference/pdp", { program_id: programId }), staleTime: 300_000, enabled: !!programId });
 export const useRefTables = () => useQuery({ queryKey: ["ref-tables"], queryFn: () => api.get<RefTableInfo[]>("/api/reference/tables") });
 export const useRefRows = (name: string | null, planner?: string | null) => useQuery({ queryKey: ["ref-rows", name, planner ?? null], queryFn: () => api.get<RefRow[]>(`/api/reference/${name}/rows`, { planner: planner ?? undefined }), enabled: !!name });
 /** Articles eligible as consumption sources of an article (derived consumption). */

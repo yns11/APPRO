@@ -76,7 +76,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--orders-table", default="commandes_edi")
     p.add_argument("--receipts-table", default="recep_edi")
     p.add_argument("--consumption-table", default="", help="table UC de consommation réelle par composant (article_id, date, qty) ; vide = aucune")
-    p.add_argument("--pdp-table", default="")
     p.add_argument("--desadv-table", default="desadv_edi", help="table UC des avis d'expédition (DESADV) ; vide = aucune")
     p.add_argument("--prices-table", default="silver_base_article", help="table UC des articles avec std_cost_price (prix en euros) ; vide = aucune")
     p.add_argument("--branch", default="", help="projects/<projet>/branches/<branche>")
@@ -174,7 +173,7 @@ def publish(conn, spark, query: str, name: str, pg_schema: str, run_id: str, sou
 def run(args: argparse.Namespace) -> dict[str, int]:
     import psycopg
     tables = ErpTables(catalog=args.catalog, schema=args.schema, orders=args.orders_table, receipts=args.receipts_table,
-                       consumption=args.consumption_table or "", desadv=args.desadv_table or "", pdp=args.pdp_table or "",
+                       consumption=args.consumption_table or "", desadv=args.desadv_table or "",
                        prices=args.prices_table or "")
     queries = fact_queries(tables)
     wanted = {t.strip() for t in args.tables.split(",") if t.strip()}

@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import time
+from collections import defaultdict
 from typing import Any
 
 from sqlalchemy import select
@@ -24,8 +25,10 @@ from ..data.store import (
     audit,
 )
 from ..engine import run_mrp
+from ..engine.calendar import iso_week_label, iso_week_monday
 from ..engine.models import AdjustCell, CellFlag, Dataset, EngineParams, MrpResult, PlanCell
 from ..engine.models import PdpLine as EnginePdpLine
+from ..engine.runner import resolve_as_of, resolve_init_date
 from .context import AppContext
 from .expression import evaluate
 
@@ -107,8 +110,98 @@ def build_params(ctx: AppContext, session: Session, **requested: Any) -> EngineP
     return EngineParams(**base)
 
 
-def app_entries_into_dataset(ds: Dataset, session: Session) -> None:
-    """Merge the planner cells and the active PDP version into the dataset."""
+def first_full_monday(init_date: dt.date, this_monday: dt.date | None = None) -> dt.date:
+    """First complete ISO week after the point zero : the week of ``init_date`` when it is a Monday, else
+    the next one ; never after the current week (a point zero set this week starts the sheet on the
+    current week).  The PDP sheet and the past weeks of the effective plan start there."""
+    monday = iso_week_monday(init_date)
+    first = monday if monday == init_date else monday + dt.timedelta(days=7)
+    return min(first, this_monday) if this_monday else first
+
+
+def plan_versions_by_week(session: Session, mondays: list[dt.date]) -> list[dict[str, Any]]:
+    """For each past week, the imported PDP version that stands for « the plan of that week » :
+
+    * ``monday`` : the **latest version imported before the Monday** of the week **that holds a line
+      for that week** (what the CBN saw on that Monday) ;
+    * ``later`` : no version imported before the Monday holds the week (the application was not yet in
+      use, or every earlier version stopped before it) → the **first version imported afterwards** that
+      holds the week is taken instead (flagged : it was not known on the Monday) ;
+    * ``none`` : no imported version holds the week.
+    The versions are matched on their content, never on their active flag : an old version stays
+    the plan of its weeks after a newer import."""
+    if not mondays:
+        return []
+    weeks = sorted(set(mondays))
+    rows = session.execute(
+        select(PdpLine.week_start, PdpVersion.id, PdpVersion.name, PdpVersion.imported_at)
+        .join(PdpVersion, PdpVersion.id == PdpLine.version_id)
+        .where(PdpLine.week_start >= weeks[0], PdpLine.week_start <= weeks[-1])
+        .group_by(PdpLine.week_start, PdpVersion.id, PdpVersion.name, PdpVersion.imported_at)).all()
+    by_week: dict[dt.date, list[tuple[dt.datetime, str, str]]] = defaultdict(list)
+    for week_start, vid, name, imported_at in rows:
+        by_week[week_start].append((imported_at, vid, name))
+    out = []
+    for monday in weeks:
+        cutoff = dt.datetime.combine(monday, dt.time.min)
+        cands = sorted(by_week.get(monday, []))
+        before = [c for c in cands if c[0] < cutoff]
+        after = [c for c in cands if c[0] >= cutoff]
+        if before:
+            imported_at, vid, name = before[-1]
+            origin = "monday"
+        elif after:
+            imported_at, vid, name = after[0]
+            origin = "later"
+        else:
+            imported_at, vid, name, origin = None, None, None, "none"
+        out.append({"week": iso_week_label(monday), "week_start": monday.isoformat(), "version_id": vid, "version_name": name,
+                    "imported_at": imported_at.isoformat(timespec="minutes") if imported_at else None, "origin": origin})
+    return out
+
+
+def effective_pdp(session: Session, programs: set[str], as_of: dt.date, init_date: dt.date) -> tuple[list[EnginePdpLine], dict[str, Any]]:
+    """The one production plan every screen and the engine use (docs/regles_metier.md § 11 bis) :
+
+    * current week and the weeks after it : the **active version** ;
+    * past weeks, from the first complete week after the point zero : the active version when it holds
+      the week ; otherwise the version **known at the Monday** of the week (:func:`plan_versions_by_week`),
+      else the first version imported afterwards that holds it ; else nothing.
+    Returns the lines (programmes with a bill of material only) and a meta dict : the active version and,
+    per past week, the version the plan comes from."""
+    this_monday = iso_week_monday(as_of)
+    active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
+    lines: list[EnginePdpLine] = []
+    active_weeks: set[dt.date] = set()
+    if active:
+        for l in session.scalars(select(PdpLine).where(PdpLine.version_id == active.id)).all():
+            if l.program_id in programs:
+                lines.append(EnginePdpLine(l.program_id, l.week_start, l.qty, version=f"APP:{active.id}"))
+            active_weeks.add(l.week_start)
+    first = first_full_monday(init_date, this_monday)
+    past = [first + dt.timedelta(days=7 * k) for k in range((this_monday - first).days // 7)] if this_monday > first else []
+    week_origin: dict[str, dict[str, Any]] = {}
+    missing = [m for m in past if m not in active_weeks]
+    fallback = {dt.date.fromisoformat(v["week_start"]): v for v in plan_versions_by_week(session, missing)}
+    for m in past:
+        if m in active_weeks:
+            week_origin[m.isoformat()] = {"origin": "active", "version_id": active.id if active else None, "version_name": active.name if active else None}
+            continue
+        v = fallback.get(m)
+        week_origin[m.isoformat()] = {"origin": v["origin"] if v else "none", "version_id": v["version_id"] if v else None,
+                                      "version_name": v["version_name"] if v else None}
+        if v and v["version_id"]:
+            for l in session.scalars(select(PdpLine).where(PdpLine.version_id == v["version_id"], PdpLine.week_start == m)).all():
+                if l.program_id in programs:
+                    lines.append(EnginePdpLine(l.program_id, l.week_start, l.qty, version=f"APP:{v['version_id']}"))
+    meta = {"pdp_version": {"id": active.id, "name": active.name} if active else None, "pdp_first_week": first.isoformat(),
+            "pdp_week_origin": week_origin}
+    return lines, meta
+
+
+def app_entries_into_dataset(ds: Dataset, session: Session, params: EngineParams | None = None) -> None:
+    """Merge the planner cells and the effective production plan into the dataset (``params`` gives the
+    simulated « today » ; the real date otherwise)."""
     ids = {a.article_id for a in ds.articles}
     for c in session.scalars(select(AppAdjustment)):
         if c.article_id in ids:
@@ -120,18 +213,10 @@ def app_entries_into_dataset(ds: Dataset, session: Session) -> None:
         if f.article_id in ids:
             ds.flags.append(CellFlag(f.article_id, f.supplier_id or None, f.date, f.kind, f.qty))
     programs = {b.program_id for b in ds.bom}
-    active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
-    if active:
-        lines = session.scalars(select(PdpLine).where(PdpLine.version_id == active.id)).all()
-        by_program: dict[str, list] = {}
-        for l in lines:
-            if l.program_id in programs:
-                by_program.setdefault(l.program_id, []).append(l)
-        # an imported PDP replaces the ERP plan for the programs it contains
-        ds.pdp = [p for p in ds.pdp if p.program_id not in by_program]
-        for pid, ls in by_program.items():
-            ds.pdp.extend(EnginePdpLine(pid, l.week_start, l.qty, version=f"APP:{active.id}") for l in ls)
-        ds.meta["pdp_version"] = {"id": active.id, "name": active.name}
+    as_of = resolve_as_of(ds, params) if params is not None else dt.date.today()
+    init_date = resolve_init_date(ds, as_of)
+    ds.pdp, meta = effective_pdp(session, programs, as_of, init_date)
+    ds.meta.update(meta)
     rates = scrap_rates(session)
     for p in ds.pdp:
         p.scrap_pct = scrap_rate_at(rates, p.program_id, p.week_start)
@@ -173,7 +258,7 @@ def compute(ctx: AppContext, session: Session, planner: str | None = None, artic
         return cached
     t0 = time.perf_counter()
     ds = erp_dataset(ctx.table, planner=planner, article_ids=article_ids, holidays=ctx.settings.holiday_dates)
-    app_entries_into_dataset(ds, session)
+    app_entries_into_dataset(ds, session, params)
     notes = apply_weekly_overrides(ds, session.scalars(select(ParamOverride).where(ParamOverride.scope == "article_week")).all())
     result = run_mrp(ds, params)
     result.diagnostics.extend(notes)

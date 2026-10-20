@@ -28,34 +28,58 @@ def _out(session: Session, v: PdpVersion) -> S.PdpVersionOut:
                            first_week=stats[2], last_week=stats[3])
 
 
-@router.get("/template.xlsx")
-def template(weeks: int = Query(26, ge=4, le=104), ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Template of the weekly PDP to import: one row per programme with a bill of material, one
-    column per ISO week from the current week."""
+def _frame(ctx: AppContext, session: Session):
+    """Dataset with the effective PDP, the reference day, the current Monday and the point zero."""
     from ...data.assembler import erp_dataset
     from ...engine.calendar import iso_week_monday
-    from ...engine.runner import resolve_as_of
-    from ...services import mrp_service
+    from ...engine.runner import resolve_as_of, resolve_init_date
     ds = erp_dataset(ctx.table)
+    params = mrp_service.build_params(ctx, session)
+    mrp_service.app_entries_into_dataset(ds, session, params)
+    as_of = resolve_as_of(ds, params)
+    return ds, as_of, iso_week_monday(as_of), resolve_init_date(ds, as_of)
+
+
+def _sheet_frame(ctx: AppContext, session: Session):
+    """Effective PDP, the reference day and the current Monday (used by the Référentiel too)."""
+    ds, as_of, monday, _init = _frame(ctx, session)
+    return ds, as_of, monday
+
+
+def _sheet_programs(ds) -> list[tuple[str, str]]:
     with_bom = {b.program_id for b in ds.bom}
-    programs = [(p.program_id, p.name) for p in ds.programs if p.program_id in with_bom and p.active]
-    monday = iso_week_monday(resolve_as_of(ds, mrp_service.build_params(ctx, session)))
-    content = excel_service.pdp_template_workbook(programs, monday, weeks)
+    return [(p.program_id, p.name) for p in ds.programs if p.program_id in with_bom and p.active]
+
+
+@router.get("/template.xlsx")
+def template(weeks: int = Query(26, ge=4, le=104), ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Empty template of the weekly PDP to import: one row per active programme with a bill of material,
+    one column per ISO week from the current week."""
+    ds, _as_of, monday, _init = _frame(ctx, session)
+    content = excel_service.pdp_template_workbook(_sheet_programs(ds), monday, weeks)
     return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="modele_pdp_{dt.date.today().isoformat()}.xlsx"'})
 
 
-def _sheet_frame(ctx: AppContext, session: Session):
-    """Effective PDP (ERP + active version), the ERP-only plan, the reference day and the current Monday."""
-    from ...data.assembler import erp_dataset
-    from ...engine.calendar import iso_week_monday
-    from ...engine.runner import resolve_as_of
-    from ...services import mrp_service
-    ds = erp_dataset(ctx.table)
-    erp_lines = list(ds.pdp)
-    mrp_service.app_entries_into_dataset(ds, session)
-    as_of = resolve_as_of(ds, mrp_service.build_params(ctx, session))
-    return ds, erp_lines, as_of, iso_week_monday(as_of)
+@router.get("/export.xlsx")
+def export(weeks: int = Query(26, ge=4, le=160), ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """The effective PDP as a workbook in the import format : every programme with a bill of material
+    (active, or planned), every week from the first complete week after the point zero to the last
+    planned week (at least ``weeks`` weeks ahead).  Re-importable as is."""
+    ds, _as_of, monday, init = _frame(ctx, session)
+    first = mrp_service.first_full_monday(init, monday)
+    last = max([p.week_start for p in ds.pdp] + [monday + dt.timedelta(days=7 * (weeks - 1))])
+    n = min((last - first).days // 7 + 1, 260)
+    names = {p.program_id: p.name for p in ds.programs}
+    programs = _sheet_programs(ds)
+    planned = {p.program_id for p in ds.pdp if p.qty}
+    programs += [(pid, names.get(pid, pid)) for pid in sorted(planned - {pid for pid, _ in programs})]
+    values: dict[tuple[str, dt.date], float] = {}
+    for p in ds.pdp:
+        values[(p.program_id, p.week_start)] = values.get((p.program_id, p.week_start), 0.0) + p.qty
+    content = excel_service.pdp_template_workbook(programs, first, n, values)
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="pdp_{dt.date.today().isoformat()}.xlsx"'})
 
 
 PROGRAM_ORDER_KEY = "pdp_program_order"
@@ -72,27 +96,23 @@ def read_program_order(session: Session) -> list[str]:
 
 @router.get("/sheet", response_model=S.PdpSheetOut)
 def sheet(weeks: int = Query(26, ge=4, le=160), planner: str | None = None, ctx: AppContext = Depends(ctx_dep),
-          session: Session = Depends(session_dep)):
+          session: Session = Depends(session_dep), access: Access = Depends(access_dep)):
     """The effective weekly PDP as a sheet: every active programme (plus any programme planned), one
-    column per ISO week from the current week to ``weeks`` weeks ahead or to the last planned week.
-    The current week and the weeks after it are editable (managers, admins).  ``planner`` keeps the
-    programmes whose bill of material reaches that planner's articles.  Rows follow the order the
-    managers stored (drag and drop), then the alphabetical order."""
+    column per ISO week **from the first complete week after the point zero** to ``weeks`` weeks ahead or
+    to the last planned week.  The current week and the weeks after it are editable (managers, admins) ;
+    the past weeks are read-only, except for an administrator.  ``planner`` keeps the programmes whose
+    bill of material reaches that planner's articles.  Rows follow the order the managers stored."""
     from ...engine.calendar import iso_week_label
-    ds, erp_lines, as_of, monday = _sheet_frame(ctx, session)
-    last = max([p.week_start for p in ds.pdp] + [monday])
-    n = min(max(weeks, (last - monday).days // 7 + 1), 160)
-    week_starts = [monday + dt.timedelta(days=7 * k) for k in range(n)]
+    ds, as_of, monday, init = _frame(ctx, session)
+    first = mrp_service.first_full_monday(init, monday)
+    last = max([p.week_start for p in ds.pdp] + [monday + dt.timedelta(days=7 * (weeks - 1))])
+    week_starts = [first + dt.timedelta(days=7 * k) for k in range(min((last - first).days // 7 + 1, 260))]
     with_bom = {b.program_id for b in ds.bom}
     by_program: dict[str, dict[dt.date, float]] = {}
-    src: dict[str, str] = {}
     for p in ds.pdp:
         weeks_of = by_program.setdefault(p.program_id, {})
         weeks_of[p.week_start] = weeks_of.get(p.week_start, 0.0) + p.qty
-        src[p.program_id] = "app" if p.version.startswith("APP:") else "erp"
     names = {p.program_id: p for p in ds.programs}
-    # every active programme (a programme just added in the Référentiel appears at once, even before its
-    # bill of material) plus any programme planned
     listed = sorted({p.program_id for p in ds.programs if p.active} | set(by_program),
                     key=lambda pid: (names[pid].name if pid in names else pid).lower())
     if planner:
@@ -103,12 +123,20 @@ def sheet(weeks: int = Query(26, ge=4, le=160), planner: str | None = None, ctx:
     listed.sort(key=lambda pid: (order.get(pid, len(order)), 0))   # stable : the alphabetical order remains inside each group
     rates = mrp_service.scrap_rates(session)
     active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
+    origins = ds.meta.get("pdp_week_origin", {})
+    weeks_out = []
+    for d in week_starts:
+        past = d < monday
+        o = origins.get(d.isoformat()) if past else None
+        weeks_out.append(S.PdpSheetWeek(week=iso_week_label(d), week_start=d, editable=(not past) or access.is_admin, past=past,
+                                        origin=o["origin"] if o else None, origin_version=o["version_name"] if o else None))
     return S.PdpSheetOut(
         as_of=as_of, current_week=iso_week_label(monday), active_version=_out(session, active) if active else None,
-        erp_available=bool(erp_lines),
-        weeks=[S.PdpSheetWeek(week=iso_week_label(d), week_start=d, editable=d >= monday) for d in week_starts],
+        first_week=iso_week_label(first), init_date=init,
+        weeks=weeks_out,
         programs=[S.PdpSheetProgram(program_id=pid, name=names[pid].name if pid in names else pid,
-                                    active=names[pid].active if pid in names else True, source=src.get(pid, "none"),
+                                    active=names[pid].active if pid in names else True,
+                                    source="app" if any(by_program.get(pid, {}).values()) else "none",
                                     has_bom=pid in with_bom, scrap_pct=mrp_service.scrap_rate_at(rates, pid, monday),
                                     values=[float(by_program.get(pid, {}).get(d, 0.0)) for d in week_starts])
                   for pid in listed])
@@ -117,30 +145,38 @@ def sheet(weeks: int = Query(26, ge=4, le=160), planner: str | None = None, ctx:
 @router.put("/sheet", response_model=S.PdpVersionOut, status_code=201)
 def save_sheet(body: S.PdpSheetIn, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                user: str = Depends(current_user), access: Access = Depends(access_dep)):
-    """Direct entry of the PDP.  The changed cells (current and future weeks) are applied on the effective
-    plan and saved as a **new active version** that holds the programmes of the previous active
-    version plus the programmes touched (copied from the ERP plan, then edited) ; the other programmes
-    keep following the ERP plan.  Deactivating the version restores the previous state."""
+    """Direct entry of the PDP.  The changed cells are applied on the effective plan and saved as a **new
+    active version** holding every line of the previous active version plus the cells typed.  The current
+    week and the weeks after it are open to managers and administrators ; a **past week** (from the first
+    complete week after the point zero) only to an administrator : the week is then materialised in the
+    new version with its effective values (history) before the edits, so that it stays complete."""
     access.require_pdp()
-    ds, erp_lines, as_of, monday = _sheet_frame(ctx, session)
+    ds, as_of, monday, init = _frame(ctx, session)
+    first = mrp_service.first_full_monday(init, monday)
     known = {p.program_id for p in ds.programs}
+    past_weeks: set[dt.date] = set()
     for c in body.cells:
         if c.program_id not in known:
             raise HTTPException(422, f"Programme inconnu : {c.program_id}")
         if c.week_start.isoweekday() != 1:
             raise HTTPException(422, f"{c.week_start.isoformat()} n'est pas un lundi")
+        if c.week_start < first:
+            raise HTTPException(422, f"Semaine {c.week_start.isoformat()} : antérieure au point zéro du stock ({first.isoformat()})")
         if c.week_start < monday:
-            raise HTTPException(422, f"Semaine {c.week_start.isoformat()} : seules la semaine en cours et les semaines à venir sont modifiables")
+            if not access.is_admin:
+                raise HTTPException(422, f"Semaine {c.week_start.isoformat()} : une semaine passée n'est modifiable que par un administrateur")
+            past_weeks.add(c.week_start)
     active = session.scalars(select(PdpVersion).where(PdpVersion.active.is_(True))).first()
     lines: dict[str, dict[dt.date, float]] = {}
     if active:
         for l in active.lines:
             lines.setdefault(l.program_id, {})[l.week_start] = l.qty
-    touched = {c.program_id for c in body.cells}
-    for pid in touched - set(lines):
-        lines[pid] = {p.week_start: p.qty for p in erp_lines if p.program_id == pid}
+    # a past week edited : its effective values (history) come along so the week is complete in the new version
+    for p in ds.pdp:
+        if p.week_start in past_weeks and p.week_start not in lines.get(p.program_id, {}):
+            lines.setdefault(p.program_id, {})[p.week_start] = p.qty
     for c in body.cells:
-        lines[c.program_id][c.week_start] = float(c.qty)
+        lines.setdefault(c.program_id, {})[c.week_start] = float(c.qty)
     stamp = dt.datetime.now().strftime("%d/%m/%Y %H:%M")
     version = PdpVersion(name=body.name.strip() or f"Saisie du {stamp}", source_file="saisie directe", note=body.note,
                          imported_by=user, active=False)
@@ -152,7 +188,8 @@ def save_sheet(body: S.PdpSheetIn, ctx: AppContext = Depends(ctx_dep), session: 
         v.active = False
     version.active = True
     audit(session, user, "edit", "pdp_version", version.id, None,
-          {"name": version.name, "cells": len(body.cells), "programs": sorted(touched), "from_version": active.id if active else None})
+          {"name": version.name, "cells": len(body.cells), "programs": sorted({c.program_id for c in body.cells}),
+           "past_weeks": sorted(w.isoformat() for w in past_weeks), "from_version": active.id if active else None})
     session.commit()
     ctx.bump()
     return _out(session, version)
@@ -231,6 +268,15 @@ async def import_pdp(file: UploadFile = File(...), name: str = Form(""), note: s
         raise HTTPException(422, f"Classeur illisible : {exc}")
     if not lines:
         raise HTTPException(422, "Aucune ligne de PDP reconnue : " + "; ".join(notes[:5]))
+    # the past weeks of the file (before the current week) are kept for an administrator only
+    _ds, _as_of, monday, _init = _frame(ctx, session)
+    past = sorted({l.week_start for l in lines if l.week_start < monday})
+    if past and not access.is_admin:
+        lines = [l for l in lines if l.week_start >= monday]
+        notes.append(f"{len(past)} semaine(s) passée(s) ignorée(s) (réservées à un administrateur) : "
+                     + ", ".join(w.isoformat() for w in past[:6]) + (" …" if len(past) > 6 else ""))
+        if not lines:
+            raise HTTPException(422, "Le classeur ne contient que des semaines passées : " + "; ".join(notes[:5]))
     version = PdpVersion(name=name or file.filename or "PDP", source_file=file.filename or "", note=note,
                          imported_by=user, active=False)
     for l in lines:
@@ -271,8 +317,15 @@ def deactivate(version_id: str, ctx: AppContext = Depends(ctx_dep), session: Ses
     v = session.get(PdpVersion, version_id)
     if v is None:
         raise HTTPException(404, "Version inconnue")
+    was_active = v.active
     v.active = False
-    audit(session, user, "deactivate", "pdp_version", v.id, None, {"name": v.name})
+    # « back to the previous state » : the most recent other version takes over (there is no ERP plan)
+    fallback = None
+    if was_active:
+        fallback = session.scalars(select(PdpVersion).where(PdpVersion.id != v.id).order_by(PdpVersion.imported_at.desc())).first()
+        if fallback is not None:
+            fallback.active = True
+    audit(session, user, "deactivate", "pdp_version", v.id, None, {"name": v.name, "now_active": fallback.id if fallback else None})
     session.commit()
     ctx.bump()
     return _out(session, v)
