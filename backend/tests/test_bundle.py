@@ -112,6 +112,7 @@ def test_le_job_verifie_les_sources_sans_table_de_pdp() -> None:
     """La vérification des tables sources du job ne nomme que les tables qui existent encore dans
     ``ErpTables`` (le plan de production ERP a été retiré) : exécutée avec un Spark factice."""
     import importlib.util
+
     from appro.data.erp_sql import ErpTables
     spec = importlib.util.spec_from_file_location("sync_job", RACINE / "jobs" / "sync_erp_to_lakebase.py")
     job = importlib.util.module_from_spec(spec)
