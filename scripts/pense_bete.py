@@ -17,15 +17,20 @@ def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
 
-def simulate(stock0: float, demand: float, deliveries: dict[int, float], n: int) -> tuple[list[float], list[float]]:
-    """Stock en fin de jour (jamais négatif) et manque cumulé (−Σ) depuis le dernier jour positif."""
-    stock, short, s, cum = [], [], stock0, 0.0
-    for j in range(n):
+def simulate(stock0: float, demand: float, deliveries: dict[int, float], n: int, start: int = 0,
+             allow_negative: bool = False) -> tuple[list[float | None], list[float]]:
+    """Stock en fin de jour à partir du jour ``start`` (``stock0`` = stock de la veille de ``start``) ; les jours
+    avant ``start`` valent None. Le stock n'est jamais négatif (manque cumulé −Σ), sauf ``allow_negative``
+    pour la ligne « sans livraison »."""
+    stock: list[float | None] = [None] * start
+    short: list[float] = [0.0] * start
+    s, cum = stock0, 0.0
+    for j in range(start, n):
         s = s + deliveries.get(j, 0.0) - demand
-        if s < 0:
+        if s < 0 and not allow_negative:
             cum += -s
             s = 0.0
-        else:
+        elif s >= 0:
             cum = 0.0
         stock.append(s)
         short.append(cum)
@@ -35,14 +40,14 @@ def simulate(stock0: float, demand: float, deliveries: dict[int, float], n: int)
 def chart(cid: str, title: str, subtitle: str, weeks: list[str], series: list[tuple[str, list[float], str]],
           bars: list[tuple[int, float, str, str]], ymax: float, lines: list[tuple[float, str, str]] = (),
           band: tuple[int, int, str] | None = None, marks: list[tuple[int, float, str, str]] = (),
-          today: int | None = None, shortage: list[float] | None = None, caption: str = "") -> str:
+          today: int | None = None, shortage: list[float] | None = None, caption: str = "", ymin: float = 0.0) -> str:
     """Un graphique : n = 5 jours ouvrés × semaines. series = (classe, valeurs, style 'solid'|'dotted').
     bars = (jour, quantité, classe, libellé). lines = (y, classe, libellé). marks = (jour, y, texte, classe)."""
     n = 5 * len(weeks)
     iw = W - PAD_L - PAD_R
     ih = H - PAD_T - PAD_B
     x = lambda j: PAD_L + (j + 0.5) * iw / n  # noqa: E731
-    y = lambda v: PAD_T + ih - (v / ymax) * ih  # noqa: E731
+    y = lambda v: PAD_T + ih - ((v - ymin) / (ymax - ymin)) * ih  # noqa: E731
     out = [f'<svg class="chart" viewBox="0 0 {W} {H}" role="img" aria-labelledby="{cid}-t" xmlns="http://www.w3.org/2000/svg">',
            f'<title id="{cid}-t">{esc(title)}</title>']
     out.append(f'<text class="c-title" x="{PAD_L}" y="18">{esc(title)}</text>')
@@ -57,6 +62,9 @@ def chart(cid: str, title: str, subtitle: str, weeks: list[str], series: list[tu
         v = ymax * k / 4
         out.append(f'<line class="c-grid" x1="{PAD_L}" x2="{W - PAD_R}" y1="{y(v):.1f}" y2="{y(v):.1f}" />')
         out.append(f'<text class="c-tick" x="{PAD_L - 6}" y="{y(v) + 4:.1f}" text-anchor="end">{int(v)}</text>')
+    if ymin < 0:
+        out.append(f'<line class="c-zero" x1="{PAD_L}" x2="{W - PAD_R}" y1="{y(0):.1f}" y2="{y(0):.1f}" />')
+        out.append(f'<text class="c-tick" x="{PAD_L - 6}" y="{y(ymin) + 4:.1f}" text-anchor="end">{int(ymin)}</text>')
     for w, wk in enumerate(weeks):
         x0 = PAD_L + w * iw / len(weeks)
         if w:
@@ -64,10 +72,12 @@ def chart(cid: str, title: str, subtitle: str, weeks: list[str], series: list[tu
         out.append(f'<text class="c-week" x="{x0 + 4:.1f}" y="{H - 8}">{esc(wk)}</text>')
         for d in range(5):
             out.append(f'<text class="c-day" x="{x(w * 5 + d):.1f}" y="{PAD_T + ih + 14}" text-anchor="middle">{DAYS[d]}</text>')
+    out.append(f'<line class="c-sep" x1="{PAD_L}" x2="{W - PAD_R}" y1="{PAD_T + ih}" y2="{PAD_T + ih}" />')
     # today
     if today is not None:
         out.append(f'<line class="c-today" x1="{x(today):.1f}" x2="{x(today):.1f}" y1="{PAD_T}" y2="{PAD_T + ih}" />')
-        out.append(f'<text class="c-today-l" x="{x(today) + 4:.1f}" y="{PAD_T + 28}">aujourd\'hui</text>')
+        ty = PAD_T + 28 if band else PAD_T + ih - 6
+        out.append(f'<text class="c-today-l" x="{x(today) + 4:.1f}" y="{ty}">aujourd\'hui</text>')
     # horizontal lines
     for v, cls, lbl in lines:
         out.append(f'<line class="c-line {cls}" x1="{PAD_L}" x2="{W - PAD_R}" y1="{y(v):.1f}" y2="{y(v):.1f}" />')
@@ -93,7 +103,7 @@ def chart(cid: str, title: str, subtitle: str, weeks: list[str], series: list[tu
         out.append(f'<circle class="c-mark {cls}" cx="{x(j):.1f}" cy="{y(v):.1f}" r="4" />')
         anchor = "end" if j > n * 0.55 else "start"
         dx = -8 if anchor == "end" else 8
-        dy = -10 if v > ymax * 0.12 else -14
+        dy = 18 if v < 0 else -10 if v > ymax * 0.12 else -14
         out.append(f'<text class="c-mark-l {cls}" x="{x(j) + dx:.1f}" y="{y(v) + dy:.1f}" text-anchor="{anchor}">{esc(txt)}</text>')
     out.append("</svg>")
     fig = f'<figure class="fig">{"".join(out)}'
@@ -105,55 +115,58 @@ def chart(cid: str, title: str, subtitle: str, weeks: list[str], series: list[tu
 def charts() -> dict[str, str]:
     c: dict[str, str] = {}
     weeks4 = ["S43", "S44", "S45", "S46"]
-    # ---- 1. déclenchement et cible : stock en fin de jour ; chaque lundi la livraison couvre jusqu'au lundi suivant
+    # ---- 1. déclenchement et cible : 1 000 lundi matin S43, 500 chaque lundi suivant
     stock, _ = simulate(1000.0, 100.0, {5: 500.0, 10: 500.0, 15: 500.0}, 20)
-    without, _ = simulate(1000.0, 100.0, {}, 10)
+    ghost, _ = simulate(500.0, 100.0, {}, 10, start=5, allow_negative=True)
+    ghost[4] = 500.0
     c["trigger"] = chart(
-        "c1", "Déclenchement et cible", "besoin 100 / jour · cible 5 jours ouvrés = 500 · déclenchement sous 85 % = 425 · fournisseur du lundi, délai 5, marge 1",
-        weeks4, [("s-appro", stock, "solid"), ("s-ghost", [None] * 4 + without[4:], "dotted")],
+        "c1", "Déclenchement et cible", "besoin 100 / jour · cible 5 j ouvrés = 500 · déclenchement sous 85 % = 425 · fournisseur du lundi, délai 5, marge 1",
+        weeks4, [("s-appro", stock, "solid"), ("s-ghost", ghost, "dotted")],
         [(5, 500.0, "b-cbn", "500"), (10, 500.0, "b-cbn", "500"), (15, 500.0, "b-cbn", "500")],
         1000.0, [(500.0, "l-target", "cible 500"), (425.0, "l-trigger", "déclenchement 425")],
         marks=[(5, 400.0, "sans livraison : 400 < 425 → proposition le lundi", "m-trigger"), (1, 800.0, "date limite = lun. S44 − 4 j.o. = mar. S43", "m-order")],
-        today=0, caption="La proposition se pose sur le jour standard (lundi) avant le besoin et regroupe les besoins jusqu'au lundi suivant : le stock redescend à la cible (500) la veille de la livraison suivante. Ligne pointillée : ce que ferait le stock sans la proposition.")
-    # ---- 2. plancher : aujourd'hui mer. S43, stock 250 mardi soir ; vendredi non tenable ; lundi S44 tenable
-    stock, _ = simulate(250.0, 100.0, {4: 50.0, 5: 1000.0, 10: 500.0, 15: 500.0}, 20)
-    stock[:2] = [None, None]  # type: ignore[list-item]
+        today=0, ymin=-100.0,
+        caption="La proposition se pose sur le jour standard (lundi) avant le besoin et regroupe les besoins jusqu'au lundi suivant : le stock redescend à la cible (500) la veille de la livraison suivante. Pointillé : le stock sans la proposition.")
+    # ---- 2. plancher : aujourd'hui mer. S43, 250 mardi soir ; vendredi non tenable ; lundi S44 tenable
+    stock, _ = simulate(250.0, 100.0, {4: 50.0, 5: 1000.0, 10: 500.0, 15: 500.0}, 20, start=2)
+    ghost, _ = simulate(50.0, 100.0, {}, 5, start=4, allow_negative=True)
+    ghost[3] = 50.0
     c["floor"] = chart(
-        "c2", "Plancher urgent (!) puis cible pleine", "aujourd'hui mercredi S43 · stock 250 mardi soir, besoin 100 / jour · lundi S44 est la première livraison tenable (date limite = aujourd'hui)",
-        weeks4, [("s-appro", stock, "solid")],
+        "c2", "Plancher urgent (!) puis cible pleine", "aujourd'hui mercredi S43 · 250 mardi soir, besoin 100 / jour · lundi S44 = première livraison tenable (date limite aujourd'hui)",
+        weeks4, [("s-appro", stock, "solid"), ("s-ghost", ghost, "dotted")],
         [(4, 50.0, "b-urgent", "50 !"), (5, 1000.0, "b-cbn", "1 000"), (10, 500.0, "b-cbn", "500"), (15, 500.0, "b-cbn", "500")],
-        1000.0, [(500.0, "l-target", "cible 500"), (425.0, "l-trigger", "déclenchement 425")],
-        band=(2, 4, "aucune livraison tenable : plancher"), today=2,
-        caption="Jusqu'à vendredi, aucune livraison n'est tenable : le CBN propose, urgente, la quantité minimale qui évite la rupture (50 vendredi, le jour du besoin, ◇). Lundi S44, première livraison tenable : cible pleine, et la livraison couvre la semaine (1 000), puis 500 par semaine.")
-    # ---- 3. hors jour standard : aujourd'hui jeu. S43, stock 550 mercredi soir ; tenable à partir de mer. S44
-    stock, _ = simulate(550.0, 100.0, {7: 850.0, 10: 300.0, 15: 500.0}, 20)
-    stock[:3] = [None, None, None]  # type: ignore[list-item]
-    before, _ = simulate(550.0, 100.0, {}, 20)
+        1200.0, [(500.0, "l-target", "cible 500"), (425.0, "l-trigger", "déclenchement 425")],
+        band=(2, 4, "non tenable : plancher"), today=2, ymin=-100.0,
+        marks=[(4, -50.0, "sans rien : −50 vendredi", "m-trigger")],
+        caption="Mercredi 150, jeudi 50 : vendredi serait à −50. Aucune livraison tenable avant : plancher urgent de 50 vendredi (le jour du besoin, ◇). Lundi S44, première livraison tenable : cible pleine, la livraison couvre la semaine (1 000), puis 500 par semaine.")
+    # ---- 3. hors jour standard : aujourd'hui jeu. S43, 550 mercredi soir ; tenable à partir de mer. S44
+    stock, _ = simulate(550.0, 100.0, {7: 850.0, 10: 300.0, 15: 500.0}, 20, start=3)
+    ghost, _ = simulate(150.0, 100.0, {}, 9, start=7, allow_negative=True)
+    ghost[6] = 150.0
     c["offday"] = chart(
-        "c3", "Hors jour standard (◇)", "aujourd'hui jeudi S43 · fournisseur du lundi, délai 5, marge 1 · tenable à partir de mercredi S44 (jeudi + 4 j.o.)",
-        weeks4, [("s-appro", stock, "solid"), ("s-ghost", [None] * 6 + before[6:9] + [None] * 11, "dotted")],
+        "c3", "Hors jour standard (◇)", "aujourd'hui jeudi S43 · 550 mercredi soir · fournisseur du lundi, délai 5, marge 1 · tenable à partir de mercredi S44 (jeudi + 4 j.o.)",
+        weeks4, [("s-appro", stock, "solid"), ("s-ghost", ghost, "dotted")],
         [(7, 850.0, "b-cbn", "850 ◇"), (10, 300.0, "b-cbn", "300"), (15, 500.0, "b-cbn", "500")],
         1000.0, [(500.0, "l-target", "cible 500"), (425.0, "l-trigger", "déclenchement 425")],
-        band=(3, 6, "non tenable (lundi S44 compris)"),
-        marks=[(5, 250.0, "lundi S44 : jour standard, date limite dépassée", "m-trigger"), (8, 0.0, "sans livraison : rupture jeudi", "m-trigger")], today=3,
-        caption="Le jour standard (lundi S44) n'est pas tenable ; plutôt que d'attendre le lundi S45 (rupture jeudi) ou de tomber au plancher, le CBN propose la cible pleine au premier jour ouvré tenable avant le besoin : mercredi S44, marqué ◇. Le lundi S45 ne reçoit que le complément. Sauf fournisseur à jours stricts.")
-    # ---- 4. multi-sourcing quota
-    stock, _ = simulate(700.0, 100.0, {3: 400.0, 5: 600.0, 8: 400.0, 10: 600.0, 13: 400.0, 15: 600.0}, 20)
+        band=(3, 6, "non tenable (lundi S44 compris)"), today=3, ymin=-100.0,
+        marks=[(5, 250.0, "lundi S44 : jour standard, date limite dépassée", "m-trigger"), (8, -50.0, "sans livraison : −50 jeudi S44", "m-trigger")],
+        caption="Jeudi 450, vendredi 350, lundi 250, mardi 150 : jeudi S44 serait à −50. Le lundi S44 n'est pas tenable ; le CBN propose la cible pleine au premier jour ouvré tenable avant le besoin, mercredi S44 (◇), et regroupe la semaine (850). Le lundi S45 ne reçoit que le complément.")
+    # ---- 4. multi-sourcing quota : besoin 500 / semaine = 300 A (lundi) + 200 B (jeudi)
+    stock, _ = simulate(500.0, 100.0, {0: 300.0, 3: 200.0, 5: 300.0, 8: 200.0, 10: 300.0, 13: 200.0, 15: 300.0, 18: 200.0}, 20)
     c["quota"] = chart(
-        "c4", "Multi-sourcing à quotas 60 / 40", "A livre le lundi (60 %), B le jeudi (40 %) · chaque besoin est partagé, chaque part a son MOQ, son UM, son délai et ses plafonds",
+        "c4", "Multi-sourcing à quotas 60 / 40", "besoin 500 / semaine partagé : A 300 le lundi (60 %), B 200 le jeudi (40 %) · chaque part a son MOQ, son UM, son délai, ses plafonds",
         weeks4, [("s-appro", stock, "solid")],
-        [(3, 400.0, "b-b", "B 400"), (5, 600.0, "b-cbn", "A 600"), (8, 400.0, "b-b", "B 400"), (10, 600.0, "b-cbn", "A 600"), (13, 400.0, "b-b", "B 400"), (15, 600.0, "b-cbn", "A 600")],
-        1200.0, [(500.0, "l-target", "cible 500")], today=0,
-        caption="Une ligne Proposition CBN par fournisseur. La part qu'un fournisseur ne peut pas livrer (plafond) passe à l'autre le même jour ; une part refusée d'un clic aussi. Avec la politique « priorité », tout va au fournisseur n° 1.")
-    # ---- 5. manque cumulé
-    stock, short = simulate(300.0, 100.0, {5: 500.0, 10: 500.0, 15: 500.0}, 20)
+        [(0, 300.0, "b-cbn", "A 300"), (3, 200.0, "b-b", "B 200"), (5, 300.0, "b-cbn", "A 300"), (8, 200.0, "b-b", "B 200"), (10, 300.0, "b-cbn", "A 300"), (13, 200.0, "b-b", "B 200"), (15, 300.0, "b-cbn", "A 300"), (18, 200.0, "b-b", "B 200")],
+        1000.0, [(500.0, "l-target", "cible 500"), (425.0, "l-trigger", "déclenchement 425")],
+        caption="Une ligne Proposition CBN par fournisseur. Le stock oscille entre 500 et 700 : chaque part couvre jusqu'à la livraison suivante de son fournisseur. Part plafonnée ou refusée : elle passe à l'autre fournisseur le même jour.")
+    # ---- 5. manque cumulé : 300 lundi matin S43, ferme 1 000 lundi S44, puis CBN 500
+    stock, short = simulate(300.0, 100.0, {5: 1000.0, 10: 500.0, 15: 500.0}, 20)
     c["shortage"] = chart(
-        "c5", "Stock projeté et manque cumulé (−Σ)", "stock 300 lundi soir S43, besoin 100 / jour, première livraison lundi S44 : deux jours non servis",
+        "c5", "Stock projeté et manque cumulé (−Σ)", "300 lundi matin S43, besoin 100 / jour · commande ferme de 1 000 le lundi S44 · deux jours non servis avant",
         weeks4, [("s-appro", stock, "solid")],
-        [(5, 500.0, "b-firm", "500"), (10, 500.0, "b-cbn", "500"), (15, 500.0, "b-cbn", "500")],
-        1000.0, [(500.0, "l-target", "cible 500")], shortage=short, today=0,
-        marks=[(2, 0.0, "stock à 0 : le besoin non servi est perdu", "m-trigger")],
-        caption="Le stock n'est jamais négatif ; la cellule affiche le stock physique et, en fond rouge foncé, le cumul du besoin non servi depuis le dernier jour positif (−Σ100 jeudi, −Σ200 vendredi), remis à zéro dès la livraison du lundi (commande ferme, en orange).")
+        [(5, 1000.0, "b-firm", "1 000 ferme"), (10, 500.0, "b-cbn", "500"), (15, 500.0, "b-cbn", "500")],
+        1200.0, [(500.0, "l-target", "cible 500"), (425.0, "l-trigger", "déclenchement 425")], shortage=short, today=0,
+        caption="Lundi 200, mardi 100, mercredi 0 ; jeudi et vendredi le besoin n'est pas servi (−Σ100, −Σ200), le stock reste à 0. La ferme du lundi S44 remet le manque à zéro ; ensuite le CBN maintient la cible.")
     return c
 
 
@@ -298,6 +311,7 @@ svg.chart { width: 100%; height: auto; display: block; font-family: var(--font-b
 .c-sub { font-size: 11px; fill: var(--fg-subtle); }
 .c-grid { stroke: var(--border); stroke-width: 1; }
 .c-sep { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 3; }
+.c-zero { stroke: var(--fg-muted); stroke-width: 1.2; }
 .c-tick, .c-day { font-size: 10px; fill: var(--fg-subtle); }
 .c-week { font-size: 11px; font-weight: 600; fill: var(--fg-muted); font-family: var(--font-display); }
 .c-band { fill: var(--bg-subtle); }
@@ -312,7 +326,7 @@ svg.chart { width: 100%; height: auto; display: block; font-family: var(--font-b
 .c-series.dotted { stroke-dasharray: 3 4; }
 .c-bar.b-cbn { fill: var(--ok); } .c-bar.b-urgent { fill: var(--critical); } .c-bar.b-firm { fill: var(--warning); } .c-bar.b-b { fill: var(--info); }
 .c-bar-l { font-size: 11px; font-weight: 700; } .c-bar-l.b-cbn { fill: var(--ok-fg); } .c-bar-l.b-urgent { fill: var(--critical-fg); } .c-bar-l.b-firm { fill: var(--warning-fg); } .c-bar-l.b-b { fill: var(--info-fg); }
-.c-short { fill: var(--cell-neg); } .c-short-l { font-size: 10px; font-weight: 700; fill: var(--critical-fg); }
+.c-short { fill: var(--cell-neg); } .c-short-l { font-size: 9px; font-weight: 700; fill: var(--critical-fg); }
 .c-mark { stroke-width: 2; fill: var(--bg-elev); } .c-mark.m-trigger { stroke: var(--critical); } .c-mark.m-order { stroke: var(--warning); }
 .c-mark-l { font-size: 11px; } .c-mark-l.m-trigger { fill: var(--critical-fg); } .c-mark-l.m-order { fill: var(--warning-fg); }
 .z-crit { fill: var(--critical-soft); } .z-warn { fill: var(--warning-soft); } .z-ok { fill: var(--ok-soft); } .z-over { fill: var(--bg-subtle); }
@@ -352,50 +366,57 @@ def page() -> str:
                  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;600&display=swap">')
     parts.append(CSS)
     parts.append('<div class="wrap">')
-    parts.append('''<header class="hero">
+    parts.append("""<header class="hero">
 <div class="eyebrow">Ma Routine Appro · règles, statuts, marqueurs, couleurs</div>
 <h1>Pense-bête de l'approvisionneur</h1>
-<p>Tout ce que l'application décide, affiche ou colore, en une page. Une règle par ligne, les exemples en dessous. Tous les délais, couvertures et seuils se comptent en <b>jours ouvrés</b> du calendrier usine.</p>
-<div class="meta"><span>Version du 21 octobre 2026</span><span>Intègre les règles validées : marge de délai, livraison hors jour standard ◇, une seule projection de stock dans le tableau</span></div>
+<p>Ce que l'application décide, affiche et colore, en une page. Une règle par ligne, les exemples dessous. Délais, couvertures et seuils se comptent en <b>jours ouvrés</b> du calendrier usine.</p>
+<div class="meta"><span>Version du 21 octobre 2026</span><span>Règles validées incluses : marge de délai, hors jour standard ◇, une seule projection de stock dans le tableau</span></div>
 </header>
 <nav class="toc" aria-label="Sommaire">
 <span class="part">Tableau d'appro</span><a href="#cbn">CBN</a><a href="#ferme">Ferme</a><a href="#recu">Reçu</a><a href="#appro">Appro.</a><a href="#stock">Stock projeté</a><a href="#multi">Multi-sourcing</a>
 <span class="part">Cockpit</span><a href="#stocks">Couvertures et stocks</a><a href="#flux">Flux d'approvisionnement</a><a href="#memo">Mémo</a>
 </nav>
-<main>''')
+<main>""")
 
     # ============================================================== PARTIE A
-    parts.append('''<section class="part" id="tableau">
+    parts.append("""<section class="part" id="tableau">
 <h2><span class="part">Partie A</span>Tableau d'approvisionnement</h2>
-<p class="lead">Une ligne <b>Besoin</b> ; par fournisseur actif, les lignes <b>Ferme</b>, <b>Prévisionnel</b>, <b>Reçu</b>, <b>Appro.</b> et <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Projeté Appro.</b>, la seule projection de stock du tableau. Deux lignes se saisissent (Appro., Ajustement), trois se cliquent (Ferme, Proposition CBN, Reçu), le reste se lit.</p>
-<div class="callout"><b>Vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se recalcule.</b> Une colonne semaine se saisit comme une colonne jour : la valeur se place au lundi et la cellule affiche le total de la semaine.</div>
-''')
+<p class="lead">Une ligne <b>Besoin</b> ; par fournisseur actif : <b>Ferme</b>, <b>Prévisionnel</b>, <b>Reçu</b>, <b>Appro.</b>, <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Projeté Appro.</b>, seule projection de stock du tableau. Deux lignes se saisissent (Appro., Ajustement), trois se cliquent (Ferme, CBN, Reçu), le reste se lit.</p>
+<div class="callout"><b>Vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se recalcule.</b></div>
+""")
 
     # ---------------------------------------------------------------- CBN
-    parts.append('''<h3 id="cbn">1. Proposition CBN</h3>
+    parts.append("""<h3 id="cbn">1. Proposition CBN</h3>
 <p>Recalculée à chaque affichage sur le Projeté Appro., <b>après</b> le plan : elle ne propose que ce que ni l'ERP ni vos cellules ne couvrent. Une proposition par fournisseur et par jour de livraison.</p>
 <dl class="rule">
-<dt>Déclenchement</dt><dd>un besoin non servi, ou un stock projeté <b>sous 85 % de la cible</b> (tolérance 15 %, seule règle commune réglable avec la marge).</dd>
-<dt>Cible</dt><dd>le besoin des <b>n prochains jours ouvrés</b> (couverture cible de l'article, par semaine si besoin). Ni stock de sécurité, ni cycle de commande.</dd>
-<dt>Quantité</dt><dd>cible − stock projeté + manque, relevée au <b>MOQ</b>, arrondie au multiple supérieur de l'<b>UM</b> du lien, puis tronquée par les plafonds.</dd>
-<dt>Placement</dt><dd>sur le <b>jour de livraison standard</b> du fournisseur, le dernier avant le besoin ; les besoins jusqu'à la livraison suivante sont regroupés dessus.</dd>
-<dt>Date limite</dt><dd>livraison − (délai − marge) jours ouvrés : le dernier jour où l'ordre peut partir. Affichée « à commander au plus tard le ». <b>Marge</b> = 1 jour ouvré par défaut (0 = délai strict).</dd>
+<dt>Déclenchement</dt><dd>un besoin non servi, ou un stock projeté <b>sous 85 % de la cible</b> (tolérance 15 %, règle commune réglable).</dd>
+<dt>Cible</dt><dd>le besoin des <b>n prochains jours ouvrés</b> (couverture cible de l'article). Ni stock de sécurité, ni cycle de commande.</dd>
+<dt>Quantité</dt><dd>cible − stock projeté + manque, relevée au <b>MOQ</b>, arrondie au multiple d'<b>UM</b>, tronquée par les plafonds.</dd>
+<dt>Placement</dt><dd>le dernier <b>jour de livraison standard</b> du fournisseur avant le besoin ; les besoins jusqu'à la livraison suivante sont regroupés dessus.</dd>
+<dt>Date limite</dt><dd>livraison − (délai − marge) jours ouvrés : le dernier jour où l'ordre peut partir, affiché « à commander au plus tard le ». <b>Marge</b> : 1 jour ouvré par défaut, 0 = délai strict.</dd>
 <dt>Tenable</dt><dd>date limite ≥ aujourd'hui. Le CBN vise alors la <b>cible pleine</b>.</dd>
-<dt>Hors jour standard ◇</dt><dd>le jour standard n'est pas tenable mais un autre jour ouvré avant le besoin l'est : la proposition se pose sur le <b>premier jour ouvré tenable</b>, marquée ◇. Sauf fournisseur à <b>jours stricts</b> (case du fournisseur, décochée par défaut).</dd>
-<dt>Plancher !</dt><dd>aucun jour ouvré tenable avant le besoin : proposition <b>urgente</b>, limitée au <b>minimum qui évite la rupture</b> jusqu'à la veille de la livraison suivante, lotie MOQ / UM. La tolérance ne s'applique pas au plancher.</dd>
-<dt>Plafonds ▲</dt><dd>maximum par livraison et par semaine ISO (commandes fermes et cellules Appro. comprises) : la quantité est tronquée au multiple d'UM, l'excédent glisse à la livraison suivante ; un manque qu'aucun plafond ne peut absorber est signalé (alerte « plafond fournisseur atteint »).</dd>
-<dt>Refuser</dt><dd>un clic sur la cellule la barre : plus de proposition pour <b>ce fournisseur ce jour-là</b> ; le besoin passe aux autres fournisseurs à quota, ou glisse au jour de livraison suivant. Un second clic rétablit.</dd>
-<dt>Reprendre</dt><dd>cliquer la cellule grisée puis Entrée : elle devient une cellule Appro. ordinaire et le CBN se recalcule sans elle.</dd>
+</dl>""")
+    parts.append(c["trigger"])
+    parts.append("""<dl class="rule">
+<dt>Hors jour standard ◇</dt><dd>le jour standard n'est pas tenable, un autre jour ouvré avant le besoin l'est : la proposition se pose sur le <b>premier jour ouvré tenable</b>, marquée ◇. Sauf fournisseur à <b>jours stricts</b> (case du fournisseur, décochée par défaut).</dd>
+<dt>Plancher !</dt><dd>aucun jour ouvré tenable avant le besoin : proposition <b>urgente</b>, limitée au <b>minimum qui évite la rupture</b> jusqu'à la veille de la livraison suivante, lotie MOQ / UM, posée sur le jour du besoin. Pas de tolérance sur le plancher.</dd>
+</dl>""")
+    parts.append(c["floor"])
+    parts.append(c["offday"])
+    parts.append("""<dl class="rule">
+<dt>Plafonds ▲</dt><dd>maximum par livraison et par semaine ISO (fermes et cellules Appro. comprises) : quantité tronquée au multiple d'UM, l'excédent glisse à la livraison suivante. Un manque qu'aucun plafond n'absorbe est signalé (« plafond fournisseur atteint »).</dd>
+<dt>Refuser</dt><dd>un clic barre la cellule : plus de proposition pour <b>ce fournisseur ce jour-là</b>. Le besoin passe aux autres fournisseurs à quota, sinon glisse au jour de livraison suivant. Second clic : rétablie.</dd>
+<dt>Reprendre</dt><dd>cliquer la cellule grisée puis Entrée : elle devient une cellule Appro. et le CBN se recalcule sans elle.</dd>
 </dl>
 <h4>Marqueurs dans la cellule</h4>
 <div class="legend">
-<div><span class="k">''' + cell("1 440", "cbn") + '''</span><span>grisé, pointillé orange = proposition (cliquer puis Entrée pour la reprendre)</span></div>
-<div><span class="k">''' + cell('1 440 <span class="mk urgent">!</span>', "cbn") + '''</span><span>urgente = plancher, date limite dépassée</span></div>
-<div><span class="k">''' + cell('1 440 <span class="mk cap">▲</span>', "cbn") + '''</span><span>plafonnée par le fournisseur</span></div>
-<div><span class="k">''' + cell('1 440 <span class="mk off">◇</span>', "cbn") + '''</span><span>hors jour standard (jour tenable avant le besoin)</span></div>
-<div><span class="k">''' + cell("1 440", "cbn refused") + '''</span><span>refusée d'un clic (ce jour, ce fournisseur)</span></div>
+<div><span class="k">""" + cell("1 440", "cbn") + """</span><span>grisé, pointillé orange : proposition (clic puis Entrée pour la reprendre)</span></div>
+<div><span class="k">""" + cell('1 440 <span class="mk urgent">!</span>', "cbn") + """</span><span>urgente : plancher, date limite dépassée</span></div>
+<div><span class="k">""" + cell('1 440 <span class="mk cap">▲</span>', "cbn") + """</span><span>plafonnée par le fournisseur</span></div>
+<div><span class="k">""" + cell('1 440 <span class="mk off">◇</span>', "cbn") + """</span><span>hors jour standard</span></div>
+<div><span class="k">""" + cell("1 440", "cbn refused") + """</span><span>refusée d'un clic (ce jour, ce fournisseur)</span></div>
 </div>
-<h4>Exemple : fournisseur du lundi, délai 5, marge 1, besoin mercredi 4/11 (cible 1 440)</h4>''')
+<h4>Exemple : fournisseur du lundi, délai 5, marge 1, besoin mercredi 4/11, cible 1 440</h4>""")
     parts.append(table(["L'appro regarde le", "Livraison proposée", "Date limite", "Quantité", "Cockpit"], [
         ["lun. 26/10", "lun. 2/11", "mar. 27/10", cell("1 440", "cbn"), chip("À commander", "warning")],
         ["mar. 27/10", "lun. 2/11", "aujourd'hui", cell("1 440", "cbn"), chip("À commander", "warning")],
@@ -403,172 +424,169 @@ def page() -> str:
         ["jeu. 29/10", "mer. 4/11 ◇ (le jour du besoin)", "aujourd'hui", cell('1 440 <span class="mk off">◇</span>', "cbn"), chip("À commander", "warning")],
         ["ven. 30/10", "mer. 4/11 ◇, plancher", "jeu. 29/10, dépassée", cell('240 <span class="mk urgent">!</span>', "cbn"), chip("Critique", "critical")],
     ]))
-    parts.append('<p class="cmt">Du mardi au jeudi, l\'article reste « à commander » à la cible pleine, avec un jour de livraison réaliste. Le plancher n\'apparaît que lorsque plus aucune livraison tenable ne précède le besoin.</p>')
-    parts.append(c["trigger"])
-    parts.append(c["floor"])
-    parts.append(c["offday"])
+    parts.append('<p class="cmt">Du mardi au jeudi, l\'article reste « à commander » à la cible pleine, sur un jour de livraison réaliste. Le plancher n\'apparaît que lorsque plus aucune livraison tenable ne précède le besoin.</p>')
 
     # ---------------------------------------------------------------- Ferme
-    parts.append('''<h3 id="ferme">2. Ferme</h3>
-<p>La cellule affiche la <b>quantité commandée</b> des commandes fermes ERP du jour ; le calcul, lui, compte le <b>restant ERP</b> à partir d'aujourd'hui, et rien pour le passé. Un clic (à partir d'aujourd'hui) ignore les commandes du jour ; un second les rétablit.</p>
+    parts.append("""<h3 id="ferme">2. Ferme</h3>
+<p>La cellule affiche la <b>quantité commandée</b> du jour ; le calcul compte le <b>restant ERP</b> à partir d'aujourd'hui, rien pour le passé. Un clic ignore les commandes du jour, un second les rétablit.</p>
 <div class="legend">
-<div><span class="k">''' + cell("1 600", "firm-open") + '''</span><span>orange = en cours (restant ERP &gt; 0)</span></div>
-<div><span class="k">''' + cell("400 / 1 600", "firm-open") + '''</span><span>livraison partielle : restant / commandé</span></div>
-<div><span class="k">''' + cell("1 600", "firm-done") + '''</span><span>vert = soldée (restant nul)</span></div>
-<div><span class="k">''' + cell("1 600", "firm-ignored") + '''</span><span>rouge barré = ignorée d'un clic (hors projection, hors plan)</span></div>
+<div><span class="k">""" + cell("1 600", "firm-open") + """</span><span>orange : en cours (restant &gt; 0)</span></div>
+<div><span class="k">""" + cell("400 / 1 600", "firm-open") + """</span><span>livraison partielle : restant / commandé</span></div>
+<div><span class="k">""" + cell("1 600", "firm-done") + """</span><span>vert : soldée</span></div>
+<div><span class="k">""" + cell("1 600", "firm-ignored") + """</span><span>rouge barré : ignorée d'un clic (hors projection, hors plan)</span></div>
 </div>
-<p><b>En retard</b> = somme du restant ERP des commandes fermes dont la livraison est passée. Ce n'est ni une alerte ni un statut : c'est une colonne du cockpit et une carte du flux, une ligne par commande, qui disparaît dès que l'ERP solde la commande. Si vous l'attendez encore, tapez la quantité dans Appro. au jour prévu.</p>''')
+<p><b>En retard</b> = restant ERP des commandes fermes dont la livraison est passée. Ni alerte ni statut : une colonne du cockpit et une carte du flux, une ligne par commande, qui sort dès que l'ERP solde. Si vous l'attendez encore, tapez la quantité dans Appro. au jour prévu.</p>""")
 
     # ---------------------------------------------------------------- Reçu
-    parts.append('''<h3 id="recu">3. Reçu</h3>
-<p>Une ligne de réception ERP est un <b>journal d'arrivée</b>. Seules entrent dans la ligne Reçu et dans le stock les réceptions d'une <b>commande ouverte</b> (CO-…) ou d'une <b>commande fermée (PO, six chiffres) déclarée</b> dans Référentiel › Commandes fermées (PO). Les autres restent visibles dans Recherche, les flux et la fiche fournisseur.</p>''')
-    parts.append(table(["Statut ERP", "Cellule", "Compté ?", "Dans le cockpit"], [
-        ["En transit (journal non validé)", cell("🚚 <i>800</i>", "transit"), "non, jamais", "carte En transit"],
-        ["Reçu (journal validé, ACR à valider)", cell("1 600", "received"), "oui", "carte Reçu le jour même ; carte À valider après 7 jours sans ACR"],
+    parts.append("""<h3 id="recu">3. Reçu</h3>
+<p>Une réception ERP est un <b>journal d'arrivée</b>. Comptent dans la ligne Reçu et le stock : les réceptions d'une <b>commande ouverte</b> (CO-…) ou d'une <b>PO déclarée</b> (six chiffres, Référentiel › Commandes fermées). Les autres restent visibles dans Recherche, les flux et la fiche fournisseur.</p>""")
+    parts.append(table(["Statut ERP", "Cellule", "Compté ?", "Cockpit"], [
+        ["En transit (journal non validé)", cell("🚚 <i>800</i>", "transit"), "jamais", "carte En transit"],
+        ["Reçu (journal validé, ACR à valider)", cell("1 600", "received"), "oui", "carte Reçu le jour même ; À valider après 7 jours sans ACR"],
         ["Comptabilisé (ACR validé)", cell("1 600", "booked"), "oui", "carte Reçu le jour même"],
-        ["DESADV annoncé sans journal", cell("🚚 <i>800</i>", "transit"), "non", "carte En transit ; En erreur ou sans journal de saisie : carte À traiter"],
+        ["DESADV annoncé, sans journal", cell("🚚 <i>800</i>", "transit"), "non", "En transit ; en erreur ou sans journal de saisie : À traiter"],
     ]))
-    parts.append('''<div class="legend">
-<div><span class="k"><span class="dot ok"></span></span><span>point vert = le BL est annoncé par un DESADV traité / OK</span></div>
-<div><span class="k"><span class="dot ko"></span></span><span>point rouge = aucun DESADV traité (réception manuelle, DESADV absent, en erreur, annulé) ; jamais rouge pour une PO déclarée</span></div>
+    parts.append("""<div class="legend">
+<div><span class="k"><span class="dot ok"></span></span><span>point vert : BL annoncé par un DESADV traité / OK</span></div>
+<div><span class="k"><span class="dot ko"></span></span><span>point rouge : aucun DESADV traité (réception manuelle, absent, en erreur, annulé). Jamais rouge pour une PO déclarée.</span></div>
 </div>
-<p>Le fond (transit, reçu, comptabilisé) et le point (DESADV) sont indépendants. Un en transit se <b>masque</b> par double-clic confirmé (rétablissable dans Saisies &amp; journal). L'info-bulle détaille chaque ligne du jour : BL, quantité, état d'ACR, origine.</p>''')
+<p>Fond et point sont indépendants. Un en transit se <b>masque</b> par double-clic confirmé (rétablissable dans Saisies &amp; journal). L'info-bulle détaille chaque ligne du jour : BL, quantité, état d'ACR, origine.</p>""")
 
     # ---------------------------------------------------------------- Appro
-    parts.append('''<h3 id="appro">4. Appro.</h3>
+    parts.append("""<h3 id="appro">4. Appro.</h3>
 <div class="legend">
-<div><span class="k">''' + cell("1 600", "erp") + '''</span><span>vide = la commande ferme ERP du jour (gris). Rien n'est stocké.</span></div>
-<div><span class="k">''' + cell("1 200", "typed") + '''</span><span>chiffre = votre décision pour ce fournisseur ce jour : décaler, fractionner, annuler (0), livraison hors commande.</span></div>
-<div><span class="k">''' + cell("0", "typed") + '''</span><span>0 = rien attendu ce jour. Vider la cellule = retour à l'ERP.</span></div>
-<div><span class="k">''' + cell("1 440", "cbn") + '''</span><span>grisé = proposition CBN dans une cellule vide sans ERP.</span></div>
+<div><span class="k">""" + cell("1 600", "erp") + """</span><span>vide : la commande ferme ERP du jour (gris). Rien n'est stocké.</span></div>
+<div><span class="k">""" + cell("1 200", "typed") + """</span><span>chiffre : votre décision pour ce fournisseur ce jour (décaler, fractionner, livraison hors commande).</span></div>
+<div><span class="k">""" + cell("0", "typed") + """</span><span>0 : rien attendu ce jour. Vider = retour à l'ERP.</span></div>
+<div><span class="k">""" + cell("1 440", "cbn") + """</span><span>grisé : proposition CBN dans une cellule vide sans ERP.</span></div>
 </div>
 <ul>
-<li>Une cellule datée avant aujourd'hui a <b>expiré</b> : ignorée, listée « expirée » dans Saisies &amp; journal.</li>
-<li>Colonne semaine : la saisie se place au lundi (ou aujourd'hui dans la semaine en cours). Recopie : tirer le carré de la cellule active, comme Excel. Clic droit : commentaire.</li>
-<li>Quantité ou expression (<span class="cell">2*600-50</span>). Chaque geste s'annule : toast « Annuler », Ctrl+Z / Ctrl+Y, historique ↶ ↷ (7 jours).</li>
-</ul>''')
+<li>Une cellule datée avant aujourd'hui a <b>expiré</b> (listée « expirée » dans Saisies &amp; journal).</li>
+<li>Colonne semaine : la saisie se place au lundi, ou aujourd'hui dans la semaine en cours. Recopie en tirant le carré. Clic droit : commentaire.</li>
+<li>Quantité ou expression (<span class="cell">2*600-50</span>). Chaque geste s'annule : toast « Annuler », Ctrl+Z / Ctrl+Y, ↶ ↷ (7 jours).</li>
+</ul>""")
 
     # ---------------------------------------------------------------- Stock projeté
-    parts.append('''<h3 id="stock">5. Stock projeté</h3>
-<p>Une seule projection dans le tableau, le <b>Projeté Appro.</b> : stock de référence + réceptions + commandes fermes restantes (sauf cellule saisie) + cellules Appro. + propositions CBN + ajustements − besoin. Le <b>Projeté Ferme</b> (stock, réceptions et commandes fermes seuls, sans plan ni CBN) reste un indicateur : rupture ferme de la fiche article, colonne du cockpit, impact programmes.</p>
+    parts.append("""<h3 id="stock">5. Stock projeté</h3>
+<p>Une seule projection dans le tableau, le <b>Projeté Appro.</b> : stock de référence + réceptions + fermes restantes (sauf cellule saisie) + cellules Appro. + propositions CBN + ajustements − besoin. Le <b>Projeté Ferme</b> (sans plan ni CBN) reste un indicateur : rupture ferme de la fiche, colonne du cockpit, impact programmes.</p>
 <dl class="rule">
-<dt>Formule</dt><dd>stock du jour = stock de la veille + entrées + ajustements − besoin, à partir du stock de référence (point zéro) corrigé des ajustements.</dd>
-<dt>Jamais négatif</dt><dd>le besoin non servi est <b>perdu</b>, jamais reporté. La cellule affiche le stock physique et, en fond rouge foncé, le <b>manque cumulé −Σ</b> depuis le dernier jour positif, remis à zéro dès que le stock redevient positif.</dd>
+<dt>Formule</dt><dd>stock du jour = stock de la veille + entrées + ajustements − besoin, depuis le stock de référence (point zéro).</dd>
+<dt>Jamais négatif</dt><dd>le besoin non servi est <b>perdu</b>. La cellule affiche le stock physique et, en fond rouge foncé, le <b>manque cumulé −Σ</b> depuis le dernier jour positif, remis à zéro dès que le stock redevient positif.</dd>
 <dt>Couverture</dt><dd>en petit dans chaque cellule : jours ouvrés futurs dont le besoin cumulé est couvert par le stock du jour.</dd>
-<dt>Passé</dt><dd>du point zéro à hier, reconstitué (réceptions, ajustements, consommation réelle) : gris, sans couverture.</dd>
+<dt>Passé</dt><dd>du point zéro à hier, reconstitué : gris, sans couverture.</dd>
 </dl>
 <div class="legend">
-<div><span class="k">''' + cell("3 022", "cov-green", "14 j") + '''</span><span>vert : au-dessus du seuil orange</span></div>
-<div><span class="k">''' + cell("1 210", "cov-orange", "5 j") + '''</span><span>orange : couverture ≤ seuil orange (ex. 5 j)</span></div>
-<div><span class="k">''' + cell("260", "cov-red", "1 j") + '''</span><span>rouge : couverture ≤ seuil rouge (ex. 2 j)</span></div>
-<div><span class="k">''' + cell("0 · −Σ 300", "neg") + '''</span><span>rupture : stock 0 et manque cumulé</span></div>
-<div><span class="k">''' + cell("9 800", "", "42 j") + '''</span><span>neutre : ≥ seuil de surstock (ex. 30 j)</span></div>
-</div>''')
+<div><span class="k">""" + cell("3 022", "cov-green", "14 j") + """</span><span>vert : au-dessus du seuil orange</span></div>
+<div><span class="k">""" + cell("1 210", "cov-orange", "5 j") + """</span><span>orange : ≤ seuil orange (ex. 5 j)</span></div>
+<div><span class="k">""" + cell("260", "cov-red", "1 j") + """</span><span>rouge : ≤ seuil rouge (ex. 2 j)</span></div>
+<div><span class="k">""" + cell("0 · −Σ 300", "neg") + """</span><span>rupture : stock 0 et manque cumulé</span></div>
+<div><span class="k">""" + cell("9 800", "", "42 j") + """</span><span>neutre : ≥ surstock (ex. 30 j)</span></div>
+</div>""")
     parts.append(table(["Jour", "Besoin", "Entrées", "Ajustement", "Projeté Appro.", "Commentaire"], [
-        ["lun.", "100", "", "", cell("200", "cov-red", "2 j"), "→ stock de la veille 300 − 100"],
+        ["lun.", "100", "", "", cell("200", "cov-red", "2 j"), "→ veille 300 − 100"],
         ["mar.", "100", "", "", cell("100", "cov-red", "1 j"), "→ dernier jour couvert"],
-        ["mer.", "100", "", "", cell("0 · −Σ 0", "cov-red", "0 j"), "→ exactement servi, stock nul"],
-        ["jeu.", "100", "", "", cell("0 · −Σ 100", "neg"), "→ besoin non servi, perdu"],
-        ["ven.", "100", "", "−50", cell("0 · −Σ 250", "neg"), "→ l'ajustement (casse) s'ajoute au manque"],
-        ["lun.", "100", "500 (CBN)", "", cell("400", "cov-green", "4 j"), "→ le manque est remis à zéro"],
+        ["mer.", "100", "", "", cell("0", "cov-red", "0 j"), "→ exactement servi"],
+        ["jeu.", "100", "", "", cell("0 · −Σ 100", "neg"), "→ non servi, perdu"],
+        ["ven.", "100", "", "−50", cell("0 · −Σ 250", "neg"), "→ la casse s'ajoute au manque"],
+        ["lun.", "100", "1 000 (ferme)", "", cell("900", "cov-green", "9 j"), "→ manque remis à zéro"],
     ], num={1, 2, 3}))
     parts.append(c["shortage"])
 
     # ---------------------------------------------------------------- Multi-sourcing
-    parts.append('''<h3 id="multi">6. Multi-sourcing</h3>
-<p>Les voies du tableau sont les <b>liens actifs</b> article ↔ fournisseur, par priorité. Les flux d'un fournisseur sans lien actif restent hors du tableau (visibles dans Flux, Recherche et la fiche fournisseur) ; une commande ferme à venir chez lui remonte dans « Données à corriger ».</p>
+    parts.append("""<h3 id="multi">6. Multi-sourcing</h3>
+<p>Les voies du tableau sont les <b>liens actifs</b>, par priorité. Les flux d'un fournisseur sans lien actif restent hors du tableau (Flux, Recherche, fiche fournisseur) ; une ferme à venir chez lui remonte dans « Données ».</p>
 <dl class="rule">
-<dt>Quotas (défaut)</dt><dd>chaque besoin est <b>partagé</b> au prorata des quotas ; chaque part a son MOQ, son UM, son délai, ses jours de livraison, sa marge et ses plafonds. Les parts d'un même besoin forment une proposition par fournisseur.</dd>
-<dt>Priorité</dt><dd>tout va au fournisseur de priorité 1 ; les autres ne reçoivent rien.</dd>
-<dt>Plafond atteint</dt><dd>la part qu'un fournisseur ne peut pas livrer passe à l'autre fournisseur à quota <b>le même jour</b>, avant de glisser.</dd>
-<dt>Refus</dt><dd>une part refusée d'un clic passe aux autres fournisseurs à quota ; en mono-source, le besoin glisse au jour de livraison suivant.</dd>
-<dt>Statut</dt><dd>suit la <b>date limite la plus proche</b> parmi les parts ; la colonne « Commande à placer » nomme ce fournisseur.</dd>
-</dl>''')
-    parts.append(table(["Besoin net", "Fournisseur A · 60 % · lundi · MOQ 200 · UM 100", "Fournisseur B · 40 % · jeudi · MOQ 300 · UM 50", "Commentaire"], [
+<dt>Quotas (défaut)</dt><dd>chaque besoin est <b>partagé</b> au prorata ; chaque part a son MOQ, son UM, son délai, ses jours, sa marge, ses plafonds. Une proposition par fournisseur.</dd>
+<dt>Priorité</dt><dd>tout au fournisseur n° 1.</dd>
+<dt>Plafond atteint</dt><dd>la part non livrable passe à l'autre fournisseur à quota <b>le même jour</b>, avant de glisser.</dd>
+<dt>Refus</dt><dd>une part refusée passe aux autres fournisseurs à quota ; en mono-source, le besoin glisse au jour suivant.</dd>
+<dt>Statut</dt><dd>suit la <b>date limite la plus proche</b> ; « Commande à placer » nomme ce fournisseur.</dd>
+</dl>""")
+    parts.append(table(["Besoin net", "A · 60 % · lundi · MOQ 200 · UM 100", "B · 40 % · jeudi · MOQ 300 · UM 50", "Commentaire"], [
         ["1 000", cell("600", "cbn"), cell("400", "cbn"), "→ partage 60 / 40, chaque part lotie"],
         ["500", cell("300", "cbn"), cell("300", "cbn"), "→ 200 relevés au MOQ 300 de B"],
-        ["1 000, A plafonné à 400 / livraison", cell('400 <span class="mk cap">▲</span>', "cbn"), cell("600", "cbn"), "→ l'excédent de A passe à B le même jour"],
-        ["1 000, B refusé jeudi (clic)", cell("1 000", "cbn"), cell("400", "cbn refused"), "→ tout à A ; B redevient possible le jeudi suivant"],
+        ["1 000, A plafonné à 400", cell('400 <span class="mk cap">▲</span>', "cbn"), cell("600", "cbn"), "→ l'excédent de A passe à B"],
+        ["1 000, B refusé jeudi", cell("1 000", "cbn"), cell("400", "cbn refused"), "→ tout à A ; B possible le jeudi suivant"],
     ]))
     parts.append(c["quota"])
     parts.append("</section>")
 
     # ============================================================== PARTIE B
-    parts.append('''<section class="part" id="cockpit">
+    parts.append("""<section class="part" id="cockpit">
 <h2><span class="part">Partie B</span>Tableau de bord : Cockpit du jour</h2>
-<p class="lead">Deux onglets. <b>Couvertures et stocks</b> répond à « que dois-je faire aujourd'hui ? » article par article ; <b>Flux d'approvisionnement</b> suit les commandes, les transports et les réceptions du jour.</p>
+<p class="lead"><b>Couvertures et stocks</b> répond à « que dois-je faire aujourd'hui ? » article par article ; <b>Flux d'approvisionnement</b> suit commandes, transports et réceptions du jour.</p>
 <h3 id="stocks">7. Onglet Couvertures et stocks</h3>
-<p>Cinq tuiles qui filtrent le portefeuille d'un clic. Les tuiles se lisent sur deux indicateurs : le <b>stock à date</b> (fin de la veille) et la <b>couverture à date</b> (jours ouvrés de besoin couverts par ce stock seul, sans aucune livraison), comparés aux seuils de l'article.</p>
-''')
+<p>Cinq tuiles qui filtrent le portefeuille. Elles se lisent sur le <b>stock à date</b> (fin de la veille) et la <b>couverture à date</b> (jours ouvrés couverts par ce stock seul, sans livraison), comparés aux seuils de l'article.</p>
+""")
     parts.append(coverage_scale())
-    parts.append('''<div class="tiles">
-<div class="tile critical"><h4>Critiques</h4><p>couverture à date ≤ seuil rouge + 1 ; <b>ou</b> une proposition CBN urgente (date limite dépassée) ; <b>ou</b> stock de départ négatif.</p></div>
-<div class="tile warning"><h4>À commander</h4><p>une date limite de commande tombe dans les <b>5 prochains jours ouvrés</b> ; <b>ou</b> couverture à date ≤ seuil orange et aucune livraison ferme ni cellule Appro. n'arrive avant l'épuisement.</p></div>
-<div class="tile info"><h4>Surstock</h4><p>couverture à date ≥ seuil de surstock. Un <b>filtre</b>, pas un statut : l'article reste OK, À commander ou Critique par ailleurs.</p></div>
-<div class="tile brand"><h4>Données</h4><p>pas de stock de départ ; pas de lien fournisseur actif ; absent des nomenclatures ; commande ferme à venir chez un fournisseur sans lien. <b>Pastille bleue</b> sur le statut, jamais dans le statut.</p></div>
+    parts.append("""<div class="tiles">
+<div class="tile critical"><h4>Critiques</h4><p>couverture à date ≤ rouge + 1 ; <b>ou</b> proposition urgente (date limite dépassée) ; <b>ou</b> stock de départ négatif.</p></div>
+<div class="tile warning"><h4>À commander</h4><p>une date limite dans les <b>5 prochains jours ouvrés</b> ; <b>ou</b> couverture ≤ orange sans livraison ferme ni cellule Appro. avant l'épuisement.</p></div>
+<div class="tile info"><h4>Surstock</h4><p>couverture à date ≥ seuil de surstock. Un <b>filtre</b>, pas un statut.</p></div>
+<div class="tile brand"><h4>Données</h4><p>pas de stock de départ ; pas de lien actif ; absent des nomenclatures ; ferme à venir chez un fournisseur sans lien. <b>Pastille bleue</b>, jamais dans le statut.</p></div>
 <div class="tile ok"><h4>OK</h4><p>tout le reste : rien à faire aujourd'hui.</p></div>
 </div>
 <h4>Le portefeuille</h4>
-<p>Colonnes principales : article, fournisseurs (liens actifs), approvisionneur, statut, stock à date (cible en dessous), couverture à date (cible en dessous), <b>commande en cours</b> (prochaine ferme : date, fournisseur, restant), <b>commande à placer</b> (première proposition : date limite, fournisseur retenu, quantité, livraison, ◇ si hors jour standard), en retard. Les colonnes secondaires (couverture Appro., rupture Appro., rupture ferme, en-cours, valeur, alertes) sont dans le menu Colonnes.</p>
-<h4>Exemple : six articles, seuils rouge 2 j, orange 5 j, surstock 30 j, cible 10 j</h4>''')
+<p>Article, fournisseurs, approvisionneur, statut, stock à date (cible dessous), couverture à date (cible dessous), <b>commande en cours</b> (prochaine ferme : date, fournisseur, restant), <b>commande à placer</b> (première proposition : date limite, fournisseur, quantité, livraison, ◇ si hors jour standard), en retard. Colonnes secondaires dans le menu Colonnes.</p>
+<h4>Exemple : seuils rouge 2 j, orange 5 j, surstock 30 j, cible 10 j</h4>""")
     parts.append(table(["Article", "Couverture à date", "Livraison avant l'épuisement ?", "Commande à placer", "Statut", "Commentaire"], [
-        ["P-001", chip("1 j", "critical"), "oui, ferme demain", "–", chip("Critique", "critical"), "→ la couverture rouge prime, même si une livraison arrive"],
-        ["P-002", chip("4 j", "warning"), "non", "–", chip("À commander", "warning"), "→ orange et rien n'arrive avant l'épuisement"],
-        ["P-003", chip("4 j", "warning"), "oui, Appro. saisie jeudi", "–", chip("OK", "ok"), "→ orange mais couvert : rien à faire"],
+        ["P-001", chip("1 j", "critical"), "oui, ferme demain", "–", chip("Critique", "critical"), "→ la couverture rouge prime"],
+        ["P-002", chip("4 j", "warning"), "non", "–", chip("À commander", "warning"), "→ orange, rien n'arrive"],
+        ["P-003", chip("4 j", "warning"), "oui, Appro. saisie jeudi", "–", chip("OK", "ok"), "→ orange mais couvert"],
         ["P-004", chip("12 j", "ok"), "–", "au plus tard mer. 28/10 · A · 1 440 · liv. 3/11 ◇", chip("À commander", "warning"), "→ date limite sous 5 j ouvrés"],
-        ["P-005", chip("12 j", "ok"), "–", "au plus tard 27/10, dépassée · plancher !", chip("Critique", "critical"), "→ une urgence CBN rend l'article critique"],
-        ["P-006", chip("42 j", "neutral"), "–", "–", chip("OK", "ok") + " + Surstock", "→ filtré par la tuile Surstock, sans lien actif : pastille Données"],
+        ["P-005", chip("12 j", "ok"), "–", "27/10 dépassée · plancher !", chip("Critique", "critical"), "→ une urgence CBN rend critique"],
+        ["P-006", chip("42 j", "neutral"), "–", "–", chip("OK", "ok") + " + Surstock", "→ sans lien actif : pastille Données"],
     ]))
-    parts.append('<p class="cmt">Sous les tuiles : une ligne de contexte (couverture médiane, valeur du stock contre la valeur cible, en-cours ERP, articles en retard), puis la projection de la valeur du stock et les alertes prioritaires.</p>')
+    parts.append('<p class="cmt">Sous les tuiles : contexte (couverture médiane, valeur du stock contre la cible, en-cours, en retard), projection de la valeur du stock, alertes prioritaires.</p>')
 
     # ---------------------------------------------------------------- Flux
-    parts.append('''<h3 id="flux">8. Onglet Flux d'approvisionnement</h3>
-<p>Huit cartes ; un clic affiche les lignes correspondantes en dessous, avec un bouton Excel. Les cartes se calculent sur la copie ERP du jour (synchronisation toutes les heures, bandeau orange si elle est en retard).</p>
+    parts.append("""<h3 id="flux">8. Onglet Flux d'approvisionnement</h3>
+<p>Huit cartes ; un clic affiche les lignes dessous, avec export Excel. Calculées sur la copie ERP du jour (bandeau orange si la synchronisation est en retard).</p>
 <div class="tiles">
-<div class="tile critical"><h4>À commander</h4><p>propositions CBN dont la <b>date limite tombe dans les 5 prochains jours ouvrés</b>, les <b>urgentes</b> (date limite dépassée) en tête et marquées <span class="mk urgent">!</span> ; colonne « au plus tard le », livraison avec ◇ si hors jour standard. Une proposition refusée reste listée, marquée <i>ignorée</i>, hors calculs.</p></div>
-<div class="tile brand"><h4>Commandé</h4><p>commandes fermes <b>apparues aujourd'hui</b> dans la copie ERP, quelle que soit leur date de livraison.</p></div>
-<div class="tile info"><h4>En transit</h4><p>journaux d'arrivée <b>non validés</b>, plus les DESADV non annulés qu'aucun journal ne porte encore.</p></div>
+<div class="tile critical"><h4>À commander</h4><p>propositions dont la <b>date limite tombe dans les 5 prochains jours ouvrés</b> ; les <b>urgentes</b> en tête, marquées <span class="mk urgent">!</span> ; colonne « au plus tard le », ◇ si hors jour standard. Une proposition refusée reste listée, <i>ignorée</i>.</p></div>
+<div class="tile brand"><h4>Commandé</h4><p>fermes <b>apparues aujourd'hui</b> dans la copie ERP, quelle que soit la livraison.</p></div>
+<div class="tile info"><h4>En transit</h4><p>journaux d'arrivée <b>non validés</b>, plus les DESADV qu'aucun journal ne porte.</p></div>
 <div class="tile warning"><h4>À traiter</h4><p>DESADV en <b>erreur</b>, ou traités <b>sans journal de saisie</b>.</p></div>
-<div class="tile brand"><h4>À réceptionner</h4><p>commandes fermes dont la livraison est attendue <b>aujourd'hui</b>.</p></div>
-<div class="tile ok"><h4>Reçu</h4><p>réceptions (journaux validés) datées d'aujourd'hui.</p></div>
-<div class="tile warning"><h4>En retard</h4><p>commandes fermes passées avec un restant ERP, <b>une ligne par commande</b> : numéro, date prévue, commandé, reçu, restant.</p></div>
-<div class="tile warning"><h4>À valider</h4><p>réceptions au statut Reçu (journal validé, ACR non validé) depuis <b>7 jours</b> ou plus.</p></div>
+<div class="tile brand"><h4>À réceptionner</h4><p>fermes attendues <b>aujourd'hui</b>.</p></div>
+<div class="tile ok"><h4>Reçu</h4><p>journaux validés datés d'aujourd'hui.</p></div>
+<div class="tile warning"><h4>En retard</h4><p>fermes passées avec un restant ERP, <b>une ligne par commande</b>.</p></div>
+<div class="tile warning"><h4>À valider</h4><p>réceptions au statut Reçu sans ACR depuis <b>7 jours</b> ou plus.</p></div>
 </div>
-<h4>Exemple : une journée, mercredi 28/10</h4>''')
+<h4>Exemple : une journée, mercredi 28/10</h4>""")
     parts.append(table(["Ligne du jour", "Carte", "Commentaire"], [
-        ["Proposition A · 1 440 · au plus tard aujourd'hui · liv. mar. 3/11 ◇", chip("À commander", "critical"), "→ date limite sous 5 j ouvrés ; ◇ = mardi au lieu du lundi"],
-        ["Proposition B · 240 ! · au plus tard hier · liv. 4/11", chip("À commander", "critical") + " en tête", "→ urgente : plancher, date limite dépassée"],
-        ["Proposition C refusée d'un clic lundi", chip("À commander", "critical") + " <i>ignorée</i>", "→ listée pour mémoire, hors calculs"],
-        ["CO-10234 créée ce matin, livraison le 16/11", chip("Commandé", "brand"), "→ apparue aujourd'hui dans l'ERP"],
-        ["Journal d'arrivée BL-990002 non validé", chip("En transit", "info"), "→ jamais compté dans le stock"],
+        ["Proposition A · 1 440 · au plus tard aujourd'hui · liv. mar. 3/11 ◇", chip("À commander", "critical"), "→ date limite sous 5 j ; ◇ mardi au lieu du lundi"],
+        ["Proposition B · 240 ! · au plus tard hier · liv. 4/11", chip("À commander", "critical") + " en tête", "→ urgente : plancher"],
+        ["Proposition C refusée lundi", chip("À commander", "critical") + " <i>ignorée</i>", "→ pour mémoire, hors calculs"],
+        ["CO-10234 créée ce matin, livraison 16/11", chip("Commandé", "brand"), "→ apparue aujourd'hui"],
+        ["Journal BL-990002 non validé", chip("En transit", "info"), "→ jamais compté"],
         ["DESADV BL-990003 en erreur", chip("À traiter", "warning"), "→ à corriger dans l'ERP"],
-        ["CO-10001 attendue aujourd'hui, restant 800", chip("À réceptionner", "brand"), "→ ce soir sans journal, elle sera en retard demain"],
-        ["BL-990000 validé ce matin (ACR à valider)", chip("Reçu", "ok"), "→ compté dans le stock ; sans ACR dans 7 jours : À valider"],
-        ["CO-09980 prévue le 20/10, restant 400", chip("En retard", "warning"), "→ une ligne par commande, sort dès que l'ERP solde"],
+        ["CO-10001 attendue aujourd'hui, restant 800", chip("À réceptionner", "brand"), "→ sans journal ce soir, en retard demain"],
+        ["BL-990000 validé ce matin, ACR à valider", chip("Reçu", "ok"), "→ compté ; sans ACR dans 7 jours : À valider"],
+        ["CO-09980 prévue le 20/10, restant 400", chip("En retard", "warning"), "→ sort dès que l'ERP solde"],
     ]))
     parts.append("</section>")
 
     # ============================================================== MÉMO
-    parts.append('''<section class="part" id="memo">
-<h2><span class="part">Mémo</span>Marqueurs, couleurs et gestes en un coup d'œil</h2>''')
+    parts.append("""<section class="part" id="memo">
+<h2><span class="part">Mémo</span>Marqueurs, couleurs et gestes</h2>""")
     parts.append(table(["Où", "Signe", "Sens"], [
-        ["Proposition CBN", '<span class="mk urgent">!</span>', "urgente : plancher, date limite dépassée → article Critique, carte À commander en tête"],
-        ["Proposition CBN", '<span class="mk cap">▲</span>', "plafonnée par le fournisseur (max par livraison ou par semaine)"],
-        ["Proposition CBN, cockpit", '<span class="mk off">◇</span>', "hors jour standard : livraison sur un jour ouvré tenable, pas sur le jour de livraison habituel"],
+        ["Proposition CBN", '<span class="mk urgent">!</span>', "urgente : plancher, date limite dépassée → Critique, en tête de la carte À commander"],
+        ["Proposition CBN", '<span class="mk cap">▲</span>', "plafonnée (max par livraison ou par semaine)"],
+        ["Proposition CBN, cockpit", '<span class="mk off">◇</span>', "hors jour standard : jour ouvré tenable, pas le jour habituel"],
         ["Proposition CBN", "barré", "refusée d'un clic, ce fournisseur ce jour-là"],
-        ["Ferme", "orange / vert / rouge barré", "en cours / soldée / ignorée d'un clic"],
-        ["Reçu", "italique orange 🚚 / blanc / vert", "en transit (jamais compté) / reçu (compté, ACR à valider) / comptabilisé"],
-        ["Reçu", '<span class="dot ok"></span> / <span class="dot ko"></span>', "BL annoncé par un DESADV traité / aucun DESADV traité"],
+        ["Ferme", "orange / vert / rouge barré", "en cours / soldée / ignorée"],
+        ["Reçu", "italique orange 🚚 / blanc / vert", "en transit (jamais compté) / reçu / comptabilisé"],
+        ["Reçu", '<span class="dot ok"></span> / <span class="dot ko"></span>', "DESADV traité / aucun DESADV traité"],
         ["Appro.", "gris / bleu", "ERP (vide) / votre saisie (0 = rien attendu)"],
-        ["Projeté Appro.", "petit chiffre vert · orange · rouge · neutre", "couverture en jours ouvrés : normale · ≤ orange · ≤ rouge · ≥ surstock"],
+        ["Projeté Appro.", "petit chiffre vert · orange · rouge · neutre", "couverture : normale · ≤ orange · ≤ rouge · ≥ surstock"],
         ["Projeté Appro.", "fond rouge foncé −Σ", "manque cumulé du besoin non servi"],
-        ["Statut", chip("Critique", "critical") + " " + chip("À commander", "warning") + " " + chip("OK", "ok"), "couverture rouge ou urgence / date limite sous 5 j ouvrés ou orange non couvert / rien à faire"],
-        ["Statut", "pastille bleue", "données à corriger (stock de départ, lien, nomenclature, commande hors lien)"],
+        ["Statut", chip("Critique", "critical") + " " + chip("À commander", "warning") + " " + chip("OK", "ok"), "couverture rouge ou urgence / date limite sous 5 j ou orange non couvert / rien à faire"],
+        ["Statut", "pastille bleue", "données à corriger"],
         ["Partout", "Ctrl+Z · Ctrl+Y · ↶ ↷", "annuler / rétablir chaque geste, 7 jours, dans l'ordre"],
     ]))
-    parts.append('''<div class="callout warn"><b>Règles communes réglables</b> (Paramètres) : tolérance de déclenchement (15 % → 85 % de la cible) et marge de délai (1 jour ouvré). <b>Par article</b> (fiche › Paramétrage, et par semaine ISO) : couverture cible, seuils rouge et orange, surstock, jours de consommation, source de consommation, politique de multi-sourcing. <b>Par fournisseur</b> : délai, jours de livraison standard, jours stricts. <b>Par lien</b> : MOQ, UM, quota, priorité, délai spécifique, plafonds.</div>
-</section>''')
-    parts.append('<footer>Ma Routine Appro · pense-bête de l\'approvisionneur · les règles détaillées avec leurs calculs sont dans <i>docs/regles_metier.md</i> et <i>docs/guide_moteur.md</i>.</footer>')
+    parts.append("""<div class="callout warn"><b>Réglable en commun</b> : tolérance (85 % de la cible), marge de délai (1 j ouvré). <b>Par article</b> (et par semaine ISO) : couverture cible, seuils rouge et orange, surstock, jours de consommation, source de consommation, politique de multi-sourcing. <b>Par fournisseur</b> : délai, jours de livraison standard, jours stricts. <b>Par lien</b> : MOQ, UM, quota, priorité, délai spécifique, plafonds.</div>
+</section>""")
+    parts.append('<footer>Ma Routine Appro · pense-bête de l\'approvisionneur · règles détaillées : <i>docs/regles_metier.md</i>, calculs : <i>docs/guide_moteur.md</i>.</footer>')
     parts.append("</main></div>")
     return "\n".join(parts)
 
