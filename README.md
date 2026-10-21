@@ -54,6 +54,7 @@ databricks bundle run appro_sync_erp -t dev --profile PROD           # première
 
 ## Documentation
 
+* [`docs/pense_bete_approvisionneur.html`](docs/pense_bete_approvisionneur.html) — **pense-bête de l'approvisionneur** : règles, statuts, marqueurs et couleurs en une page, avec exemples et graphiques (générée par `scripts/pense_bete.py`)
 * [`docs/guide_moteur.md`](docs/guide_moteur.md) — **guide du moteur et du tableau d'approvisionnement** : chaque paramètre et son effet, avec des scénarios calculés par le moteur (tableaux générés par `scripts/guide_moteur.py`)
 * [`docs/regles_metier.md`](docs/regles_metier.md) — règles de calcul (besoin et jours de consommation, voies fournisseur, plan par cellules, commandes en retard, ajustements, projection, couverture, alertes, propositions : plancher, tolérance, plafonds, quotas, classeur)
 * [`docs/recommandations_simplification.md`](docs/recommandations_simplification.md) — liste des simplifications et règles décidées (toutes implémentées)
