@@ -3,10 +3,11 @@
 Three statuses only, read on the article data and the CBN, never on a common horizon :
 
 * **critical** : the stock « à date » (end of yesterday, no inflow counted) covers at most the red
-  threshold + 1 working day ; or a CBN proposal whose order date is already past ; or a negative
-  reference stock ;
-* **to order** : a CBN proposal to order within the next five working days ; or the stock « à date »
-  covers at most the orange threshold and no firm order nor typed plan cell lands before it runs out ;
+  threshold + 1 working day ; or a CBN proposal whose order deadline (« au plus tard le », margin
+  included) is already past ; or a negative reference stock ;
+* **to order** : a CBN proposal whose order deadline falls within the next five working days ; or the
+  stock « à date » covers at most the orange threshold and no firm order nor typed plan cell lands
+  before it runs out ;
 * **ok** otherwise.
 
 Everything else is information : the plan stockout that the CBN could not avoid (caps, refusals), the
@@ -130,16 +131,18 @@ def classify_alerts(
     if late:
         p = late[0]
         alerts.append(Alert(aid, AlertType.URGENT_PROPOSAL, Severity.CRITICAL,
-                            f"{len(late)} proposition(s) dont la date de commande est passée – {who(p.supplier_id)}, livraison "
-                            f"requise le {p.delivery_date.isoformat()} ({_fmt(p.qty)}, plancher : le minimum qui évite la rupture)",
+                            f"{len(late)} proposition(s) dont la date limite de commande est passée – {who(p.supplier_id)}, livraison "
+                            f"requise le {p.delivery_date.isoformat()} ({_fmt(p.qty)}"
+                            + (", plancher : le minimum qui évite la rupture" if p.floor else "") + (", hors jour standard ◇" if p.off_standard else "") + ")",
                             date=p.delivery_date, value=p.qty, details={"count": len(late), "supplier_id": p.supplier_id}))
     due_limit = calendar.add_working_days(as_of, ORDER_DUE_WD)
     due = [p for p in ordered if as_of <= p.order_date <= due_limit and not (p.urgent or p.order_date < as_of)]
     if due:
         p = due[0]
         alerts.append(Alert(aid, AlertType.ORDER_DUE, Severity.WARNING,
-                            f"Commande à placer avant le {p.order_date.isoformat()} chez {who(p.supplier_id)} : {_fmt(p.qty)} "
-                            f"à livrer le {p.delivery_date.isoformat()}" + (f" ({len(due)} propositions sous {ORDER_DUE_WD} j ouvrés)" if len(due) > 1 else ""),
+                            f"Commande à placer au plus tard le {p.order_date.isoformat()} chez {who(p.supplier_id)} : {_fmt(p.qty)} "
+                            f"à livrer le {p.delivery_date.isoformat()}" + (" (hors jour standard ◇)" if p.off_standard else "")
+                            + (f" ({len(due)} propositions sous {ORDER_DUE_WD} j ouvrés)" if len(due) > 1 else ""),
                             date=p.order_date, value=p.qty, details={"count": len(due), "supplier_id": p.supplier_id}))
 
     # --- information on the plan ---------------------------------------------------------
@@ -147,14 +150,14 @@ def classify_alerts(
     if k_plan is not None:
         worst = float(np.max(plan.shortage_cum[k_plan:]))
         alerts.append(Alert(aid, AlertType.STOCKOUT, Severity.INFO,
-                            f"Rupture Projeté Appro. le {index.dates[k_plan].isoformat()} (J+{wd_ahead(k_plan)} ouvrés) malgré le plan "
+                            f"Rupture du stock projeté le {index.dates[k_plan].isoformat()} (J+{wd_ahead(k_plan)} ouvrés) malgré le plan "
                             f"de livraison et le complément CBN, manque cumulé max {_fmt(worst)}", date=index.dates[k_plan], value=worst,
                             scope="plan", details={"days_ahead": wd_ahead(k_plan)}))
     if cap_shortfalls:
         c = cap_shortfalls[0]
         alerts.append(Alert(aid, AlertType.CAP_REACHED, Severity.INFO,
                             f"Plafond fournisseur atteint : {_fmt(c.qty)} non livrables le {c.date.isoformat()} "
-                            f"({len(cap_shortfalls)} jour(s)), manque inévitable affiché dans le Projeté Appro.",
+                            f"({len(cap_shortfalls)} jour(s)), manque inévitable affiché dans le stock projeté",
                             date=c.date, value=c.qty, details={"count": len(cap_shortfalls), "supplier_id": c.supplier_id}))
     return alerts
 

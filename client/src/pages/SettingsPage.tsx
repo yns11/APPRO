@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Clock, Database, RefreshCw, RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
-import { useFixedRules, useOrphans, useOverrides, useParamEffective, useParamSchema, usePlantCalendar, useSyncStatus, useWrite } from "@/lib/queries";
+import { useFixedRules, useOrphans, useOverrides, useParamEffective, useParamSchema, usePlantCalendar, useSupplierNames, useSyncStatus, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { usePageState } from "@/lib/pageState";
 import { BASE_SIZES, DISPLAY_DEFAULTS, FONTS, GRID_SIZES, fontStack, type FontId, type GridFontId } from "@/lib/display";
@@ -42,21 +42,26 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
   const setParam = useWrite((b: { scope: string; key1?: string; key2?: string; field: string; value: unknown }) => api.put("/api/params/overrides", { key1: "", key2: "", ...b }), () => toast.push("Règle enregistrée", "success"));
   const del = useWrite((id: string) => api.del(`/api/params/overrides/${id}`), () => toast.push("Surcharge supprimée – valeur par défaut rétablie"));
   const globalOv = new Map((overrides.data ?? []).filter((o) => o.scope === "global").map((o) => [o.field, o]));
-  const editable = (schema.data ?? []).filter((p) => p.field === "target_tolerance_pct");
+  const EDITABLE: Record<string, { label: string; unit: string; max: number; aria: string; explain: (v: number) => string }> = {
+    target_tolerance_pct: { label: "Tolérance sous la cible", unit: "%", max: 100, aria: "Tolérance sous la cible (%)", explain: (v) => `Avec ${v} % : le CBN propose un retour à la cible dès que le stock projeté passe sous ${100 - v} % de la cible, et la quantité vise 100 % de la cible. Le plancher (!) reste strict.` },
+    lead_margin_days: { label: "Marge de délai", unit: "j ouvrés", max: 30, aria: "Marge de délai (jours ouvrés)", explain: (v) => (v === 0 ? "0 = strict : la date limite de commande est livraison − délai ; toute proposition dont la livraison tombe dans le délai est urgente." : `Avec ${v} j : la date limite de commande est livraison − (délai − ${v}) jours ouvrés ; une proposition est tenable (pleine cible) tant que sa date limite n'est pas passée, sinon elle devient urgente (!) : plancher au jour du besoin ou livraison hors jour standard (◇) au premier jour ouvré tenable.`) },
+  };
+  const editable = (schema.data ?? []).filter((p) => p.field in EDITABLE);
   return (
     <div className="grid cols-2">
-      <Card title="Règle réglable" hint={canEdit ? "la seule règle commune réglable ; vaut pour tous les articles et tous les approvisionneurs" : "lecture seule : modifiable par les managers et administrateurs"}>
+      <Card title="Règles réglables" hint={canEdit ? "les deux règles communes réglables ; valent pour tous les articles et tous les approvisionneurs" : "lecture seule : modifiables par les managers et administrateurs"}>
         {schema.isError ? <ErrorBox error={schema.error} /> : schema.isLoading || effective.isLoading ? <SkeletonBlock rows={3} /> : editable.map((p) => {
           const cur = effective.data?.[p.field];
           const ov = globalOv.get(p.field);
-          const pct = Number(cur ?? 15);
+          const meta = EDITABLE[p.field];
+          const val = Number(cur ?? p.default ?? 0);
           return (
             <div key={p.field} className="param editable">
-              <span className="label">Tolérance sous la cible{ov && <Badge tone="brand">surchargée</Badge>}</span>
-              <span className="value"><input className="input sm" type="number" min={0} max={100} step={1} disabled={!canEdit} defaultValue={String(cur ?? "")} style={{ width: 80 }} aria-label="Tolérance sous la cible (%)"
-                onBlur={(e) => { if (e.target.value !== String(cur ?? "") && e.target.value !== "") setParam.mutate({ scope: "global", field: p.field, value: Number(e.target.value) }); }} /><small>%</small>
-                {ov && canEdit && <Button size="xs" variant="ghost" title="Rétablir la valeur par défaut (15 %)" onClick={() => del.mutate(ov.id)}><RotateCcw /></Button>}</span>
-              <span className="small subtle">{p.description}. Défaut : {String(p.default)} %. Avec {pct} % : le CBN propose un retour à la cible dès que le stock projeté passe sous <b>{100 - pct} %</b> de la cible, et la quantité vise 100 % de la cible. Le plancher (dans le délai) reste strict.</span>
+              <span className="label">{meta.label}{ov && <Badge tone="brand">surchargée</Badge>}</span>
+              <span className="value"><input className="input sm" type="number" min={0} max={meta.max} step={1} disabled={!canEdit} defaultValue={String(cur ?? "")} style={{ width: 80 }} aria-label={meta.aria}
+                onBlur={(e) => { if (e.target.value !== String(cur ?? "") && e.target.value !== "") setParam.mutate({ scope: "global", field: p.field, value: Number(e.target.value) }); }} /><small>{meta.unit}</small>
+                {ov && canEdit && <Button size="xs" variant="ghost" title={`Rétablir la valeur par défaut (${String(p.default)} ${meta.unit})`} onClick={() => del.mutate(ov.id)}><RotateCcw /></Button>}</span>
+              <span className="small subtle">{p.description}. Défaut : {String(p.default)} {meta.unit}. {meta.explain(val)}</span>
             </div>
           );
         })}
@@ -67,7 +72,8 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
             {(fixed.data ?? []).map((r) => <div key={r.name} className="rule"><div className="name">{r.name}</div><div className="value small">{r.value}</div></div>)}
             <div className="rule"><div className="name">Délai fournisseur</div><div className="value small">jours ouvrés, inclusif (lundi + 5 = lundi suivant) ; valeur du fournisseur, exception possible par lien</div></div>
             <div className="rule"><div className="name">Plafonds</div><div className="value small">par livraison et par semaine, sur le lien article ↔ fournisseur ; l'excédent glisse à la livraison / semaine suivante ou à l'autre fournisseur (quotas) ; manque inévitable affiché et alerté</div></div>
-            <div className="rule"><div className="name">Refus d'une proposition</div><div className="value small">bloque le fournisseur ce jour-là seulement ; un mono-source glisse au jour de livraison ouvert suivant</div></div>
+            <div className="rule"><div className="name">Refus d'une proposition</div><div className="value small">bloque le fournisseur ce jour-là seulement ; un mono-source glisse au jour de livraison ouvert suivant ; un refus daté avant aujourd'hui a expiré et n'est plus affiché</div></div>
+            <div className="rule"><div className="name">Jours stricts</div><div className="value small">fournisseur à jours stricts : jamais de livraison hors jour standard (◇) ; le besoin non tenable devient un plancher (!) au jour standard</div></div>
           </div>
         )}
       </Card>
@@ -77,7 +83,7 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
 
 /* ---------------------------------------------------------------- display */
 const SAMPLE_COLS = ["2026 S41", "2026 S42", "2026 S43", "2026 S44"];
-const SAMPLE_ROWS: [string, number[]][] = [["Besoin", [1800, 2100, 2400, 2400]], ["Appro.", [2916, 1800, 2088, 2124]], ["Projeté Appro.", [1818, 2106, 0, 510]]];
+const SAMPLE_ROWS: [string, number[]][] = [["Besoin", [1800, 2100, 2400, 2400]], ["Quantité à retenir", [2916, 1800, 2088, 2124]], ["Stock projeté", [1818, 2106, 0, 510]]];
 
 function DisplayTab() {
   const { perimeter, set } = usePerimeter();
@@ -179,6 +185,7 @@ function SyncCard() {
 
 function OrphansCard() {
   const q = useOrphans();
+  const names = useSupplierNames();
   const cols = useMemo<Column<OrphanRow>[]>(() => [
     { key: "article", label: "Article (ERP)", get: (o) => o.article_id, render: (o) => <b className="mono">{o.article_id}</b> },
     { key: "orders", label: "Commandes", get: (o) => o.orders, num: true, sum: true },
@@ -186,8 +193,8 @@ function OrphansCard() {
     { key: "desadv", label: "DESADV", get: (o) => o.desadv, num: true, sum: true },
     { key: "conso", label: "Consommation", get: (o) => o.consumption, num: true, render: (o) => fmtQty(o.consumption) },
     { key: "last", label: "Dernière date", get: (o) => o.last_date ?? "", render: (o) => fmtDate(o.last_date) },
-    { key: "suppliers", label: "Fournisseurs", get: (o) => o.suppliers.join(" "), render: (o) => <>{o.suppliers.map((s, i) => <span key={s}>{i > 0 && ", "}<SupplierLink id={s} inline /></span>)}</> },
-  ], []);
+    { key: "suppliers", label: "Fournisseurs", get: (o) => o.suppliers.map((s) => `${s} ${names.get(s) ?? ""}`).join(" "), render: (o) => <>{o.suppliers.map((s, i) => <span key={s}>{i > 0 && ", "}<SupplierLink id={s} name={names.get(s)} inline /></span>)}</> },
+  ], [names]);
   return (
     <Card flush title="Articles présents dans l'ERP et absents du référentiel" hint="commandes, réceptions, DESADV ou consommations portant une référence inconnue de la table des articles : ignorés par les calculs tant qu'ils ne sont pas créés" actions={<Link className="btn sm" to="/referentiel?table=ref_articles">Ouvrir les articles</Link>}>
       {q.isError ? <ErrorBox error={q.error} /> : q.isLoading ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={q.data ?? []} columns={cols} rowKey={(o) => o.article_id} compact emptyTitle="Aucun article orphelin" emptyHint="Toutes les références des flux ERP existent dans le référentiel." maxHeight="calc(100vh - 420px)" storageKey="data.orphans" exportTitle="Articles hors référentiel" />}
@@ -237,8 +244,8 @@ function UsersTab() {
         <p className="small">Les approvisionneurs (ID, prénom, e-mail Databricks, rôle, actif) et les délégations (délégant, destinataire, dates) sont des tables du Référentiel.</p>
         <ul className="small" style={{ margin: "8px 0 12px 18px", padding: 0 }}>
           <li><b>appro</b> : écrit sur son carnet (articles dont il est l'approvisionneur) et sur les carnets qui lui sont délégués.</li>
-          <li><b>manager</b> : en plus, règle commune, paramètres hebdomadaires de tout article, import des PDP.</li>
-          <li><b>admin</b> : tous les droits, dont la table des approvisionneurs.</li>
+          <li><b>manager</b> : en plus, règles communes, paramètres hebdomadaires de tout article, import des PDP.</li>
+          <li><b>admin</b> : tous les droits, dont la table des approvisionneurs et le pense-bête intégré (bouton ? de l'en-tête, texte modifiable).</li>
           <li>Utilisateur non déclaré ou inactif : lecture seule.</li>
         </ul>
         <div className="row wrap"><Link className="btn sm" to="/referentiel?table=ref_planners">Approvisionneurs</Link><Link className="btn sm" to="/referentiel?table=ref_delegations">Délégations</Link></div>
@@ -251,7 +258,7 @@ function UsersTab() {
           <div><h4>Horizon</h4><div>52 semaines</div></div>
           <div><h4>Version</h4><div>{config?.version}</div></div>
         </dl>
-        {rights.isAdmin && <div style={{ marginTop: 12 }}><Button size="sm" onClick={() => { if (window.confirm("Rétablir la valeur par défaut de la règle commune (tolérance 15 %) ?")) resetRules.mutate(undefined); }}><RotateCcw />Rétablir la règle par défaut</Button></div>}
+        {rights.isAdmin && <div style={{ marginTop: 12 }}><Button size="sm" onClick={() => { if (window.confirm("Rétablir les valeurs par défaut des règles communes (tolérance 15 %, marge de délai 1 j) ?")) resetRules.mutate(undefined); }}><RotateCcw />Rétablir les règles par défaut</Button></div>}
       </Card>
     </div>
   );

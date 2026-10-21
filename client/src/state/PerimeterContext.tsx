@@ -25,6 +25,8 @@ export interface Perimeter {
   /** supply tables : weeks shown before the current week, and weeks detailed day by day after it (per user) */
   historyWeeks: number;
   focusWeeks: number;
+  /** language of the supply tables and of the article tiles (FR | EN buttons) ; the rest of the application stays French */
+  lang: "fr" | "en";
 }
 
 /** What the signed-in user may write (mirror of the server rules ; the server enforces them). */
@@ -55,7 +57,7 @@ interface Ctx {
 }
 
 const KEY = "appro.perimeter.v3";
-const defaults: Perimeter = { planner: null, granularity: "default", theme: "system", hiddenRows: [], showSaturday: true, showSunday: true, weekRange: null, sidebarCollapsed: false, display: DISPLAY_DEFAULTS, historyWeeks: 2, focusWeeks: 2 };
+const defaults: Perimeter = { planner: null, granularity: "default", theme: "system", hiddenRows: [], showSaturday: true, showSunday: true, weekRange: null, sidebarCollapsed: false, display: DISPLAY_DEFAULTS, historyWeeks: 2, focusWeeks: 2, lang: "fr" };
 
 function load(): Perimeter {
   try {

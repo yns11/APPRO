@@ -13,6 +13,7 @@ import EntriesPage from "@/pages/EntriesPage";
 import ImportsPage from "@/pages/ImportsPage";
 import ReferencePage from "@/pages/ReferencePage";
 import SettingsPage from "@/pages/SettingsPage";
+import HelpPage from "@/pages/HelpPage";
 
 /** The search page can be hidden again by turning this off (no menu entry, no route). */
 const SEARCH_ENABLED = true;
@@ -35,6 +36,8 @@ export default function App() {
         <Route path="/imports" element={<ImportsPage />} />
         <Route path="/referentiel" element={<ReferencePage />} />
         <Route path="/parametres" element={<SettingsPage />} />
+        <Route path="/aide" element={<HelpPage />} />
+        <Route path="/aide/:slug" element={<HelpPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

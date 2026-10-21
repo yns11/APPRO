@@ -9,7 +9,7 @@ import { fmtDate, fmtQty, isSaturday, isSunday, isWeekKey, isoWeekKey, periodLab
 /**
  * Article charts – four panels on one time axis, the **same window as the supply table** (its
  * granularity, its week range, its hidden week-ends) :
- *  1. stock projected (Appro.), target stock, lead-time window, order to place, stockout, unserved cumul ;
+ *  1. stock projected, target stock, lead-time window, order to place, stockout, unserved cumul ;
  *  2. flows : firm orders (past = ordered, future = remaining), typed plan, CBN proposals above the axis,
  *     the demand below, the receipts as a line over the past ;
  *  3. exploded PDP (bars) against the reported consumption (line) with the bias of each past period ;
@@ -95,10 +95,10 @@ export function ArticleCharts({ data }: { data: ProjectionResponse }) {
     { key: "stock", label: "Stock projeté", get: (r) => r.stock, num: true, render: (r) => fmtQty(r.stock, unit) },
     { key: "target", label: "Stock cible", get: (r) => r.target, num: true, render: (r) => fmtQty(r.target, unit) },
     { key: "demand", label: "Besoin", get: (r) => -r.demand, num: true, render: (r) => fmtQty(-r.demand, unit) },
-    { key: "firm", label: "Ferme ERP", get: (r) => r.firm, num: true, render: (r) => fmtQty(r.firm, unit) },
-    { key: "plan", label: "Appro. saisi", get: (r) => r.plan, num: true, render: (r) => fmtQty(r.plan, unit) },
+    { key: "firm", label: "Ordre ferme", get: (r) => r.firm, num: true, render: (r) => fmtQty(r.firm, unit) },
+    { key: "plan", label: "Quantité à retenir (saisie)", get: (r) => r.plan, num: true, render: (r) => fmtQty(r.plan, unit) },
     { key: "cbn", label: "Proposition CBN", get: (r) => r.cbn, num: true, render: (r) => fmtQty(r.cbn, unit) },
-    { key: "receipts", label: "Reçu", get: (r) => r.receipts, num: true, render: (r) => (r.receipts === null ? "" : fmtQty(r.receipts, unit)) },
+    { key: "receipts", label: "Quantité reçue", get: (r) => r.receipts, num: true, render: (r) => (r.receipts === null ? "" : fmtQty(r.receipts, unit)) },
     { key: "pdp", label: "PDP éclaté", get: (r) => r.pdp, num: true, render: (r) => fmtQty(r.pdp, unit) },
     { key: "real", label: "Conso réelle", get: (r) => r.real, num: true, render: (r) => (r.real === null ? "" : fmtQty(r.real, unit)) },
     { key: "bias", label: "Écart %", get: (r) => r.bias, num: true, export: "number", render: (r) => (r.bias === null ? "" : `${r.bias > 0 ? "+" : ""}${r.bias} %`) },
@@ -127,13 +127,13 @@ export function ArticleCharts({ data }: { data: ProjectionResponse }) {
           <Legend {...LEGEND} />
           {pastArea}
           {today && leadEnd && <ReferenceArea x1={today} x2={leadEnd} fill="var(--brand)" fillOpacity={0.08} label={<ViewBoxLabel text="délai fournisseur" dy={28} muted />} />}
-          <Area type="monotone" dataKey="stock" name="Stock projeté (Appro.)" stroke="var(--s-stock-sim)" strokeWidth={2.2} fill="var(--s-stock-sim)" fillOpacity={0.1} dot={false} activeDot={{ r: 4 }} />
+          <Area type="monotone" dataKey="stock" name="Stock projeté" stroke="var(--s-stock-sim)" strokeWidth={2.2} fill="var(--s-stock-sim)" fillOpacity={0.1} dot={false} activeDot={{ r: 4 }} />
           <Line type="monotone" dataKey="target" name="Stock cible" stroke="var(--s-target)" strokeWidth={1.5} strokeDasharray="2 4" dot={false} activeDot={false} />
           {hasShortage && <Bar dataKey="shortage" name="Manque cumulé" fill="var(--s-shortage)" fillOpacity={0.8} maxBarSize={22} radius={[0, 0, 3, 3]} />}
           <ReferenceLine y={0} stroke="var(--border-strong)" />
           {todayLine}
           {today && <ReferenceLine x={today} stroke="none" label={<ViewBoxLabel text="Aujourd'hui" dy={14} />} />}
-          {orderDue && <ReferenceDot x={orderDue} y={0} r={0} shape={<OrderDueMarker text={`Commande à placer avant le ${fmtDate(data.kpis.order_due_date ?? "")}`} sub={`${data.kpis.order_due_supplier_id ?? ""} · ${fmtQty(data.kpis.order_due_qty ?? 0, unit)} · livraison ${fmtDate(data.kpis.order_due_delivery_date ?? "")}`} late={data.kpis.order_due_late} />} />}
+          {orderDue && <ReferenceDot x={orderDue} y={0} r={0} shape={<OrderDueMarker text={`À commander au plus tard le ${fmtDate(data.kpis.order_due_date ?? "")}${data.kpis.order_due_late ? " !" : ""}`} sub={`${data.kpis.order_due_supplier_id ?? ""}${(() => { const n = data.suppliers.find((s) => s.supplier_id === data.kpis.order_due_supplier_id)?.supplier_name; return n ? ` · ${n}` : ""; })()} · ${fmtQty(data.kpis.order_due_qty ?? 0, unit)} · livraison ${fmtDate(data.kpis.order_due_delivery_date ?? "")}${data.kpis.order_due_off_standard ? " ◇" : ""}`} late={data.kpis.order_due_late} />} />}
           {stockout && <ReferenceDot x={stockout} y={0} r={5} fill="var(--critical)" stroke="var(--bg-elev)" strokeWidth={2} label={{ value: `rupture ${fmtDate(data.kpis.first_stockout_plan ?? "")}`, position: "top", fontSize: 11, fill: "var(--critical-fg)", fontWeight: 600 }} />}
         </ComposedChart>
       </ResponsiveContainer>
@@ -153,11 +153,11 @@ export function ArticleCharts({ data }: { data: ProjectionResponse }) {
           <Legend {...LEGEND} />
           {pastArea}
           <ReferenceLine y={0} stroke="var(--border-strong)" />
-          <Bar dataKey="firm" name="Ferme ERP" stackId="in" fill="var(--s-firm)" maxBarSize={22} />
-          <Bar dataKey="plan" name="Appro. saisi" stackId="in" fill="url(#chart-hatch)" maxBarSize={22} />
+          <Bar dataKey="firm" name="Ordre ferme" stackId="in" fill="var(--s-firm)" maxBarSize={22} />
+          <Bar dataKey="plan" name="Quantité à retenir (saisie)" stackId="in" fill="url(#chart-hatch)" maxBarSize={22} />
           <Bar dataKey="cbn" name="Proposition CBN" stackId="in" fill="var(--s-proposal)" maxBarSize={22} radius={[3, 3, 0, 0]} />
           <Bar dataKey="demand" name="Besoin" stackId="out" fill="var(--s-demand)" fillOpacity={0.55} maxBarSize={22} radius={[0, 0, 3, 3]} />
-          <Line type="monotone" dataKey="receipts" name="Reçu (passé)" stroke="var(--s-receipt)" strokeWidth={2} dot={{ r: 3.5, fill: "var(--s-receipt)", stroke: "var(--bg-elev)", strokeWidth: 1.5 }} activeDot={{ r: 5 }} connectNulls={false} />
+          <Line type="monotone" dataKey="receipts" name="Quantité reçue (passé)" stroke="var(--s-receipt)" strokeWidth={2} dot={{ r: 3.5, fill: "var(--s-receipt)", stroke: "var(--bg-elev)", strokeWidth: 1.5 }} activeDot={{ r: 5 }} connectNulls={false} />
           {todayLine}
         </ComposedChart>
       </ResponsiveContainer>
@@ -195,7 +195,7 @@ export function ArticleCharts({ data }: { data: ProjectionResponse }) {
           <ReferenceLine y={a.alert_yellow_days} stroke="var(--warning)" strokeOpacity={0.5} />
           <ReferenceLine y={a.coverage_target_days} stroke="var(--fg-muted)" strokeDasharray="2 4" />
           <ReferenceLine y={a.overstock_days} stroke="var(--fg-muted)" strokeOpacity={0.5} />
-          <Line type="stepAfter" dataKey="cov" name="Couverture Appro." stroke="var(--s-stock-sim)" strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />
+          <Line type="stepAfter" dataKey="cov" name="Couverture projetée" stroke="var(--s-stock-sim)" strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />
           {todayLine}
         </ComposedChart>
       </ResponsiveContainer>
@@ -244,7 +244,7 @@ function AllTooltip({ active, label, rows, unit }: { active?: boolean; label?: s
       <div className="t">{r.label}{r.current ? " · aujourd'hui" : r.past ? " · passé" : ""}</div>
       {line("Stock projeté", r.stock)}{line("Stock cible", r.target)}{r.shortage < 0 && line("Manque cumulé", r.shortage)}
       <div className="sep" />
-      {line("Besoin", r.demand)}{r.firm > 0 && line(r.past ? "Ferme (commandé)" : "Ferme (restant)", r.firm)}{r.plan > 0 && line("Appro. saisi", r.plan)}{r.cbn > 0 && line("Proposition CBN", r.cbn)}{r.receipts !== null && r.receipts > 0 && line("Reçu", r.receipts)}
+      {line("Besoin", r.demand)}{r.firm > 0 && line(r.past ? "Ordre ferme (commandé)" : "Ordre ferme (restant)", r.firm)}{r.plan > 0 && line("Quantité à retenir (saisie)", r.plan)}{r.cbn > 0 && line("Proposition CBN", r.cbn)}{r.receipts !== null && r.receipts > 0 && line("Quantité reçue", r.receipts)}
       <div className="sep" />
       {line("PDP éclaté", r.pdp)}{r.real !== null && line("Conso réelle", r.real)}{r.bias !== null && <div className="r"><span>Écart</span><b style={{ color: Math.abs(r.bias) > 15 ? "var(--critical-fg)" : undefined }}>{r.bias > 0 ? "+" : ""}{r.bias} %</b></div>}
       <div className="sep" />

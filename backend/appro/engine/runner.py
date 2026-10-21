@@ -209,7 +209,8 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         horizon_slice = slice(i_as_of, n)
         typed = int(sum(int(l.plan_typed[i_as_of:].sum()) for l in lanes))
         ignored_days = int(sum(int(l.orders_ignored[i_as_of:].sum()) for l in lanes))
-        refused = sum(1 for f in flags_by_article.get(aid, []) if f.kind == "proposal_refused")
+        # refusals dated before today have expired : no proposal is ever placed in the past
+        refused = sum(1 for f in flags_by_article.get(aid, []) if f.kind == "proposal_refused" and f.date >= as_of)
         price = dataset.prices.get(aid)
         # next firm delivery expected (ERP, not ignored) and first order to place (CBN), with their supplier
         firm_next = sorted((o for l in lanes for o in l.orders
@@ -247,6 +248,8 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "order_due_supplier_name": supplier_names.get(order_due.supplier_id or "", "") if order_due else None,
             "order_due_qty": float(order_due.qty) if order_due else None,
             "order_due_late": bool(order_due and (order_due.urgent or order_due.order_date < as_of)),
+            "order_due_off_standard": bool(order_due and order_due.off_standard),
+            "order_due_floor": bool(order_due and order_due.floor),
             "init_date": snap_date.isoformat(),
             "stock_as_of_erp": float(erp.stock[i_as_of]),
             "stock_as_of_plan": float(plan_proj.stock[i_as_of]),

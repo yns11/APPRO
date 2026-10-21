@@ -1,7 +1,8 @@
+import { useMemo } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Params } from "./api";
 import type {
-  ActionOut, AdherenceResponse, AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, ConsumptionSourceOption, DeliveryPlanResponse, FixedRule, FlagOut, GridResponse, LinkRef, OrphanRow, ParamDoc, ParamOverrideOut,
+  ActionOut, AdherenceResponse, AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, ConsumptionSourceOption, DeliveryPlanResponse, FixedRule, FlagOut, GridResponse, HelpPage, HelpPageSummary, LinkRef, OrphanRow, ParamDoc, ParamOverrideOut,
   FlowsResponse, PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, PlantCalendar, SearchResponse, ProgramImpactResponse, ProgramRef, ProjectionResponse, RefRow, RefTableInfo, SupplierDetail, SupplierRef, SyncStatus, WeeklyParamsResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -73,6 +74,11 @@ export const useWeeklyParams = (articleId: string | null) => useQuery({
 export const useArticles = (planner?: string | null) => useQuery({ queryKey: ["ref-articles", planner], queryFn: () => api.get<ArticleRef[]>("/api/reference/articles", { planner }), staleTime: 300_000 });
 export const useLinks = (articleId?: string, supplierId?: string) => useQuery({ queryKey: ["ref-links", articleId ?? null, supplierId ?? null], queryFn: () => api.get<LinkRef[]>("/api/reference/links", { article_id: articleId, supplier_id: supplierId }), staleTime: 300_000 });
 export const useSuppliers = () => useQuery({ queryKey: ["ref-suppliers"], queryFn: () => api.get<SupplierRef[]>("/api/reference/suppliers"), staleTime: 300_000 });
+/** ``supplier_id → name`` for every supplier of the reference (the screens show the code **and** the name everywhere). */
+export function useSupplierNames(): Map<string, string> {
+  const q = useSuppliers();
+  return useMemo(() => new Map((q.data ?? []).map((s) => [s.supplier_id, s.name])), [q.data]);
+}
 export const useSupplier = (supplierId: string | undefined) => useQuery({ queryKey: ["supplier", supplierId], enabled: !!supplierId, staleTime: 30_000, queryFn: () => api.get<SupplierDetail>(`/api/suppliers/${encodeURIComponent(supplierId!)}`) });
 export const usePrograms = () => useQuery({ queryKey: ["ref-programs"], queryFn: () => api.get<ProgramRef[]>("/api/reference/programs"), staleTime: 300_000 });
 export const useRefTables = () => useQuery({ queryKey: ["ref-tables"], queryFn: () => api.get<RefTableInfo[]>("/api/reference/tables") });
@@ -90,6 +96,10 @@ export const usePdpVersions = () => useQuery({ queryKey: ["pdp-versions"], query
 export const useAudit = (params?: Params) => useQuery({ queryKey: ["audit", params], queryFn: () => api.get<AuditOut[]>("/api/entries/audit", params) });
 /** The undo journal (7 days) ; ``mine`` = the caller's own actions. */
 export const useActions = (params?: Params) => useQuery({ queryKey: ["actions", params], queryFn: () => api.get<ActionOut[]>("/api/actions", params), staleTime: 10_000 });
+
+/** The in-app pense-bête : pages and one page (the text saved by an administrator, else the shipped one). */
+export const useHelpPages = () => useQuery({ queryKey: ["help-pages"], queryFn: () => api.get<HelpPageSummary[]>("/api/help/pages"), staleTime: 300_000 });
+export const useHelpPage = (slug: string | undefined) => useQuery({ queryKey: ["help-page", slug], enabled: !!slug, queryFn: () => api.get<HelpPage>(`/api/help/pages/${encodeURIComponent(slug!)}`), staleTime: 300_000 });
 
 /** Paramètres › Données */
 export const useSyncStatus = (refetchMs = 120_000) => useQuery({ queryKey: ["data-sync"], queryFn: () => api.get<SyncStatus>("/api/data/sync"), staleTime: 60_000, refetchInterval: refetchMs });

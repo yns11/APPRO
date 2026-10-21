@@ -3,10 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Redo2, Trash2, Undo2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useActions, useAdjustments, useAudit, useFlags, usePlanCells, useWrite } from "@/lib/queries";
+import { useActions, useAdjustments, useAudit, useFlags, usePlanCells, useSupplierNames, useWrite } from "@/lib/queries";
 import { flashCells } from "@/lib/actionsBus";
 import { usePerimeter } from "@/state/PerimeterContext";
-import { Badge, Button, Card, ErrorBox, SkeletonBlock, Tabs, useToast } from "@/components/ui";
+import { Badge, Button, Card, ErrorBox, SkeletonBlock, SupplierLink, Tabs, useToast } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
 import { fmtDate, fmtDateTime, fmtQty } from "@/lib/format";
 import type { ActionOut, ActionResultOut, AdjustmentOut, AuditOut, FlagOut, PlanCellOut } from "@/lib/types";
@@ -36,18 +36,19 @@ export default function EntriesPage() {
     qc.invalidateQueries({ queryKey: ["actions"] });
   });
   const asOf = config?.as_of ?? "";
+  const names = useSupplierNames();
   const initDate = config?.init_date ?? "";
   const delCol = <T extends { id: string }>(path: string, title: string): Column<T> => ({ key: "del", label: "", get: () => "", filter: "none", sortable: false, render: (r) => rights.canWrite ? <Button size="sm" variant="ghost" title={title} onClick={(e) => { e.stopPropagation(); del.mutate(`${path}/${r.id}`); }}><Trash2 /></Button> : null });
 
   const planCols = useMemo<Column<PlanCellOut>[]>(() => [
     article<PlanCellOut>(),
-    { key: "supplier", label: "Fournisseur", get: (c) => c.supplier_id, filter: "select" },
+    { key: "supplier", label: "Fournisseur", get: (c) => `${c.supplier_id} ${names.get(c.supplier_id) ?? ""}`, filter: "select", title: "Code et nom : filtre sur les deux", render: (c) => <SupplierLink id={c.supplier_id} name={names.get(c.supplier_id)} /> },
     { key: "date", label: "Date", get: (c) => c.date, render: (c) => <>{fmtDate(c.date)}{asOf && c.date < asOf && <span className="sub subtle">expirée</span>}</> },
     { key: "qty", label: "Quantité", get: (c) => c.qty, num: true, render: (c) => <b>{fmtQty(c.qty)}</b> },
     { key: "expr", label: "Saisie", get: (c) => c.expression, render: (c) => <span className="mono small">{c.expression}</span> },
     { key: "note", label: "Commentaire", get: (c) => c.note },
     who<PlanCellOut>(), delCol<PlanCellOut>("/api/entries/plan", "Supprimer : retour à l'ERP"),
-  ], [asOf]);
+  ], [asOf, names]);
   const adjCols = useMemo<Column<AdjustmentOut>[]>(() => [
     article<AdjustmentOut>(),
     { key: "date", label: "Date", get: (c) => c.date, render: (c) => fmtDate(c.date) },
@@ -59,12 +60,12 @@ export default function EntriesPage() {
   const flagCols = useMemo<Column<FlagOut>[]>(() => [
     article<FlagOut>(),
     { key: "kind", label: "Type", get: (f) => FLAG_LABELS[f.kind], filter: "select", render: (f) => <Badge tone={f.kind === "order_ignored" ? "critical" : f.kind === "proposal_refused" ? "warning" : "neutral"}>{FLAG_LABELS[f.kind]}</Badge> },
-    { key: "supplier", label: "Fournisseur", get: (f) => f.supplier_id, filter: "select" },
-    { key: "date", label: "Date", get: (f) => f.date, render: (f) => <>{fmtDate(f.date)}{f.kind === "proposal_refused" && <span className="sub subtle">ce jour seulement</span>}</> },
+    { key: "supplier", label: "Fournisseur", get: (f) => `${f.supplier_id} ${names.get(f.supplier_id) ?? ""}`, filter: "select", title: "Code et nom : filtre sur les deux", render: (f) => <SupplierLink id={f.supplier_id} name={names.get(f.supplier_id)} /> },
+    { key: "date", label: "Date", get: (f) => f.date, render: (f) => <>{fmtDate(f.date)}{f.kind === "proposal_refused" && <span className="sub subtle">{asOf && f.date < asOf ? "expirée (plus affichée dans le tableau)" : "ce jour seulement"}</span>}</> },
     { key: "qty", label: "Quantité", get: (f) => f.qty, num: true, render: (f) => f.kind !== "order_ignored" ? fmtQty(f.qty) : <span className="subtle">–</span> },
     { key: "note", label: "Détail", get: (f) => f.note, render: (f) => <span className="subtle small">{f.note}</span> },
     who<FlagOut>(), delCol<FlagOut>("/api/entries/flags", "Rétablir"),
-  ], []);
+  ], [asOf, names]);
   const actionCols = useMemo<Column<ActionOut>[]>(() => {
     const rows = actions.data ?? [];
     // « annuler jusqu'ici » : the newer applied actions of the same user go first
@@ -105,7 +106,7 @@ export default function EntriesPage() {
 
   return (
     <div className="page">
-      <div className="page-header"><div className="title"><h1>Saisies & journal</h1><p>Les saisies se font dans le tableau (lignes Appro. et Ajustement) ; cette page les liste et les journalise.</p></div></div>
+      <div className="page-header"><div className="title"><h1>Saisies & journal</h1><p>Les saisies se font dans le tableau (lignes Quantité à retenir et Ajustement) ; cette page les liste et les journalise.</p></div></div>
       <Tabs value={tab} onChange={setTab} tabs={[
         { id: "plan", label: "Cellules du plan", count: plan.data?.length }, { id: "adjustments", label: "Ajustements", count: adjustments.data?.length },
         { id: "flags", label: "Commandes ignorées & CBN refusées", count: flags.data?.length },
@@ -115,7 +116,7 @@ export default function EntriesPage() {
       {tab === "actions" && block(actions, actionCols, (a) => a.id, "Aucune action depuis 7 jours")}
       {tab === "plan" && block(plan, planCols, (c) => c.id, "Aucune cellule saisie : le plan suit l'ERP partout")}
       {tab === "adjustments" && block(adjustments, adjCols, (c) => c.id, "Aucun ajustement saisi")}
-      {tab === "flags" && block(flags, flagCols, (f) => f.id, "Aucune commande ignorée ni proposition refusée", "Cliquer une cellule Ferme ou Proposition CBN du tableau.")}
+      {tab === "flags" && block(flags, flagCols, (f) => f.id, "Aucune commande ignorée ni proposition refusée", "Cliquer une cellule Ordre ferme ou Proposition CBN du tableau.")}
       {tab === "audit" && block(audit, auditCols, (e) => String(e.id), "Journal vide")}
     </div>
   );

@@ -124,7 +124,7 @@ def supplier_detail(supplier_id: str, ctx: AppContext = Depends(ctx_dep), sessio
     return json_response(S.SupplierDetail(
         supplier=S.SupplierRef(supplier_id=sup.supplier_id, name=sup.name, country=sup.country, contact=sup.contact,
                                delivery_weekdays=",".join(str(d) for d in sorted(sup.delivery_weekdays)),
-                               lead_time_days=sup.lead_time_days, active=sup.active),
+                               lead_time_days=sup.lead_time_days, active=sup.active, strict_days=sup.strict_days),
         as_of=result.as_of, articles=articles, late=mine(flows.late), in_transit=mine(flows.in_transit),
         to_process=mine(flows.to_process), to_validate=mine(flows.to_validate), to_order=mine(flows.to_order),
         upcoming=upcoming[:200],
@@ -132,7 +132,9 @@ def supplier_detail(supplier_id: str, ctx: AppContext = Depends(ctx_dep), sessio
               "critical": sum(1 for r in articles if r.severity == "critical"),
               "late_orders": len(mine(flows.late)), "late_qty": float(sum(r.backlog for r in mine(flows.late))),
               "in_transit": len(mine(flows.in_transit)), "to_process": len(mine(flows.to_process)),
-              "to_validate": len(mine(flows.to_validate)), "urgent_proposals": len(mine(flows.to_order)),
+              "to_validate": len(mine(flows.to_validate)),
+              "to_order": sum(1 for p in mine(flows.to_order) if not p.ignored),
+              "urgent_proposals": sum(1 for p in mine(flows.to_order) if p.urgent and not p.ignored),
               "upcoming_orders": len(upcoming), "upcoming_qty": float(sum(o.qty_open for o in upcoming))}).model_dump(mode="json"))
 
 

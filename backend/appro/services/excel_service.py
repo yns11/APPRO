@@ -70,12 +70,12 @@ QTY_FMT = "#,##0.###"
 SIM_HEADER_ROWS = 3       # label / period start / period end
 SIM_FIRST_COL = 5         # E
 COL_ARTICLE, COL_DESIGNATION, COL_VARIABLE, COL_REF = 1, 2, 3, 4
-LANE_ROWS = [("orders_firm", "Ferme", "value"), ("orders_forecast", "Prévisionnel", "value"),
-             ("receipts", "Reçu", "value"), ("plan", "Appro.", "input"), ("cbn", "Proposition CBN", "value")]
+LANE_ROWS = [("orders_firm", "Ordre ferme", "value"), ("orders_forecast", "Prévisionnel EDI", "value"),
+             ("receipts", "Quantité reçue", "value"), ("plan", "Quantité à retenir", "input"), ("cbn", "Proposition CBN", "value")]
 TAIL_ROWS = [("adjustments", "Ajustement", "input"),
-             ("stock_erp", "Projeté ERP", "stock"), ("stock_plan", "Projeté Appro.", "stock"),
-             ("shortage_plan", "Manque (plan, besoin non servi)", "formula"), ("target", "Stock cible", "formula"),
-             ("coverage", "Couverture Appro. (périodes ouvrées)", "formula"), ("cum_demand", "Besoin cumulé (aide au calcul)", "helper"),
+             ("stock_erp", "Projeté Ferme", "stock"), ("stock_plan", "Stock projeté", "stock"),
+             ("shortage_plan", "Manque (besoin non servi)", "formula"), ("target", "Stock cible", "formula"),
+             ("coverage", "Couverture (périodes ouvrées)", "formula"), ("cum_demand", "Besoin cumulé (aide au calcul)", "helper"),
              ("wd", "Période ouvrée (aide au calcul)", "helper"), ("wd_cum", "Périodes ouvrées cumulées (aide au calcul)", "helper")]
 
 
@@ -174,8 +174,8 @@ def _parameters_sheet(ws, result: MrpResult, granularity: str, meta: dict[str, A
     ws.cell(r, 1, "Mode d'emploi").font = BOLD
     notes = [
         "Vide, c'est l'ERP. Un chiffre, c'est votre plan. Le stock se recalcule.",
-        "SIMULATION : les lignes Appro. (une par fournisseur) et Ajustement sont les saisies (fond jaune ; bleu = cellule déjà saisie dans l'application) ; les autres lignes se recalculent.",
-        "Plan : la cellule est préremplie avec la valeur ERP (ligne Ferme) ; modifier la valeur = décaler, réduire, fractionner (taper sur plusieurs jours), 0 = rien attendu ; une valeur égale au Ferme = pas de saisie.",
+        "SIMULATION : les lignes Quantité à retenir (une par fournisseur) et Ajustement sont les saisies (fond jaune ; bleu = cellule déjà saisie dans l'application) ; les autres lignes se recalculent.",
+        "Quantité à retenir : la cellule est préremplie avec la valeur ERP (ligne Ordre ferme) ; modifier la valeur = décaler, réduire, fractionner (taper sur plusieurs jours), 0 = rien attendu ; une valeur égale à l'ordre ferme = pas de saisie.",
         "Ajustement : quantité signée, toute date (une date passée corrige le stock de référence).",
         "Réimport dans l'application (Imports / exports) : le plan et les ajustements des articles présents dans le classeur remplacent ceux de l'application (granularité jour uniquement).",
         "Stock net = stock physique − manque (backlog) ; un stock physique n'est jamais négatif.",
@@ -390,7 +390,7 @@ def alerts_workbook(result: MrpResult, ids: list[str] | None = None) -> bytes:
     return buf.getvalue()
 
 
-PLAN_HEADERS = ["Article", "Désignation", "Fournisseur", "Date", "Ferme ERP", "Appro.", "Écart", "Proposition CBN", "Saisie"]
+PLAN_HEADERS = ["Article", "Désignation", "Fournisseur", "Date", "Ordre ferme ERP", "Quantité à retenir", "Écart", "Proposition CBN", "Saisie"]
 
 
 def plan_workbook(result: MrpResult, ids: list[str] | None = None) -> bytes:
@@ -584,9 +584,9 @@ def parse_simulation_workbook(content: bytes) -> tuple[dict[str, list[ParsedCell
         base = label.split(" · ")[0]
         supplier = str(r[COL_REF - 1] or "").strip() or None
         out.setdefault(aid, [])
-        if base == "Ferme":
+        if base in ("Ordre ferme", "Ferme"):              # « Ferme » : workbooks exported by an earlier version
             firm_by_lane[(aid, supplier or "")] = r
-        elif base in ("Appro.", "Plan"):      # « Plan » : workbooks exported by an earlier version
+        elif base in ("Quantité à retenir", "Appro.", "Plan"):      # « Appro. », « Plan » : earlier versions
             firm = firm_by_lane.get((aid, supplier or ""))
             for c, d in day_cols.items():
                 v = _num(r[c] if c < len(r) else None)

@@ -1,15 +1,28 @@
-"""Order proposals (« Proposition CBN ») : floor inside the lead time, full target after it,
-tolerance, lot sizing, delivery caps, quotas and refusals.
+"""Order proposals (« Proposition CBN ») : order deadline with a margin, standard delivery day or a
+tenable working day before the need (« hors jour standard », ◇), floor on the need day when nothing is
+tenable, full target otherwise, tolerance, lot sizing, delivery caps, quotas and refusals.
+
+Vocabulary (docs/regles_metier.md § 7) :
+
+* **date limite** of a delivery = delivery − (lead time − margin) working days : the last day the order
+  can leave (``EngineParams.lead_margin_days`` [1], a common rule ; 0 = strict lead time) ;
+* a delivery is **tenable** when its date limite is today or later ;
+* the **standard day** of a need is the last standard delivery weekday of the supplier on or before the
+  need (the needs up to the next delivery are grouped on it).
 
 Algorithm (per article, on the *plan* stock, scanned day by day from tomorrow)::
 
-    for each day d:
-        delivery day of each eligible supplier = its previous allowed day (« earlier » shift), or the
-            next one when that day is refused or full ; urgent when the order should already be placed
-            (delivery before as_of + lead time, working days, inclusive)
-        inside the lead time (every supplier urgent) : only a **shortage** triggers a proposal, sized to
-            what avoids it (floor) – the stock is not brought back to the target ;
-        after it : a stock under (100 − tolerance) % of the target triggers a proposal that fills the
+    for each day d with a shortage or a stock under the trigger:
+        delivery day of each eligible supplier :
+            the standard day when it is tenable and free (not refused, not full) ;
+            else, unless the supplier is on strict days, the first tenable working day on or before d
+                that is free (◇ hors jour standard) ;
+            else the floor day : d itself (flexible supplier) or the standard day (strict supplier),
+                urgent because its date limite is already past ;
+            a refused or full day makes the need slide : the next day is evaluated the same way.
+        every supplier urgent : only a **shortage** triggers a proposal, sized to what avoids it (floor) –
+            the stock is not brought back to the target ;
+        otherwise : a stock under (100 − tolerance) % of the target triggers a proposal that fills the
             stock back to 100 % of the target ;
         qty = round_up(max(need, MOQ), pack) then truncated by the delivery / weekly caps of the link ;
             a full day never receives more, the rest slides to the next delivery day ; with quotas the
@@ -73,7 +86,9 @@ class _Link:
     supplier_id: str | None
     lead: int
     weekdays: frozenset[int] | None
-    tenable: dt.date                 # first delivery day whose order can still be placed today
+    tenable: dt.date                 # first delivery day whose order can still be placed today (margin included)
+    strict: bool                     # deliveries on the standard weekdays only (no ◇)
+    order_lead: int                  # lead time − margin, working days : delivery − order_lead = date limite
     cap_day: float | None
     cap_week: float | None
     pack: float
@@ -115,35 +130,70 @@ class _Link:
         return r < (self.pack if self.pack else EPS)
 
 
-def _delivery_day(st: _Link, candidate: dt.date, earliest: dt.date, latest: dt.date, calendar: WorkCalendar,
-                  index: DayIndex, with_constraints: bool = True) -> dt.date | None:
-    """Delivery day for a need on ``candidate`` : the previous allowed day of the supplier (needs are
-    grouped on the delivery day before them), unless that day is refused or full, in which case the
-    first allowed, free day **after** the candidate (the need slides, never earlier)."""
-    def base(d: dt.date) -> bool:
+def _delivery_day(st: _Link, need: dt.date, earliest: dt.date, latest: dt.date, calendar: WorkCalendar, index: DayIndex,
+                  short_between: Callable[[dt.date, dt.date], bool], with_constraints: bool = True) -> tuple[dt.date | None, bool]:
+    """Delivery day for a need on ``need`` and whether it is « hors jour standard » (◇).
+
+    1. the **standard day** (last standard weekday of the supplier on or before the need) when it is
+       tenable and free (not refused, not full) ;
+    2. the standard day is not tenable (or there is none before the need) : when nothing runs out before
+       the **next standard delivery** that is tenable, the need simply **waits for it** (a dip under the
+       target is not worth an off-day delivery) ;
+    3. otherwise, unless the supplier is on strict days : the **first tenable working day** on or before
+       the need that is free – ◇ ;
+    4. nothing tenable before the need : the **floor day**, urgent – the need day itself (or the last
+       working day before it) for a flexible supplier, the standard day for a strict one ;
+    5. a refused or full day never receives a proposal : the need **slides** to the next day, evaluated
+       the same way (never earlier)."""
+    one = dt.timedelta(days=1)
+
+    def standard(d: dt.date) -> bool:
         return calendar.is_open_weekday(d, st.weekdays)
 
     def ok(d: dt.date) -> bool:
-        if not base(d):
-            return False
         if not with_constraints:
             return True
         j = index.offset(d)
         return d not in st.refused and j is not None and not st.full(j)
 
-    d = candidate
-    while d >= earliest:
-        if base(d):
-            if ok(d):
+    def last_before(d: dt.date, test) -> dt.date | None:
+        while d >= earliest:
+            if test(d):
                 return d
-            break
-        d -= dt.timedelta(days=1)
-    d = max(candidate, earliest)
-    while d <= latest:
-        if ok(d):
-            return d
-        d += dt.timedelta(days=1)
-    return None
+            d -= one
+        return None
+
+    def next_standard(d: dt.date) -> dt.date | None:
+        d += one
+        while d <= latest:
+            if standard(d) and d >= st.tenable and ok(d):
+                return d
+            d += one
+        return None
+
+    day = max(need, earliest)
+    while day <= latest:
+        std = last_before(day, standard)
+        if std is not None and std >= st.tenable:          # 1. standard day, tenable
+            if ok(std):
+                return std, False
+        else:
+            nxt = next_standard(day)
+            if nxt is not None and not short_between(need, nxt):
+                return nxt, False                           # 2. nothing runs out before the next standard delivery
+            if not st.strict:
+                d = max(st.tenable, earliest)               # 3. ◇ : first tenable working day before the need
+                while d <= day:
+                    if calendar.is_working_day(d) and ok(d):
+                        return d, not standard(d)
+                    d += one
+                floor_day = last_before(day, calendar.is_working_day)   # 4. floor on the need day
+                if floor_day is not None and ok(floor_day):
+                    return floor_day, not standard(floor_day)
+            elif std is not None and ok(std):               # 4. strict supplier : floor on the standard day
+                return std, False
+        day += one                                          # 5. refused or full : the need slides
+    return None, False
 
 
 def generate_proposals(
@@ -187,6 +237,7 @@ def generate_proposals(
     earliest_date, latest_date = index.dates[earliest_idx], index.dates[last_idx]
     tol = max(float(params.target_tolerance_pct), 0.0) / 100.0
     trigger = target * (1.0 - tol)
+    margin = max(int(params.lead_margin_days or 0), 0)
     today = as_of if calendar.is_working_day(as_of) else calendar.next_working_day(as_of)
     week_of = index.week_labels
     states: dict[str | None, _Link] = {}
@@ -194,14 +245,21 @@ def generate_proposals(
         sid = link.supplier_id if link else None
         sup = suppliers.get(sid) if sid else None
         lead = link.lead_time(suppliers) if link else 0
+        order_lead = max(lead - margin, 0)
         states[sid] = _Link(
             link=link, supplier_id=sid, lead=lead, weekdays=sup.delivery_weekdays if sup else None,
-            tenable=calendar.add_working_days(today, lead), cap_day=link.max_qty_per_delivery if link else None,
+            tenable=calendar.add_working_days(today, order_lead), strict=bool(sup.strict_days) if sup else False,
+            order_lead=order_lead, cap_day=link.max_qty_per_delivery if link else None,
             cap_week=link.max_qty_per_week if link else None, pack=float(link.pack_qty) if link else 0.0,
             moq=float(link.moq) if link else 0.0,
             plan=(lane_plan or {}).get(sid, np.zeros(n)), proposed=np.zeros(n),
             refused=(blocked or {}).get(None, set()) | ((blocked or {}).get(sid, set()) if sid else set()),
             week_of=week_of)
+    def short_between(a: dt.date, b: dt.date) -> bool:
+        """A shortage on any day of ``[a, b)`` in the current projection."""
+        ia, ib = index.offset(a), index.offset(b)
+        return bool(shortage[0 if ia is None else ia:n if ib is None else ib].sum() > EPS)
+
     seq = seq_start
     i = earliest_idx
     while i <= last_idx:
@@ -211,16 +269,16 @@ def generate_proposals(
             i += 1
             continue
         # ---- one delivery day per eligible supplier (own lead time, delivery days, refusals, caps)
-        parts = []   # (state, share, delivery day, free of any refusal / cap, urgent, pushed by a full day)
+        parts = []   # (state, share, delivery day, free of any refusal / cap, urgent, pushed by a full day, off standard)
         for link, share in eligible_suppliers(links, article.sourcing_policy):
             st = states[link.supplier_id if link else None]
-            delivery = _delivery_day(st, index.dates[i], earliest_date, latest_date, calendar, index)
+            delivery, off = _delivery_day(st, index.dates[i], earliest_date, latest_date, calendar, index, short_between)
             if delivery is None:
                 continue
-            free = _delivery_day(st, index.dates[i], earliest_date, latest_date, calendar, index, with_constraints=False)
+            free, _ = _delivery_day(st, index.dates[i], earliest_date, latest_date, calendar, index, short_between, with_constraints=False)
             j_free = index.offset(free) if free is not None else None
             by_cap = free is not None and delivery != free and free not in st.refused and j_free is not None and st.full(j_free)
-            parts.append((st, share, delivery, delivery == free, delivery < st.tenable, by_cap))
+            parts.append((st, share, delivery, delivery == free, delivery < st.tenable, by_cap, off))
         if not parts:
             break  # no feasible delivery day inside the horizon
         chosen = [x for x in parts if x[3]] or parts
@@ -249,12 +307,12 @@ def generate_proposals(
         before = float(stock[k])
         # ---- split, lot-size, cap ; a truncated share goes to the other suppliers of the quota
         wanted = {id(x[0]): need * x[1] / total_share for x in chosen}
-        lines: list[tuple[_Link, float, dt.date, int, float, float, str, bool]] = []
+        lines: list[tuple[_Link, float, dt.date, int, float, float, str, bool, bool]] = []
         for _pass in range(2):
             lines = []
             leftover = 0.0
             open_states = []
-            for st, share, delivery, _free, urgent, _pushed in chosen:
+            for st, share, delivery, _free, urgent, _pushed, off in chosen:
                 part = wanted[id(st)]
                 if part <= EPS:
                     continue
@@ -270,44 +328,48 @@ def generate_proposals(
                     leftover += max(0.0, part - placed)
                 else:
                     open_states.append(st)
-                lines.append((st, share / total_share, delivery, j, placed, part, which if capped else "", urgent))
+                lines.append((st, share / total_share, delivery, j, placed, part, which if capped else "", urgent, off))
             if leftover <= EPS or not open_states or _pass:
                 break
             extra_share = sum(x[1] for x in chosen if x[0] in open_states)
-            for st, share, _d, _f, _u, _p in chosen:
+            for st, share, _d, _f, _u, _p, _o in chosen:
                 if st in open_states:
                     wanted[id(st)] += leftover * share / extra_share
         if not lines:
             shortfalls.append(CapShortfall(index.dates[k], chosen[0][0].supplier_id, need))
             i = k + 1
             continue
-        for st, _s, _d, j, placed, _p, _w, _u in lines:
+        for st, _s, _d, j, placed, _p, _w, _u, _o in lines:
             proposed[j] += placed
             st.proposed[j] += placed
         if reproject is not None:
             proj = reproject(proposed)
             stock, shortage = proj.net, proj.shortage
         else:
-            for _st, _s, _d, j, placed, _p, _w, _u in lines:
+            for _st, _s, _d, j, placed, _p, _w, _u, _o in lines:
                 stock[j:] += placed
             shortage = np.maximum(-stock, 0.0)
         if shortage[k] > EPS and any(x[6] for x in lines):
             shortfalls.append(CapShortfall(index.dates[k], lines[0][0].supplier_id, float(shortage[k])))
         split = len(lines) > 1
-        for st, share, delivery, j, placed, part, cap_kind, urgent in lines:
-            order_date = calendar.add_working_days(delivery, -st.lead)
+        for st, share, delivery, j, placed, part, cap_kind, urgent, off in lines:
+            order_date = calendar.add_working_days(delivery, -st.order_lead)
+            deadline = (f"date limite {order_date.isoformat()} dépassée (délai {st.lead} j ouvrés"
+                        + (f", marge {margin} j" if margin else "") + "), commande à passer immédiatement")
             if floor:
                 reason = (f"Plancher : besoin non servi de {_fmt(need)} le {index.dates[k].isoformat()}, lot minimal pour l'éviter ; "
-                          f"délai fournisseur ({st.lead} j ouvrés) non tenable, commande à passer immédiatement")
+                          f"aucune livraison tenable avant le besoin, {deadline}")
             else:
                 reason = (f"Stock projeté {_fmt(before)} < {100 - tol * 100:.0f} % de la cible ({_fmt(trigger[k])}) le "
                           f"{index.dates[k].isoformat()} : retour à la cible {_fmt(target[k])}")
                 if urgent:
-                    reason += f" ; délai fournisseur ({st.lead} j ouvrés) non tenable, commande à passer immédiatement"
+                    reason += f" ; {deadline}"
+            if off:
+                reason += " ; hors jour standard (◇) : le jour de livraison habituel n'est plus tenable"
             if split:
                 reason += f" ; part {share * 100:.0f} % du quota ({_fmt(part)} sur {_fmt(need)})"
             if j > i:
-                reason += f" (besoin dès le {index.dates[i].isoformat()}, première livraison possible le {delivery.isoformat()})"
+                reason += f" (sous la cible dès le {index.dates[i].isoformat()}, livraison standard suivante le {delivery.isoformat()})"
             if cap_kind:
                 cap = st.cap_day if cap_kind == "livraison" else st.cap_week
                 reason += (f" ; plafond par {cap_kind} ({_fmt(cap or 0)}) atteint : {_fmt(placed)} livrés, "
@@ -323,7 +385,7 @@ def generate_proposals(
                 supplier_id=st.supplier_id, delivery_date=delivery, order_date=order_date, qty=float(placed),
                 net_requirement=float(max(part, 0.0)), reason=reason, urgent=urgent, lead_time_days=st.lead,
                 moq=st.moq, pack_qty=st.pack, projected_stock_before=before, projected_stock_after=float(stock[k]),
-                floor=floor, capped=bool(cap_kind)))
+                floor=floor, capped=bool(cap_kind), off_standard=bool(off)))
             seq += 1
         i = k + 1
     return merge_same_day(proposals), proposed, stock, shortfalls
@@ -345,6 +407,7 @@ def merge_same_day(proposals: list[Proposal]) -> list[Proposal]:
         cur.urgent = cur.urgent or p.urgent
         cur.floor = cur.floor and p.floor
         cur.capped = cur.capped or p.capped
+        cur.off_standard = cur.off_standard or p.off_standard
         cur.projected_stock_after = p.projected_stock_after
         if cur.reason.count(" ; ") < 2 and p.reason not in cur.reason:
             cur.reason = f"{cur.reason} ; {p.reason}"

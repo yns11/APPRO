@@ -112,6 +112,10 @@ class Access:
         if not self.is_manager:
             raise self._deny("les règles globales sont réservées aux managers et administrateurs")
 
+    def require_admin(self, what: str = "cette action est réservée aux administrateurs") -> None:
+        if not self.is_admin:
+            raise self._deny(what)
+
     def require_pdp(self) -> None:
         if not self.is_manager:
             raise self._deny("l'import du PDP est réservé aux managers et administrateurs")

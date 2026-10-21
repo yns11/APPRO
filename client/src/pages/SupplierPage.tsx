@@ -27,8 +27,8 @@ export default function SupplierPage() {
     art<SupplierArticleRow>(), planner<SupplierArticleRow>(),
     { key: "severity", label: "Statut", get: (a) => a.severity ?? "ok", filter: "select", render: (a) => <SeverityBadge severity={a.severity} /> },
     { key: "stock", label: "Stock à date", get: (a) => a.stock_at_date, num: true, render: (a) => <>{fmtQty(a.stock_at_date, a.unit)} <span className="subtle">{a.unit}</span></> },
-    { key: "cov", label: "Couverture Appro.", get: (a) => a.coverage_plan_days, num: true, render: (a) => a.coverage_plan_days === null ? <span className="subtle">–</span> : <Badge tone={a.coverage_plan_days <= 2 ? "critical" : a.coverage_plan_days <= 5 ? "warning" : "ok"}>{a.coverage_plan_days} j</Badge> },
-    { key: "stockout", label: "Rupture Appro.", get: (a) => a.first_stockout_plan ?? "", render: (a) => a.first_stockout_plan ? <Badge tone="critical">{fmtDate(a.first_stockout_plan)}</Badge> : <span className="subtle">–</span> },
+    { key: "cov", label: "Couverture projetée", get: (a) => a.coverage_plan_days, num: true, render: (a) => a.coverage_plan_days === null ? <span className="subtle">–</span> : <Badge tone={a.coverage_plan_days <= 2 ? "critical" : a.coverage_plan_days <= 5 ? "warning" : "ok"}>{a.coverage_plan_days} j</Badge> },
+    { key: "stockout", label: "Rupture projetée", get: (a) => a.first_stockout_plan ?? "", render: (a) => a.first_stockout_plan ? <Badge tone="critical">{fmtDate(a.first_stockout_plan)}</Badge> : <span className="subtle">–</span> },
     { key: "moq", label: "MOQ", get: (a) => a.moq, num: true, render: (a) => fmtQty(a.moq, a.unit) },
     { key: "pack", label: "UM", get: (a) => a.pack_qty, num: true, render: (a) => fmtQty(a.pack_qty, a.unit) },
     { key: "lead", label: "Délai (j ouvrés)", get: (a) => a.lead_time_days, num: true, title: "Délai effectif : valeur propre au lien, sinon celui du fournisseur (grisé)", render: (a) => a.lead_time_override === null ? <span className="inherited" title="Délai du fournisseur (hérité)">{a.lead_time_days}</span> : <b title="Délai spécifique au lien">{a.lead_time_days}</b> },
@@ -37,7 +37,7 @@ export default function SupplierPage() {
     { key: "cap_w", label: "Max / semaine", get: (a) => a.max_qty_per_week, num: true, render: (a) => a.max_qty_per_week === null ? <span className="subtle">–</span> : fmtQty(a.max_qty_per_week, a.unit) },
     { key: "open", label: "En-cours ferme", get: (a) => a.open_firm_qty, num: true, render: (a) => fmtQty(a.open_firm_qty, a.unit) },
     { key: "backlog", label: "En retard", get: (a) => a.backlog_qty, num: true, render: (a) => a.backlog_qty > 0 ? <span style={{ color: "var(--warning-fg)" }}>{fmtQty(a.backlog_qty, a.unit)}</span> : <span className="subtle">–</span> },
-    { key: "plan", label: "Appro. + CBN", get: (a) => a.planned_qty, num: true, render: (a) => <>{fmtQty(a.planned_qty, a.unit)}{a.urgent_count > 0 && <span className="sub" style={{ color: "var(--critical-fg)" }}>{a.urgent_count} urgent(e)</span>}</> },
+    { key: "plan", label: "Quantité à retenir + CBN", get: (a) => a.planned_qty, num: true, render: (a) => <>{fmtQty(a.planned_qty, a.unit)}{a.urgent_count > 0 && <span className="sub" style={{ color: "var(--critical-fg)" }}>{a.urgent_count} urgent(e)</span>}</> },
     { key: "active", label: "Lien actif", get: (a) => (a.active ? "oui" : "non"), filter: "select", render: (a) => <Badge tone={a.active ? "ok" : "neutral"}>{a.active ? "oui" : "non"}</Badge> },
   ], []);
   const backlogCols = useMemo<Column<BacklogRow>[]>(() => [
@@ -76,8 +76,9 @@ export default function SupplierPage() {
   ], []);
   const proposalCols = useMemo<Column<ProposalOut>[]>(() => [
     art<ProposalOut>(),
-    { key: "order", label: "À commander le", get: (p) => p.order_date, render: (p) => <span style={{ color: "var(--critical-fg)" }}>{fmtDate(p.order_date)}</span> },
-    { key: "delivery", label: "Livraison", get: (p) => p.delivery_date, render: (p) => fmtDate(p.delivery_date) },
+    { key: "order", label: "Au plus tard le", get: (p) => p.order_date, title: "Date limite de commande ; ! = dépassée", render: (p) => <span style={p.urgent ? { color: "var(--critical-fg)", fontWeight: 600 } : undefined}>{fmtDate(p.order_date)}{p.urgent ? " !" : ""}</span> },
+    { key: "delivery", label: "Livraison", get: (p) => p.delivery_date, render: (p) => <>{fmtDate(p.delivery_date)}{p.off_standard && <span className="sub" style={{ color: "var(--brand-fg)" }}>◇ hors jour standard</span>}</> },
+    { key: "ignored", label: "Ignorée", get: (p) => (p.ignored ? "oui" : "non"), filter: "select", render: (p) => p.ignored ? <Badge tone="neutral">ignorée</Badge> : <span className="subtle">–</span> },
     { key: "qty", label: "Quantité", get: (p) => p.qty, num: true, sum: true, unit: (p) => p.unit, render: (p) => <><b>{fmtQty(p.qty, p.unit)}</b><span className="sub">{p.floor ? "plancher" : ""}{p.capped ? " · plafonnée" : ""}</span></> },
     { key: "reason", label: "Motif", get: (p) => p.reason, render: (p) => <span className="small subtle" style={{ whiteSpace: "normal", maxWidth: 360, display: "block" }}>{p.reason}</span> },
   ], []);
@@ -91,7 +92,7 @@ export default function SupplierPage() {
     { id: "in_transit", label: "En transit", count: d?.in_transit.length },
     { id: "to_process", label: "À traiter", count: d?.to_process.length },
     { id: "to_validate", label: "À valider", count: d?.to_validate.length },
-    { id: "to_order", label: "À commander (urgent)", count: d?.to_order.length },
+    { id: "to_order", label: "À commander", count: d?.to_order.filter((p) => !p.ignored).length },
   ];
   const title = `Fournisseur ${supplierId}`;
   return (
@@ -100,7 +101,7 @@ export default function SupplierPage() {
         <div className="title">
           <div className="row"><Link to="/fournisseurs" className="btn ghost sm"><ArrowLeft />Fournisseurs</Link>{s && !s.active && <Badge tone="neutral">inactif</Badge>}</div>
           <h1 style={{ marginTop: 6 }}>{supplierId} {s && <span className="muted" style={{ fontWeight: 400 }}>· {s.name}</span>}</h1>
-          <p>{s ? <>{s.country && <>{s.country} · </>}{s.contact && <>{s.contact} · </>}livraisons <b>{fmtWeekdays(s.delivery_weekdays)}</b> · délai <b>{s.lead_time_days} j ouvrés</b> (inclusif : lundi + 5 = lundi suivant){k && k.active_links !== k.articles ? ` · ${k.active_links} lien(s) actif(s) sur ${k.articles}` : ""}</> : <Skeleton w={400} />}</p>
+          <p>{s ? <>{s.country && <>{s.country} · </>}{s.contact && <>{s.contact} · </>}livraisons <b>{fmtWeekdays(s.delivery_weekdays)}</b>{s.strict_days ? <> <Badge tone="neutral" title="Jours stricts : jamais de proposition hors jour standard (◇)">jours stricts</Badge></> : null} · délai <b>{s.lead_time_days} j ouvrés</b> (inclusif : lundi + 5 = lundi suivant){k && k.active_links !== k.articles ? ` · ${k.active_links} lien(s) actif(s) sur ${k.articles}` : ""}</> : <Skeleton w={400} />}</p>
         </div>
         <div className="actions"><Link className="btn" to="/referentiel?table=ref_suppliers">Modifier dans le Référentiel</Link></div>
       </div>
@@ -112,7 +113,7 @@ export default function SupplierPage() {
         <Kpi label="En transit" icon={<Truck size={14} />} value={k ? fmtInt(k.in_transit) : <Skeleton w={40} h={28} />} meta="journaux non validés et DESADV annoncés" tone={k && k.in_transit > 0 ? "info" : undefined} onClick={() => setTab("in_transit")} active={tab === "in_transit"} />
         <Kpi label="À traiter" icon={<AlertTriangle size={14} />} value={k ? fmtInt(k.to_process) : <Skeleton w={40} h={28} />} meta="DESADV en erreur ou sans journal" tone={k && k.to_process > 0 ? "warning" : undefined} onClick={() => setTab("to_process")} active={tab === "to_process"} />
         <Kpi label="À valider" icon={<CheckSquare size={14} />} value={k ? fmtInt(k.to_validate) : <Skeleton w={40} h={28} />} meta="réceptions sans ACR depuis 7 j" tone={k && k.to_validate > 0 ? "warning" : undefined} onClick={() => setTab("to_validate")} active={tab === "to_validate"} />
-        <Kpi label="Urgences CBN" icon={<ShoppingCart size={14} />} value={k ? fmtInt(k.urgent_proposals) : <Skeleton w={40} h={28} />} meta="propositions hors délai (plancher)" tone={k && k.urgent_proposals > 0 ? "critical" : "ok"} onClick={() => setTab("to_order")} active={tab === "to_order"} />
+        <Kpi label="À commander" icon={<ShoppingCart size={14} />} value={k ? fmtInt(k.to_order) : <Skeleton w={40} h={28} />} meta={k ? `${k.urgent_proposals} date(s) limite dépassée(s) · sous 5 j ouvrés` : ""} tone={k && k.urgent_proposals > 0 ? "critical" : k && k.to_order > 0 ? "warning" : "ok"} onClick={() => setTab("to_order")} active={tab === "to_order"} />
       </div>
 
       <Tabs value={tab} onChange={setTab} tabs={tabs} />
@@ -124,7 +125,7 @@ export default function SupplierPage() {
           : tab === "in_transit" ? <DataTable rows={d.in_transit} columns={desadvCols} rowKey={(x) => x.desadv_id} maxHeight={H} storageKey="supplier.transit" exportTitle={`${title} - en transit`} emptyTitle="Rien en transit" />
           : tab === "to_process" ? <DataTable rows={d.to_process} columns={desadvCols} rowKey={(x) => x.desadv_id} maxHeight={H} storageKey="supplier.process" exportTitle={`${title} - à traiter`} emptyTitle="Aucun DESADV à traiter" />
           : tab === "to_validate" ? <DataTable rows={d.to_validate} columns={pendingCols} rowKey={(b) => b.pending_id} maxHeight={H} storageKey="supplier.validate" exportTitle={`${title} - à valider`} emptyTitle="Aucune réception en attente de comptabilisation" />
-          : <DataTable rows={d.to_order} columns={proposalCols} rowKey={(p) => `${p.proposal_id}-${p.ignored}`} rowClass={(p) => (p.ignored ? "muted" : "")} maxHeight={H} storageKey="supplier.order" exportTitle={`${title} - à commander`} emptyTitle="Aucune proposition urgente" />}
+          : <DataTable rows={d.to_order} columns={proposalCols} rowKey={(p) => `${p.proposal_id}-${p.ignored}`} rowClass={(p) => (p.ignored ? "muted" : "")} maxHeight={H} storageKey="supplier.order" exportTitle={`${title} - à commander`} emptyTitle="Aucune commande à placer sous 5 jours ouvrés" />}
       </Card>
     </div>
   );

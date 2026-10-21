@@ -1,7 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, CheckSquare, ClipboardList, Clock, Inbox, PackageCheck, ShoppingCart, Truck } from "lucide-react";
 import { useFlows } from "@/lib/queries";
-import { ArticleLink, Badge, Card, Empty, ErrorBox, Kpi, Skeleton, SkeletonBlock, SupplierLink } from "@/components/ui";
+import { ArticleLink, Badge, Button, Card, Empty, ErrorBox, Kpi, Skeleton, SkeletonBlock, SupplierLink } from "@/components/ui";
 import { useRemembered } from "@/lib/pageState";
 import { DataTable, type Column } from "@/components/DataTable";
 import { fmtDate, fmtInt, fmtQty, ORDER_TYPE_LABELS } from "@/lib/format";
@@ -10,13 +10,13 @@ import type { BacklogRow, DesadvRow, FlowKey, OrderRow, PendingRow, ProposalOut,
 const FLOW_H = "calc(100vh - 330px)";   // the table scrolls under its sticky header, the tiles stay in view
 
 const FLOWS: { key: FlowKey; label: string; hint: string; icon: typeof Truck; tone?: "critical" | "warning" | "ok" | "info" | "brand" }[] = [
-  { key: "to_order", label: "À commander", hint: "propositions CBN urgentes (refusées comprises, marquées ignorées)", icon: ShoppingCart, tone: "critical" },
+  { key: "to_order", label: "À commander", hint: "propositions CBN dont la date limite de commande est dépassée (!) ou tombe sous 5 jours ouvrés", icon: ShoppingCart, tone: "critical" },
   { key: "ordered", label: "Commandé", hint: "commandes fermes apparues aujourd'hui dans l'ERP", icon: ClipboardList, tone: "brand" },
-  { key: "in_transit", label: "En transit", hint: "journaux d'arrivée non validés et DESADV annoncés", icon: Truck, tone: "info" },
-  { key: "to_process", label: "À traiter", hint: "DESADV en erreur, ou traités sans journal de saisie", icon: AlertTriangle, tone: "warning" },
+  { key: "in_transit", label: "En transit", hint: "journaux d'arrivée non validés et DESADV annoncés des 5 derniers jours ouvrés", icon: Truck, tone: "info" },
+  { key: "to_process", label: "À traiter", hint: "DESADV en erreur, ou traités sans journal de saisie, des 5 derniers jours ouvrés", icon: AlertTriangle, tone: "warning" },
   { key: "to_receive", label: "À réceptionner", hint: "commandes fermes attendues aujourd'hui", icon: Inbox, tone: "brand" },
   { key: "received", label: "Reçu", hint: "réceptions apparues aujourd'hui", icon: PackageCheck, tone: "ok" },
-  { key: "late", label: "En retard", hint: "commandes fermes passées avec un restant ERP", icon: Clock, tone: "warning" },
+  { key: "late", label: "En retard", hint: "commandes fermes des 5 derniers jours ouvrés avec un restant ERP", icon: Clock, tone: "warning" },
   { key: "to_validate", label: "À valider", hint: "réceptions non comptabilisées depuis 7 jours (ACR à valider)", icon: CheckSquare, tone: "warning" },
 ];
 
@@ -28,12 +28,14 @@ const planner = <T extends { planner: string }>(): Column<T> => ({ key: "planner
 export function FlowsPanel() {
   const q = useFlows();
   const [flow, setFlow] = useRemembered<FlowKey>("flows.flow", "to_order");
+  const [showIgnored, setShowIgnored] = useState(false);   // À commander : les propositions refusées (ignorées) sont masquées par défaut
+  const [showAll, setShowAll] = useState<Partial<Record<FlowKey, boolean>>>({});   // À traiter / En retard : au-delà des 5 derniers jours ouvrés
   const d = q.data;
 
   const proposalCols = useMemo<Column<ProposalOut>[]>(() => [
     art<ProposalOut>(), { ...sup<ProposalOut>(), render: (p) => <>{p.supplier_id}<span className="sub">{p.supplier_name} · délai {p.lead_time_days} j</span></> },
-    { key: "order", label: "À commander le", get: (p) => p.order_date, render: (p) => <span style={{ color: "var(--critical-fg)" }}>{fmtDate(p.order_date)}</span>, title: "Date réelle à laquelle la commande devait partir pour tenir le délai" },
-    { key: "delivery", label: "Livraison", get: (p) => p.delivery_date, render: (p) => fmtDate(p.delivery_date) },
+    { key: "order", label: "Au plus tard le", get: (p) => p.order_date, render: (p) => <span style={p.urgent ? { color: "var(--critical-fg)", fontWeight: 600 } : undefined}>{fmtDate(p.order_date)}{p.urgent && <span title="Date limite dépassée : à commander sans attendre"> !</span>}</span>, title: "Date limite de commande : livraison − (délai − marge) jours ouvrés ; ! = dépassée, à commander sans attendre" },
+    { key: "delivery", label: "Livraison", get: (p) => p.delivery_date, render: (p) => <>{fmtDate(p.delivery_date)}{p.off_standard && <span className="sub" style={{ color: "var(--brand-fg)" }} title="Hors jour standard : le jour de livraison habituel n'est plus tenable">◇ hors jour standard</span>}</> },
     { key: "qty", label: "Quantité", get: (p) => p.qty, num: true, sum: true, unit: (p) => p.unit, render: (p) => <><b>{fmtQty(p.qty, p.unit)}</b> <span className="subtle">{p.unit}</span><span className="sub">{p.floor ? "plancher · " : ""}{p.capped ? "plafonnée · " : ""}MOQ {fmtQty(p.moq, p.unit)} · UM {fmtQty(p.pack_qty, p.unit)}</span></> },
     { key: "net", label: "Besoin net", get: (p) => p.net_requirement, num: true, render: (p) => fmtQty(p.net_requirement, p.unit) },
     { key: "stock", label: "Stock avant → après", get: (p) => p.projected_stock_before, num: true, render: (p) => <>{fmtQty(p.projected_stock_before, p.unit)} → {fmtQty(p.projected_stock_after, p.unit)}</> },
@@ -86,16 +88,28 @@ export function FlowsPanel() {
 
   if (q.isError) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   const meta = FLOWS.find((f) => f.key === flow)!;
+  const since = d?.recent_since ?? "";
+  const toOrder = (d?.to_order ?? []).filter((p) => showIgnored || !p.ignored);
+  const toProcess = (d?.to_process ?? []).filter((x) => showAll.to_process || x.issue_date >= since);
+  const late = (d?.late ?? []).filter((b) => showAll.late || (b.expected_date ?? "") >= since);
+  const ignoredCount = (d?.to_order ?? []).filter((p) => p.ignored).length;
+  /** number of lines of the open flow (the counter of the tile counts the default view) */
+  const shownCount = flow === "to_order" ? toOrder.length : flow === "to_process" ? toProcess.length : flow === "late" ? late.length : d?.kpis[flow] ?? 0;
+  // older lines of À traiter / En retard (before the last 5 working days) : hidden by default, a button shows them all
+  const older = d && (flow === "to_process" || flow === "late") ? d[flow].filter((x) => ((flow === "to_process" ? (x as DesadvRow).issue_date : (x as BacklogRow).expected_date) ?? "") < since).length : 0;
+  const actions = flow === "to_order" && ignoredCount > 0 ? <Button size="sm" variant={showIgnored ? "primary" : "default"} onClick={() => setShowIgnored((v) => !v)} title="Les propositions refusées d'un clic dans le tableau sont hors calculs ; les afficher pour mémoire">{showIgnored ? "Masquer les ignorées" : `Afficher les ignorées (${ignoredCount})`}</Button>
+    : (flow === "to_process" || flow === "late") && d && (older > 0 || showAll[flow]) ? <Button size="sm" variant={showAll[flow] ? "primary" : "default"} onClick={() => setShowAll((s) => ({ ...s, [flow]: !s[flow] }))} title={`Par défaut : les 5 derniers jours ouvrés (depuis le ${fmtDate(since)}), tri par date décroissante`}>{showAll[flow] ? "5 derniers jours ouvrés" : `Tout afficher (${d[flow].length})`}</Button>
+    : null;
   const table = () => {
     if (!d) return <div style={{ padding: 20 }}><SkeletonBlock rows={6} /></div>;
     switch (flow) {
-      case "to_order": return <div className="scroll-x"><DataTable rows={d.to_order} columns={proposalCols} rowKey={(p) => `${p.proposal_id}-${p.ignored}`} rowClass={(p) => (p.ignored ? "muted" : "")} emptyTitle="Aucune proposition urgente" emptyHint="Toutes les propositions CBN respectent le délai fournisseur." maxHeight={FLOW_H} storageKey="flows.to_order" exportTitle="À commander" /></div>;
+      case "to_order": return <div className="scroll-x"><DataTable rows={toOrder} columns={proposalCols} rowKey={(p) => `${p.proposal_id}-${p.ignored}`} rowClass={(p) => (p.ignored ? "muted" : "")} emptyTitle="Aucune commande à placer sous 5 jours ouvrés" emptyHint={ignoredCount ? `${ignoredCount} proposition(s) refusée(s) masquée(s).` : "Aucune proposition CBN n'a sa date limite de commande dépassée ni sous 5 jours ouvrés."} maxHeight={FLOW_H} storageKey="flows.to_order" exportTitle="À commander" /></div>;
       case "ordered": return <DataTable rows={d.ordered} columns={orderCols} rowKey={(o) => o.order_id} emptyTitle="Aucune nouvelle commande ferme aujourd'hui" emptyHint={d.first_seen_available ? undefined : "La date d'apparition des commandes est posée par le job de synchronisation : elle sera disponible après sa prochaine exécution."} maxHeight={FLOW_H} storageKey="flows.ordered" exportTitle="Commandé" />;
       case "in_transit": return <DataTable rows={d.in_transit} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Rien en transit" maxHeight={FLOW_H} storageKey="flows.in_transit" exportTitle="En transit" />;
-      case "to_process": return <DataTable rows={d.to_process} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Aucun DESADV à traiter" maxHeight={FLOW_H} storageKey="flows.to_process" exportTitle="À traiter" />;
+      case "to_process": return <DataTable rows={toProcess} columns={desadvCols} rowKey={(x) => x.desadv_id} emptyTitle="Aucun DESADV à traiter" maxHeight={FLOW_H} storageKey="flows.to_process" exportTitle="À traiter" />;
       case "to_receive": return <DataTable rows={d.to_receive} columns={orderCols} rowKey={(o) => o.order_id} emptyTitle="Aucune commande ferme attendue aujourd'hui" maxHeight={FLOW_H} storageKey="flows.to_receive" exportTitle="À réceptionner" />;
       case "received": return <DataTable rows={d.received} columns={receiptCols} rowKey={(r) => r.receipt_id} emptyTitle="Aucune réception aujourd'hui" maxHeight={FLOW_H} storageKey="flows.received" exportTitle="Reçu" />;
-      case "late": return <DataTable rows={d.late} columns={backlogCols} rowKey={(b) => b.order_id} emptyTitle="Aucune commande en retard" maxHeight={FLOW_H} storageKey="flows.late" exportTitle="En retard" />;
+      case "late": return <DataTable rows={late} columns={backlogCols} rowKey={(b) => b.order_id} emptyTitle="Aucune commande en retard" maxHeight={FLOW_H} storageKey="flows.late" exportTitle="En retard" />;
       case "to_validate": return <DataTable rows={d.to_validate} columns={pendingCols} rowKey={(b) => b.pending_id} emptyTitle="Aucune réception en attente de comptabilisation" maxHeight={FLOW_H} storageKey="flows.to_validate" exportTitle="À valider" />;
     }
   };
@@ -106,8 +120,8 @@ export function FlowsPanel() {
           <Kpi key={f.key} label={f.label} icon={<f.icon size={14} />} tone={d && d.kpis[f.key] > 0 ? f.tone : undefined} value={d ? fmtInt(d.kpis[f.key]) : <Skeleton w={40} h={28} />} meta={f.hint} onClick={() => setFlow(f.key)} active={flow === f.key} />
         ))}
       </div>
-      <Card flush title={meta.label} hint={meta.hint}>
-        {d && d.kpis[flow] === 0 && flow !== "ordered" ? <Empty title={`Rien dans « ${meta.label} »`} /> : table()}
+      <Card flush title={meta.label} hint={meta.hint} actions={actions}>
+        {d && shownCount === 0 && flow !== "ordered" && flow !== "to_order" ? <Empty title={`Rien dans « ${meta.label} »`} hint={(flow === "to_process" || flow === "late") && d[flow].length ? `${d[flow].length} ligne(s) plus ancienne(s) que les 5 derniers jours ouvrés.` : undefined} /> : table()}
       </Card>
     </>
   );

@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { Card, Empty, ErrorBox, Segmented, SkeletonBlock } from "@/components/ui";
 import { SimulationGrid } from "@/components/SimulationGrid";
 import { SearchSelect } from "@/components/SearchSelect";
+import { useLang } from "@/lib/i18n";
 
 const PAGE_SIZES = [10, 20, 50, 100];
 
@@ -23,6 +24,7 @@ function useDebounced<T>(value: T, ms: number): T {
  */
 export default function SupplyTablePage() {
   const { perimeter, set, engineParams } = usePerimeter();
+  const { lang, t } = useLang();
   // filters remembered between visits (per browser)
   const [filters, patch] = usePageState("tableau", { program: "", suppliers: [] as string[], search: "" });
   const { program, suppliers, search } = filters;
@@ -55,10 +57,11 @@ export default function SupplyTablePage() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Tableau d'approvisionnement</h1></div>
+        <div className="title"><h1>{t("page.table")}</h1></div>
         <div className="actions">
-          <Segmented size="sm" value={perimeter.granularity} onChange={(g) => set({ granularity: g })} options={[{ id: "default", label: "Par défaut" }, { id: "day", label: "Jour" }, { id: "week", label: "Semaine" }]} />
-          <a className="btn" href={exportUrl} title="Classeur à formules des articles de la page"><Download />Excel (page)</a>
+          <Segmented size="sm" value={perimeter.granularity} onChange={(g) => set({ granularity: g })} options={[{ id: "default", label: t("page.default") }, { id: "day", label: t("page.day") }, { id: "week", label: t("page.week") }]} />
+          <span className="lang-toggle" title={t("page.lang_title")}><Segmented size="sm" value={lang} onChange={(l) => set({ lang: l })} options={[{ id: "fr", label: "FR" }, { id: "en", label: "EN" }]} /></span>
+          <a className="btn" href={exportUrl} title={t("page.excel_title")}><Download />{t("page.excel")}</a>
         </div>
       </div>
       <Card tight>

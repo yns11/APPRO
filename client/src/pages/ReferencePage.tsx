@@ -4,7 +4,7 @@ import { CalendarDays, Download, Plus, Trash2, Upload, Wand2 } from "lucide-reac
 import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { RefRowEditor } from "@/components/RefRowEditor";
 import { DataTable, type Column } from "@/components/DataTable";
-import { useRefRows, useRefTables, useWrite } from "@/lib/queries";
+import { useRefRows, useRefTables, useSupplierNames, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useRemembered } from "@/lib/pageState";
 import { api } from "@/lib/api";
@@ -40,7 +40,7 @@ const QUICK_FILTERS: Record<string, { id: string; label: string; title: string; 
 /** Columns of the table itself that the Référentiel does not show (replaced by query columns). */
 const HIDDEN: Record<string, string[]> = { ref_articles: ["family"] };
 /** Columns that can be set in bulk on the filtered rows. */
-const BULK: Record<string, string[]> = { ref_articles: ["coverage_target_days", "alert_red_days", "alert_yellow_days", "overstock_days", "demand_days", "sourcing_policy", "consumption_source", "planner", "active"], ref_suppliers: ["lead_time_days", "delivery_weekdays", "active"], ref_article_suppliers: ["lead_time_override", "max_qty_per_delivery", "max_qty_per_week", "quota_pct", "priority", "active"] };
+const BULK: Record<string, string[]> = { ref_articles: ["coverage_target_days", "alert_red_days", "alert_yellow_days", "overstock_days", "demand_days", "sourcing_policy", "consumption_source", "planner", "active"], ref_suppliers: ["lead_time_days", "delivery_weekdays", "strict_days", "active"], ref_article_suppliers: ["lead_time_override", "max_qty_per_delivery", "max_qty_per_week", "quota_pct", "priority", "active"] };
 
 const fmtCell = (c: RefColumn, v: RefValue) => v === null || v === undefined || v === "" ? "" : c.type === "bool" ? (v ? "oui" : "non") : c.type === "date" ? fmtDate(String(v)) : c.type === "float" ? fmtQty(Number(v)) : String(v);
 
@@ -56,6 +56,7 @@ export default function ReferencePage() {
   const [report, setReport] = useState<ImportReport | null>(null);
   const [bulk, setBulk] = useState(false);
   const toast = useToast();
+  const names = useSupplierNames();
   const table = tables.data?.find((t) => t.name === tab);
   const rows = useRefRows(tab, perimeter.planner);   // the global planner filter applies here too
   const [flags, setFlags] = useRemembered<string[]>(`referentiel.quick.${tab}`, []);
@@ -74,10 +75,10 @@ export default function ReferencePage() {
     const out: Column<RefRow>[] = table.columns.filter((c) => !hidden.includes(c.name)).map((c) => ({
       key: c.name, label: c.label, num: c.type === "float" || c.type === "int", title: c.description || undefined,
       filter: c.type === "bool" || (c.type === "str" && ["unit", "planner", "family", "country", "program_id", "active", "role", "sourcing_policy", "consumption_source", "delivery_weekdays"].includes(c.name) && !c.key) || c.name === "demand_days" ? "select" : undefined,
-      get: (r) => (c.type === "bool" ? (r[c.name] ? "oui" : "non") : c.name === "consumption_source" ? CONSUMPTION_SOURCE_SHORT[String(r[c.name] ?? "erp")] ?? String(r[c.name]) : c.name === "sourcing_policy" ? SOURCING_LABELS[String(r[c.name] ?? "quota")] ?? String(r[c.name]) : c.name === "delivery_weekdays" ? fmtWeekdays(String(r[c.name] ?? "")) : (r[c.name] as string | number | null)),
+      get: (r) => (c.type === "bool" ? (r[c.name] ? "oui" : "non") : c.name === "supplier_id" && table.name !== "ref_suppliers" ? `${r[c.name] ?? ""} ${names.get(String(r[c.name] ?? "")) ?? ""}` : c.name === "consumption_source" ? CONSUMPTION_SOURCE_SHORT[String(r[c.name] ?? "erp")] ?? String(r[c.name]) : c.name === "sourcing_policy" ? SOURCING_LABELS[String(r[c.name] ?? "quota")] ?? String(r[c.name]) : c.name === "delivery_weekdays" ? fmtWeekdays(String(r[c.name] ?? "")) : (r[c.name] as string | number | null)),
       exportGet: (r) => (r[c.name] as string | number | boolean | null),
       render: (r) => c.name === "article_id" ? <Link to={`/articles/${encodeURIComponent(String(r[c.name]))}`} onClick={(e) => e.stopPropagation()} title="Ouvrir la fiche article"><b>{String(r[c.name])}</b></Link>
-        : c.name === "supplier_id" ? <SupplierLink id={String(r[c.name])} />
+        : c.name === "supplier_id" ? <SupplierLink id={String(r[c.name])} name={table.name === "ref_suppliers" ? undefined : names.get(String(r[c.name]))} />
         : c.name === "name" && table.name === "ref_suppliers" ? <SupplierLink id={String(r.supplier_id)} name={String(r[c.name] ?? "")} inline className="" />
         : c.name === "source_article_id" ? <Link to={`/articles/${encodeURIComponent(String(r[c.name]))}`} onClick={(e) => e.stopPropagation()}>{String(r[c.name])}</Link>
         : c.type === "bool" ? <Badge tone={r[c.name] ? "ok" : "neutral"}>{r[c.name] ? "oui" : "non"}</Badge>
@@ -100,7 +101,7 @@ export default function ReferencePage() {
     if (table.name !== "ref_articles") out.push({ key: "who", label: "Modifié", get: (r) => `${r.updated_by ?? ""} ${r.updated_at ?? ""}`, render: (r) => <span className="subtle small">{r.updated_by}{r.updated_at ? <><br />{fmtDateTime(r.updated_at)}</> : null}</span> });
     if (rights.canEditTable(table.name)) out.push({ key: "del", label: "", get: () => "", filter: "none", sortable: false, export: false, render: (r) => <Button size="sm" variant="ghost" title="Supprimer" onClick={(e) => { e.stopPropagation(); if (window.confirm("Supprimer cette ligne ?")) del.mutate({ name: table.name, key: Object.fromEntries(table.key.map((k) => [k, r[k]])) }); }}><Trash2 /></Button> });
     return out;
-  }, [table, del, rights]);
+  }, [table, del, rights, names]);
 
   const toggleFlag = (id: string) => setFlags(flags.includes(id) ? flags.filter((x) => x !== id) : [...flags, id]);
 

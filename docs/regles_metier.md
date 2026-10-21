@@ -8,7 +8,7 @@ ou **par lien article ↔ fournisseur** (MOQ, UM, délai spécifique, quota, pri
 défaut sont entre crochets. **Tous les délais, couvertures, seuils et horizons sont en jours ouvrés.**
 
 **Le mode d'emploi tient en une phrase : vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se
-recalcule.** L'approvisionneur ne saisit que deux lignes du tableau, *Appro.* et *Ajustement*. Tout le reste
+recalcule.** L'approvisionneur ne saisit que deux lignes du tableau, *Quantité à retenir* et *Ajustement*. Tout le reste
 se lit.
 
 ## 1. Temps et calendrier
@@ -67,15 +67,15 @@ distingue par la date de référence.
 
 ## 3. Approvisionnements : voies fournisseur, plan, commandes en retard
 
-Le tableau montre, **par fournisseur de l'article**, quatre lignes : *Ferme*, *Prévisionnel*, *Reçu* (ERP,
-lecture) et *Appro.* (saisie). Les voies sont **les liens actifs article ↔ fournisseur** du Référentiel (par
+Le tableau montre, **par fournisseur de l'article**, quatre lignes : *Ordre ferme*, *Prévisionnel EDI*, *Quantité reçue* (ERP,
+lecture) et *Quantité à retenir* (saisie). Les voies sont **les liens actifs article ↔ fournisseur** du Référentiel (par
 priorité), et rien d'autre : les commandes, réceptions et DESADV d'un fournisseur **sans lien actif** restent
 hors du tableau (hors des voies, des stocks projetés et du retard de l'article) et ne sont visibles que dans
 les vues d'état (cockpit *Flux*, fiche fournisseur, *Recherche*) ; l'alerte `UNLINKED_FLOWS` les signale sur
-l'article. Un fournisseur sans lien actif qui porte encore des cellules *Appro.* saisies garde une voie,
+l'article. Un fournisseur sans lien actif qui porte encore des cellules *Quantité à retenir* saisies garde une voie,
 marquée « hors lien », le temps de les effacer ou de réactiver le lien. Un flux sans fournisseur suit la
 première voie. Sans aucun lien actif, l'article n'a pas de voie : aucun approvisionnement n'est compté. Les lignes suivantes sont à la maille article : *Proposition CBN*, *Ajustement*, *Projeté
-ERP*, *Projeté Appro.*. Les stocks somment les voies.
+ERP*, *Stock projeté*. Les stocks somment les voies.
 
 ### 3.1 La commande = un créneau de livraison
 
@@ -86,7 +86,7 @@ prévisionnelle. Le restant ERP (`Quantite_restante`) est la quantité ouverte.
 
 ### 3.2 Les deux scenarios
 
-| Jour calculé | Projeté ERP | Projeté Appro. |
+| Jour calculé | Projeté Ferme | Stock projeté |
 |---|---|---|
 | Avant la référence | historique reconstitué (§ 4) | idem |
 | À partir de la référence | R + Ferme + A − besoin | R + Plan + CBN + A − besoin |
@@ -108,22 +108,33 @@ du plan saisie ce jour-là est prise telle quelle.
   (elle devient une cellule saisie ordinaire).
 * Une cellule datée avant la référence a **expiré** : ignorée, listée « expirée » dans *Saisies & journal*.
 * Le plan se saisit aussi bien dans une colonne jour que dans une **colonne semaine** : la valeur saisie se place
-  alors au **lundi** de la semaine (au jour de référence dans la semaine en cours, le plan ne datant jamais avant) ;
-  la cellule semaine affiche le total de la semaine (le lundi saisi plus les autres jours, ERP ou saisis). Même
-  règle pour un ajustement (lundi, sans limite au passé) ; un clic Ferme dans une colonne semaine ignore (ou
-  rétablit) les commandes de tous les jours de la semaine, un clic CBN refuse la proposition datée du lundi
-  (le refus ne vaut que pour ce jour). L'en-tête d'une colonne semaine bascule sur le détail par jour.
-* Un **commentaire** facultatif se pose par clic droit sur une cellule (Plan ou Ajustement).
+  au **premier jour de livraison standard du fournisseur** de la semaine qui n'est pas passé (`delivery_weekdays`,
+  jours ouvrés du calendrier usine ; à défaut le premier jour ouvré, à défaut le lundi ; jamais avant le jour de
+  référence), annoncé dans l'infobulle ; la cellule semaine affiche le total de la semaine (jours saisis plus
+  jours ERP). **Maj+Entrée**, ou clic droit › *Placer le jour…*, ouvre la liste des jours de la semaine (quantité
+  ERP, saisie et proposition CBN de chaque jour, jour standard surligné) pour choisir un autre jour. Reprendre une
+  proposition CBN grisée depuis une cellule semaine la garde **à sa propre date** (◇ comprise). **Vider** une
+  cellule semaine rend toute la semaine à l'ERP (toutes les cellules saisies de la semaine, une seule action
+  annulable). Un ajustement saisi en colonne semaine se place au lundi (au jour de référence dans la semaine en
+  cours ; *Placer le jour…* pour un autre jour) ; un clic *Ordre ferme* dans une colonne semaine ignore (ou
+  rétablit) les commandes de tous les jours de la semaine, un clic CBN refuse (ou rétablit) toutes les
+  propositions de la semaine chez ce fournisseur. L'en-tête d'une colonne semaine bascule sur le détail par jour.
+* Un **commentaire** facultatif se pose par clic droit sur une cellule jour (Quantité à retenir ou Ajustement) ;
+  dans une colonne semaine, clic droit › *Commentaire…*.
+* **FR | EN** : deux boutons dans l'en-tête du tableau d'approvisionnement et de la fiche article passent en
+  anglais les intitulés des lignes, les en-têtes de colonnes (S → W), les infobulles, la légende et les tuiles
+  de la fiche article (partage d'écran ou capture pour un fournisseur anglophone) ; le reste de l'application
+  reste en français. Le choix est mémorisé dans le navigateur.
 * **Recopie** : la cellule active (Plan ou Ajustement) porte un petit carré dans son coin ; le tirer le long de la
   ligne recopie la valeur sur les cellules traversées, comme Excel (copie, pas de série) ; une colonne semaine
-  traversée reçoit la valeur à son lundi. Le passé est sauté ; une seule transaction, un seul recalcul.
+  traversée reçoit la valeur à son jour standard (même règle que la saisie). Le passé est sauté ; une seule transaction, un seul recalcul.
 
 Il n'existe **aucun autre objet** : ni ligne de plan, ni statut de commande, ni action « dater / clôturer ».
 Deux lignes en lecture sont néanmoins **cliquables** (§ 3.3 bis et § 7).
 
-### 3.3 bis La ligne Ferme : affichage et commandes ignorées
+### 3.3 bis La ligne Ordre ferme : affichage et commandes ignorées
 
-La cellule *Ferme* d'un fournisseur et d'un jour affiche toujours la **quantité commandée** des commandes
+La cellule *Ordre ferme* d'un fournisseur et d'un jour affiche toujours la **quantité commandée** des commandes
 fermes de ce jour, quelle que soit la quantité restant à livrer :
 
 | Situation | Texte | Couleur |
@@ -132,18 +143,18 @@ fermes de ce jour, quelle que soit la quantité restant à livrer :
 | livraisons partielles, restant > 0 | `restant / commandé` | orange (en cours) |
 | commande **ignorée** (clic) | quantité commandée barrée | rouge |
 
-L'affichage ne change pas le calcul : le Projeté ERP et le pré-remplissage du plan comptent le **restant ERP**
+L'affichage ne change pas le calcul : le Projeté Ferme et le pré-remplissage du plan comptent le **restant ERP**
 des commandes à partir de la référence, et rien pour le passé (§ 3.2).
 
-Un **clic** sur une cellule Ferme à partir de la date de référence **ignore** les commandes fermes de ce
-fournisseur et de ce jour : elles sortent du Projeté ERP et ne pré-remplissent plus le Plan (cellule vide =
+Un **clic** sur une cellule Ordre ferme à partir de la date de référence **ignore** les commandes fermes de ce
+fournisseur et de ce jour : elles sortent du Projeté Ferme et ne pré-remplissent plus le Plan (cellule vide =
 0 ; une cellule saisie garde sa valeur). Un nouveau clic les rétablit. Le passé ne s'ignore pas (il ne compte
-dans aucun stock). Ces jours ignorés sont listés dans *Saisies & journal* et comptés dans le KPI *Appro.*.
+dans aucun stock). Ces jours ignorés sont listés dans *Saisies & journal* et comptés dans le KPI *Quantité à retenir*.
 
-### 3.3 ter La ligne Reçu : journaux d'arrivée, réceptions et avis d'expédition (DESADV)
+### 3.3 ter La ligne Quantité reçue : journaux d'arrivée, réceptions et avis d'expédition (DESADV)
 
 **Quelles réceptions comptent.** L'ERP fournit toutes les réceptions, quelle que soit la commande. Seules
-entrent dans la ligne *Reçu* et le stock celles d'une **commande ouverte** (`CO-…`) et celles d'une **commande
+entrent dans la ligne *Quantité reçue* et le stock celles d'une **commande ouverte** (`CO-…`) et celles d'une **commande
 fermée (PO, six chiffres) déclarée** dans *Référentiel › Commandes fermées (PO)* et active : c'est le flux
 dégradé (demande d'achat puis PO ponctuelle) en attendant une commande ouverte. Toute autre réception reste
 visible dans *Recherche* (filtres CO / PO déclarée / autres, bouton « Déclarer la PO »), les flux et la fiche
@@ -169,7 +180,7 @@ le BL, c'est le journal qui est affiché. Point vert si le message est *Traité 
 (journal ou DESADV) peut être **masqué** par un double-clic confirmé (drapeau `desadv_hidden`, listé et
 rétablissable dans *Saisies & journal*).
 
-L'**info-bulle** de chaque cellule *Reçu* détaille les lignes du jour (ou de la semaine) : pour chaque réception
+L'**info-bulle** de chaque cellule *Quantité reçue* détaille les lignes du jour (ou de la semaine) : pour chaque réception
 son BL, sa quantité et son état d'ACR (*comptabilisé* ou *ACR à valider depuis n j*) ; pour chaque en transit son BL,
 sa quantité et son origine (journal d'arrivée non validé, ou DESADV avec son état). Une ligne sans BL s'affiche
 « sans BL » : c'est une réception manuelle, qui ne peut être rapprochée d'aucun DESADV (point rouge). Ces règles
@@ -184,7 +195,7 @@ passée et dont l'ERP garde un **restant** (`qty_open`, mis à jour à la valida
 `en retard = Σ restant ERP des commandes fermes dont la date de livraison est antérieure à aujourd'hui`
 
 Sans fenêtre et sans correction par les réceptions : c'est le restant ERP qui fait foi (cohérent avec la ligne
-*Ferme*, `restant / commandé`). Une commande **ignorée** d'un clic sort de la projection mais reste en retard.
+*Ordre ferme*, `restant / commandé`). Une commande **ignorée** d'un clic sort de la projection mais reste en retard.
 Le retard est affiché (KPI *En retard* de la fiche, en-tête de la voie, carte *En retard* du cockpit et de la
 fiche fournisseur, **une ligne par commande** : numéro, date prévue, commandé, reçu ERP, restant) ; il **sort
 tout seul** dès que l'ERP solde la commande. Si l'approvisionneur l'attend encore, il tape la quantité dans le
@@ -199,7 +210,7 @@ persiste jusqu'à sa suppression ; rappelé dans le KPI *Stock de référence*. 
 (casse, transfert, inventaire) compté à sa date, passé ou futur. Les ajustements comptent dans les deux
 scenarios.
 
-| Élément | Projeté ERP | Projeté Appro. | Règle |
+| Élément | Projeté Ferme | Stock projeté | Règle |
 |---|---|---|---|
 | Commande ERP ferme future | ✔ | ✔ sauf cellule saisie | restant ERP |
 | Commande ERP ferme passée | – | – | en retard si l'ERP garde un restant |
@@ -248,62 +259,75 @@ Le **statut** d'un article répond à une seule question : que doit faire l'appr
 sur les données de l'article, de ses fournisseurs, de ses commandes et de son stock, sans horizon commun.
 
 * **Critique** : la **couverture à date** (stock de la veille seul, sans aucune livraison comptée) tient au plus
-  `alert_red_days` + 1 jours ouvrés ; ou une proposition CBN a sa **date de commande déjà passée** (la livraison
-  ne peut plus arriver avant la rupture) ; ou le stock de départ est négatif.
-* **À commander** : une proposition CBN est à commander dans les **5 prochains jours ouvrés** ; ou la couverture
-  à date tient au plus `alert_yellow_days` jours ouvrés et aucune livraison ferme ni cellule *Appro.* saisie
-  n'arrive avant l'épuisement.
+  `alert_red_days` + 1 jours ouvrés ; ou une proposition CBN a sa **date limite de commande dépassée** (§ 7 :
+  plancher ! ou livraison hors jour standard ◇) ; ou le stock de départ est négatif.
+* **À commander** : une proposition CBN a sa **date limite de commande** dans les **5 prochains jours ouvrés** ;
+  ou la couverture à date tient au plus `alert_yellow_days` jours ouvrés et aucune livraison ferme ni cellule
+  *Quantité à retenir* saisie n'arrive avant l'épuisement.
 * **OK** : tout le reste.
 
 Le **surstock** (couverture à date ≥ `overstock_days`) est un filtre, pas un statut. Les **données à corriger**
 (pas de stock de départ, pas de lien actif, commande ferme à venir chez un fournisseur sans lien) sont une
 pastille à part, jamais dans le statut. En **multi-sourcing**, chaque part d'une proposition porte le délai du
-fournisseur que le CBN a retenu (§ 7) : le statut suit la date de commande la plus proche, et la colonne
-*Commande à placer* nomme ce fournisseur.
+fournisseur que le CBN a retenu (§ 7) : le statut suit la date limite la plus proche, et la colonne
+*À commander au plus tard le* nomme ce fournisseur (◇ quand la livraison est hors jour standard).
 
 | Type | Sévérité | Règle |
 |---|---|---|
 | `LOW_COVERAGE` | critique | couverture à date ≤ seuil rouge + 1 jour ouvré |
 | `LOW_COVERAGE` | avertissement | couverture à date ≤ seuil orange, rien de ferme ni de saisi avant l'épuisement |
-| `URGENT_PROPOSAL` | critique | proposition dont la date de commande est passée (plancher dans le délai, § 7) |
-| `ORDER_DUE` | avertissement | première proposition à commander sous 5 jours ouvrés (date, fournisseur, quantité) |
+| `URGENT_PROPOSAL` | critique | proposition dont la date limite de commande est passée (plancher !, ou hors jour standard ◇, § 7) |
+| `ORDER_DUE` | avertissement | première proposition à commander au plus tard sous 5 jours ouvrés (date limite, fournisseur, quantité, livraison, ◇) |
 | `NEGATIVE_STOCK` | critique | stock de référence négatif |
-| `STOCKOUT` (plan) | info | premier manque sur le Projeté Appro. malgré le plan et les propositions (plafonds, refus) ; manque cumulé maximal |
+| `STOCKOUT` (plan) | info | premier manque sur le stock projeté malgré le plan et les propositions (plafonds, refus) ; manque cumulé maximal |
 | `OVERSTOCK` | info | couverture à date ≥ `overstock_days` |
 | `CAP_REACHED` | info | manque inévitable sous les plafonds du fournisseur (§ 7) |
 | `NO_DEMAND` | info | aucun besoin alors que du stock existe |
 | `MISSING_DATA` | info (données) | pas de stock de référence, pas de fournisseur actif, pas de nomenclature |
 | `UNLINKED_FLOWS` | info (données) | commande ferme **à venir** chez un fournisseur sans lien actif, hors tableau (§ 3) ; les réceptions et commandes passées d'un ancien fournisseur ne déclenchent rien |
 
-La rupture sur les commandes ERP seules n'est plus une alerte : c'est une colonne (*Rupture ERP*).
+La rupture sur les commandes ERP seules n'est plus une alerte : c'est une colonne (*Rupture Ferme*, calculée sur
+le **Projeté Ferme** : stock + ordres fermes seuls, qui n'est plus une ligne du tableau mais reste un KPI de la
+fiche article, une colonne du cockpit et une couche de l'impact programmes).
 
 ## 7. Propositions CBN
 
-Recalculées à chaque calcul sur le Projeté Appro., **après** le plan : elles ne proposent que ce que ni l'ERP
+Recalculées à chaque calcul sur le stock projeté, **après** le plan : elles ne proposent que ce que ni l'ERP
 ni le plan ne couvrent. Elles n'existent nulle part ailleurs ; pour en reprendre une, taper la quantité dans la
-cellule *Appro.* (la cellule grisée la prérempli), le CBN se recalcule sans elle.
+cellule *Quantité à retenir* (la cellule grisée la prérempli), le CBN se recalcule sans elle.
 
 **Déclenchement** : un besoin non servi, ou un stock projeté **sous (100 − tolérance) % de la cible**
-(`target_tolerance_pct` [15], seule règle commune réglable : déclenchement sous 85 % de la cible). La
+(`target_tolerance_pct` [15], règle commune réglable : déclenchement sous 85 % de la cible). La
 quantité ramène le stock à **100 % de la cible** (besoin net = cible − stock projeté + manque), relevée au
 **MOQ** puis arrondie au multiple supérieur de l'**UM** du lien.
 
-**Placement** : sur un jour de livraison du fournisseur (`delivery_weekdays`), le dernier **avant** le besoin ;
-les besoins jusqu'à la livraison suivante sont regroupés sur cette livraison (**une proposition par
-fournisseur et par jour de livraison**, partout). Date de commande = livraison − délai en jours ouvrés
-(inclusif) ; une date de commande déjà passée rend la proposition **urgente** (date réelle affichée telle
-quelle, « à commander le »).
+**Placement** : sur un jour de livraison **standard** du fournisseur (`delivery_weekdays`), le dernier **avant**
+le besoin ; les besoins jusqu'à la livraison suivante sont regroupés sur cette livraison (**une proposition par
+fournisseur et par jour de livraison**, partout).
 
-**Plancher dans le délai** : tant que la livraison tombe **avant la première livraison tenable** (aujourd'hui +
-délai), le moteur ne remonte pas à la cible : il propose, urgente, la **quantité minimale qui évite la rupture
-jusqu'à la veille de la livraison suivante**, lotie MOQ / UM. La tolérance ne s'applique pas au plancher. À
-partir de la première livraison tenable, la proposition vise la cible pleine, sans rampe.
+**Date limite de commande** = livraison − (délai − marge) jours ouvrés : le dernier jour où l'ordre peut partir.
+La **marge de délai** (`lead_margin_days` [1], règle commune réglable, 0 = délai strict) reconnaît qu'un
+fournisseur livre en général un peu avant son délai contractuel. Une proposition est **tenable** tant que sa
+date limite n'est pas passée (≥ aujourd'hui) : le CBN vise alors la cible pleine. La date limite est affichée
+« au plus tard le » (flux *À commander*, fiche article, cockpit, courbes).
+
+**Hors jour standard ◇** : quand le jour standard n'est plus tenable mais qu'une rupture arriverait avant la
+livraison standard suivante tenable, la proposition se pose sur le **premier jour ouvré tenable** avant le besoin,
+marquée **◇** (« hors jour standard ») ; si rien ne manque avant la livraison standard suivante, le besoin
+**attend** celle-ci (simple passage sous la cible, pas de ◇). Un fournisseur à **jours stricts**
+(`strict_days`, Référentiel) ne reçoit jamais de ◇ : le besoin non tenable devient un plancher au jour standard.
+
+**Plancher !** : quand aucun jour ouvré tenable ne précède le besoin, la proposition est **urgente** (date limite
+dépassée, marquée **!**) : posée au **jour du besoin** (au jour standard pour un fournisseur à jours stricts),
+limitée à la **quantité minimale qui évite la rupture** jusqu'à la livraison suivante, lotie MOQ / UM. La
+tolérance ne s'applique pas au plancher. Dès la première livraison tenable, la proposition vise la cible pleine,
+sans rampe. Une proposition refusée au jour du besoin glisse au jour suivant (jamais avant).
 
 **Plafonds du lien** (`max_qty_per_delivery`, `max_qty_per_week`, multiples de l'UM ; le plafond hebdomadaire
-compte les commandes fermes et les cellules Appro. de la semaine ISO) : appliqués **après** le lotissement, en
+compte les commandes fermes et les cellules Quantité à retenir de la semaine ISO) : appliqués **après** le lotissement, en
 tronquant au multiple d'UM ; un jour plein ne tire plus de besoin, l'excédent glisse à la livraison suivante,
 une semaine pleine à la semaine suivante. Les plafonds s'appliquent aussi aux propositions urgentes. Quand même
-le plancher dépasse les plafonds, le manque est **inévitable** : affiché en rouge dans le Projeté Appro. et
+le plancher dépasse les plafonds, le manque est **inévitable** : affiché en rouge dans le stock projeté et
 remonté par l'alerte `CAP_REACHED` (« plafond fournisseur atteint »).
 
 **Multi-sourcing** (`sourcing_policy` de l'article, `quota` [défaut]) : **chaque besoin est partagé** entre les
@@ -311,21 +335,24 @@ fournisseurs à quota au prorata des quotas (chaque part a son MOQ, son UM, son 
 et ses plafonds ; les parts d'un même besoin forment une proposition par fournisseur) ; la part qu'un
 fournisseur ne peut pas livrer (plafond) est **reportée sur l'autre fournisseur à quota** le même jour avant de
 glisser ; avec `priority`, tout va au fournisseur de priorité 1. Dans le tableau, la ligne *Proposition CBN*
-est **à la maille fournisseur** (une par voie, sous la ligne *Appro.*), comme dans l'export Excel. Marques dans
-la cellule : **!** urgente (plancher), **▲** plafonnée.
+est **à la maille fournisseur** (une par voie, sous la ligne *Quantité à retenir*), comme dans l'export Excel.
+Marques dans la cellule : **!** urgente (date limite dépassée, plancher), **▲** plafonnée, **◇** hors jour
+standard ; l'infobulle donne la date limite (« à commander au plus tard le »).
 
 **Refuser une proposition** : un clic sur une cellule *Proposition CBN* la barre, la retire du plan et interdit
 toute proposition à **ce fournisseur ce jour-là seulement** (un fournisseur mardi / jeudi refusé le mardi reste
 possible le jeudi) : en multi-sourcing, sa part passe aux autres fournisseurs à quota ; en mono-source, le
 besoin glisse au jour de livraison ouvert suivant, au prix d'un manque éventuel entre-temps, affiché dans le
-Projeté Appro. et alerté. Un refus enregistré sans fournisseur (anciennes données) vaut pour tous. La quantité
+stock projeté et alerté. Un refus enregistré sans fournisseur (anciennes données) vaut pour tous. La quantité
 refusée reste affichée barrée ; un nouveau clic rétablit la proposition. Les refus sont listés dans *Saisies &
-journal*. Une proposition refusée **urgente** reste listée dans le flux *À commander* du cockpit, marquée
-« ignorée », hors de tout calcul.
+journal* ; un refus **daté avant aujourd'hui a expiré** : il n'apparaît plus dans le tableau (listé « expirée »
+dans *Saisies & journal*). Une proposition refusée dont la date limite est passée ou tombe sous 5 jours ouvrés
+reste dans le flux *À commander* du cockpit, marquée « ignorée », hors de tout calcul, **masquée par défaut**
+(bouton *Afficher les ignorées*).
 
-**Planning de livraison** (onglet de la fiche article) : la ligne *Appro.* est présentée comme des lignes de
+**Planning de livraison** (onglet de la fiche article) : la ligne *Quantité à retenir* est présentée comme des lignes de
 planning ERP, **une par fournisseur et par semaine ISO** à quantité non nulle, à partir de la date de
-référence. La quantité de la semaine additionne **tout ce que porte la ligne Appro.** : cellules saisies,
+référence. La quantité de la semaine additionne **tout ce que porte la ligne Quantité à retenir** : cellules saisies,
 commandes fermes ERP reprises (cellules vides) et propositions CBN (cellules grisées) ; l'infobulle de la
 quantité en donne la décomposition. Colonnes : *Quantité livrée*, *Unité*, *Date de début de livraison* (le
 lundi), *Heure de début* (11:59:00 PM), *Date de fin* (le dimanche), *Heure de fin* (11:59:00 PM). Le bouton
@@ -353,7 +380,7 @@ par semaine de l'article (`DELETE /api/params/overrides?scope=article_week&key1=
 ## 9. Impact sur les programmes
 
 Production **réalisable** par programme et semaine = PDP × part servable du composant le plus contraint,
-pour trois stocks : à date, Projeté ERP, Projeté Appro. (page *Plan de production*, onglet *Impact programmes*).
+pour trois stocks : à date, Projeté Ferme, Stock projeté (page *Plan de production*, onglet *Impact programmes*).
 
 ## 9 bis. Cockpit du jour : deux onglets, et la page Recherche
 
@@ -362,23 +389,24 @@ pour trois stocks : à date, Projeté ERP, Projeté Appro. (page *Plan de produc
 valeur cible, en-cours ERP, articles en retard). Le **portefeuille** vient en premier (pliable) : article,
 fournisseurs (liens actifs), approvisionneur, statut (pastille bleue = données à corriger), stock à date avec le
 stock cible en dessous, couverture à date avec la couverture cible en dessous, *commande en cours* (prochaine
-commande ferme attendue : date, fournisseur, restant), *commande à placer* (première proposition CBN : date limite
-de commande, fournisseur retenu, quantité, livraison), puis en retard. Les colonnes secondaires (couverture
-Appro., rupture Appro., rupture ERP, en-cours ERP, Appro., CBN, valeur, alertes) s'affichent par le menu
-*Colonnes* du tableau, mémorisé. Suivent la projection de la valeur du stock et les alertes prioritaires.
+commande ferme attendue : date, fournisseur, restant), *à commander au plus tard le* (première proposition CBN :
+date limite de commande, ! si dépassée, fournisseur retenu, quantité, livraison, ◇ hors jour standard), puis en
+retard. Les fournisseurs sont partout affichés **code et nom** (le filtre porte sur les deux). Les colonnes
+secondaires (couverture projetée, rupture projetée, rupture Ferme, en-cours ERP, quantité à retenir, CBN, valeur,
+alertes) s'affichent par le menu *Colonnes* du tableau, mémorisé. Suivent la projection de la valeur du stock et les alertes prioritaires.
 
 **Flux d'approvisionnement** : huit cartes, un clic affiche les lignes correspondantes en dessous ; les cartes et
 l'en-tête de la table restent visibles pendant le défilement.
 
 | Flux | Contenu |
 |---|---|
-| À commander | propositions CBN **urgentes** (date réelle « à commander le » dans le passé) ; une proposition refusée d'un clic reste listée, marquée *ignorée*, hors calculs |
+| À commander | propositions CBN dont la **date limite de commande** est dépassée (**!**, en tête) ou tombe sous **5 jours ouvrés** (colonne *Au plus tard le*, ◇ hors jour standard) ; la tuile compte les propositions **non ignorées** ; une proposition refusée d'un clic est masquée par défaut, le bouton *Afficher les ignorées* la liste, marquée *ignorée*, hors calculs |
 | Commandé | commandes fermes **apparues aujourd'hui** dans la copie ERP (`first_seen` posé par le job de synchronisation), quelle que soit la date de livraison |
-| En transit | journaux d'arrivée **non validés** (statut *En transit*), plus les DESADV non annulés qu'aucun journal ne porte encore |
-| À traiter | DESADV en **erreur**, ou **traités sans journal de saisie** (`ID_transaction_stock` vide) |
+| En transit | journaux d'arrivée **non validés** (statut *En transit*), plus les DESADV non annulés qu'aucun journal ne porte encore, datés des **5 derniers jours ouvrés** seulement (pas de bouton pour le reste) |
+| À traiter | DESADV en **erreur**, ou **traités sans journal de saisie** (`ID_transaction_stock` vide) ; par défaut les **5 derniers jours ouvrés**, tri par date décroissante, bouton *Tout afficher* |
 | À réceptionner | commandes fermes dont la livraison est attendue aujourd'hui |
 | Reçu | réceptions (journaux validés) datées d'aujourd'hui |
-| En retard | commandes fermes passées avec un restant ERP, **une ligne par commande** (§ 3.4) |
+| En retard | commandes fermes passées avec un restant ERP, **une ligne par commande** (§ 3.4) ; par défaut les **5 derniers jours ouvrés**, tri par date décroissante, bouton *Tout afficher* |
 | À valider | réceptions au statut *Reçu* (journal validé, ACR non validé) depuis **7 jours** ou plus, calculées depuis les réceptions |
 
 L'ancienne page *Propositions CBN* est remplacée par le flux *À commander* (`/propositions` y redirige).
@@ -390,7 +418,8 @@ au-delà). Les filtres des pages (recherche, tableau, référentiel, flux) sont 
 **Fournisseurs** : une liste (état des articles de chaque fournisseur dans le périmètre) et une **fiche
 fournisseur** (code et nom cliquables partout) : articles et règles (MOQ, UM, délai hérité ou spécifique,
 quotas, plafonds, situation), commandes en retard, commandes à venir, en transit, à traiter, à valider,
-urgences CBN. Les filtres de colonne *Fournisseur* portent sur le code **et** le nom.
+à commander (date limite dépassée ou sous 5 jours ouvrés). Les filtres de colonne *Fournisseur* portent sur le
+code **et** le nom, partout (cockpit, fiche article, saisies, référentiel, courbes).
 
 **Exports** : tout tableau de l'application porte un bouton *Excel* (colonnes affichées, lignes filtrées) et un
 pied de tableau (nombre de lignes, totaux) ; le tableau d'approvisionnement n'a pas de pied, son export est le
@@ -412,8 +441,16 @@ aucune version, « aucun plan ». Une bande sous le sélecteur montre,
 semaine par semaine, la version retenue et sa date d'import.
 
 **Fiches articles** (liste) : en-tête fixe ; colonnes *Prochaine livraison* (quantité), *Attendue le* et *Nature*
-(**Ferme ERP**, **CBN** ou **Saisie**) = première quantité attendue à partir d'aujourd'hui sur la ligne *Appro.* et le
-complément CBN, tous fournisseurs confondus.
+(**Ferme ERP**, **CBN** ou **Saisie**) = première quantité attendue à partir d'aujourd'hui sur la ligne *Quantité à
+retenir* et le complément CBN, tous fournisseurs confondus.
+
+**Pense-bête intégré** : le bouton **?** de l'en-tête (réservé aux administrateurs pour le moment) ouvre le
+pense-bête de l'approvisionneur dans l'application, **une page par section** (navigation à gauche, pages
+précédente / suivante). Un administrateur passe en **mode édition** (*Modifier*) : le texte se corrige sur place
+(gras, listes, tableaux et figures conservés), *Enregistrer* publie la page pour tous les lecteurs (table
+`app_help_pages`, HTML nettoyé des scripts et liens actifs, action journalisée), *Version d'origine* revient au
+texte livré avec l'application (`backend/appro/help/pense_bete.json`, généré par `scripts/pense_bete.py`).
+Les lecteurs voient la dernière version enregistrée, sans mention des versions précédentes ni bouton d'édition.
 
 **Période affichée** : sous la barre d'outils des tableaux d'approvisionnement (global et fiche article), une
 rangée de semaines ISO ; cliquer une semaine, ou glisser d'une semaine à une autre, n'affiche que ces colonnes
@@ -461,15 +498,15 @@ champ de saisie, toast « Annuler » (8 s) après chaque écriture, cellules ré
 
 ## 11. Classeur Excel « vivant »
 
-L'export *Simulation* reproduit le tableau : par article, *Besoin*, puis *Ferme / Prévisionnel / Reçu /
-Plan* par fournisseur, *Proposition CBN*, *Ajustement*, *Projeté ERP*, *Projeté Appro.*, manque, cible,
-couverture. Les lignes *Appro.* et *Ajustement* sont des saisies (fond jaune, bleu = déjà saisi dans
+L'export *Simulation* reproduit le tableau : par article, *Besoin*, puis *Ordre ferme / Prévisionnel EDI /
+Quantité reçue / Quantité à retenir* par fournisseur, *Proposition CBN*, *Ajustement*, *Projeté Ferme*, *Stock
+projeté*, manque, cible, couverture. Les lignes *Quantité à retenir* et *Ajustement* sont des saisies (fond jaune, bleu = déjà saisi dans
 l'application) ; les stocks sont des **formules** : `x = stock précédent + Σ Reçu + Σ Plan (ou Σ Ferme) +
 CBN + Ajustement − Besoin`, `stock = MAX(0 ; x)` ; la cible et la couverture sont des formules sur les jours
 ouvrés (lignes d'aide `wd`, `wd_cum`). Un test automatisé recalcule le classeur avec LibreOffice et le compare
 au moteur.
 
-**Réimport** (granularité jour) : dans chaque ligne *Appro.*, une valeur différente de la ligne *Ferme* du même
+**Réimport** (granularité jour) : dans chaque ligne *Quantité à retenir*, une valeur différente de la ligne *Ordre ferme* du même
 fournisseur devient une cellule saisie, une valeur égale vaut « ERP » ; chaque valeur d'*Ajustement* devient
 une cellule. Les cellules des articles présents dans le classeur remplacent celles de l'application.
 

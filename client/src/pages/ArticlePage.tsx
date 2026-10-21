@@ -13,6 +13,7 @@ import { DataTable, type Column } from "@/components/DataTable";
 import { RefRowEditor } from "@/components/RefRowEditor";
 import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { AlertList } from "./CockpitPage";
+import { useLang } from "@/lib/i18n";
 import { CONSUMPTION_SOURCE_LABELS, CONSUMPTION_SOURCE_SHORT, ORDER_TYPE_LABELS, SOURCING_LABELS, WEEKDAY_SHORT, fmtDate, fmtDateTime, fmtDemandDays, fmtQty, fmtWeekdays } from "@/lib/format";
 import type { ArticleRef, ConsumptionSource, LinkRef, OrderInfo, PlanCellOut, AdjustmentOut, RefRow } from "@/lib/types";
 
@@ -21,6 +22,7 @@ type Tab = "chart" | "delivery" | "params" | "plan" | "orders" | "proposals" | "
 export default function ArticlePage() {
   const { articleId } = useParams();
   const { perimeter, set, rights } = usePerimeter();
+  const { lang, t } = useLang();
   const [tab, setTab] = useRemembered<Tab>("article.tab", "chart");
   const q = useProjection(articleId);
   const planCells = usePlanCells(articleId ? { article_id: articleId } : undefined);
@@ -35,26 +37,27 @@ export default function ArticlePage() {
   const unit = a?.unit ?? "";
   const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { article_ids: [articleId ?? ""], granularity: perimeter.granularity === "week" ? "week" : "day" });
   const canEdit = !!a && (rights.canEditPlanner(a.planner) || rights.canManageParams);
+  const names = useMemo(() => new Map((d?.suppliers ?? []).map((s) => [s.supplier_id, s.supplier_name])), [d]);
 
   const orders = useMemo(() => (d?.lanes ?? []).flatMap((l) => l.orders), [d]);
   const orderCols = useMemo<Column<OrderInfo>[]>(() => [
-    { key: "supplier", label: "Fournisseur", get: (o) => o.supplier_id ?? "", filter: "select", render: (o) => <SupplierLink id={o.supplier_id} /> },
+    { key: "supplier", label: "Fournisseur", get: (o) => (o.supplier_id ? `${o.supplier_id} ${names.get(o.supplier_id) ?? ""}` : ""), filter: "select", title: "Code et nom : filtre sur les deux", render: (o) => <SupplierLink id={o.supplier_id} name={o.supplier_id ? names.get(o.supplier_id) : undefined} /> },
     { key: "type", label: "Type", get: (o) => ORDER_TYPE_LABELS[o.order_type] ?? o.order_type, filter: "select", render: (o) => <Badge tone={o.order_type === "FIRM" ? "brand" : "neutral"}>{ORDER_TYPE_LABELS[o.order_type] ?? o.order_type}</Badge> },
     { key: "date", label: "Date de livraison", get: (o) => o.expected_date, render: (o) => <>{fmtDate(o.expected_date)}{d && o.expected_date < d.as_of && <span className="sub subtle">passée</span>}</> },
     { key: "ordered", label: "Commandé", get: (o) => o.qty_ordered, num: true, sum: true, render: (o) => fmtQty(o.qty_ordered, unit) },
     { key: "open", label: "Restant ERP", get: (o) => o.qty_open, num: true, sum: true, render: (o) => fmtQty(o.qty_open, unit) },
     { key: "state", label: "État", get: (o) => (o.ignored ? "ignorée" : d && o.expected_date < d.as_of && o.qty_open > 0 ? "en retard" : o.qty_open > 0 ? "en cours" : "soldée"), filter: "select", render: (o) => o.ignored ? <Badge tone="critical">ignorée</Badge> : d && o.expected_date < d.as_of && o.qty_open > 0 ? <Badge tone="warning">en retard</Badge> : o.qty_open > 0 ? <Badge tone="brand">en cours</Badge> : <Badge tone="ok">soldée</Badge> },
     { key: "ref", label: "N° commande", get: (o) => o.ref, render: (o) => <span className="mono small">{o.ref}</span> },
-  ], [unit, d]);
+  ], [unit, d, names]);
   const planCols = useMemo<Column<PlanCellOut>[]>(() => [
-    { key: "supplier", label: "Fournisseur", get: (c) => c.supplier_id, filter: "select", render: (c) => <SupplierLink id={c.supplier_id} /> },
+    { key: "supplier", label: "Fournisseur", get: (c) => `${c.supplier_id} ${names.get(c.supplier_id) ?? ""}`, filter: "select", title: "Code et nom : filtre sur les deux", render: (c) => <SupplierLink id={c.supplier_id} name={names.get(c.supplier_id)} /> },
     { key: "date", label: "Date", get: (c) => c.date, render: (c) => fmtDate(c.date) },
     { key: "qty", label: "Quantité", get: (c) => c.qty, num: true, sum: true, render: (c) => <b>{fmtQty(c.qty, unit)}</b> },
     { key: "expr", label: "Saisie", get: (c) => c.expression, render: (c) => <span className="mono small">{c.expression}</span> },
     { key: "note", label: "Commentaire", get: (c) => c.note },
     { key: "who", label: "Modifié", get: (c) => `${c.updated_by} ${c.updated_at}`, render: (c) => <span className="subtle small">{c.updated_by}<br />{fmtDateTime(c.updated_at)}</span> },
     ...(rights.canWrite ? [{ key: "del", label: "", get: () => "", filter: "none" as const, sortable: false, export: false as const, render: (c: PlanCellOut) => <Button size="sm" variant="ghost" title="Supprimer : la cellule revient à l'ERP" onClick={() => delPlan.mutate(c.id)}><Trash2 /></Button> }] : []),
-  ], [unit, delPlan, rights.canWrite]);
+  ], [unit, delPlan, rights.canWrite, names]);
   const adjCols = useMemo<Column<AdjustmentOut>[]>(() => [
     { key: "date", label: "Date", get: (c) => c.date, render: (c) => fmtDate(c.date) },
     { key: "qty", label: "Quantité", get: (c) => c.qty, num: true, sum: true, render: (c) => <b className={c.qty < 0 ? "delta down" : "delta up"}>{c.qty > 0 ? "+" : ""}{fmtQty(c.qty, unit)}</b> },
@@ -74,24 +77,25 @@ export default function ArticlePage() {
         <div className="title">
           <div className="row"><Link to="/" className="btn ghost sm"><ArrowLeft />Cockpit</Link>{a && <SeverityBadge severity={k?.severity ?? null} />}{a && a.consumption_source !== "erp" && <Badge tone="info" title={CONSUMPTION_SOURCE_LABELS[a.consumption_source]}>conso {CONSUMPTION_SOURCE_SHORT[a.consumption_source]}</Badge>}{a && a.demand_days < 5 && <Badge tone="brand" title="Besoin hebdomadaire réparti sur les premiers jours ouvrés de la semaine">besoin {fmtDemandDays(a.demand_days)}</Badge>}</div>
           <h1 style={{ marginTop: 6 }}>{articleId} {a && <span className="muted" style={{ fontWeight: 400 }}>· {a.designation}</span>}</h1>
-          <p>{a ? <>{a.unit} · cible {a.coverage_target_days} j ouvrés · rouge ≤ {a.alert_red_days} j · orange ≤ {a.alert_yellow_days} j · surstock ≥ {a.overstock_days} j · {d?.suppliers.map((s, i) => <span key={s.supplier_id}>{i > 0 && " · "}<SupplierLink id={s.supplier_id} name={s.supplier_name} inline /> <span className="subtle">(délai {s.lead_time_days} j, MOQ {fmtQty(s.moq, a.unit)}, UM {fmtQty(s.pack_qty, a.unit)}{s.max_qty_per_delivery ? `, max ${fmtQty(s.max_qty_per_delivery, a.unit)}/liv.` : ""}{s.max_qty_per_week ? `, max ${fmtQty(s.max_qty_per_week, a.unit)}/sem.` : ""})</span></span>)}</> : <Skeleton w={400} />}</p>
+          <p>{a ? <>{a.unit} · {t("page.target")} {a.coverage_target_days} {t("page.unit_wd")} · {t("page.red")} {a.alert_red_days} {t("stock.cov_unit")} · {t("page.orange")} {a.alert_yellow_days} {t("stock.cov_unit")} · {t("page.overstock")} {a.overstock_days} {t("stock.cov_unit")} · {d?.suppliers.map((s, i) => <span key={s.supplier_id}>{i > 0 && " · "}<SupplierLink id={s.supplier_id} name={s.supplier_name} inline /> <span className="subtle">({t("grid.lead")} {s.lead_time_days} {t("stock.cov_unit")}, {t("page.moq")} {fmtQty(s.moq, a.unit)}, {t("page.pack")} {fmtQty(s.pack_qty, a.unit)}{s.max_qty_per_delivery ? `, max ${fmtQty(s.max_qty_per_delivery, a.unit)}${t("grid.max_delivery")}` : ""}{s.max_qty_per_week ? `, max ${fmtQty(s.max_qty_per_week, a.unit)}${t("grid.max_week")}` : ""}{s.strict_days ? ", jours stricts" : ""})</span></span>)}</> : <Skeleton w={400} />}</p>
         </div>
         <div className="actions">
-          <Segmented size="sm" value={perimeter.granularity} onChange={(g) => set({ granularity: g })} options={[{ id: "default", label: "Par défaut" }, { id: "day", label: "Jour" }, { id: "week", label: "Semaine" }]} />
-          <Button variant={tab === "params" ? "primary" : "default"} onClick={() => setTab("params")}><Pencil />Paramétrage</Button>
+          <Segmented size="sm" value={perimeter.granularity} onChange={(g) => set({ granularity: g })} options={[{ id: "default", label: t("page.default") }, { id: "day", label: t("page.day") }, { id: "week", label: t("page.week") }]} />
+          <span className="lang-toggle" title={t("page.lang_title")}><Segmented size="sm" value={lang} onChange={(l) => set({ lang: l })} options={[{ id: "fr", label: "FR" }, { id: "en", label: "EN" }]} /></span>
+          <Button variant={tab === "params" ? "primary" : "default"} onClick={() => setTab("params")}><Pencil />{t("page.params")}</Button>
           <a className="btn" href={exportUrl}><Download />Excel</a>
         </div>
       </div>
 
       <div className="grid kpis">
-        <Kpi label="Stock à date" value={k ? fmtQty(k.stock_at_date, unit) : <Skeleton w={60} h={28} />} unit={unit} meta={k ? `fin de la veille · référence ${fmtQty(k.stock_reference, unit)} initialisée le ${fmtDate(k.init_date)}${k.reference_correction ? ` (corrigée de ${k.reference_correction > 0 ? "+" : ""}${fmtQty(k.reference_correction, unit)})` : ""}` : ""} tone={k?.reference_correction ? "warning" : undefined} onClick={() => setTab("adjustments")} />
-        <Kpi label="Couverture Appro." value={k ? k.coverage_plan_days : <Skeleton w={40} h={28} />} unit="j ouvrés" tone={k ? (k.coverage_plan_days <= (a?.alert_red_days ?? 2) ? "critical" : k.coverage_plan_days <= (a?.alert_yellow_days ?? 5) ? "warning" : "ok") : undefined} meta={k ? `ERP : ${k.coverage_erp_days} j · cible ${k.coverage_target_days} j = ${fmtQty(k.target_stock, unit)}` : ""} />
-        <Kpi label="Rupture ERP" value={k ? (k.first_stockout_erp ? fmtDate(k.first_stockout_erp) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_erp ? "critical" : "ok"} meta={k ? (k.first_stockout_erp ? `manque cumulé max ${fmtQty(k.max_shortage_erp, unit)}` : `stock mini ${fmtQty(k.min_stock_erp, unit)}`) : ""} />
-        <Kpi label="Rupture Appro." value={k ? (k.first_stockout_plan ? fmtDate(k.first_stockout_plan) : "aucune") : <Skeleton w={60} h={28} />} tone={k?.first_stockout_plan ? "critical" : "ok"} meta={k ? (k.first_stockout_plan ? `manque cumulé max ${fmtQty(k.max_shortage_plan, unit)}` : `stock mini ${fmtQty(k.min_stock_plan, unit)}`) : ""} />
-        <Kpi label="En retard" value={k ? fmtQty(k.backlog_qty, unit) : <Skeleton w={60} h={28} />} unit={unit} tone={k && k.backlog_qty > 0 ? "warning" : "ok"} meta={k ? (k.backlog_qty > 0 ? `restant ERP des commandes fermes passées · commandé ${fmtQty(k.backlog_ordered, unit)}, reçu ${fmtQty(k.backlog_received, unit)}` : "aucune commande ferme passée avec un restant") : ""} onClick={() => setTab("orders")} />
-        <Kpi label="En-cours ERP" value={k ? fmtQty(k.open_firm_qty, unit) : <Skeleton w={60} h={28} />} meta={k ? `ferme · + ${fmtQty(k.open_forecast_qty, unit)} prévisionnel` : ""} onClick={() => setTab("orders")} />
-        <Kpi label="Appro." value={k ? fmtQty(k.plan_qty, unit) : <Skeleton w={60} h={28} />} tone="brand" meta={k ? `${k.plan_cell_count} cellule(s) saisie(s) · CBN ${fmtQty(k.proposed_qty, unit)}${k.urgent_proposal_count ? ` (${k.urgent_proposal_count} urgent)` : ""}${k.capped_proposal_count ? ` (${k.capped_proposal_count} plafonnée)` : ""}${k.ignored_order_days ? ` · ${k.ignored_order_days} j ferme ignoré(s)` : ""}${k.refused_proposals ? ` · ${k.refused_proposals} CBN refusée(s)` : ""}` : ""} onClick={() => setTab("delivery")} />
-        <Kpi label="Besoin 20 j ouvrés" value={k ? fmtQty(k.demand_next_20wd, unit) : <Skeleton w={60} h={28} />} meta={k ? `${fmtQty(k.avg_daily_demand_wd, unit)} / jour ouvré · délai ${k.lead_time_days} j ouvrés` : ""} />
+        <Kpi label={t("tile.stock_at_date")} value={k ? fmtQty(k.stock_at_date, unit) : <Skeleton w={60} h={28} />} unit={unit} meta={k ? `${t("tile.stock_meta", { ref: fmtQty(k.stock_reference, unit), d: fmtDate(k.init_date, undefined, lang) })}${k.reference_correction ? t("tile.corrected", { v: `${k.reference_correction > 0 ? "+" : ""}${fmtQty(k.reference_correction, unit)}` }) : ""}` : ""} tone={k?.reference_correction ? "warning" : undefined} onClick={() => setTab("adjustments")} />
+        <Kpi label={t("tile.coverage")} value={k ? k.coverage_plan_days : <Skeleton w={40} h={28} />} unit={t("tile.coverage_unit")} tone={k ? (k.coverage_plan_days <= (a?.alert_red_days ?? 2) ? "critical" : k.coverage_plan_days <= (a?.alert_yellow_days ?? 5) ? "warning" : "ok") : undefined} meta={k ? t("tile.coverage_meta", { e: k.coverage_erp_days, t: k.coverage_target_days, q: fmtQty(k.target_stock, unit) }) : ""} />
+        <Kpi label={t("tile.stockout_firm")} value={k ? (k.first_stockout_erp ? fmtDate(k.first_stockout_erp, undefined, lang) : t("tile.none")) : <Skeleton w={60} h={28} />} tone={k?.first_stockout_erp ? "critical" : "ok"} meta={k ? (k.first_stockout_erp ? t("tile.max_short", { v: fmtQty(k.max_shortage_erp, unit) }) : t("tile.min_stock", { v: fmtQty(k.min_stock_erp, unit) })) : ""} />
+        <Kpi label={t("tile.stockout_plan")} value={k ? (k.first_stockout_plan ? fmtDate(k.first_stockout_plan, undefined, lang) : t("tile.none")) : <Skeleton w={60} h={28} />} tone={k?.first_stockout_plan ? "critical" : "ok"} meta={k ? (k.first_stockout_plan ? t("tile.max_short", { v: fmtQty(k.max_shortage_plan, unit) }) : t("tile.min_stock", { v: fmtQty(k.min_stock_plan, unit) })) : ""} />
+        <Kpi label={t("tile.late")} value={k ? fmtQty(k.backlog_qty, unit) : <Skeleton w={60} h={28} />} unit={unit} tone={k && k.backlog_qty > 0 ? "warning" : "ok"} meta={k ? (k.backlog_qty > 0 ? t("tile.late_meta", { o: fmtQty(k.backlog_ordered, unit), r: fmtQty(k.backlog_received, unit) }) : t("tile.late_none")) : ""} onClick={() => setTab("orders")} />
+        <Kpi label={t("tile.open")} value={k ? fmtQty(k.open_firm_qty, unit) : <Skeleton w={60} h={28} />} meta={k ? t("tile.open_meta", { v: fmtQty(k.open_forecast_qty, unit) }) : ""} onClick={() => setTab("orders")} />
+        <Kpi label={t("tile.plan")} value={k ? fmtQty(k.plan_qty, unit) : <Skeleton w={60} h={28} />} tone="brand" meta={k ? `${t("tile.plan_meta", { n: k.plan_cell_count, v: fmtQty(k.proposed_qty, unit) })}${k.urgent_proposal_count ? t("tile.urgent", { n: k.urgent_proposal_count }) : ""}${k.capped_proposal_count ? t("tile.capped", { n: k.capped_proposal_count }) : ""}${k.ignored_order_days ? t("tile.ignored_days", { n: k.ignored_order_days }) : ""}${k.refused_proposals ? t("tile.refused", { n: k.refused_proposals }) : ""}` : ""} onClick={() => setTab("delivery")} />
+        <Kpi label={t("tile.demand")} value={k ? fmtQty(k.demand_next_20wd, unit) : <Skeleton w={60} h={28} />} meta={k ? t("tile.demand_meta", { v: fmtQty(k.avg_daily_demand_wd, unit), l: k.lead_time_days }) : ""} />
       </div>
 
       {q.isLoading || !d ? <SkeletonBlock rows={10} /> : (
@@ -119,8 +123,8 @@ export default function ArticlePage() {
       {tab === "params" && a && d && <ParamsTab article={a} links={d.suppliers} programs={d.programs} canEdit={canEdit} diagnostics={d.diagnostics} />}
 
       {tab === "plan" && (
-        <Card flush title="Cellules saisies dans la ligne Appro." hint="tout ce qui n'est pas ici vient de l'ERP ; supprimer une cellule rend la journée à l'ERP">
-          <DataTable rows={planCells.data ?? []} columns={planCols} rowKey={(c) => c.id} compact emptyTitle="Aucune cellule saisie : le plan suit l'ERP" emptyHint="Taper une quantité dans la ligne Appro. du tableau." storageKey="article.plan" exportTitle={`${articleId} - cellules Appro`} />
+        <Card flush title="Cellules saisies dans la ligne Quantité à retenir" hint="tout ce qui n'est pas ici vient de l'ERP ; supprimer une cellule rend la journée à l'ERP">
+          <DataTable rows={planCells.data ?? []} columns={planCols} rowKey={(c) => c.id} compact emptyTitle="Aucune cellule saisie : le plan suit l'ERP" emptyHint="Taper une quantité dans la ligne Quantité à retenir du tableau." storageKey="article.plan" exportTitle={`${articleId} - quantités à retenir`} />
         </Card>
       )}
 
@@ -130,17 +134,17 @@ export default function ArticlePage() {
         </Card>
       )}
 
-      {tab === "proposals" && (q.isLoading || !d ? <SkeletonBlock /> : d.proposals.length === 0 ? <Empty title="Aucune proposition CBN" hint="Le Projeté Appro. reste au-dessus de 85 % de la cible sur tout l'horizon, sans rupture." /> : (
-        <Card flush title="Propositions CBN" hint="une par fournisseur et par jour de livraison ; pour la reprendre, taper la quantité dans la ligne Appro. (la cellule grisée la prérempli) ; ! = urgente (plancher dans le délai), ▲ = plafonnée">
+      {tab === "proposals" && (q.isLoading || !d ? <SkeletonBlock /> : d.proposals.length === 0 ? <Empty title="Aucune proposition CBN" hint="Le stock projeté reste au-dessus de la cible moins la tolérance sur tout l'horizon, sans rupture." /> : (
+        <Card flush title="Propositions CBN" hint="une par fournisseur et par jour de livraison ; pour la reprendre, taper la quantité dans la ligne Quantité à retenir (la cellule grisée la prérempli) ; ! = urgente (date limite dépassée), ▲ = plafonnée, ◇ = hors jour standard">
           <table className="tbl compact">
-            <thead><tr><th>À commander le</th><th>Livraison</th><th>Fournisseur</th><th className="num">Quantité</th><th className="num">Besoin net</th><th className="num">Stock avant → après</th><th>Motif</th></tr></thead>
+            <thead><tr><th>Au plus tard le</th><th>Livraison</th><th>Fournisseur</th><th className="num">Quantité</th><th className="num">Besoin net</th><th className="num">Stock avant → après</th><th>Motif</th></tr></thead>
             <tbody>
               {d.proposals.map((p) => (
                 <tr key={p.proposal_id}>
-                  <td>{fmtDate(p.order_date)} {p.urgent && <Badge tone="critical">urgent</Badge>}</td>
-                  <td>{fmtDate(p.delivery_date)}</td>
+                  <td>{fmtDate(p.order_date)} {p.urgent && <Badge tone="critical" title="Date limite de commande dépassée : à commander sans attendre">urgent !</Badge>}</td>
+                  <td>{fmtDate(p.delivery_date)}{p.off_standard && <Badge tone="brand" title="Hors jour standard : le jour de livraison habituel du fournisseur n'est plus tenable, livraison au premier jour ouvré tenable">◇ hors jour standard</Badge>}</td>
                   <td><SupplierLink id={p.supplier_id} name={p.supplier_name} /><span className="sub">délai {p.lead_time_days} j ouvrés</span></td>
-                  <td className="num"><b>{fmtQty(p.qty, p.unit)}</b>{p.floor && <Badge tone="critical" title="Plancher : le minimum qui évite la rupture jusqu'à la veille de la livraison suivante">plancher</Badge>}{p.capped && <Badge tone="warning" title="Tronquée au plafond du fournisseur (max / livraison ou / semaine)">plafonnée</Badge>}<span className="sub">MOQ {fmtQty(p.moq, p.unit)} · UM {fmtQty(p.pack_qty, p.unit)}</span></td>
+                  <td className="num"><b>{fmtQty(p.qty, p.unit)}</b>{p.floor && <Badge tone="critical" title="Plancher : le minimum qui évite la rupture, aucune livraison tenable avant le besoin">plancher</Badge>}{p.capped && <Badge tone="warning" title="Tronquée au plafond du fournisseur (max / livraison ou / semaine)">plafonnée</Badge>}<span className="sub">MOQ {fmtQty(p.moq, p.unit)} · UM {fmtQty(p.pack_qty, p.unit)}</span></td>
                   <td className="num">{fmtQty(p.net_requirement, p.unit)}</td>
                   <td className="num">{fmtQty(p.projected_stock_before, p.unit)} → {fmtQty(p.projected_stock_after, p.unit)}</td>
                   <td className="small" style={{ whiteSpace: "normal", maxWidth: 380 }}>{p.reason}</td>
@@ -214,7 +218,7 @@ function ParamsTab({ article, links, programs, canEdit, diagnostics }: { article
               <span className="small subtle">{links.length < 2 ? "mono-source : sans objet" : article.sourcing_policy === "quota" ? "chaque besoin réparti selon les quotas ; un excédent plafonné passe à l'autre fournisseur" : "le fournisseur prioritaire d'abord"}</span>
             </div>
           </div>
-          <p className="small subtle" style={{ marginTop: 10 }}>Règles communes à tous les articles : délai inclusif en jours ouvrés, plancher dans le délai, retour à la cible sous 85 % de la cible, besoin non servi perdu ; statut : couverture à date contre les seuils rouge et orange, date de commande des propositions. Voir <Link to="/parametres">Paramètres › Règles communes</Link>.</p>
+          <p className="small subtle" style={{ marginTop: 10 }}>Règles communes à tous les articles : délai inclusif en jours ouvrés, marge de délai, date limite de commande, hors jour standard ◇ (sauf fournisseur à jours stricts), plancher ! au jour du besoin, retour à la cible sous la tolérance, besoin non servi perdu ; statut : couverture à date contre les seuils rouge et orange, date limite des propositions. Voir <Link to="/parametres">Paramètres › Règles communes</Link>.</p>
         </Card>
 
         <Card title="Jours de consommation" hint="jours ouvrés de la semaine qui portent le besoin hebdomadaire (le PDP est hebdomadaire)">
@@ -316,5 +320,5 @@ function SupplierDays({ supplierId }: { supplierId: string }) {
   const rows = useRefRows("ref_suppliers");
   const s = (rows.data ?? []).find((r) => String(r.supplier_id) === supplierId);
   if (!s) return <span>…</span>;
-  return <span title="Jours de livraison du fournisseur">{fmtWeekdays(String(s.delivery_weekdays ?? ""))}</span>;
+  return <span title={s.strict_days ? "Jours de livraison standard ; jours stricts : jamais de proposition hors jour standard (◇)" : "Jours de livraison standard ; une proposition peut sortir de ces jours (◇) quand le jour habituel n'est plus tenable"}>{fmtWeekdays(String(s.delivery_weekdays ?? ""))}{s.strict_days ? <Badge tone="neutral" title="Jours stricts">stricts</Badge> : null}</span>;
 }

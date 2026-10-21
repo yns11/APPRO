@@ -31,6 +31,7 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "target_tolerance_pct": ("Tolérance sous la cible (%) : le CBN ne remonte à la cible que si le stock projeté passe sous (100 − n) % de la cible ; la quantité proposée vise 100 %", None),
+    "lead_margin_days": ("Marge de délai (jours ouvrés) : la date limite de commande d'une livraison = livraison − (délai − marge) ; une livraison est tenable quand sa date limite est aujourd'hui ou plus tard ; 0 = délai strict", None),
     "horizon_days": ("Horizon de calcul après la date de référence (jours) : 52 semaines, fixé dans l'application", None),
     "history_weeks": ("Affichage : semaines montrées avant la semaine en cours (réglage par utilisateur)", None),
     "focus_weeks": ("Affichage : semaines détaillées jour par jour après la semaine en cours (réglage par utilisateur)", None),
@@ -40,9 +41,12 @@ FIXED_RULES: list[tuple[str, str]] = [
     ("Unité de temps", "jours ouvrés pour la couverture, les seuils et le délai"),
     ("Besoin non servi", "perdu : le stock s'arrête à 0, le manque affiché est le cumul des jours sans stock"),
     ("Stock cible", "besoin des n prochains jours ouvrés de couverture ; pas de stock de sécurité ni de cycle de commande"),
-    ("Propositions", "sur les jours de livraison du fournisseur, regroupées sur la livraison précédant le besoin ; plancher dans le délai, cible pleine ensuite ; plafonds du lien"),
+    ("Propositions", "sur le jour de livraison standard du fournisseur précédant le besoin, regroupées ; cible pleine dès que la date limite est tenable ; plafonds du lien"),
+    ("Hors jour standard ◇", "jour standard non tenable : proposition au premier jour ouvré tenable avant le besoin, sauf fournisseur à jours stricts"),
+    ("Plancher !", "aucun jour tenable avant le besoin : proposition urgente du minimum qui évite la rupture, posée le jour du besoin (jour standard si jours stricts)"),
+    ("À commander", "statut et carte du cockpit : date limite dans les 5 prochains jours ouvrés ; urgente quand elle est dépassée"),
     ("Horizon", "52 semaines, tableau et PDP compris"),
-    ("Commandes comptées", "ordres fermes seulement (les prévisionnels sont affichés, jamais comptés)"),
+    ("Commandes comptées", "ordres fermes seulement (les prévisionnels EDI sont affichés, jamais comptés)"),
 ]
 
 
@@ -336,7 +340,7 @@ def suppliers_list(ctx: AppContext = Depends(ctx_dep)):
     return [S.SupplierRef(supplier_id=r["supplier_id"], name=r["name"], country=r["country"], contact=r["contact"],
                           delivery_weekdays=r["delivery_weekdays"] or "1,2,3,4,5",
                           lead_time_days=int(r["lead_time_days"]) if int(r["lead_time_days"] or 0) > 0 else 5,
-                          active=bool(r["active"])) for r in df.to_dict("records")]
+                          active=bool(r["active"]), strict_days=bool(r.get("strict_days") or False)) for r in df.to_dict("records")]
 
 
 @router.get("/reference/programs", response_model=list[S.ProgramRef])

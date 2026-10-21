@@ -106,7 +106,8 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
     source_ids = {src for a in articles for src, _c in a.derived_terms}
 
     suppliers = [Supplier(r["supplier_id"], r["name"], r["country"], r["contact"], parse_weekdays(r["delivery_weekdays"]),
-                          _lead(r.get("lead_time_days")), bool(r["active"])) for r in _records(t("ref_suppliers"))]
+                          _lead(r.get("lead_time_days")), bool(r["active"]), strict_days=bool(r.get("strict_days") or False))
+                 for r in _records(t("ref_suppliers"))]
     links = [SupplierLink(r["article_id"], r["supplier_id"], float(r["moq"]), float(r["pack_qty"]),
                           _optional_int(r.get("lead_time_override")), float(r["quota_pct"]), _int(r["priority"], 1), bool(r["active"]),
                           _optional_float(r.get("max_qty_per_delivery")), _optional_float(r.get("max_qty_per_week")))

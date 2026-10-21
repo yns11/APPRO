@@ -64,6 +64,7 @@ class Supplier:
     delivery_weekdays: frozenset[int] = frozenset({1, 2, 3, 4, 5})
     lead_time_days: int = 5        # default lead time of the supplier, working days, inclusive (Monday + 5 = next Monday)
     active: bool = True
+    strict_days: bool = False      # True : deliveries on the standard weekdays only (no « hors jour standard » proposal)
 
 
 @dataclass
@@ -318,6 +319,7 @@ class EngineParams:
     focus_weeks: int = 2                          # display : weeks detailed day by day after the current week
     working_weekdays: tuple[int, ...] = (1, 2, 3, 4, 5)
     target_tolerance_pct: float = 15.0            # a proposal is triggered under (100 − n) % of the target, and fills it to 100 %
+    lead_margin_days: int = 1                     # order deadline = delivery − (lead time − margin) working days ; 0 = strict lead time
 
     def copy_with(self, **changes: Any) -> "EngineParams":
         data = self.__dict__.copy()
@@ -382,6 +384,7 @@ class Proposal:
     ignored: bool = False          # refused by the planner (click) : listed for information, out of every calculation
     floor: bool = False            # urgent proposal limited to what avoids a shortage (inside the lead time)
     capped: bool = False           # truncated by a delivery / weekly cap of the supplier link
+    off_standard: bool = False     # « hors jour standard » (◇) : placed on a tenable working day that is not a standard delivery day
 
 
 @dataclass

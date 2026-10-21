@@ -1,5 +1,5 @@
 import { format, parseISO, differenceInCalendarDays, getISOWeek, getISOWeekYear } from "date-fns";
-import { fr } from "date-fns/locale";
+import { enGB, fr } from "date-fns/locale";
 
 const nf0 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
@@ -29,9 +29,9 @@ export const fmtCellQty = (v: number, unit: string, decimal: boolean): string =>
 export function fmtInt(v: number | null | undefined): string { return v === null || v === undefined ? "–" : nf0.format(v); }
 export function fmtCompact(v: number | null | undefined): string { return v === null || v === undefined ? "–" : compact.format(v); }
 export function fmtPct(v: number | null | undefined, digits = 0): string { return v === null || v === undefined ? "–" : `${(100 * v).toFixed(digits)} %`; }
-export function fmtDate(iso: string | null | undefined, pattern = "dd/MM/yyyy"): string {
+export function fmtDate(iso: string | null | undefined, pattern = "dd/MM/yyyy", lang: "fr" | "en" = "fr"): string {
   if (!iso) return "–";
-  try { return format(parseISO(iso), pattern, { locale: fr }); } catch { return iso; }
+  try { return format(parseISO(iso), pattern, { locale: lang === "en" ? enGB : fr }); } catch { return iso; }
 }
 export function fmtDateTime(iso: string): string { return fmtDate(iso, "dd/MM/yyyy HH:mm"); }
 export function daysFrom(iso: string | null | undefined, from: string): number | null {
@@ -47,10 +47,12 @@ export function isoWeekOf(iso: string): string { const d = parseISO(iso); return
 export function isoWeekKey(iso: string): string { const d = parseISO(iso); return `${getISOWeekYear(d)}-W${String(getISOWeek(d)).padStart(2, "0")}`; }
 /** A column key is either an ISO week label ("2026-W38") or an ISO date. */
 export const isWeekKey = (p: string) => p.includes("-W");
-export function periodLabel(p: string): string {
-  if (isWeekKey(p)) return p.replace("-W", " S");
-  return fmtDate(p, "EEE dd/MM").replace(".", "");
+export function periodLabel(p: string, lang: "fr" | "en" = "fr"): string {
+  if (isWeekKey(p)) return p.replace("-W", lang === "en" ? " W" : " S");
+  return fmtDate(p, "EEE dd/MM", lang).replace(".", "");
 }
+/** Week chip label : "S43" in French, "W43" in English. */
+export function weekChipLabel(key: string, lang: "fr" | "en" = "fr"): string { return key.replace(/^\d{4}-W/, lang === "en" ? "W" : "S"); }
 export const ALERT_LABELS: Record<string, string> = {
   STOCKOUT: "Rupture Appro.", LOW_COVERAGE: "Couverture à date", OVERSTOCK: "Surstock", BACKLOG: "Backlog fournisseur", ORDER_DUE: "Commande à placer",
   URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock de départ négatif",

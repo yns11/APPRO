@@ -248,6 +248,19 @@ class AppAction(Base):
         return json.loads(self.items_json or "[]")
 
 
+class AppHelpPage(Base):
+    """One page of the in-app « pense-bête » **edited by an administrator** : the saved version replaces
+    the default text shipped with the application (``appro/help/pense_bete.json``) for everybody ; deleting
+    the row brings the default back.  One row per page at most : no history is kept."""
+
+    __tablename__ = "app_help_pages"
+    slug: Mapped[str] = mapped_column(String(60), primary_key=True)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    body_html: Mapped[str] = mapped_column(Text, default="")
+    updated_by: Mapped[str] = mapped_column(String(120), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 def audit(session: Session, user: str, action: str, entity_type: str, entity_id: str = "",
           article_id: str | None = None, payload: dict | None = None) -> None:
     session.add(AuditLog(user=user, action=action, entity_type=entity_type, entity_id=entity_id,

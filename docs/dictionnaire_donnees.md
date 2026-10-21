@@ -24,7 +24,7 @@ tables (`GET /api/reference/<table>/rows`) ; elles ne sont ni stockées, ni expo
 | Table | Colonnes requête | Boutons de filtre rapide (cumulables) |
 |---|---|---|
 | `ref_articles` | *Programmes* (noms des programmes dont la nomenclature utilise l'article, `programs`, `program_count`) ; *Fourn.* (`supplier_count`, règles article ↔ fournisseur actives). La colonne *Famille* n'est pas affichée. | *Sans fournisseur*, *Multi-sourcing* (≥ 2 fournisseurs actifs), *Sans programme*, *Conso dérivée / PDP*, *Jours conso ≠ 5* |
-| `ref_suppliers` | *Articles* (nombre et références des articles reliés par une règle active, `articles`, `article_count`) | *Sans article*, *Délai ≠ 5* |
+| `ref_suppliers` | *Articles* (nombre et références des articles reliés par une règle active, `articles`, `article_count`) | *Sans article*, *Délai ≠ 5* ; modification en lot : délai, jours de livraison, jours stricts, actif |
 | `ref_article_suppliers` | — | *Plafonnés*, *Délai spécifique* |
 | `ref_programs` | *Articles* (nombre de composants de la nomenclature, `article_count`) ; `has_plan` (une quantité planifiée à partir de la semaine en cours dans le PDP effectif) | *Sans nomenclature*, *Sans plan* |
 
@@ -58,7 +58,8 @@ plus ; les anciennes colonnes sont ignorées à l'import.
 | name | Nom | texte | oui | |
 | country | Pays | texte | non | |
 | contact | Contact | texte | non | |
-| delivery_weekdays | Jours de livraison | texte | oui | jours ISO autorisés, `1,2,3,4,5` (1 = lundi) |
+| delivery_weekdays | Jours de livraison | texte | oui | jours de livraison **standard**, ISO, `1,2,3,4,5` (1 = lundi) ; saisie en colonne semaine posée sur le premier de ces jours |
+| strict_days | Jours stricts | oui / non | non (non) | oui : livraisons uniquement les jours standard, jamais de proposition hors jour standard (◇) ; non : le CBN peut poser une proposition ◇ sur un autre jour ouvré quand le jour standard n'est plus tenable |
 | lead_time_days | Délai (j ouvrés) | entier | oui | délai du fournisseur en jours **ouvrés**, inclusif (lundi + 5 = lundi suivant) ; initialisé à 5 pour tous |
 | active | Actif | oui / non | oui | |
 
@@ -346,7 +347,8 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `app_cell_flags` | **clics sur les cellules en lecture** : `kind` = `order_ignored` (commande ferme ignorée : article, fournisseur, jour), `proposal_refused` (proposition CBN refusée : article, fournisseur, jour, quantité refusée affichée ; bloque les propositions à ce fournisseur **ce jour-là seulement**) ou `desadv_hidden` (DESADV non reçu masqué : article, fournisseur, jour, BL en note), auteur | (kind, article, fournisseur, date) |
 | `app_pdp_versions`, `app_pdp_lines` | versions de PDP importées (classeur) ou saisies dans la page *Plan de production* (`source_file` = « saisie directe ») ; une active au plus | id |
 | `app_program_scrap` | **taux de rebut par programme**, daté : `rate_pct` s'applique de `week_start` (lundi) jusqu'à la ligne suivante ; besoin = PDP × (1 + taux / 100) ; auteur | (program_id, week_start) |
-| `app_param_overrides` | règle commune du moteur (`global`, seul champ `target_tolerance_pct`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
+| `app_help_pages` | **pense-bête intégré** : texte enregistré par un administrateur pour une page (`slug`, titre, `body_html` nettoyé, auteur, horodatage) ; absent = texte livré (`backend/appro/help/pense_bete.json`) ; `DELETE` revient au texte livré | slug |
+| `app_param_overrides` | règles communes du moteur (`global`, champs `target_tolerance_pct` et `lead_margin_days`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
 | `app_actions` | annuler / rétablir : un geste utilisateur (horodatage, utilisateur, type, libellé, article, groupe), les lignes touchées avec leur état avant / après (JSON), annulable ou non, état `applied` / `undone` / `discarded`, qui l'a annulée ou rétablie et quand ; purge après 7 jours | id |
 | `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_desadv` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |

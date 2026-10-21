@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { Activity, AlertTriangle, BookOpen, CalendarRange, FileSpreadsheet, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Search, Settings, Sun, Table, Truck } from "lucide-react";
+import { Activity, AlertTriangle, BookOpen, CalendarRange, CircleHelp, FileSpreadsheet, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Search, Settings, Sun, Table, Truck } from "lucide-react";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useInvalidateAll, useSyncStatus } from "@/lib/queries";
 import { Button } from "@/components/ui";
@@ -27,7 +27,7 @@ const MORE = [
 ];
 
 export default function AppShell() {
-  const { perimeter, set, config } = usePerimeter();
+  const { perimeter, set, config, rights } = usePerimeter();
   const [open, setOpen] = useState(false);
   const invalidate = useInvalidateAll();
   const toast = useToast();
@@ -82,6 +82,7 @@ export default function AppShell() {
             {late && <Link to="/parametres?tab=data" className="sync-alert" title={`Dernière copie ERP il y a ${fmtMinutes(Math.min(...lateTables.map((t) => t.age_minutes ?? 0)))} : ${lateTables.map((t) => t.table).join(", ")}`}><AlertTriangle size={14} />Synchronisation ERP en retard</Link>}
             <span className="freshness" title="Aujourd'hui = date du calcul (passé / futur, propositions, expiration des cellules) · le stock a été initialisé en fin de journée du point zéro, la projection commence le lendemain · horizon : 52 semaines">Aujourd'hui : <b>{config ? fmtDate(config.as_of) : "…"}</b>{config && <span className="subtle"> · stock initialisé le {fmtDate(config.init_date)}</span>}</span>
             <ActionsBar />
+            {rights.isAdmin && <Link to="/aide" className="btn ghost icon no-print" title="Pense-bête de l'approvisionneur (réservé aux administrateurs pour le moment)" aria-label="Aide : pense-bête"><CircleHelp /></Link>}
             {config?.access?.can_write && <Button variant="ghost" icon title="Recharger les données ERP" onClick={refresh}><RefreshCw /></Button>}
             <Button variant="ghost" icon title={`Thème : ${THEME_LABELS[perimeter.theme]} (cliquer pour changer)`} aria-label="Changer de thème" onClick={cycleTheme}><ThemeIcon /></Button>
           </div>

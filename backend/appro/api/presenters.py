@@ -7,33 +7,35 @@ from typing import Any
 
 import numpy as np
 
-from ..engine.calendar import iso_week_label, iso_week_monday
+from ..engine.alerts import ORDER_DUE_WD
+from ..engine.calendar import WorkCalendar, iso_week_label, iso_week_monday
 from ..engine.models import Alert, ArticleResult, Dataset, Lane, MrpResult, Proposal, SupplierLink
 from . import schemas as S
 
+#: labels of the rows (the screens and the exports) ; the keys never change (``stock_erp`` is the firm projection)
 SERIES_LABELS = [
     ("demand", "Besoin"),
     ("consumed", "Consommé"),
     ("required", "Requis"),
     ("demand_plan", "Besoin (PDP seul)"),
-    ("orders_firm", "Ferme"),
-    ("orders_firm_hist", "Ferme (passé)"),
-    ("orders_forecast", "Prévisionnel"),
-    ("receipts", "Reçu"),
-    ("plan", "Appro."),
+    ("orders_firm", "Ordre ferme"),
+    ("orders_firm_hist", "Ordre ferme (passé)"),
+    ("orders_forecast", "Prévisionnel EDI"),
+    ("receipts", "Quantité reçue"),
+    ("plan", "Quantité à retenir"),
     ("supply_proposed", "Proposition CBN"),
     ("adjustments", "Ajustement"),
-    ("stock_erp", "Projeté ERP"),
-    ("stock_plan", "Projeté Appro."),
-    ("shortage_erp_cum", "Manque ERP (cumul)"),
-    ("shortage_plan_cum", "Manque Plan (cumul)"),
+    ("stock_erp", "Projeté Ferme"),
+    ("stock_plan", "Stock projeté"),
+    ("shortage_erp_cum", "Manque Ferme (cumul)"),
+    ("shortage_plan_cum", "Manque (cumul)"),
     ("target_stock", "Stock cible"),
-    ("coverage_erp", "Couverture ERP (j)"),
-    ("coverage_plan", "Couverture Appro. (j)"),
+    ("coverage_erp", "Couverture Ferme (j)"),
+    ("coverage_plan", "Couverture (j)"),
 ]
-LANE_SERIES = [("orders_firm", "Ferme"), ("orders_firm_hist", "Ferme (passé)"), ("orders_forecast", "Prévisionnel"),
-               ("receipts", "Reçu"), ("plan", "Appro."), ("supply_proposed", "Proposition CBN"),
-               ("orders_firm_ordered", "Ferme commandé"), ("orders_firm_open", "Ferme restant ERP"),
+LANE_SERIES = [("orders_firm", "Ordre ferme"), ("orders_firm_hist", "Ordre ferme (passé)"), ("orders_forecast", "Prévisionnel EDI"),
+               ("receipts", "Quantité reçue"), ("plan", "Quantité à retenir"), ("supply_proposed", "Proposition CBN"),
+               ("orders_firm_ordered", "Ordre ferme commandé"), ("orders_firm_open", "Ordre ferme restant ERP"),
                ("desadv_open", "En transit")]
 #: series of the multi-article table (the article page gets every series)
 GRID_SERIES = {"demand", "supply_proposed", "adjustments", "stock_erp", "stock_plan", "shortage_erp_cum", "shortage_plan_cum",
@@ -55,14 +57,18 @@ def proposal_out(p: Proposal, ar: ArticleResult, supplier_names: dict[str, str])
         delivery_date=p.delivery_date, order_date=p.order_date, qty=p.qty, net_requirement=p.net_requirement,
         reason=p.reason, urgent=p.urgent, lead_time_days=p.lead_time_days, moq=p.moq,
         pack_qty=p.pack_qty, projected_stock_before=p.projected_stock_before,
-        projected_stock_after=p.projected_stock_after, ignored=p.ignored, floor=p.floor, capped=p.capped)
+        projected_stock_after=p.projected_stock_after, ignored=p.ignored, floor=p.floor, capped=p.capped,
+        off_standard=p.off_standard)
 
 
 def link_out(l: SupplierLink, supplier_names: dict[str, str], suppliers: dict[str, Any] | None = None) -> S.LinkRef:
+    sup = (suppliers or {}).get(l.supplier_id)
     return S.LinkRef(article_id=l.article_id, supplier_id=l.supplier_id, supplier_name=supplier_names.get(l.supplier_id, ""),
                      moq=l.moq, pack_qty=l.pack_qty, lead_time_days=l.lead_time(suppliers), lead_time_override=l.lead_time_days,
                      quota_pct=l.quota_pct, priority=l.priority, active=l.active,
-                     max_qty_per_delivery=l.max_qty_per_delivery, max_qty_per_week=l.max_qty_per_week)
+                     max_qty_per_delivery=l.max_qty_per_delivery, max_qty_per_week=l.max_qty_per_week,
+                     delivery_weekdays=",".join(str(d) for d in sorted(sup.delivery_weekdays)) if sup is not None else "1,2,3,4,5",
+                     strict_days=bool(getattr(sup, "strict_days", False)) if sup is not None else False)
 
 
 def article_ref(ar: ArticleResult) -> S.ArticleRef:
@@ -214,9 +220,15 @@ def _desadv_journaled(ds: Dataset) -> set[str]:
     return {bl for r in ds.receipts if r.in_transit for bl in r.packing_slips}
 
 
+RECENT_WD = 5   # en transit / à traiter / en retard : the last five working days by default
+
+
 def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], planner: str | None) -> S.FlowsResponse:
     """The supply flows of the day (cockpit, tab « Flux d'approvisionnement »)."""
     as_of = result.as_of
+    calendar = WorkCalendar.from_spec(result.params.working_weekdays, result.holidays)
+    due_limit = calendar.add_working_days(as_of, ORDER_DUE_WD)
+    recent_since = calendar.add_working_days(as_of, -RECENT_WD)
     arts = {a.article_id: a for a in ds.articles}
     res = result.articles
 
@@ -256,9 +268,11 @@ def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], pl
                            issue_date=r.receipt_date, qty=r.qty, state="Journal d'arrivée non validé", final_processing="",
                            received=False, journal=False, issue="")
 
-    # 1. à commander : urgent proposals, the refused ones included (flagged « ignorée »)
-    to_order = [proposal_out(p, r, supplier_names) for r in res.values() for p in (*r.proposals, *r.proposals_ignored) if p.urgent]
-    to_order.sort(key=lambda p: (p.order_date, p.article_id, p.supplier_id or ""))
+    # 1. à commander : every proposal whose order deadline falls within the next five working days (the urgent ones,
+    #    deadline past, first) ; a refused proposal stays listed, flagged « ignorée » (hidden by default on screen)
+    to_order = [proposal_out(p, r, supplier_names) for r in res.values() for p in (*r.proposals, *r.proposals_ignored)
+                if p.urgent or p.order_date <= due_limit]
+    to_order.sort(key=lambda p: (not p.urgent, p.order_date, p.article_id, p.supplier_id or ""))
     firm = [o for o in ds.orders if o.order_type.value == "FIRM" and o.article_id in res]
     # 2. commandé : firm slots that appeared in the ERP today, whatever their delivery date
     ordered = sorted((order_row(o) for o in firm if o.first_seen == as_of), key=lambda o: (o.expected_date, o.article_id))
@@ -266,31 +280,36 @@ def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], pl
     posted = [r for r in ds.receipts if r.article_id in res and not r.in_transit]
     journals = [r for r in ds.receipts if r.article_id in res and r.in_transit]
     journaled_bls = _desadv_journaled(ds)
-    # 3. en transit : arrival journals not validated yet, plus the announced DESADV no journal carries
+    # 3. en transit : arrival journals not validated yet, plus the announced DESADV no journal carries ; the
+    #    last five working days only (an older line is a receipt that never came : à traiter or en retard)
     in_transit = [journal_row(r) for r in journals]
     in_transit += [desadv_row(d) for d in live if d.packing_slip.strip() not in received_bls and d.packing_slip.strip() not in journaled_bls]
-    in_transit.sort(key=lambda d: (d.issue_date, d.article_id))
-    # 4. à traiter : in error, or processed without any stock transaction (no entry journal)
+    in_transit = [x for x in in_transit if x.issue_date >= recent_since]
+    in_transit.sort(key=lambda d: (d.issue_date, d.article_id), reverse=True)
+    # 4. à traiter : in error, or processed without any stock transaction (no entry journal) ; newest first,
+    #    the screen shows the last five working days by default (recent_since)
     to_process = []
     for d in live:
         if d.state.strip().lower() == "erreur":
             to_process.append(desadv_row(d, "message en erreur"))
         elif d.processed and not d.stock_trans_id.strip():
             to_process.append(desadv_row(d, "traité sans journal de saisie"))
-    to_process.sort(key=lambda d: (d.issue_date, d.article_id))
+    to_process.sort(key=lambda d: (d.issue_date, d.article_id), reverse=True)
     # 5. à réceptionner : firm slots due today
     to_receive = sorted((order_row(o) for o in firm if o.expected_date == as_of), key=lambda o: (o.supplier_id or "", o.article_id))
     # 6. reçu : validated receipts dated today
     received = sorted((receipt_row(r) for r in posted if r.receipt_date == as_of), key=lambda r: (r.supplier_id or "", r.article_id))
-    # 7. en retard : supplier backlog
-    late = backlog_rows(result)
+    # 7. en retard : supplier backlog, newest expected date first (the screen shows the last five working days by default)
+    late = sorted(backlog_rows(result), key=lambda r: (r.expected_date or dt.date.min, -r.backlog, r.article_id), reverse=True)
     # 8. à valider : validated receipts not booked (acknowledgement of receipt pending) for a week or more
     to_validate = sorted((pending_row(r) for r in posted if not r.booked and (as_of - r.receipt_date).days >= ACR_PENDING_DAYS),
                          key=lambda b: (-b.days_pending, b.article_id))
     return S.FlowsResponse(
-        as_of=as_of, planner=planner, first_seen_available=any(o.first_seen is not None for o in ds.orders),
-        kpis=S.FlowsKpis(to_order=len(to_order), ordered=len(ordered), in_transit=len(in_transit), to_process=len(to_process),
-                         to_receive=len(to_receive), received=len(received), late=len(late), to_validate=len(to_validate)),
+        as_of=as_of, planner=planner, first_seen_available=any(o.first_seen is not None for o in ds.orders), recent_since=recent_since,
+        kpis=S.FlowsKpis(to_order=sum(1 for p in to_order if not p.ignored), ordered=len(ordered), in_transit=len(in_transit),
+                         to_process=sum(1 for x in to_process if x.issue_date >= recent_since),
+                         to_receive=len(to_receive), received=len(received),
+                         late=sum(1 for x in late if x.expected_date and x.expected_date >= recent_since), to_validate=len(to_validate)),
         to_order=to_order, ordered=ordered, in_transit=in_transit, to_process=to_process, to_receive=to_receive,
         received=received, late=late, to_validate=to_validate)
 

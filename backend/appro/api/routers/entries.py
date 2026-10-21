@@ -142,8 +142,8 @@ def set_plan_cell(body: S.PlanCellIn, request: Request, response: Response, ctx:
         row = mrp_service.set_plan_cell(session, user, body.article_id, body.supplier_id, body.date, body.expression, body.note)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
-    rec.done("plan_cell", _cell_label("Plan", body.article_id, body.date, body.expression, body.supplier_id), body.article_id,
-             response, group_label="Plan : {n} cellules")
+    rec.done("plan_cell", _cell_label("Quantité à retenir", body.article_id, body.date, body.expression, body.supplier_id), body.article_id,
+             response, group_label="Quantité à retenir : {n} cellules")
     session.commit()
     ctx.bump()
     return row
@@ -172,8 +172,8 @@ def set_plan_cells(body: S.PlanCellBatchIn, request: Request, response: Response
         if row is not None:
             out.append(row)
     aid = _one_article(body.cells)
-    rec.done("plan_cell", f"Plan {aid or ''} : {len(body.cells)} cellules".replace("  ", " "), aid, response,
-             group_label="Plan : {n} cellules")
+    rec.done("plan_cell", f"Quantité à retenir {aid or ''} : {len(body.cells)} cellules".replace("  ", " "), aid, response,
+             group_label="Quantité à retenir : {n} cellules")
     session.commit()
     ctx.bump()
     return out
@@ -190,7 +190,7 @@ def delete_plan_cell(cell_id: str, response: Response, ctx: AppContext = Depends
     rec.before("plan_cell", {"article_id": row.article_id, "supplier_id": row.supplier_id, "date": row.date})
     audit(session, user, "delete", "plan_cell", row.id, row.article_id, {"date": str(row.date), "supplier_id": row.supplier_id})
     session.delete(row)
-    rec.done("plan_cell", _cell_label("Plan", row.article_id, row.date, "", row.supplier_id), row.article_id, response)
+    rec.done("plan_cell", _cell_label("Quantité à retenir", row.article_id, row.date, "", row.supplier_id), row.article_id, response)
     session.commit()
     ctx.bump()
 

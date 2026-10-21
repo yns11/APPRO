@@ -10,8 +10,12 @@ export interface ArticleRef {
   demand_days: number; sourcing_policy: "quota" | "priority"; consumption_source: ConsumptionSource; derived_terms: DerivedTerm[]; active: boolean;
 }
 /** ``lead_time_days`` is the effective lead time (link override, else the supplier's) ; ``lead_time_override`` is the link's own value (null = inherited). */
-export interface LinkRef { article_id: string; supplier_id: string; supplier_name: string; moq: number; pack_qty: number; lead_time_days: number; lead_time_override: number | null; quota_pct: number; priority: number; active: boolean; max_qty_per_delivery: number | null; max_qty_per_week: number | null; }
-export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; }
+export interface LinkRef {
+  article_id: string; supplier_id: string; supplier_name: string; moq: number; pack_qty: number; lead_time_days: number; lead_time_override: number | null; quota_pct: number; priority: number; active: boolean; max_qty_per_delivery: number | null; max_qty_per_week: number | null;
+  /** standard delivery weekdays of the supplier (ISO, "1,2,4") and whether it delivers on those days only (no ◇) */
+  delivery_weekdays: string; strict_days: boolean;
+}
+export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; strict_days: boolean; }
 export interface ProgramRef { program_id: string; name: string; family: string; active: boolean; components: number; }
 
 /** Reference tables managed in the application (generic CRUD). */
@@ -28,8 +32,8 @@ export interface ProposalOut {
   proposal_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string;
   delivery_date: string; order_date: string; qty: number; net_requirement: number; reason: string; urgent: boolean;
   lead_time_days: number; moq: number; pack_qty: number; projected_stock_before: number; projected_stock_after: number; ignored: boolean;
-  /** floor : inside the lead time, only what avoids the stockout ; capped : truncated by a supplier cap */
-  floor: boolean; capped: boolean;
+  /** floor : inside the lead time, only what avoids the stockout ; capped : truncated by a supplier cap ; off_standard : ◇, a feasible working day instead of the standard delivery day */
+  floor: boolean; capped: boolean; off_standard: boolean;
 }
 export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; ignored: boolean; }
 export interface SeriesOut { key: string; label: string; values: number[]; }
@@ -52,6 +56,7 @@ export interface ArticleKpis {
   status: ArticleStatus; coverage_at_date_days: number; runout_date: string | null; overstock: boolean; data_issues: string[];
   next_firm_date: string | null; next_firm_supplier_id: string | null; next_firm_supplier_name: string | null; next_firm_qty: number | null;
   order_due_date: string | null; order_due_delivery_date: string | null; order_due_supplier_id: string | null; order_due_supplier_name: string | null; order_due_qty: number | null; order_due_late: boolean;
+  order_due_off_standard: boolean; order_due_floor: boolean;
   stock_as_of_erp: number; stock_as_of_plan: number; coverage_erp_days: number; coverage_plan_days: number; coverage_target_days: number; target_stock: number;
   first_stockout_erp: string | null; first_stockout_plan: string | null; min_stock_erp: number; min_stock_plan: number; max_shortage_erp: number; max_shortage_plan: number;
   demand_next_7d: number; demand_next_20wd: number; demand_horizon: number; avg_daily_demand_wd: number; working_days_counted: number;
@@ -153,7 +158,8 @@ export interface DesadvRow { desadv_id: string; article_id: string; designation:
 export interface PendingRow { pending_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; purch_id: string; packing_slip: string; qty: number; registered_date: string; days_pending: number; }
 export type FlowKey = "to_order" | "ordered" | "in_transit" | "to_process" | "to_receive" | "received" | "late" | "to_validate";
 export interface FlowsResponse {
-  as_of: string; planner: string | null; first_seen_available: boolean; kpis: Record<FlowKey, number>;
+  /** ``recent_since`` = today − 5 working days : the default window of en transit (server side), à traiter and en retard (screen side) */
+  as_of: string; planner: string | null; first_seen_available: boolean; recent_since: string; kpis: Record<FlowKey, number>;
   to_order: ProposalOut[]; ordered: OrderRow[]; in_transit: DesadvRow[]; to_process: DesadvRow[]; to_receive: OrderRow[]; received: ReceiptRow[]; late: BacklogRow[]; to_validate: PendingRow[];
 }
 export type SearchKind = "receipts" | "orders" | "desadv";
@@ -189,6 +195,9 @@ export interface SupplierDetail {
   supplier: SupplierRef; as_of: string; kpis: Record<string, number>; articles: SupplierArticleRow[];
   late: BacklogRow[]; in_transit: DesadvRow[]; to_process: DesadvRow[]; to_validate: PendingRow[]; to_order: ProposalOut[]; upcoming: OrderRow[];
 }
+/** One page of the in-app pense-bête (backend/appro/services/help_pages.py). */
+export interface HelpPageSummary { slug: string; part: string; part_title: string; title: string; edited: boolean; updated_by: string; updated_at: string | null; }
+export interface HelpPage extends HelpPageSummary { html: string; }
 export interface ConsumptionSourceOption { article_id: string; designation: string; unit: string; programs: string[]; shared_programs: string[]; }
 export type ExportType = "text" | "number" | "date" | "bool" | "percent";
 export interface ExportColumn { key: string; label: string; type?: ExportType; }

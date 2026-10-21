@@ -7,8 +7,8 @@ import type { ImpactLayer } from "@/lib/types";
 
 const LAYERS: { id: ImpactLayer; label: string; hint: string }[] = [
   { id: "onhand", label: "Stock à date", hint: "stock de référence seul, rien n'arrive" },
-  { id: "erp", label: "Projeté ERP", hint: "stock + commandes fermes ERP" },
-  { id: "plan", label: "Projeté Appro.", hint: "stock + Appro. (plan de livraison) + complément CBN" },
+  { id: "erp", label: "Projeté Ferme", hint: "stock + ordres fermes ERP" },
+  { id: "plan", label: "Stock projeté", hint: "stock + quantités à retenir + complément CBN" },
 ];
 
 /** Feasible production per programme and week, given the component stocks of each layer (tab of the Plan de production page). */
@@ -29,7 +29,7 @@ export function ProgramsImpact() {
   return (
     <div className="stack">
       <div className="row wrap" style={{ justifyContent: "space-between" }}>
-        <p className="subtle small" style={{ margin: 0 }}>Production réalisable par programme et par semaine selon les stocks de composants : à date, Projeté ERP, Projeté Appro. Réalisable au prorata du composant le plus contraint.</p>
+        <p className="subtle small" style={{ margin: 0 }}>Production réalisable par programme et par semaine selon les stocks de composants : à date, Projeté Ferme, Stock projeté. Réalisable au prorata du composant le plus contraint.</p>
         <Segmented value={layer} onChange={setLayer} options={LAYERS.map((l) => ({ id: l.id, label: l.label }))} />
       </div>
 

@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 ARTICLE_WEEK_FIELDS = {"coverage_target_days": int, "alert_red_days": int, "alert_yellow_days": int, "overstock_days": int}
 GLOBAL_FIELDS = {f.name: f.type for f in dataclasses.fields(EngineParams)}
 #: the rules a user may change from the Paramètres screen (the others are display or technical)
-EDITABLE_GLOBAL_FIELDS = ("target_tolerance_pct",)
+EDITABLE_GLOBAL_FIELDS = ("target_tolerance_pct", "lead_margin_days")
 
 
 def apply_weekly_overrides(ds: Dataset, overrides: list[ParamOverride]) -> list[str]:

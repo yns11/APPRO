@@ -42,6 +42,8 @@ class LinkRef(ORM):
     active: bool = True
     max_qty_per_delivery: float | None = None
     max_qty_per_week: float | None = None
+    delivery_weekdays: str = "1,2,3,4,5"   # standard delivery weekdays of the supplier (ISO, comma separated)
+    strict_days: bool = False              # the supplier delivers on its standard weekdays only (no ◇)
 
 
 class SupplierRef(ORM):
@@ -52,6 +54,7 @@ class SupplierRef(ORM):
     delivery_weekdays: str = "1,2,3,4,5"
     lead_time_days: int = 5
     active: bool = True
+    strict_days: bool = False
 
 
 class SupplierArticleRow(BaseModel):
@@ -163,6 +166,7 @@ class ProposalOut(BaseModel):
     ignored: bool = False          # refused by a click : listed in the ordering flow, out of the calculations
     floor: bool = False            # urgent proposal limited to the quantity that avoids a shortage
     capped: bool = False           # truncated by a delivery / weekly cap of the supplier link
+    off_standard: bool = False     # « hors jour standard » (◇) : a tenable working day instead of the standard delivery day
 
 
 class OrderInfoOut(BaseModel):
@@ -397,11 +401,18 @@ class FlowsKpis(BaseModel):
 
 
 class FlowsResponse(BaseModel):
-    """The « Flux d'approvisionnement » tab of the cockpit : one counter and one table per flow."""
+    """The « Flux d'approvisionnement » tab of the cockpit : one counter and one table per flow.
+
+    ``to_order`` holds every proposal whose order deadline falls within the next five working days (the
+    urgent ones first), refused ones included and flagged ``ignored`` (the screen hides them by default) ;
+    ``in_transit`` keeps the lines of the last five working days only ; ``to_process`` and ``late`` are
+    complete, newest first, with ``recent_since`` (today − 5 working days) for the screen's default view.
+    The counters count what the screen shows by default."""
 
     as_of: dt.date
     planner: str | None
     first_seen_available: bool          # False until the synchronisation job has stamped the orders
+    recent_since: dt.date               # today − 5 working days : the default window of en transit / à traiter / en retard
     kpis: FlowsKpis
     to_order: list[ProposalOut]
     ordered: list[OrderRow]
@@ -754,6 +765,26 @@ class ActionResultOut(BaseModel):
     kind: Literal["undo", "redo"]
     actions: list[ActionOut]
     cells: list[TouchedCell] = []
+
+
+class HelpPageSummary(BaseModel):
+    """One page of the in-app pense-bête (services/help_pages.py)."""
+    slug: str
+    part: str = ""
+    part_title: str = ""
+    title: str
+    edited: bool = False               # an administrator saved another text than the one shipped
+    updated_by: str = ""
+    updated_at: dt.datetime | None = None
+
+
+class HelpPageOut(HelpPageSummary):
+    html: str
+
+
+class HelpPageIn(BaseModel):
+    html: str = Field(max_length=500_000)
+    title: str | None = Field(None, max_length=200)
 
 
 class AuditOut(BaseModel):

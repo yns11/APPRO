@@ -206,9 +206,11 @@ def test_weekly_article_parameters_api(client):
 
 
 def test_params_overrides(client):
-    """One common rule left : the tolerance under the target ; the fixed rules are listed, not editable."""
+    """Two common rules : the tolerance under the target and the lead-time margin ; the fixed rules are listed, not editable."""
     schema = client.get("/api/params/schema").json()
-    assert [p["field"] for p in schema] == ["target_tolerance_pct"] and schema[0]["default"] == 15
+    assert [p["field"] for p in schema] == ["target_tolerance_pct", "lead_margin_days"] and schema[0]["default"] == 15 and schema[1]["default"] == 1
+    assert client.put("/api/params/overrides", json={"scope": "global", "field": "lead_margin_days", "value": 0}).status_code == 200
+    assert client.get("/api/params/effective").json()["lead_margin_days"] == 0
     fixed = client.get("/api/params/fixed").json()
     assert any("ouvrés" in f["value"] for f in fixed) and any("perdu" in f["value"] for f in fixed)
     r = client.put("/api/params/overrides", json={"scope": "global", "field": "target_tolerance_pct", "value": 20})
@@ -220,7 +222,8 @@ def test_params_overrides(client):
     assert client.put("/api/params/overrides", json={"scope": "global", "field": "target_tolerance_pct", "value": "abc"}).status_code == 422
     assert client.put("/api/params/overrides", json={"scope": "article", "key1": AID, "field": "coverage_target_days", "value": 20}).status_code == 422
     rows = client.get("/api/params/overrides").json()
-    assert len(rows) == 1 and client.delete(f"/api/params/overrides/{rows[0]['id']}").status_code == 204
+    assert {r["field"] for r in rows} == {"target_tolerance_pct", "lead_margin_days"}
+    assert all(client.delete(f"/api/params/overrides/{r['id']}").status_code == 204 for r in rows)
 
 
 def test_reference_crud_template_and_import(client):
@@ -255,8 +258,8 @@ def test_reference_crud_template_and_import(client):
     wb = load_workbook(io.BytesIO(t.content))
     assert wb.sheetnames == ["Fournisseurs", "NOTICE"]
     ws = wb["Fournisseurs"]
-    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Pays", "Contact", "Jours de livraison", "Délai (j ouvrés)", "Actif"]
-    ws["A2"], ws["B2"], ws["E2"], ws["F2"], ws["G2"] = "S-NEW", "New supplier", "1,3", 7, "oui"
+    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Pays", "Contact", "Jours de livraison", "Jours stricts", "Délai (j ouvrés)", "Actif"]
+    ws["A2"], ws["B2"], ws["E2"], ws["F2"], ws["G2"], ws["H2"] = "S-NEW", "New supplier", "1,3", "oui", 7, "oui"
     buf = io.BytesIO()
     wb.save(buf)
     rep = client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", buf.getvalue())}, data={"mode": "merge"})
@@ -318,21 +321,21 @@ def test_exports_and_reimport(client):
     assert set(wb.sheetnames) == {"PARAMETRES", "ARTICLES", "SIMULATION", "ALERTES"}
     ws = wb["SIMULATION"]
     labels = [ws.cell(r, 3).value for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == AID]
-    assert list(labels[:5]) == ["Besoin", "Ferme", "Prévisionnel", "Reçu", "Appro."] and "Projeté Appro." in labels
+    assert list(labels[:5]) == ["Besoin", "Ordre ferme", "Prévisionnel EDI", "Quantité reçue", "Quantité à retenir"] and "Stock projeté" in labels
     labels2 = [ws.cell(r, 3).value for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == "P-00005775"]
-    assert "Appro. · S-000032" in labels2 and "Appro. · S-001033" in labels2         # two supplier lanes
+    assert "Quantité à retenir · S-000032" in labels2 and "Quantité à retenir · S-001033" in labels2         # two supplier lanes
     assert ws.cell(1, 5).value == AS_OF
     rows = {ws.cell(r, 3).value: r for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == AID}
-    assert str(ws.cell(rows["Projeté ERP"], 5).value).startswith("=MAX(0,")
-    assert "SUMIFS" in str(ws.cell(rows["Stock cible"], 5).value) and "COUNTIFS" in str(ws.cell(rows["Couverture Appro. (périodes ouvrées)"], 5).value)
+    assert str(ws.cell(rows["Projeté Ferme"], 5).value).startswith("=MAX(0,")
+    assert "SUMIFS" in str(ws.cell(rows["Stock cible"], 5).value) and "COUNTIFS" in str(ws.cell(rows["Couverture (périodes ouvrées)"], 5).value)
     assert wb["ARTICLES"]["A2"].value == AID and wb["ARTICLES"]["I2"].value > 0
     assert client.get("/api/exports/alerts.xlsx").status_code == 200
     assert client.get("/api/exports/plan.xlsx", params={"planner": "QUENTIN"}).status_code == 200
     # planner edits in Excel: delay the 30/09 order (1600) to 06/10, an adjustment on 22/09
     cols = {ws.cell(1, c).value: c for c in range(5, ws.max_column + 1)}
-    assert ws.cell(rows["Ferme"], cols["2026-09-30"]).value == 1600 and ws.cell(rows["Appro."], cols["2026-09-30"]).value == 1600
-    ws.cell(rows["Appro."], cols["2026-09-30"], 0)
-    ws.cell(rows["Appro."], cols["2026-10-06"], 1600)
+    assert ws.cell(rows["Ordre ferme"], cols["2026-09-30"]).value == 1600 and ws.cell(rows["Quantité à retenir"], cols["2026-09-30"]).value == 1600
+    ws.cell(rows["Quantité à retenir"], cols["2026-09-30"], 0)
+    ws.cell(rows["Quantité à retenir"], cols["2026-10-06"], 1600)
     ws.cell(rows["Ajustement"], cols["2026-09-22"], -50)
     buf = io.BytesIO()
     wb.save(buf)
@@ -738,16 +741,28 @@ def test_flows_of_the_day(client):
     assert transit["BL-990001"]["state"] == "Traité"
     issues = {d["packing_slip"]: d["issue"] for d in f["to_process"]}
     assert issues["BL-990002"] == "message en erreur" and issues["BL-990005"] == "traité sans journal de saisie"
-    assert all(p["urgent"] for p in f["to_order"]) and k["to_order"] == len(f["to_order"])
-    assert all(not p["ignored"] for p in f["to_order"])
-    assert k["late"] == len(client.get("/api/backlog", params={"planner": "QUENTIN"}).json())
-    # a refused urgent proposal stays listed, flagged « ignorée », and leaves the calculations
-    if f["to_order"]:
-        p = f["to_order"][0]
-        assert client.post("/api/entries/flags/toggle", json={"article_id": p["article_id"], "supplier_id": p["supplier_id"], "date": p["delivery_date"], "kind": "proposal_refused", "qty": p["qty"]}).status_code == 200
-        f2 = client.get("/api/flows", params={"planner": "QUENTIN"}).json()
-        ign = [x for x in f2["to_order"] if x["ignored"] and x["article_id"] == p["article_id"]]
-        assert ign and ign[0]["order_date"] == p["order_date"]
+    # à commander : every proposal whose date limite falls within the next five working days, the urgent ones first
+    due_limit = "2026-09-25"   # Saturday 19/09 + 5 working days
+    assert f["to_order"] and all(p["urgent"] or p["order_date"] <= due_limit for p in f["to_order"])
+    flags = [p["urgent"] for p in f["to_order"]]
+    assert flags == sorted(flags, reverse=True) and k["to_order"] == sum(1 for p in f["to_order"] if not p["ignored"])
+    assert all(not p["ignored"] for p in f["to_order"]) and all("off_standard" in p for p in f["to_order"])
+    # en transit : the last five working days only ; à traiter and en retard are complete, newest first, with the
+    # default window of the screen
+    assert f["recent_since"] == "2026-09-14"
+    assert all(d["issue_date"] >= f["recent_since"] for d in f["in_transit"])
+    dates = [d["issue_date"] for d in f["to_process"]]
+    assert dates == sorted(dates, reverse=True) and k["to_process"] == sum(1 for d in dates if d >= f["recent_since"])
+    late = f["late"]
+    assert len(late) == len(client.get("/api/backlog", params={"planner": "QUENTIN"}).json())
+    exp = [b["expected_date"] for b in late]
+    assert exp == sorted(exp, reverse=True) and k["late"] == sum(1 for d in exp if d >= f["recent_since"])
+    # a refused proposal stays listed, flagged « ignorée » (hidden by default on screen), and leaves the calculations
+    p = f["to_order"][0]
+    assert client.post("/api/entries/flags/toggle", json={"article_id": p["article_id"], "supplier_id": p["supplier_id"], "date": p["delivery_date"], "kind": "proposal_refused", "qty": p["qty"]}).status_code == 200
+    f2 = client.get("/api/flows", params={"planner": "QUENTIN"}).json()
+    ign = [x for x in f2["to_order"] if x["ignored"] and x["article_id"] == p["article_id"]]
+    assert ign and ign[0]["order_date"] == p["order_date"] and f2["kpis"]["to_order"] == sum(1 for x in f2["to_order"] if not x["ignored"])
 
 
 def test_search_page_queries(client):
@@ -1116,7 +1131,7 @@ def test_undo_redo_plan_cell_and_shortcuts(client):
     day = "2026-09-23"
     r = client.put("/api/entries/plan", json={"article_id": AID, "supplier_id": "S-000545", "date": day, "expression": "600"})
     assert r.status_code == 200 and r.headers["X-Action-Id"].startswith("AC-")
-    assert "Plan%20P-00001046" in r.headers["X-Action-Label"]
+    assert "retenir%20P-00001046" in r.headers["X-Action-Label"]
     aid = r.headers["X-Action-Id"]
     acts = _acts(client, mine=True)
     assert acts[0]["id"] == aid and acts[0]["state"] == "applied" and acts[0]["items"] == 1 and acts[0]["conflict"] is None
@@ -1310,3 +1325,36 @@ def test_a_planner_declares_closed_orders(client):
     assert client.post("/api/reference/ref_closed_orders/delete", json={"key": {"purch_id": "031234"}}).status_code == 204
     reader = {"x-forwarded-email": "nobody@example.com"}     # not declared = reader
     assert client.put("/api/reference/ref_closed_orders/rows", json={"values": row}, headers=reader).status_code == 403
+
+
+def test_help_pages_default_edited_and_reset(client):
+    """The in-app pense-bête : pages shipped with the application, read by everyone ; an administrator saves
+    another text (sanitised), everybody then reads that version ; the reset brings the shipped text back."""
+    pages = client.get("/api/help/pages").json()
+    slugs = [p["slug"] for p in pages]
+    assert slugs[:2] == ["accueil", "cbn"] and "flux" in slugs and "memo" in slugs and all(not p["edited"] for p in pages)
+    cbn = client.get("/api/help/pages/cbn").json()
+    assert cbn["title"].endswith("Proposition CBN") and "<svg" in cbn["html"] and cbn["part"] == "A" and not cbn["edited"]
+    assert client.get("/api/help/pages/nope").status_code == 404
+    # the bootstrap admin (planners table empty) edits a page ; scripts and handlers are stripped
+    body = {"html": "<p onclick=\"x()\">Texte <b>modifié</b></p><script>alert(1)</script><a href=\"javascript:x\">l</a>", "title": "1. CBN (maison)"}
+    r = client.put("/api/help/pages/cbn", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["edited"] and out["title"] == "1. CBN (maison)" and "<script" not in out["html"] and "onclick" not in out["html"] and "javascript:" not in out["html"]
+    assert "Texte <b>modifié</b>" in out["html"] and out["updated_by"] == "quentin@example.com"
+    assert client.get("/api/help/pages/cbn").json()["html"] == out["html"]
+    assert next(p for p in client.get("/api/help/pages").json() if p["slug"] == "cbn")["edited"] is True
+    # journalised, not undoable
+    acts = client.get("/api/actions", params={"mine": True}).json()
+    assert acts and acts[0]["kind"] == "help" and acts[0]["undoable"] is False
+    # a declared non-admin user reads the saved version but cannot write ; a reader reads it too
+    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC0", "name": "ROOT", "email": "root@example.com", "role": "admin", "active": True}}).status_code == 200
+    assert client.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC1", "name": "QUENTIN", "email": "quentin@example.com", "role": "appro", "active": True}}, headers={"x-forwarded-email": "root@example.com"}).status_code == 200
+    assert client.get("/api/help/pages/cbn").json()["html"] == out["html"]
+    assert client.put("/api/help/pages/cbn", json={"html": "<p>non</p>"}).status_code == 403
+    assert client.delete("/api/help/pages/cbn").status_code == 403
+    assert client.get("/api/help/pages/cbn", headers={"x-forwarded-email": "nobody@example.com"}).json()["html"] == out["html"]
+    # the administrator brings the shipped text back
+    back = client.delete("/api/help/pages/cbn", headers={"x-forwarded-email": "root@example.com"})
+    assert back.status_code == 200 and not back.json()["edited"] and back.json()["html"] == cbn["html"]
