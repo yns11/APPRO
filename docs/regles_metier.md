@@ -323,6 +323,10 @@ limitée à la **quantité minimale qui évite la rupture** jusqu'à la livraiso
 tolérance ne s'applique pas au plancher. Dès la première livraison tenable, la proposition vise la cible pleine,
 sans rampe. Une proposition refusée au jour du besoin glisse au jour suivant (jamais avant).
 
+> Version réduite et lisible de ces règles (un fournisseur, pas d'ordre ferme, de refus ni de plafond) :
+> [`docs/mini_cbn.ipynb`](mini_cbn.ipynb), une fonction Python dont `backend/tests/test_mini_cbn.py` vérifie qu'elle
+> reproduit exactement le moteur.
+
 **Plafonds du lien** (`max_qty_per_delivery`, `max_qty_per_week`, multiples de l'UM ; le plafond hebdomadaire
 compte les commandes fermes et les cellules Quantité à retenir de la semaine ISO) : appliqués **après** le lotissement, en
 tronquant au multiple d'UM ; un jour plein ne tire plus de besoin, l'excédent glisse à la livraison suivante,
