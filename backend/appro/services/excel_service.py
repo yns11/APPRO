@@ -90,7 +90,7 @@ class BlockRow:
 def block_layout(ar: ArticleResult) -> list[BlockRow]:
     """Rows of one article block: Besoin, then Ferme / Prévisionnel / Reçu / Plan per supplier
     (labels suffixed by the supplier when there are several), then the article rows."""
-    rows = [BlockRow("demand", "Besoin", "value")]
+    rows = [BlockRow("demand", "Consommation et besoin", "value")]
     several = len(ar.lanes) > 1
     for k, lane in enumerate(ar.lanes):
         for key, label, kind in LANE_ROWS:

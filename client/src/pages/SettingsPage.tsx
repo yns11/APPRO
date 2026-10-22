@@ -83,7 +83,7 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
 
 /* ---------------------------------------------------------------- display */
 const SAMPLE_COLS = ["2026 S41", "2026 S42", "2026 S43", "2026 S44"];
-const SAMPLE_ROWS: [string, number[]][] = [["Besoin", [1800, 2100, 2400, 2400]], ["Quantité à retenir", [2916, 1800, 2088, 2124]], ["Stock projeté", [1818, 2106, 0, 510]]];
+const SAMPLE_ROWS: [string, number[]][] = [["Consommation et besoin", [1800, 2100, 2400, 2400]], ["Quantité à retenir", [2916, 1800, 2088, 2124]], ["Stock projeté", [1818, 2106, 0, 510]]];
 
 function DisplayTab() {
   const { perimeter, set } = usePerimeter();

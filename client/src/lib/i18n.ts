@@ -5,7 +5,7 @@ export type Lang = "fr" | "en";
 
 const T = {
   // rows of the supply table
-  "row.demand": { fr: "Besoin", en: "Requirement" },
+  "row.demand": { fr: "Consommation et besoin", en: "Consumption and requirement" },
   "row.orders_firm": { fr: "Ordre ferme", en: "Firm order" },
   "row.orders_forecast": { fr: "Prévisionnel EDI", en: "EDI forecast" },
   "row.receipts": { fr: "Quantité reçue", en: "Received quantity" },
@@ -138,6 +138,8 @@ const T = {
   "page.week": { fr: "Semaine", en: "Week" },
   "page.excel": { fr: "Excel (page)", en: "Excel (page)" },
   "page.excel_title": { fr: "Classeur à formules des articles de la page", en: "Workbook with formulas for the articles of the page" },
+  "page.inventory": { fr: "Inventaire (PDF)", en: "Stock count (PDF)" },
+  "page.inventory_title": { fr: "Feuille d'inventaire imprimable des articles filtrés (stock théorique à date, colonnes à remplir à la main)", en: "Printable stock count sheet of the filtered articles (theoretical stock to date, columns to fill by hand)" },
   "tile.stock_at_date": { fr: "Stock à date", en: "Stock to date" },
   "tile.stock_meta": { fr: "fin de la veille · référence {ref} initialisée le {d}", en: "end of yesterday · reference {ref} initialised on {d}" },
   "tile.corrected": { fr: " (corrigée de {v})", en: " (corrected by {v})" },

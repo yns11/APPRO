@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownAZ, ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
+import { ArrowDownAZ, ChevronLeft, ChevronRight, ClipboardList, Download, Search } from "lucide-react";
 import { useAdjustments, useFlags, useGrid, usePlanCells, usePerimeterLists } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { usePageState } from "@/lib/pageState";
@@ -53,6 +53,8 @@ export default function SupplyTablePage() {
   const total = grid.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { planner: engineParams.planner, granularity: perimeter.granularity === "week" ? "week" : "day", article_ids: articles.map((a) => a.article.article_id) });
+  // printable inventory sheet of the filtered articles (every page, not only the current one)
+  const inventoryUrl = api.downloadUrl("/api/exports/inventaire.pdf", { planner: engineParams.planner, program_id: program || undefined, supplier_id: suppliers.length ? suppliers : undefined, q: q || undefined, sort });
 
   return (
     <div className="page">
@@ -61,6 +63,7 @@ export default function SupplyTablePage() {
         <div className="actions">
           <Segmented size="sm" value={perimeter.granularity} onChange={(g) => set({ granularity: g })} options={[{ id: "default", label: t("page.default") }, { id: "day", label: t("page.day") }, { id: "week", label: t("page.week") }]} />
           <span className="lang-toggle" title={t("page.lang_title")}><Segmented size="sm" value={lang} onChange={(l) => set({ lang: l })} options={[{ id: "fr", label: "FR" }, { id: "en", label: "EN" }]} /></span>
+          <a className="btn" href={inventoryUrl} target="_blank" rel="noopener" title={t("page.inventory_title")}><ClipboardList />{t("page.inventory")}</a>
           <a className="btn" href={exportUrl} title={t("page.excel_title")}><Download />{t("page.excel")}</a>
         </div>
       </div>

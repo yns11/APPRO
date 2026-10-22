@@ -107,7 +107,7 @@ def jour(d: dt.date) -> str:
     return f"{JOURS[d.weekday()]} {d.day:02d}/{d.month:02d}"
 
 
-ROWS = [("Besoin", "demand", "flux"), ("Ordre ferme", "orders_firm", "flux"), ("Ordre ferme (passé)", "orders_firm_hist", "flux"), ("Quantité reçue", "receipts", "flux"),
+ROWS = [("Consommation et besoin", "demand", "flux"), ("Ordre ferme", "orders_firm", "flux"), ("Ordre ferme (passé)", "orders_firm_hist", "flux"), ("Quantité reçue", "receipts", "flux"),
         ("Quantité à retenir", "plan", "flux"), ("Prop. CBN", "supply_proposed", "flux"), ("Ajustement", "adjustments", "flux"),
         ("Projeté Ferme", "stock_erp", "stock"), ("Stock projeté", "stock_plan", "stock"), ("Cible", "target_stock", "stock")]
 
@@ -215,7 +215,7 @@ def guide() -> str:
       "manque s'accumule jour après jour (Projeté Ferme) ; il repart de zéro au premier jour où le stock redevient "
       "positif. Un besoin non servi déclenche toujours le CBN, même à 100 % de tolérance : le Stock projeté "
       "remonte à la cible dès le premier manque (§ 4).\n")
-    w(tableau(ar, days=12, rows=["Besoin", "Projeté Ferme", "Stock projeté", "Cible"]))
+    w(tableau(ar, days=12, rows=["Consommation et besoin", "Projeté Ferme", "Stock projeté", "Cible"]))
     w("")
     w(kpis(ar, ["stock_at_date", "coverage_plan_days", "target_stock", "first_stockout_plan", "max_shortage_plan", "demand_next_20wd", "avg_daily_demand_wd"]))
     w("")
@@ -234,7 +234,7 @@ def guide() -> str:
     w("Deux commandes fermes ERP de 400 arrivent le jeudi 08/10 et le jeudi 15/10. Sans saisie, la ligne "
       "**Quantité à retenir** reprend la commande ferme de chaque jour (cellule vide = ERP) : les deux projetés sont égaux. "
       "Seules les commandes **fermes** comptent ; les prévisionnelles sont affichées, jamais comptées.\n")
-    w(tableau(ar, days=10, rows=["Besoin", "Ordre ferme", "Quantité à retenir", "Projeté Ferme", "Stock projeté"]))
+    w(tableau(ar, days=10, rows=["Consommation et besoin", "Ordre ferme", "Quantité à retenir", "Projeté Ferme", "Stock projeté"]))
     w("")
     ds.plan = [PlanCell("A1", "S1", TODAY + D(days=3), 700.0), PlanCell("A1", "S1", TODAY + D(days=10), 0.0)]
     ar2 = run(ds, cbn=False).articles["A1"]
@@ -242,7 +242,7 @@ def guide() -> str:
       "**0** le 15/10 (il annule celle-là). Le **Projeté Ferme** ne bouge pas : il reflète l'ERP tel quel. Le "
       "**Stock projeté** suit la décision de l'approvisionneur : c'est le scénario sur lequel le moteur calcule "
       "les propositions CBN et les alertes de rupture du plan.\n")
-    w(tableau(ar2, days=10, rows=["Besoin", "Ordre ferme", "Quantité à retenir", "Projeté Ferme", "Stock projeté"]))
+    w(tableau(ar2, days=10, rows=["Consommation et besoin", "Ordre ferme", "Quantité à retenir", "Projeté Ferme", "Stock projeté"]))
     w("")
     ds.plan = []
     ds.flags = [CellFlag("A1", "S1", TODAY + D(days=10), "order_ignored")]
@@ -250,7 +250,7 @@ def guide() -> str:
     w("**Commande ignorée** : un clic sur la cellule *Ordre ferme* du 15/10 la barre. Elle sort du Projeté Ferme **et** "
       "du pré-remplissage de la ligne Quantité à retenir (l'approvisionneur sait que cette commande ne viendra pas) ; un second "
       "clic la rétablit.\n")
-    w(tableau(ar3, days=10, rows=["Besoin", "Ordre ferme", "Quantité à retenir", "Projeté Ferme", "Stock projeté"]))
+    w(tableau(ar3, days=10, rows=["Consommation et besoin", "Ordre ferme", "Quantité à retenir", "Projeté Ferme", "Stock projeté"]))
     w("")
     w("> Dans le tableau, la ligne *Ordre ferme* affiche `restant / commandé` après une réception partielle ; une "
       "commande ferme dont la **date est passée** et dont l'ERP garde un restant ne compte dans aucun stock : "
@@ -286,7 +286,7 @@ def guide() -> str:
       "de l'**UM** (50). La livraison est placée sur un jour de livraison du fournisseur (le dernier avant le "
       "besoin), la date limite de commande = livraison − (délai − marge) jours ouvrés (3 − 1 = 2) : le dernier jour où "
       "l'ordre peut partir, affichée « au plus tard le ».\n")
-    w(tableau(ar, days=15, rows=["Besoin", "Prop. CBN", "Projeté Ferme", "Stock projeté", "Cible"]))
+    w(tableau(ar, days=15, rows=["Consommation et besoin", "Prop. CBN", "Projeté Ferme", "Stock projeté", "Cible"]))
     w("")
     w(propositions(ar))
     w("")
@@ -320,7 +320,7 @@ def guide() -> str:
       "fournisseur livre tous les jours ouvrés : aucune proposition **hors jour standard ◇** ; avec un fournisseur "
       "du lundi, le besoin non tenable serait posé ◇ sur le premier jour ouvré tenable avant le besoin, sauf jours "
       "stricts.)\n")
-    w(tableau(ar, days=14, rows=["Besoin", "Prop. CBN", "Stock projeté", "Cible"]))
+    w(tableau(ar, days=14, rows=["Consommation et besoin", "Prop. CBN", "Stock projeté", "Cible"]))
     w("")
     w(propositions(ar))
     w("")
@@ -347,7 +347,7 @@ def guide() -> str:
       "suivante sont regroupés sur cette livraison.\n")
     w(propositions(ar_e))
     w("")
-    w(tableau(ar_e, days=10, rows=["Besoin", "Prop. CBN", "Stock projeté", "Cible"]))
+    w(tableau(ar_e, days=10, rows=["Consommation et besoin", "Prop. CBN", "Stock projeté", "Cible"]))
     w("")
 
     # ------------------------------------------------------------------ 7. jours de consommation
@@ -358,7 +358,7 @@ def guide() -> str:
       "(500) tombe sur **lundi, mardi, mercredi** (167 / 167 / 166), rien jeudi et vendredi. La cible (besoin des 5 "
       "prochains jours ouvrés) et la couverture suivent ce profil : un jeudi, la cible englobe déjà les trois "
       "jours de consommation de la semaine suivante.\n")
-    w(tableau(ar_d3, days=10, rows=["Besoin", "Stock projeté", "Cible"]))
+    w(tableau(ar_d3, days=10, rows=["Consommation et besoin", "Stock projeté", "Cible"]))
     w("")
     w("Pour la **semaine en cours**, le reliquat (PDP éclaté − réel déjà déclaré) est réparti sur les jours du "
       "profil encore à venir ; s'ils sont passés, sur les jours ouvrés restants (§ 11). Le profil observé et une "
@@ -376,7 +376,7 @@ def guide() -> str:
       "première proposition ne peut pas remonter à la cible d'un coup, elle est **plafonnée** et le reste suit.\n")
     w(propositions(ar_c))
     w("")
-    w(tableau(ar_c, days=10, rows=["Besoin", "Prop. CBN", "Stock projeté", "Cible"]))
+    w(tableau(ar_c, days=10, rows=["Consommation et besoin", "Prop. CBN", "Stock projeté", "Cible"]))
     w("")
     ds_w = dataset(stock=350.0, suppliers=[supplier(days=frozenset({2, 4}))], links=[link(max_qty_per_delivery=200, max_qty_per_week=400)])
     ar_w = run(ds_w).articles["A1"]
@@ -386,7 +386,7 @@ def guide() -> str:
       "atteint ». Les plafonds s'appliquent aussi aux propositions urgentes.\n")
     w(propositions(ar_w))
     w("")
-    w(tableau(ar_w, days=10, rows=["Besoin", "Prop. CBN", "Stock projeté", "Cible"]))
+    w(tableau(ar_w, days=10, rows=["Consommation et besoin", "Prop. CBN", "Stock projeté", "Cible"]))
     w("")
     w(alertes(ar_w))
     w("")
@@ -414,7 +414,7 @@ def guide() -> str:
     w("Priorité :\n")
     w(propositions(ar_p))
     w("")
-    w(tableau(ar_q, days=10, rows=["Besoin", "Prop. CBN", "Stock projeté"], lanes=True))
+    w(tableau(ar_q, days=10, rows=["Consommation et besoin", "Prop. CBN", "Stock projeté"], lanes=True))
     w("")
     ds_cap = dataset(stock=350.0, suppliers=[supplier(), supplier("S2", "Fournisseur B", lead=3)],
                      links=[link(quota_pct=70, priority=1, max_qty_per_delivery=200), link(supplier_id="S2", quota_pct=30, priority=2)])
@@ -483,7 +483,7 @@ def guide() -> str:
       "commande ferme du 30/09 (300) n'a été reçue qu'à 200 et l'ERP garde un **restant de 100** : c'est une "
       "commande **en retard**, affichée mais comptée dans aucun stock (le restant ERP se met à jour à la "
       "validation du journal de réception).\n")
-    w(tableau(ar, days=10, start=TODAY - D(days=7), rows=["Besoin", "Ordre ferme", "Ordre ferme (passé)", "Quantité reçue", "Quantité à retenir", "Projeté Ferme", "Stock projeté"]))
+    w(tableau(ar, days=10, start=TODAY - D(days=7), rows=["Consommation et besoin", "Ordre ferme", "Ordre ferme (passé)", "Quantité reçue", "Quantité à retenir", "Projeté Ferme", "Stock projeté"]))
     w("")
     w(kpis(ar, ["stock_reference", "stock_at_date", "backlog_qty", "coverage_plan_days"]))
     w("")
@@ -503,7 +503,7 @@ def guide() -> str:
     w("Une cellule **Ajustement** est une quantité signée. Datée **au plus tard le point zéro**, elle corrige le "
       "stock de référence (l'ERP se trompe, l'application n'y écrit jamais) ; datée après, c'est un mouvement "
       "connu d'avance (rebut, transfert). Ici −150 le jour de l'initialisation et −200 le jeudi.\n")
-    w(tableau(ar, days=6, rows=["Besoin", "Ajustement", "Projeté Ferme", "Stock projeté"]))
+    w(tableau(ar, days=6, rows=["Consommation et besoin", "Ajustement", "Projeté Ferme", "Stock projeté"]))
     w("")
     w(kpis(ar, ["stock_reference", "reference_correction", "stock_at_date"]))
     w("")
@@ -517,7 +517,7 @@ def guide() -> str:
       "**par semaine ISO** (fiche article › Paramétrage › Par semaine, ou Référentiel › Articles). Ici la "
       "couverture cible passe de 5 à **10 jours ouvrés pour la semaine 42** seulement : la cible double cette "
       "semaine-là, puis revient à 5 jours.\n")
-    w(tableau(ar, days=15, rows=["Besoin", "Cible"]))
+    w(tableau(ar, days=15, rows=["Consommation et besoin", "Cible"]))
     w("")
 
     # ------------------------------------------------------------------ 14. fenêtre

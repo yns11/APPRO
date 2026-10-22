@@ -447,7 +447,7 @@ def sections() -> list[dict[str, str]]:
     page("accueil", "", "", "Mode d'emploi en une page",
          """<p class="lead">Ce que l'application décide, affiche et colore. Une règle par ligne, les exemples dessous. Délais, couvertures et seuils se comptent en <b>jours ouvrés</b> du calendrier usine.</p>
 <div class="callout"><b>Vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se recalcule.</b></div>
-<p><b>Partie A · Tableau d'approvisionnement</b> : une ligne <b>Besoin</b> ; par fournisseur actif : <b>Ordre ferme</b>, <b>Prévisionnel EDI</b>, <b>Quantité reçue</b>, <b>Quantité à retenir</b>, <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Stock projeté</b>, seule projection de stock du tableau. Deux lignes se saisissent (Quantité à retenir, Ajustement), trois se cliquent (Ordre ferme, Proposition CBN, Quantité reçue), le reste se lit.</p>
+<p><b>Partie A · Tableau d'approvisionnement</b> : une ligne <b>Consommation et besoin</b> (consommé réel dans le passé, besoin du PDP dans le futur) ; par fournisseur actif : <b>Ordre ferme</b>, <b>Prévisionnel EDI</b>, <b>Quantité reçue</b>, <b>Quantité à retenir</b>, <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Stock projeté</b>, seule projection de stock du tableau. Deux lignes se saisissent (Quantité à retenir, Ajustement), trois se cliquent (Ordre ferme, Proposition CBN, Quantité reçue), le reste se lit.</p>
 <p><b>Partie B · Cockpit du jour</b> : l'onglet <b>Couvertures et stocks</b> répond à « que dois-je faire aujourd'hui ? » article par article ; l'onglet <b>Flux d'approvisionnement</b> suit commandes, transports et réceptions du jour.</p>
 <p>Les boutons <b>FR | EN</b> du tableau d'approvisionnement et de la fiche article passent les intitulés en anglais, pour un partage d'écran ou une capture envoyée à un fournisseur.</p>
 <p class="cmt">Règles détaillées : <i>docs/regles_metier.md</i> ; calculs pas à pas : <i>docs/guide_moteur.md</i>.</p>""")
@@ -553,7 +553,7 @@ def sections() -> list[dict[str, str]]:
 <div><span class="k">""" + cell("0 · −Σ 300", "neg") + """</span><span>rupture : stock 0 et manque cumulé</span></div>
 <div><span class="k">""" + cell("9 800", "", "42 j") + """</span><span>neutre : ≥ surstock (ex. 30 j)</span></div>
 </div>""",
-         table(["Jour", "Besoin", "Entrées", "Ajustement", "Stock projeté", "Commentaire"], [
+         table(["Jour", "Consommation et besoin", "Entrées", "Ajustement", "Stock projeté", "Commentaire"], [
              ["lun.", "100", "", "", cell("200", "cov-red", "2 j"), "→ veille 300 − 100"],
              ["mar.", "100", "", "", cell("100", "cov-red", "1 j"), "→ dernier jour couvert"],
              ["mer.", "100", "", "", cell("0", "cov-red", "0 j"), "→ exactement servi"],

@@ -20,16 +20,15 @@
 .help-doc[contenteditable="true"]:focus { outline-style: solid; }
 .help-doc h3 { font-size: var(--fs-2); font-weight: var(--fw-bold); margin: 26px 0 8px; line-height: var(--lh-tight); }
 .help-doc h4 { font-size: var(--fs-0); font-weight: var(--fw-semibold); margin: 18px 0 6px; }
-.help-doc p, .help-doc li { max-width: 72ch; }
 .help-doc p { margin: 8px 0; }
 .help-doc p.lead { color: var(--fg-muted); margin: 0 0 10px; font-size: 16px; }
 .help-doc ul { margin: 6px 0; padding-left: 20px; }
 .help-doc li { margin: 3px 0; }
 .help-doc b { font-weight: var(--fw-semibold); }
 .help-doc a { color: var(--brand-fg); }
-.help-doc .rule { display: grid; grid-template-columns: minmax(120px, 170px) 1fr; gap: 6px 14px; align-items: baseline; margin: 10px 0; }
+.help-doc .rule { display: grid; grid-template-columns: minmax(140px, 200px) 1fr; gap: 6px 14px; align-items: baseline; margin: 10px 0; }
 .help-doc .rule dt { font-weight: var(--fw-semibold); color: var(--fg); }
-.help-doc .rule dd { margin: 0; max-width: 72ch; }
+.help-doc .rule dd { margin: 0; }
 @media (max-width: 560px) { .help-doc .rule { grid-template-columns: 1fr; } .help-doc .rule dt { margin-top: 6px; } }
 .help-doc .tbl { overflow-x: auto; max-width: 100%; margin: 10px 0 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elev); }
 .help-doc table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
@@ -38,7 +37,7 @@
 .help-doc tr:last-child td { border-bottom: 0; }
 .help-doc td.num, .help-doc th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12.5px; }
 .help-doc td.note { color: var(--fg-muted); }
-.help-doc .cmt { color: var(--fg-muted); font-size: 13px; margin: 6px 0 0; max-width: 72ch; }
+.help-doc .cmt { color: var(--fg-muted); font-size: 13px; margin: 6px 0 0; }
 .help-doc .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: var(--fw-semibold); border: 1px solid transparent; white-space: nowrap; }
 .help-doc .chip.critical { background: var(--critical-soft); color: var(--critical-fg); }
 .help-doc .chip.warning { background: var(--warning-soft); color: var(--warning-fg); }
@@ -65,7 +64,7 @@
 .help-doc .legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px 16px; margin: 10px 0; padding: 0; background: none; border: 0; }
 .help-doc .legend > div { display: flex; gap: 10px; align-items: baseline; font-size: 13.5px; }
 .help-doc .legend .k { flex: none; }
-.help-doc .callout { border-left: 3px solid var(--brand); background: var(--brand-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; max-width: 72ch; margin: 12px 0; font-size: 14px; }
+.help-doc .callout { border-left: 3px solid var(--brand); background: var(--brand-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 12px 0; font-size: 14px; }
 .help-doc .callout.warn { border-left-color: var(--warning); background: var(--warning-soft); }
 .help-doc .fig { margin: 14px 0 4px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; padding: 8px 8px 4px; overflow-x: auto; }
 .help-doc .fig figcaption { font-size: 13px; color: var(--fg-muted); padding: 6px 6px 8px; }

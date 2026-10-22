@@ -5,6 +5,7 @@ import datetime as dt
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,7 +14,7 @@ from ...data.store import ParamOverride
 from ...engine.calendar import iso_week_label, iso_week_monday
 from ...engine.models import WEEKLY_FIELDS
 from ...engine.runner import resolve_as_of
-from ...services import mrp_service
+from ...services import mrp_service, pdf_service
 from ...services.context import AppContext
 from .. import presenters as P
 from .. import schemas as S
@@ -115,6 +116,18 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
     suppliers (several ``supplier_id`` = any of them), free text ``q`` on the identifier / designation ; ``sort`` by article identifier or by
     the name of the (first) supplier.  The whole perimeter is computed once (cached) ; only the
     requested page is serialised."""
+    result, arts, names = _select_articles(ctx, session, planner, article_ids, program_id, supplier_id, q, sort,
+                                           **_kw(horizon_days=horizon_days, history_weeks=history_weeks, focus_weeks=focus_weeks))
+    total = len(arts)
+    page_arts = arts[(page - 1) * page_size: page * page_size]
+    return json_response(P.grid_out(result, granularity, names, _programs_of(ctx), articles=page_arts,
+                                    total=total, page=page, page_size=page_size, suppliers=_suppliers(ctx)))
+
+
+def _select_articles(ctx: AppContext, session: Session, planner: str | None, article_ids: list[str] | None, program_id: str | None,
+                     supplier_id: list[str] | None, q: str | None, sort: str, **kw):
+    """The articles of the supply table : perimeter (planner, articles, programme, suppliers), free text on
+    the identifier / designation, sorted by article identifier or by the name of the first supplier."""
     ids = set(article_ids or [])
     if program_id:
         bom = ctx.table("ref_bom")
@@ -124,8 +137,7 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
         lk = ctx.table("ref_article_suppliers")
         sup_ids = set(lk[lk["supplier_id"].isin(supplier_id)]["article_id"])
         ids = (ids & sup_ids if ids else sup_ids) or {"__none__"}
-    result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None,
-                                 **_kw(horizon_days=horizon_days, history_weeks=history_weeks, focus_weeks=focus_weeks))
+    result = mrp_service.compute(ctx, session, planner=planner, article_ids=sorted(ids) if ids else None, **kw)
     names = _supplier_names(ctx)
     if sort == "supplier":
         def first_supplier(r) -> str:
@@ -136,10 +148,23 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
         arts = sorted(result.articles.values(), key=lambda r: r.article.article_id)
     if q and q.strip():   # « ; » separates alternatives : 123;456 = contains 123 or 456
         arts = [r for r in arts if P.match_any(f"{r.article.article_id} {r.article.designation}", q)]
-    total = len(arts)
-    page_arts = arts[(page - 1) * page_size: page * page_size]
-    return json_response(P.grid_out(result, granularity, names, _programs_of(ctx), articles=page_arts,
-                                    total=total, page=page, page_size=page_size, suppliers=_suppliers(ctx)))
+    return result, arts, names
+
+
+@router.get("/exports/inventaire.pdf")
+def export_inventory(planner: str | None = None, article_ids: list[str] | None = Query(None), program_id: str | None = None,
+                     supplier_id: list[str] | None = Query(None), q: str | None = None, sort: Literal["article", "supplier"] = "article",
+                     ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Printable **inventory sheet** (PDF, A4 landscape) of the articles of the supply table, same filters
+    as ``/grid`` : one line per article with the theoretical stock at date and blank columns for the count."""
+    result, arts, names = _select_articles(ctx, session, planner, article_ids, program_id, supplier_id, q, sort)
+    prg = ctx.table("ref_programs")
+    prog_name = next(iter(prg[prg["program_id"] == program_id]["name"]), program_id) if program_id else ""
+    parts = [f"programme {prog_name}" if program_id else "", f"fournisseur(s) {', '.join(names.get(s, s) or s for s in supplier_id)}" if supplier_id else "",
+             f"recherche « {q.strip()} »" if q and q.strip() else "", "trié par fournisseur" if sort == "supplier" else ""]
+    content = pdf_service.inventory_pdf(result.as_of, arts, names, planner or "tous les approvisionneurs", " · ".join(x for x in parts if x))
+    return Response(content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="inventaire_{result.as_of.isoformat()}.pdf"'})
 
 
 @router.get("/backlog", response_model=list[S.BacklogRow])

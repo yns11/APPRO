@@ -321,7 +321,7 @@ def test_exports_and_reimport(client):
     assert set(wb.sheetnames) == {"PARAMETRES", "ARTICLES", "SIMULATION", "ALERTES"}
     ws = wb["SIMULATION"]
     labels = [ws.cell(r, 3).value for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == AID]
-    assert list(labels[:5]) == ["Besoin", "Ordre ferme", "Prévisionnel EDI", "Quantité reçue", "Quantité à retenir"] and "Stock projeté" in labels
+    assert list(labels[:5]) == ["Consommation et besoin", "Ordre ferme", "Prévisionnel EDI", "Quantité reçue", "Quantité à retenir"] and "Stock projeté" in labels
     labels2 = [ws.cell(r, 3).value for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value == "P-00005775"]
     assert "Quantité à retenir · S-000032" in labels2 and "Quantité à retenir · S-001033" in labels2         # two supplier lanes
     assert ws.cell(1, 5).value == AS_OF
@@ -331,6 +331,7 @@ def test_exports_and_reimport(client):
     assert wb["ARTICLES"]["A2"].value == AID and wb["ARTICLES"]["I2"].value > 0
     assert client.get("/api/exports/alerts.xlsx").status_code == 200
     assert client.get("/api/exports/plan.xlsx", params={"planner": "QUENTIN"}).status_code == 200
+
     # planner edits in Excel: delay the 30/09 order (1600) to 06/10, an adjustment on 22/09
     cols = {ws.cell(1, c).value: c for c in range(5, ws.max_column + 1)}
     assert ws.cell(rows["Ordre ferme"], cols["2026-09-30"]).value == 1600 and ws.cell(rows["Quantité à retenir"], cols["2026-09-30"]).value == 1600
@@ -1358,3 +1359,14 @@ def test_help_pages_default_edited_and_reset(client):
     # the administrator brings the shipped text back
     back = client.delete("/api/help/pages/cbn", headers={"x-forwarded-email": "root@example.com"})
     assert back.status_code == 200 and not back.json()["edited"] and back.json()["html"] == cbn["html"]
+
+
+def test_inventory_pdf(client):
+    """The printable inventory sheet follows the filters of the supply table and is a real PDF."""
+    r = client.get("/api/exports/inventaire.pdf", params={"planner": "QUENTIN"})
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf" and r.content.startswith(b"%PDF")
+    assert "inventaire_" in r.headers["content-disposition"]
+    full = len(r.content)
+    r2 = client.get("/api/exports/inventaire.pdf", params={"planner": "QUENTIN", "q": "P-00001046", "sort": "supplier"})
+    assert r2.status_code == 200 and r2.content.startswith(b"%PDF") and len(r2.content) < full
+    assert client.get("/api/exports/inventaire.pdf", params={"supplier_id": ["S-000545"]}).status_code == 200

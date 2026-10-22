@@ -14,7 +14,7 @@ from . import schemas as S
 
 #: labels of the rows (the screens and the exports) ; the keys never change (``stock_erp`` is the firm projection)
 SERIES_LABELS = [
-    ("demand", "Besoin"),
+    ("demand", "Consommation et besoin"),
     ("consumed", "Consommé"),
     ("required", "Requis"),
     ("demand_plan", "Besoin (PDP seul)"),

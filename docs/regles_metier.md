@@ -62,7 +62,7 @@ se lit.
      dans aucun programme où il est absent ; sans terme, la consommation ERP de l'article est utilisée.
 4. Le PDP est une version de l'application, importée ou saisie, **active** ; les semaines passées suivent l'historique des versions (§ 11 bis).
 
-La ligne *Besoin* affiche le consommé (passé, réel) puis le requis (futur, PDP) ; le classeur exporté les
+La ligne *Consommation et besoin* affiche le consommé (passé, réel) puis le requis (futur, PDP) ; le classeur exporté les
 distingue par la date de référence.
 
 ## 3. Approvisionnements : voies fournisseur, plan, commandes en retard
@@ -425,6 +425,13 @@ code **et** le nom, partout (cockpit, fiche article, saisies, référentiel, cou
 pied de tableau (nombre de lignes, totaux) ; le tableau d'approvisionnement n'a pas de pied, son export est le
 classeur de simulation (§ 11).
 
+**Feuille d'inventaire (PDF)** : le bouton *Inventaire (PDF)* du tableau d'approvisionnement (articles filtrés :
+programme, fournisseurs, recherche, tri) et de la liste *Fiches articles* (périmètre) ouvre un PDF imprimable
+(`GET /api/exports/inventaire.pdf`, A4 paysage) : une ligne par article avec code, désignation, unité,
+fournisseurs (code et nom), **stock théorique** (stock à date, fin de la veille) et des colonnes vides *Quantité
+comptée*, *Écart*, *Commentaire*, puis une ligne de signature ; l'écart constaté se saisit ensuite comme
+*Ajustement* du jour.
+
 **Paramètres › Données** : journal de synchronisation ERP (âge de chaque table miroir, alerte au-delà de deux
 heures, bandeau en haut de page si la dernière copie est en retard), articles présents dans l'ERP et absents
 du référentiel, calendrier usine.
@@ -498,7 +505,7 @@ champ de saisie, toast « Annuler » (8 s) après chaque écriture, cellules ré
 
 ## 11. Classeur Excel « vivant »
 
-L'export *Simulation* reproduit le tableau : par article, *Besoin*, puis *Ordre ferme / Prévisionnel EDI /
+L'export *Simulation* reproduit le tableau : par article, *Consommation et besoin*, puis *Ordre ferme / Prévisionnel EDI /
 Quantité reçue / Quantité à retenir* par fournisseur, *Proposition CBN*, *Ajustement*, *Projeté Ferme*, *Stock
 projeté*, manque, cible, couverture. Les lignes *Quantité à retenir* et *Ajustement* sont des saisies (fond jaune, bleu = déjà saisi dans
 l'application) ; les stocks sont des **formules** : `x = stock précédent + Σ Reçu + Σ Plan (ou Σ Ferme) +
