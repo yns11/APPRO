@@ -1,0 +1,95 @@
+import { useState } from "react";
+import { Link, NavLink, Outlet } from "react-router-dom";
+import { Activity, AlertTriangle, BookOpen, CalendarRange, CircleHelp, FileSpreadsheet, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Search, Settings, Sun, Table, Truck } from "lucide-react";
+import { usePerimeter } from "@/state/PerimeterContext";
+import { useInvalidateAll, useSyncStatus } from "@/lib/queries";
+import { Button } from "@/components/ui";
+import { ActionsBar } from "@/components/ActionsBar";
+import { fmtDate, fmtMinutes } from "@/lib/format";
+import { api } from "@/lib/api";
+import { useToast } from "@/components/ui";
+
+const ROLE_LABELS: Record<string, string> = { reader: "lecture seule", appro: "approvisionneur", manager: "manager", admin: "administrateur" };
+
+const NAV = [
+  { to: "/", label: "Cockpit du jour", icon: LayoutDashboard, end: true },
+  { to: "/tableau", label: "Tableau d'approvisionnement", icon: Table },
+  { to: "/articles", label: "Fiches articles", icon: Activity },
+  { to: "/fournisseurs", label: "Fournisseurs", icon: Truck },
+  { to: "/recherche", label: "Recherche", icon: Search },
+  { to: "/saisies", label: "Saisies & journal", icon: PenLine },
+];
+const MORE = [
+  { to: "/referentiel", label: "Référentiel", icon: BookOpen },
+  { to: "/pdp", label: "Plan de production (PDP)", icon: CalendarRange },
+  { to: "/imports", label: "Imports / exports", icon: FileSpreadsheet },
+  { to: "/parametres", label: "Paramètres", icon: Settings },
+];
+
+export default function AppShell() {
+  const { perimeter, set, config } = usePerimeter();
+  const [open, setOpen] = useState(false);
+  const invalidate = useInvalidateAll();
+  const toast = useToast();
+  const sync = useSyncStatus();
+  const ThemeIcon = perimeter.theme === "dark" ? Moon : perimeter.theme === "light" ? Sun : Monitor;
+  const THEME_LABELS = { system: "système", light: "clair", dark: "sombre" };
+  const cycleTheme = () => set({ theme: perimeter.theme === "system" ? "light" : perimeter.theme === "light" ? "dark" : "system" });
+  const refresh = async () => {
+    try { await api.post("/api/reference/refresh"); invalidate(); toast.push("Données ERP rechargées", "success"); }
+    catch (e) { toast.push(`Rechargement impossible : ${(e as Error).message}`, "error"); }
+  };
+  const mini = perimeter.sidebarCollapsed;
+  const link = (n: { to: string; label: string; icon: typeof Table; end?: boolean }) => (
+    <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? "active" : "")} title={mini ? n.label : undefined} aria-label={n.label}><n.icon /><span className="lbl">{n.label}</span></NavLink>
+  );
+  const late = sync.data?.mirror && sync.data.status === "late";
+  const lateTables = (sync.data?.tables ?? []).filter((t) => t.status === "late");
+
+  return (
+    <div className={`shell ${mini ? "collapsed" : ""}`}>
+      <aside className={`sidebar ${open ? "open" : ""} ${mini ? "mini" : ""}`}>
+        <div className="brand" title="Ma Routine Appro">
+          <img className="logo-full light" src="/brand/logo-light.svg" alt="Ma Routine Appro" /><img className="logo-full dark" src="/brand/logo-dark.svg" alt="" aria-hidden="true" />
+          <img className="logo-mark light" src="/brand/mark-light.svg" alt="Ma Routine Appro" /><img className="logo-mark dark" src="/brand/mark-dark.svg" alt="" aria-hidden="true" />
+        </div>
+        <Button variant="ghost" icon size="sm" className="collapse no-print" title={mini ? "Déployer le panneau de navigation" : "Réduire le panneau de navigation (icônes seules)"} aria-label={mini ? "Déployer la navigation" : "Réduire la navigation"} onClick={() => set({ sidebarCollapsed: !mini })}>{mini ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
+        <nav onClick={() => setOpen(false)}>
+          {NAV.map(link)}
+          <div className="nav-group small subtle">Plus</div>
+          {MORE.map(link)}
+        </nav>
+        <div className="foot">
+          <div title={config?.access ? `${config.access.user} · ${ROLE_LABELS[config.access.role]}${config.access.portfolio.length ? ` · carnet : ${config.access.portfolio.join(", ")}` : ""}` : undefined}>{config?.access?.name || config?.user || "…"}</div>
+          {config?.access && <div><span className={`badge ${config.access.role === "reader" ? "neutral" : config.access.role === "admin" ? "critical" : config.access.role === "manager" ? "warning" : "brand"}`}>{ROLE_LABELS[config.access.role]}{config.access.bootstrap ? " (table vide)" : ""}</span></div>}
+          <div>Source : {String(config?.data_source?.name ?? "…")}</div>
+          <div>v{config?.version ?? ""}</div>
+        </div>
+      </aside>
+      <div className="main">
+        <header className="topbar">
+          <Button variant="ghost" icon className="no-print" style={{ display: "none" }} id="menu-btn" onClick={() => setOpen((o) => !o)} aria-label="Menu"><Menu /></Button>
+          <div className="ctx">
+            <label className="field" style={{ minWidth: 170 }}>
+              <span className="sr-only">Périmètre</span>
+              <select className="select sm" value={perimeter.planner ?? ""} onChange={(e) => set({ planner: e.target.value || null, plannerChosen: true })}>
+                <option value="">Tous les approvisionneurs</option>
+                {(config?.planners ?? []).map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="right row">
+            {late && <Link to="/parametres?tab=data" className="sync-alert" title={`Dernière copie ERP il y a ${fmtMinutes(Math.min(...lateTables.map((t) => t.age_minutes ?? 0)))} : ${lateTables.map((t) => t.table).join(", ")}`}><AlertTriangle size={14} />Synchronisation ERP en retard</Link>}
+            <span className="freshness" title="Aujourd'hui = date du calcul (passé / futur, propositions, expiration des cellules) · le stock a été initialisé en fin de journée du point zéro, la projection commence le lendemain · horizon : 52 semaines">Aujourd'hui : <b>{config ? fmtDate(config.as_of) : "…"}</b>{config && <span className="subtle"> · stock initialisé le {fmtDate(config.init_date)}</span>}</span>
+            <ActionsBar />
+            <Link to="/aide" className="btn ghost icon no-print" title="Pense-bête de l'approvisionneur : règles, marqueurs, couleurs et gestes" aria-label="Aide : pense-bête"><CircleHelp /></Link>
+            {config?.access?.can_write && <Button variant="ghost" icon title="Recharger les données ERP" onClick={refresh}><RefreshCw /></Button>}
+            <Button variant="ghost" icon title={`Thème : ${THEME_LABELS[perimeter.theme]} (cliquer pour changer)`} aria-label="Changer de thème" onClick={cycleTheme}><ThemeIcon /></Button>
+          </div>
+        </header>
+        <main className="content"><Outlet /></main>
+      </div>
+      <style>{`@media (max-width: 900px) { #menu-btn { display: inline-flex !important; } }`}</style>
+    </div>
+  );
+}
