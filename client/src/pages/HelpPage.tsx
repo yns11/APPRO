@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, Navigate, NavLink, useParams } from "react-router-dom";
+import { Link, NavLink, useParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Pencil, RotateCcw, Save, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useHelpPage, useHelpPages } from "@/lib/queries";
@@ -16,12 +16,12 @@ const PART_TITLES: Record<string, string> = { A: "Tableau d'approvisionnement", 
  * The in-app pense-bête : one page per section (left navigation grouped by part), the text served by the
  * server (the version an administrator saved, else the one shipped with the application).  Administrators
  * get an edit mode : the page body becomes editable in place, « Enregistrer » stores the HTML (sanitised by
- * the server), « Version d'origine » drops the saved text.  Readers never see an edit button nor the
- * history ; the pages are reserved to administrators for now (the route redirects the others).
+ * the server), « Version d'origine » drops the saved text.  Every user can read the pages ; readers never
+ * see an edit button nor the history.
  */
 export default function HelpPage() {
   const { slug } = useParams();
-  const { rights, config, configError } = usePerimeter();
+  const { rights } = usePerimeter();
   const pages = useHelpPages();
   const list = pages.data ?? [];
   const current = slug ?? list[0]?.slug;
@@ -30,15 +30,12 @@ export default function HelpPage() {
     list.forEach((p) => { const g = out[out.length - 1]; if (g && g.part === p.part) g.pages.push(p); else out.push({ part: p.part, title: p.part ? `Partie ${p.part} · ${p.part_title || PART_TITLES[p.part] || ""}` : "", pages: [p] }); });
     return out;
   }, [list]);
-  // the rights are known once the configuration is loaded : no redirect before that
-  if (!config && !configError) return <div className="page"><SkeletonBlock rows={8} /></div>;
-  if (!rights.isAdmin) return <Navigate to="/" replace />;
   const idx = list.findIndex((p) => p.slug === current);
   const prev = idx > 0 ? list[idx - 1] : undefined, next = idx >= 0 && idx < list.length - 1 ? list[idx + 1] : undefined;
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Pense-bête de l'approvisionneur</h1><p>Ce que l'application décide, affiche et colore : une page par section. Les administrateurs peuvent corriger le texte sur place ; tous les lecteurs voient la dernière version enregistrée.</p></div>
+        <div className="title"><h1>Pense-bête de l'approvisionneur</h1><p>Ce que l'application décide, affiche et colore : une page par section.{rights.isAdmin ? " Les administrateurs peuvent corriger le texte sur place ; tous les lecteurs voient la dernière version enregistrée." : ""}</p></div>
       </div>
       {pages.isError ? <ErrorBox error={pages.error} retry={() => pages.refetch()} /> : pages.isLoading ? <SkeletonBlock rows={8} /> : !list.length ? <Empty title="Aucune page d'aide" /> : (
         <div className="help-layout">
@@ -46,7 +43,7 @@ export default function HelpPage() {
             {groups.map((g, gi) => (
               <div key={g.part || `g${gi}`}>
                 {g.title && <div className="part">{g.title}</div>}
-                {g.pages.map((p) => <NavLink key={p.slug} to={`/aide/${p.slug}`} className={({ isActive }) => (isActive || (!slug && p.slug === current) ? "active" : "")}>{p.title}{p.edited && <span className="edited" title="Texte modifié par un administrateur">· modifié</span>}</NavLink>)}
+                {g.pages.map((p) => <NavLink key={p.slug} to={`/aide/${p.slug}`} className={({ isActive }) => (isActive || (!slug && p.slug === current) ? "active" : "")}>{p.title}{rights.isAdmin && p.edited && <span className="edited" title="Texte modifié par un administrateur">· modifié</span>}</NavLink>)}
               </div>
             ))}
           </nav>

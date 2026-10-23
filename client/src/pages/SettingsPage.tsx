@@ -245,7 +245,7 @@ function UsersTab() {
         <ul className="small" style={{ margin: "8px 0 12px 18px", padding: 0 }}>
           <li><b>appro</b> : écrit sur son carnet (articles dont il est l'approvisionneur) et sur les carnets qui lui sont délégués.</li>
           <li><b>manager</b> : en plus, règles communes, paramètres hebdomadaires de tout article, import des PDP.</li>
-          <li><b>admin</b> : tous les droits, dont la table des approvisionneurs et le pense-bête intégré (bouton ? de l'en-tête, texte modifiable).</li>
+          <li><b>admin</b> : tous les droits, dont la table des approvisionneurs et la modification du pense-bête intégré (bouton ? de l'en-tête, lisible par tous).</li>
           <li>Utilisateur non déclaré ou inactif : lecture seule.</li>
         </ul>
         <div className="row wrap"><Link className="btn sm" to="/referentiel?table=ref_planners">Approvisionneurs</Link><Link className="btn sm" to="/referentiel?table=ref_delegations">Délégations</Link></div>

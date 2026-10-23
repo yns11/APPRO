@@ -648,7 +648,7 @@ def sections() -> list[dict[str, str]]:
              ["Statut", "pastille bleue", "données à corriger"],
              ["Partout", "Ctrl+Z · Ctrl+Y · ↶ ↷", "annuler / rétablir chaque geste, 7 jours, dans l'ordre"],
              ["En-tête", "FR | EN", "intitulés du tableau et des tuiles en anglais (partage d'écran, capture)"],
-             ["En-tête", "?", "ce pense-bête dans l'application (administrateurs pour l'instant) ; un administrateur peut le modifier sur place"],
+             ["En-tête", "?", "ce pense-bête dans l'application, pour tous ; un administrateur peut le modifier sur place"],
          ]),
          """<div class="callout warn"><b>Réglable en commun</b> : tolérance (85 % de la cible), marge de délai (1 j ouvré). <b>Par article</b> (et par semaine ISO) : couverture cible, seuils rouge et orange, surstock, jours de consommation, source de consommation, politique de multi-sourcing. <b>Par fournisseur</b> : délai, jours de livraison standard, jours stricts. <b>Par lien</b> : MOQ, UM, quota, priorité, délai spécifique, plafonds.</div>""")
     return S

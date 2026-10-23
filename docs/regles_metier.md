@@ -455,7 +455,7 @@ semaine par semaine, la version retenue et sa date d'import.
 (**Ferme ERP**, **CBN** ou **Saisie**) = première quantité attendue à partir d'aujourd'hui sur la ligne *Quantité à
 retenir* et le complément CBN, tous fournisseurs confondus.
 
-**Pense-bête intégré** : le bouton **?** de l'en-tête (réservé aux administrateurs pour le moment) ouvre le
+**Pense-bête intégré** : le bouton **?** de l'en-tête (tous les utilisateurs) ouvre le
 pense-bête de l'approvisionneur dans l'application, **une page par section** (navigation à gauche, pages
 précédente / suivante). Un administrateur passe en **mode édition** (*Modifier*) : le texte se corrige sur place
 (gras, listes, tableaux et figures conservés), *Enregistrer* publie la page pour tous les lecteurs (table
