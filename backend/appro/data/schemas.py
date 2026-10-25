@@ -217,6 +217,14 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("article_id", "str", "Article", "item_id", True),
            Column("price", "float", "Prix (€)", "std_cost_price, euros par unité de stock", True),
        ], reference=False),
+    _t("fct_stock_snapshot", "Stock ERP (snapshots)", "Stock physique de l'ERP en fin de journée, par article et entrepôt (stock_snapshot : item_id, snapshot_date, "
+       "entrepot, stock_physique), entrepôts configurés seulement, 30 derniers jours. Comparé au stock projeté du même jour (écart, dérive, calage) ; "
+       "jamais un stock de départ, jamais écrit dans le référentiel.", ("article_id", "snapshot_date", "warehouse"), [
+           Column("article_id", "str", "Article", "item_id", True),
+           Column("snapshot_date", "date", "Date du snapshot", "stock connu en fin de journée", True),
+           Column("warehouse", "str", "Entrepôt", "entrepot (B06, B06VRAC…)", True),
+           Column("qty", "float", "Stock physique", "stock_physique, unité de stock de l'article", True),
+       ], reference=False),
 ]}
 
 REFERENCE_TABLES: tuple[str, ...] = tuple(n for n, t in TABLES.items() if t.reference)

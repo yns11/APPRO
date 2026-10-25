@@ -562,6 +562,7 @@ def guide() -> str:
         ("max_qty_per_delivery / max_qty_per_week", "vide (lien)", "lien", "plafonds, multiples de l'UM ; fermes et quantités à retenir comptés ; excédent reporté, manque inévitable alerté"),
         ("target_tolerance_pct", "15", "commune", "retour à la cible dès que le stock projeté passe sous (100 − n) % de la cible ; la quantité vise 100 %"),
         ("lead_margin_days", "1", "commune", "marge de délai : date limite de commande = livraison − (délai − marge) j ouvrés ; 0 = délai strict ; tenable ⇔ date limite ≥ aujourd'hui"),
+        ("stock_drift_pct / stock_drift_min_packs / stock_drift_persist", "10 % / 1 UM / 3", "commune", "dérive du stock ERP : écart ERP − projeté au-delà du seuil (% de la cible, UM minimale), du même signe sur n snapshots ; donnée à corriger, calage = ajustement signé daté du snapshot"),
         ("Règles figées", "—", "application", "jours ouvrés partout ; besoin non servi perdu ; date limite dépassée = plancher ! au jour du besoin, ou livraison hors jour standard ◇ au premier jour ouvré tenable (sauf jours stricts) ; cible pleine dès que tenable ; livraison standard avant le besoin, regroupée ; horizon 52 semaines ; à commander au plus tard sous 5 j ouvrés ; fermes seules comptées ; refus = jour seul, expiré dans le passé"),
         ("history_weeks / focus_weeks", "2 / 2 (utilisateur)", "affichage", "semaines passées montrées, semaines détaillées jour par jour"),
     ]

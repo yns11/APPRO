@@ -553,3 +553,16 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .day-picker .meta .cbn { color: var(--warning-fg); font-style: italic; }
 .day-picker > .btn { align-self: flex-end; margin-top: 4px; }
 .lang-toggle .btn { min-width: 40px; }
+
+/* ---------- ERP stock snapshot in the grid : drift badge on the article head, « ERP n » under the past projected stock ---------- */
+.pivot .article-head .erp-badge { position: sticky; left: 295px; margin-left: 0; display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border-radius: var(--r-pill); font-size: var(--fs--2); font-weight: var(--fw-semibold); text-decoration: none; vertical-align: 1px; }
+.pivot .article-head .erp-badge .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.pivot .article-head .erp-badge.low { background: var(--warning-soft); color: var(--warning-fg); }
+.pivot .article-head .erp-badge.low .dot { background: var(--warning); }
+.pivot .article-head .erp-badge.high { background: var(--info-soft); color: var(--info-fg); }
+.pivot .article-head .erp-badge.high .dot { background: var(--info); }
+.pivot td.stock .erpv { display: block; font-size: 10px; line-height: 1.1; color: var(--fg-subtle); font-weight: var(--fw-regular); }
+.pivot td.stock .erpv.low { color: var(--warning-fg); font-weight: var(--fw-semibold); }
+.pivot td.stock .erpv.high { color: var(--info-fg); font-weight: var(--fw-semibold); }
+.pivot td.stock.erp-low { box-shadow: inset 0 0 0 2px var(--warning); }
+.pivot td.stock.erp-high { box-shadow: inset 0 0 0 2px var(--info); }

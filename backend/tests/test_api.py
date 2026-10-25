@@ -208,7 +208,8 @@ def test_weekly_article_parameters_api(client):
 def test_params_overrides(client):
     """Two common rules : the tolerance under the target and the lead-time margin ; the fixed rules are listed, not editable."""
     schema = client.get("/api/params/schema").json()
-    assert [p["field"] for p in schema] == ["target_tolerance_pct", "lead_margin_days"] and schema[0]["default"] == 15 and schema[1]["default"] == 1
+    assert [p["field"] for p in schema] == ["target_tolerance_pct", "lead_margin_days", "stock_drift_pct", "stock_drift_min_packs", "stock_drift_persist"]
+    assert schema[0]["default"] == 15 and schema[1]["default"] == 1 and schema[2]["default"] == 10 and schema[4]["default"] == 3
     assert client.put("/api/params/overrides", json={"scope": "global", "field": "lead_margin_days", "value": 0}).status_code == 200
     assert client.get("/api/params/effective").json()["lead_margin_days"] == 0
     fixed = client.get("/api/params/fixed").json()
@@ -222,7 +223,7 @@ def test_params_overrides(client):
     assert client.put("/api/params/overrides", json={"scope": "global", "field": "target_tolerance_pct", "value": "abc"}).status_code == 422
     assert client.put("/api/params/overrides", json={"scope": "article", "key1": AID, "field": "coverage_target_days", "value": 20}).status_code == 422
     rows = client.get("/api/params/overrides").json()
-    assert {r["field"] for r in rows} == {"target_tolerance_pct", "lead_margin_days"}
+    assert {r["field"] for r in rows} >= {"target_tolerance_pct", "lead_margin_days"}
     assert all(client.delete(f"/api/params/overrides/{r['id']}").status_code == 204 for r in rows)
 
 
@@ -949,7 +950,7 @@ def test_programme_scrap_rate_in_the_pdp_sheet(client):
 # ---------------------------------------------------------------- Paramètres › Données, supplier page, exports
 def test_data_sync_orphans_calendar(client):
     sync = client.get("/api/data/sync").json()
-    assert sync["status"] == "unknown" and len(sync["tables"]) == 5 and sync["late_after_minutes"] == 120
+    assert sync["status"] == "unknown" and len(sync["tables"]) == 6 and sync["late_after_minutes"] == 120
     assert {t["table"] for t in sync["tables"]} >= {"erp_purchase_orders", "erp_receipts", "erp_consumption_actual"}
     orphans = client.get("/api/data/orphans").json()
     assert isinstance(orphans, list) and all(set(o) >= {"article_id", "orders", "receipts", "consumption", "last_date"} for o in orphans)

@@ -70,6 +70,8 @@ def cockpit(planner: str | None = None, article_ids: list[str] | None = Query(No
     return S.CockpitResponse(
         as_of=result.as_of, init_date=result.init_date, horizon_days=result.params.horizon_days, planner=planner, data_source=ctx.source.name,
         pdp_version=None, kpis=P.cockpit_kpis(result), articles=[P.article_summary(r) for r in arts],
+        erp_stock_enabled=bool(ctx.settings.erp_stock_table),
+        erp_stock_date=max((dt.date.fromisoformat(r.kpis["erp_stock_date"]) for r in arts if r.kpis.get("erp_stock_date")), default=None),
         alerts=alerts, proposals=props, backlog=P.backlog_rows(result),
         diagnostics=result.diagnostics, weekly_supply_demand=P.weekly_supply_demand(result),
         weekly_stock_value=P.weekly_stock_value(result))

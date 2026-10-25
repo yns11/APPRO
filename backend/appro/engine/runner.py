@@ -9,11 +9,69 @@ import numpy as np
 from .alerts import classify_alerts, status_of, worst_severity
 from .calendar import WorkCalendar, iso_week_monday
 from .demand import DayIndex, actual_share, build_article_demand, build_program_daily, explode_demand
-from .models import Alert, ArticleResult, Dataset, DatasetError, EngineParams, MrpResult, OrderType
+from .models import Alert, AlertType, ArticleResult, Dataset, DatasetError, EngineParams, MrpResult, OrderType, Severity
 from .programs import program_impact
 from .projection import Projection, coverage_days, coverage_from, first_shortage, project_stock, target_stock
 from .proposals import generate_proposals, is_refused
 from .supply import blocked_days, build_lanes, lane_totals, unlinked_flows
+
+
+def _qty(v: float) -> str:
+    return f"{v:,.0f}".replace(",", " ")
+
+
+def erp_stock_comparison(observations, plan_proj, target, demand, index, calendar, as_of, init_date, i_as_of, links, params):
+    """The ERP stock snapshots of an article against its projected stock (docs/regles_metier.md § 4 bis).
+
+    One entry per snapshot day inside [init date, yesterday] (a snapshot is known at the end of its day :
+    today's is not over) : ERP quantity (warehouses summed), projected net balance of the same day (the
+    stock, minus the cumulated shortage when it sits at 0), signed gap ERP − projected, gap in % of the
+    target stock, ``beyond`` when |gap| exceeds ``stock_drift_pct`` % of the target **and**
+    ``stock_drift_min_packs`` packs.  **Drift** : the last ``stock_drift_persist`` snapshots all beyond, with
+    the same sign.  Returns (entries, last entry, run length, drift, coverage from the ERP stock when the last
+    snapshot is yesterday's, stale = older than two working days)."""
+    by_day: dict[dt.date, float] = defaultdict(float)
+    by_wh: dict[dt.date, dict[str, float]] = defaultdict(dict)
+    for o in observations:
+        if o.date < init_date or o.date >= as_of:
+            continue
+        by_day[o.date] += float(o.qty)
+        by_wh[o.date][o.warehouse] = by_wh[o.date].get(o.warehouse, 0.0) + float(o.qty)
+    if not by_day:
+        return [], None, 0, False, None, False
+    pack = min((float(l.pack_qty) for l in links if l.active and l.pack_qty), default=0.0)
+    pct = max(float(params.stock_drift_pct), 0.0) / 100.0
+    min_gap = max(float(params.stock_drift_min_packs), 0.0) * pack
+    entries = []
+    for d in sorted(by_day):
+        i = index.offset(d)
+        if i is None:
+            continue
+        projected = float(plan_proj.stock[i]) - float(plan_proj.shortage_cum[i])
+        gap = by_day[d] - projected
+        tgt = float(target[i])
+        beyond = abs(gap) > 1e-9 and abs(gap) > pct * tgt + 1e-9 and abs(gap) >= min_gap - 1e-9
+        entries.append({"date": d.isoformat(), "qty": by_day[d], "projected": projected, "gap": gap,
+                        "gap_pct": (gap / tgt * 100.0) if tgt > 1e-9 else None, "beyond": beyond, "drift": False,
+                        "warehouses": dict(sorted(by_wh[d].items()))})
+    if not entries:
+        return [], None, 0, False, None, False
+    last = entries[-1]
+    runs = 0
+    for e in reversed(entries):
+        if e["beyond"] and (e["gap"] > 0) == (last["gap"] > 0):
+            runs += 1
+        else:
+            break
+    drift = runs >= max(int(params.stock_drift_persist), 1)
+    if drift:
+        for e in entries[len(entries) - runs:]:
+            e["drift"] = True
+    last_date = dt.date.fromisoformat(last["date"])
+    i_last = index.offset(last_date)
+    cov = coverage_from(float(last["qty"]), demand, i_as_of, index, calendar)[0] if i_last == i_as_of - 1 else None
+    stale = calendar.working_days_between(last_date, as_of) > 2
+    return entries, last, runs, drift, (int(cov) if cov is not None else None), bool(stale)
 
 
 def resolve_as_of(dataset: Dataset, params: EngineParams) -> dt.date:
@@ -91,6 +149,9 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     desadv_by_article = defaultdict(list)
     for d in dataset.desadv:
         desadv_by_article[d.article_id].append(d)
+    erp_stock_by_article = defaultdict(list)
+    for o in dataset.erp_stock:
+        erp_stock_by_article[o.article_id].append(o)
 
     selected = [a for a in dataset.articles if a.active and (article_ids is None or a.article_id in article_ids)]
     results: dict[str, ArticleResult] = {}
@@ -219,6 +280,17 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         next_firm = firm_next[0] if firm_next else None
         due = sorted(proposals, key=lambda p: (p.order_date, p.delivery_date, p.supplier_id or ""))
         order_due = due[0] if due else None
+        # ---- ERP stock snapshots (end of day) against the projected stock of the same day : gap, drift
+        erp_snapshots, erp_last, erp_runs, erp_drift, erp_cov, erp_stale = erp_stock_comparison(
+            erp_stock_by_article.get(aid, []), plan_proj, target, demand, index, calendar, as_of, init_date, i_as_of,
+            links_by_article.get(aid, []), params)
+        if erp_drift and erp_last is not None:
+            alerts.append(Alert(aid, AlertType.STOCK_DRIFT, Severity.INFO,
+                                f"Dérive du stock ERP : {_qty(erp_last['qty'])} dans l'ERP le {erp_last['date']} contre {_qty(erp_last['projected'])} "
+                                f"projeté, écart {erp_last['gap']:+,.0f} ({'en moins' if erp_last['gap'] < 0 else 'en plus'}), même signe sur "
+                                f"{erp_runs} snapshots – vérifier les déclarations ou caler sur l'ERP".replace(",", " "),
+                                date=dt.date.fromisoformat(erp_last["date"]), value=float(erp_last["gap"]), scope="data",
+                                details={"gap": erp_last["gap"], "runs": erp_runs}))
         data_issues = sorted({a.alert_type.value for a in alerts if a.scope == "data"})
         # requirement of the next 20 working days (four weeks) and its average per working day
         wd_mask = calendar.working_mask(index.start, n)
@@ -295,6 +367,16 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             "next_delivery_date": next_delivery[0].isoformat() if next_delivery else None,
             "next_delivery_qty": next_delivery[1] if next_delivery else None,
             "next_delivery_type": next_delivery[2] if next_delivery else None,
+            "erp_stock_qty": erp_last["qty"] if erp_last else None,
+            "erp_stock_date": erp_last["date"] if erp_last else None,
+            "erp_stock_gap": erp_last["gap"] if erp_last else None,
+            "erp_stock_gap_pct": erp_last["gap_pct"] if erp_last else None,
+            "erp_stock_beyond": bool(erp_last and erp_last["beyond"]),
+            "erp_stock_drift": erp_drift,
+            "erp_stock_drift_runs": erp_runs if erp_drift else 0,
+            "erp_stock_stale": erp_stale,
+            "erp_stock_warehouses": erp_last["warehouses"] if erp_last else None,
+            "coverage_erp_stock_days": erp_cov,
         }
         results[aid] = ArticleResult(
             article=article, start_date=start, as_of=as_of, dates=index.dates,
@@ -309,7 +391,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             stock_erp_net=erp.net, stock_plan_net=plan_proj.net,
             coverage_erp=cov["erp"], coverage_plan=cov["plan"], target_stock=target,
             lanes=lanes, alerts=alerts, proposals=proposals, kpis=kpis, suppliers=links_by_article.get(aid, []),
-            diagnostics=notes, proposals_ignored=proposals_ignored, price=price, cap_shortfalls=cap_shortfalls,
+            diagnostics=notes, proposals_ignored=proposals_ignored, price=price, cap_shortfalls=cap_shortfalls, erp_snapshots=erp_snapshots,
             unlinked=unlinked,
         )
 

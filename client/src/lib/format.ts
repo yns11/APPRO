@@ -56,7 +56,7 @@ export function weekChipLabel(key: string, lang: "fr" | "en" = "fr"): string { r
 export const ALERT_LABELS: Record<string, string> = {
   STOCKOUT: "Rupture Appro.", LOW_COVERAGE: "Couverture à date", OVERSTOCK: "Surstock", BACKLOG: "Backlog fournisseur", ORDER_DUE: "Commande à placer",
   URGENT_PROPOSAL: "Commande urgente", NO_DEMAND: "Sans besoin", MISSING_DATA: "Données manquantes", NEGATIVE_STOCK: "Stock de départ négatif",
-  CAP_REACHED: "Plafond fournisseur atteint", UNLINKED_FLOWS: "Flux hors lien actif",
+  CAP_REACHED: "Plafond fournisseur atteint", UNLINKED_FLOWS: "Flux hors lien actif", STOCK_DRIFT: "Dérive du stock ERP",
 };
 export const PLAN_ORIGIN_LABELS: Record<string, string> = {
   monday: "version connue le lundi", later: "version importée après coup", erp: "plan ERP", latest: "PDP actuel", none: "aucun plan",

@@ -225,6 +225,17 @@ class StockSnapshot:
     qty_blocked: float = 0.0
 
 
+@dataclass
+class StockObservation:
+    """Physical stock of the ERP at the end of ``date`` for one article and warehouse (the daily snapshot) :
+    compared with the projected stock of the same day, never used as a starting stock."""
+
+    article_id: str
+    date: dt.date
+    qty: float
+    warehouse: str = ""
+
+
 # =============================================================================
 # Planner entries (the two editable rows)
 # =============================================================================
@@ -301,6 +312,7 @@ class Dataset:
     flags: list[CellFlag] = field(default_factory=list)
     desadv: list[DesadvLine] = field(default_factory=list)
     prices: dict[str, float] = field(default_factory=dict)        # article → standard cost price (euros)
+    erp_stock: list[StockObservation] = field(default_factory=list)  # daily ERP stock snapshots (comparison only)
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -320,6 +332,9 @@ class EngineParams:
     working_weekdays: tuple[int, ...] = (1, 2, 3, 4, 5)
     target_tolerance_pct: float = 15.0            # a proposal is triggered under (100 − n) % of the target, and fills it to 100 %
     lead_margin_days: int = 1                     # order deadline = delivery − (lead time − margin) working days ; 0 = strict lead time
+    stock_drift_pct: float = 10.0                 # ERP stock vs projected stock : |gap| above n % of the target stock of the day…
+    stock_drift_min_packs: float = 1.0            # … and at least n packs of the main link (0 = no minimum)…
+    stock_drift_persist: int = 3                  # … on the last n snapshots, same sign = « dérive » (data issue)
 
     def copy_with(self, **changes: Any) -> "EngineParams":
         data = self.__dict__.copy()
@@ -345,6 +360,7 @@ class AlertType(str, Enum):
     CAP_REACHED = "CAP_REACHED"
     UNLINKED_FLOWS = "UNLINKED_FLOWS"
     ORDER_DUE = "ORDER_DUE"          # a CBN proposal to order within the next five working days
+    STOCK_DRIFT = "STOCK_DRIFT"      # the ERP stock snapshot drifts away from the projected stock (data issue)
 
 
 class Severity(str, Enum):
@@ -505,6 +521,7 @@ class ArticleResult:
     kpis: dict[str, Any]
     suppliers: list[SupplierLink]
     diagnostics: list[str] = field(default_factory=list)
+    erp_snapshots: list[dict[str, Any]] = field(default_factory=list)   # ERP stock snapshots vs projected stock, per day (date, qty, projected, gap…)
     proposals_ignored: list[Proposal] = field(default_factory=list)   # refused urgent / normal proposals, information only
     price: float | None = None                                         # standard cost price (euros), None = unknown
     cap_shortfalls: list["CapShortfall"] = field(default_factory=list) # needs that no delivery cap could absorb

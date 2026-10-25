@@ -81,6 +81,14 @@ variables:
   erp_prices_table:
     description: Table UC des articles avec le prix standard (item_id, std_cost_price en euros), pour valoriser les stocks. Vide = aucune.
     default: silver_base_article
+  erp_stock_table:
+    description: >-
+      Table UC du snapshot quotidien de stock physique par article et entrepôt (item_id, snapshot_date,
+      entrepot, stock_physique), comparé au stock projeté (écart, dérive, calage). Vide = aucune.
+    default: stock_snapshot
+  stock_warehouses:
+    description: Entrepôts (colonne entrepot) sommés dans le stock ERP, séparés par des virgules.
+    default: B06,B06VRAC
 
   # --- Identités et exploitation (propres à chaque cible) ---------------------
   admin_emails:

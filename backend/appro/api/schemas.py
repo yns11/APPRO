@@ -274,6 +274,9 @@ class CockpitKpis(BaseModel):
     to_order: int = 0
     ok: int = 0
     data_issues: int = 0         # articles with a data issue (no reference stock, no active link, unlinked firm orders)
+    stock_drift: int = 0         # articles whose ERP stock snapshot drifts from the projected stock
+    stock_drift_low: int = 0     # … ERP below the projection (overestimated stock)
+    stock_drift_high: int = 0    # … ERP above the projection
     stockouts: int
     stockouts_7d: int
     low_coverage: int
@@ -311,6 +314,8 @@ class CockpitResponse(BaseModel):
     data_source: str
     pdp_version: dict[str, Any] | None
     kpis: CockpitKpis
+    erp_stock_enabled: bool = False       # an ERP stock snapshot source is configured
+    erp_stock_date: dt.date | None = None  # latest snapshot compared (the day before today when the copy is fresh)
     articles: list[ArticleSummary]
     alerts: list[AlertOut]
     proposals: list[ProposalOut]
@@ -458,6 +463,7 @@ class GridArticle(BaseModel):
     kpis: dict[str, Any]
     suppliers: list[LinkRef]
     proposals: list[ProposalOut] = Field(default_factory=list)
+    erp_snapshots: list[dict[str, Any]] = Field(default_factory=list)
     programs: list[str]
 
 
@@ -563,6 +569,18 @@ class PlanCellBatchIn(BaseModel):
 
 class AdjustmentBatchIn(BaseModel):
     cells: list[AdjustmentIn] = Field(max_length=2000)
+
+
+class CalibrateIn(BaseModel):
+    """« Caler sur l'ERP » : the articles to align on their last ERP stock snapshot (one signed adjustment each)."""
+
+    article_ids: list[str] = Field(min_length=1, max_length=500)
+    note: str | None = Field(None, max_length=200)
+
+
+class CalibrateOut(BaseModel):
+    created: list[AdjustmentOut]
+    skipped: list[dict[str, str]]
 
 
 class FlagIn(BaseModel):

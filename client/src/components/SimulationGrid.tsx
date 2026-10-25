@@ -9,7 +9,8 @@ import { useToast } from "@/components/ui";
 import { useLang, type TKey } from "@/lib/i18n";
 import { ORDER_TYPE_LABELS, fmtCellQty, fmtDate, fmtQty, isDecimalArticle, isSaturday, isSunday, isWeekKey, isWeekend, isoWeekKey, isoWeekOf, periodLabel, weekChipLabel } from "@/lib/format";
 import { WeekRangeBar, type WeekChip } from "@/components/WeekRangeBar";
-import type { DesadvInfo, ReceiptInfo, AdjustmentOut, ArticleRef, FlagIn, FlagOut, LaneOut, LinkRef, PlanCellOut, ProposalOut, SeriesOut } from "@/lib/types";
+import type { DesadvInfo, ReceiptInfo, AdjustmentOut, ArticleKpis, ArticleRef, ErpSnapshot, FlagIn, FlagOut, LaneOut, LinkRef, PlanCellOut, ProposalOut, SeriesOut } from "@/lib/types";
+import { fmtSigned, fmtSignedPct } from "@/components/CalibrateDialog";
 
 /** Rows of the grid that can be hidden (for every article) ; lane rows are repeated per supplier.  The firm projection
  *  (``stock_erp``) is no longer a row of the table : it stays a KPI (« Projeté Ferme »). */
@@ -25,7 +26,7 @@ export const ROW_KEYS: { key: string; label: TKey; lane?: boolean }[] = [
 ];
 
 export interface GridColumns { as_of: string; init_date: string; periods: string[]; period_start: string[]; period_end: string[]; }
-export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis?: { severity?: string | null }; suppliers?: LinkRef[]; proposals?: ProposalOut[]; }
+export interface GridRowArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis?: Partial<ArticleKpis> & { severity?: string | null }; suppliers?: LinkRef[]; proposals?: ProposalOut[]; erp_snapshots?: ErpSnapshot[]; }
 
 /* ---------------------------------------------------------------- geometry (virtualisation) */
 const COL_W = 72;          // every data column has the same width: the visible range is arithmetic
@@ -388,6 +389,17 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   /** decimal article (non-piece unit or decimal requirement) : Besoin and stock rows with three decimals */
   const decimalOf = useCallback((a: GridRowArticle) => isDecimalArticle(a.article.unit, a.series.find((s) => s.key === "demand")?.values), []);
   const dayLabel = (iso: string) => fmtDate(iso, "EEEE dd/MM", lang);
+  /** ERP stock snapshot shown under the projected stock of a past column : the day's snapshot, or the last one of the week */
+  const erpOf = (a: GridRowArticle, i: number): ErpSnapshot | undefined => {
+    const snaps = a.erp_snapshots;
+    if (!snaps?.length) return undefined;
+    const s = cols.period_start[i], e = cols.period_end[i] ?? s;
+    let hit: ErpSnapshot | undefined;
+    for (const x of snaps) if (x.date >= s && x.date <= e) hit = x;
+    return hit;
+  };
+  const pctOf = (s: { gap_pct: number | null }) => fmtSignedPct(s.gap_pct);
+  const hasErp = articles.some((a) => a.erp_snapshots?.length);
   const plainRow = (r: RowDesc, label: ReactNode, cls: string, val: (i: number) => number, title?: (i: number) => string, extra?: (i: number) => string, decimal = false) => (
     <tr key={r.key} className={cls} style={{ height: r.h }}>
       <td>{label}</td>
@@ -405,7 +417,11 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         return (
           <tr key={r.key} className="article-head" style={{ height: r.h }}>
             <td><Link to={`/articles/${encodeURIComponent(aid)}`}>{aid}</Link> <span className="subtle" style={{ fontWeight: 400 }}>· {a.article.designation}</span>{locked && <span className="subtle" style={{ fontWeight: 400 }} title={LOCK}> · <Lock size={11} style={{ verticalAlign: "-1px" }} /> {a.article.planner}</span>}</td>
-            <td colSpan={colCount - 1} />
+            <td colSpan={colCount - 1} style={{ textAlign: "left", paddingLeft: 10 }}>
+              {a.kpis?.erp_stock_drift && a.kpis.erp_stock_date && <Link to={`/articles/${encodeURIComponent(aid)}`} className={`erp-badge ${(a.kpis.erp_stock_gap ?? 0) < 0 ? "low" : "high"}`}
+                title={t("grid.erp_badge_title", { d: fmtDate(a.kpis.erp_stock_date, undefined, lang), q: fmtQty(a.kpis.erp_stock_qty ?? 0, unit), s: fmtQty((a.kpis.erp_stock_qty ?? 0) - (a.kpis.erp_stock_gap ?? 0), unit), v: fmtSigned(a.kpis.erp_stock_gap ?? 0, unit), p: pctOf({ gap_pct: a.kpis.erp_stock_gap_pct ?? null }), n: a.kpis.erp_stock_drift_runs ?? 0 })}>
+                <span className="dot" />{t("grid.erp_badge", { v: fmtSigned(a.kpis.erp_stock_gap ?? 0, unit), p: pctOf({ gap_pct: a.kpis.erp_stock_gap_pct ?? null }) })}</Link>}
+            </td>
           </tr>
         );
       case "group": {
@@ -625,11 +641,14 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const shortDay = series("shortage_plan", i);
               const cls = [...cellBase(i), "stock", past ? "" : coverageClass(cov, a.article), shortCum > 0 ? "short" : "", decimal ? "decimal" : ""].filter(Boolean).join(" ");
               const target = series("target_stock", i);
-              const title = past ? `${t("stock.past", { v: f(v) })}${shortCum > 0 ? ` · ${t("stock.cum", { v: f(shortCum) })}` : ""}` : `${t("stock.line", { v: f(v), c: cov, t: f(target) })}${shortCum > 0 ? t("stock.cum_detail", { v: f(shortCum), d: shortDay > 0 ? t("stock.this_day", { v: f(shortDay) }) : "" }) : ""}`;
-              return <td key={i} className={cls} title={title}>
+              const erp = past ? erpOf(a, i) : undefined;
+              const erpLine = erp ? `\n${t("grid.erp_cell", { d: fmtDate(erp.date, undefined, lang), q: fmtQty(erp.qty, unit), w: Object.keys(erp.warehouses).length > 1 ? ` (${Object.entries(erp.warehouses).map(([w, q]) => `${w} ${fmtQty(q, unit)}`).join(" + ")})` : "", v: fmtSigned(erp.gap, unit), p: pctOf(erp), x: erp.drift ? t("grid.erp_drift", { n: a.kpis?.erp_stock_drift_runs ?? 0 }) : erp.beyond ? "" : t("grid.erp_below") })}` : "";
+              const title = (past ? `${t("stock.past", { v: f(v) })}${shortCum > 0 ? ` · ${t("stock.cum", { v: f(shortCum) })}` : ""}` : `${t("stock.line", { v: f(v), c: cov, t: f(target) })}${shortCum > 0 ? t("stock.cum_detail", { v: f(shortCum), d: shortDay > 0 ? t("stock.this_day", { v: f(shortDay) }) : "" }) : ""}`) + erpLine;
+              return <td key={i} className={`${cls}${erp?.drift ? (erp.gap < 0 ? " erp-low" : " erp-high") : ""}`} title={title}>
                 {!past && <span className="cov">{cov} {t("stock.cov_unit")}</span>}
                 <span className="val">{f(v)}</span>
                 {shortCum > 0 && <span className="shortv">−{f(shortCum)}<small> Σ</small></span>}
+                {erp && <span className={`erpv ${erp.beyond ? (erp.gap < 0 ? "low" : "high") : ""}`}>ERP {fmtCellQty(erp.qty, unit, false)}</span>}
               </td>;
             })}
             {spacerR}
@@ -731,6 +750,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         <span><span className="sw bar" style={{ background: "transparent", border: "1px dashed var(--warning)" }} />{t("legend.cbn")} · <b style={{ color: "var(--critical-fg)" }}>!</b> {t("legend.marks")} · <b style={{ color: "var(--warning-fg)" }}>▲</b> {t("legend.capped")} · <b style={{ color: "var(--brand-fg)" }}>◇</b> {t("legend.off")}</span>
         <span><span className="sw bar" style={{ background: "var(--cell-neg-strong)" }} />{t("legend.short")}</span>
         <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} />{t("legend.firm")} · <span className="sw bar" style={{ background: "var(--cell-green)" }} />{t("legend.firm_settled")} · <span className="sw bar" style={{ background: "var(--cell-red)" }} />{t("legend.firm_ignored")}</span>
+        {hasErp && <span>{t("legend.erp_stock")}</span>}
         <span>{t("legend.week")} · <EyeOff size={11} style={{ verticalAlign: "middle" }} /> {t("legend.hide")}</span>
       </div>
     </div>

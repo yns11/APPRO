@@ -54,6 +54,9 @@ export interface ArticleKpis {
   stock_on_hand: number; reference_correction: number; stock_reference: number; stock_at_date: number; price: number | null; stock_value: number | null; target_value: number | null; init_date: string;
   alert_red_days: number; alert_yellow_days: number; overstock_days: number;
   status: ArticleStatus; coverage_at_date_days: number; runout_date: string | null; overstock: boolean; data_issues: string[];
+  /** ERP stock snapshot of the last compared day (null when no snapshot) : gap = ERP − projected, drift = same sign beyond the threshold on the last n snapshots */
+  erp_stock_qty: number | null; erp_stock_date: string | null; erp_stock_gap: number | null; erp_stock_gap_pct: number | null; erp_stock_beyond: boolean;
+  erp_stock_drift: boolean; erp_stock_drift_runs: number; erp_stock_stale: boolean; erp_stock_warehouses: Record<string, number> | null; coverage_erp_stock_days: number | null;
   next_firm_date: string | null; next_firm_supplier_id: string | null; next_firm_supplier_name: string | null; next_firm_qty: number | null;
   order_due_date: string | null; order_due_delivery_date: string | null; order_due_supplier_id: string | null; order_due_supplier_name: string | null; order_due_qty: number | null; order_due_late: boolean;
   order_due_off_standard: boolean; order_due_floor: boolean;
@@ -73,7 +76,7 @@ export interface ArticleSummary {
 /** One late firm order (delivery date passed, ERP remaining quantity open). */
 export interface BacklogRow { article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; order_id: string; purch_id: string; expected_date: string | null; ordered: number; received: number; backlog: number; ignored: boolean; }
 export interface CockpitKpis {
-  articles: number; critical: number; warning: number; to_order: number; ok: number; data_issues: number; stockouts: number; stockouts_7d: number; low_coverage: number; overstock: number;
+  articles: number; critical: number; warning: number; to_order: number; ok: number; data_issues: number; stock_drift: number; stock_drift_low: number; stock_drift_high: number; stockouts: number; stockouts_7d: number; low_coverage: number; overstock: number;
   backlog_articles: number; backlog_qty: number; proposals: number; urgent_proposals: number; proposals_qty: number; plan_articles: number; plan_qty: number;
   open_firm_qty: number; open_forecast_qty: number; avg_coverage_days: number | null; median_coverage_days: number | null; demand_next_20wd: number;
   stock_value: number | null; target_value: number | null; priced_articles: number; unpriced_articles: number;
@@ -82,16 +85,18 @@ export interface WeeklyStockValue { week: string; week_start: string; value_plan
 export interface WeeklyOutlook { week: string; week_start: string; stockout_articles: number; below_target_articles: number; proposals: number; proposed_qty: number; }
 export interface CockpitResponse {
   as_of: string; init_date: string; horizon_days: number; planner: string | null; data_source: string;
-  pdp_version: { id: string; name: string } | null; kpis: CockpitKpis; articles: ArticleSummary[]; alerts: AlertOut[];
+  pdp_version: { id: string; name: string } | null; kpis: CockpitKpis; erp_stock_enabled: boolean; erp_stock_date: string | null; articles: ArticleSummary[]; alerts: AlertOut[];
   proposals: ProposalOut[]; backlog: BacklogRow[]; diagnostics: string[]; weekly_supply_demand: WeeklyOutlook[]; weekly_stock_value: WeeklyStockValue[];
 }
 export type Granularity = "default" | "day" | "week";
 export interface ProjectionResponse {
   article: ArticleRef; as_of: string; init_date: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; series: SeriesOut[];
-  lanes: LaneOut[]; proposals: ProposalOut[]; alerts: AlertOut[]; kpis: ArticleKpis; suppliers: LinkRef[];
+  lanes: LaneOut[]; proposals: ProposalOut[]; alerts: AlertOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; erp_snapshots: ErpSnapshot[];
   programs: { program_id: string; name: string; qty_per: number; unit: string; production_next_30d: number }[]; diagnostics: string[];
 }
-export interface GridArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; proposals: ProposalOut[]; programs: string[]; }
+/** One ERP stock snapshot against the projected stock of the same day. */
+export interface ErpSnapshot { date: string; qty: number; projected: number; gap: number; gap_pct: number | null; beyond: boolean; drift: boolean; warehouses: Record<string, number>; }
+export interface GridArticle { article: ArticleRef; series: SeriesOut[]; lanes: LaneOut[]; kpis: ArticleKpis; suppliers: LinkRef[]; proposals: ProposalOut[]; programs: string[]; erp_snapshots: ErpSnapshot[]; }
 /** One page of the supply table (``total`` articles after filters). */
 export interface GridResponse { as_of: string; init_date: string; granularity: Granularity; periods: string[]; period_start: string[]; period_end: string[]; articles: GridArticle[]; diagnostics: string[]; total: number; page: number; page_size: number; }
 /** The Plan row as ERP delivery schedule lines. */
@@ -196,6 +201,7 @@ export interface SupplierDetail {
   late: BacklogRow[]; in_transit: DesadvRow[]; to_process: DesadvRow[]; to_validate: PendingRow[]; to_order: ProposalOut[]; upcoming: OrderRow[];
 }
 /** One page of the in-app pense-bête (backend/appro/services/help_pages.py). */
+export interface CalibrateOut { created: AdjustmentOut[]; skipped: { article_id: string; reason: string }[]; }
 export interface HelpPageSummary { slug: string; part: string; part_title: string; title: string; edited: boolean; updated_by: string; updated_at: string | null; }
 export interface HelpPage extends HelpPageSummary { html: string; }
 export interface ConsumptionSourceOption { article_id: string; designation: string; unit: string; programs: string[]; shared_programs: string[]; }

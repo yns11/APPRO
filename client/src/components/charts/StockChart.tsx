@@ -22,6 +22,8 @@ interface Row {
   firm: number; plan: number; cbn: number; demand: number; receipts: number | null;
   pdp: number; real: number | null; bias: number | null;
   cov: number;
+  erp: number | null;            // ERP stock snapshot of the period (last one of a week), past only
+  erpDrift: boolean;
 }
 
 const SYNC = "article-charts";
@@ -45,6 +47,7 @@ export function ArticleCharts({ data }: { data: ProjectionResponse }) {
       if (ia >= 0 || ib >= 0) { lo = ia < 0 ? 0 : ia; hi = ib < 0 ? keys.length - 1 : ib; }
     }
     const out: Row[] = [];
+    const snaps = data.erp_snapshots ?? [];
     data.periods.forEach((p, i) => {
       const wk = keys.indexOf(weekOf(i));
       if (wk < lo || wk > hi) return;
@@ -53,13 +56,15 @@ export function ArticleCharts({ data }: { data: ProjectionResponse }) {
       const current = start <= data.as_of && data.as_of <= end;
       const past = end < data.as_of || current;
       const pdp = s("demand_plan")[i] ?? 0, real = s("consumed")[i] ?? 0;
+      let erp: Row["erp"] = null, erpDrift = false;
+      for (const x of snaps) if (x.date >= start && x.date <= end && x.date < data.as_of) { erp = x.qty; erpDrift = x.drift; }
       out.push({
         period: p, label: periodLabel(p), past, current,
         stock: s("stock_plan")[i] ?? 0, target: s("target_stock")[i] ?? 0, shortage: -(s("shortage_plan_cum")[i] ?? 0),
         firm: (s("orders_firm")[i] ?? 0) + (s("orders_firm_hist")[i] ?? 0), plan: Math.max((s("plan")[i] ?? 0) - (s("orders_firm")[i] ?? 0), 0),
         cbn: s("supply_proposed")[i] ?? 0, demand: -(s("demand")[i] ?? 0), receipts: past ? (s("receipts")[i] ?? 0) : null,
         pdp, real: past && !current ? real : null, bias: past && !current && pdp > 0 && real > 0 ? Math.round(100 * (real - pdp) / pdp) : null,
-        cov: s("coverage_plan")[i] ?? 0,
+        cov: s("coverage_plan")[i] ?? 0, erp, erpDrift,
       });
     });
     return out;
@@ -94,6 +99,7 @@ export function ArticleCharts({ data }: { data: ProjectionResponse }) {
     { key: "period", label: "Période", get: (r) => r.label },
     { key: "stock", label: "Stock projeté", get: (r) => r.stock, num: true, render: (r) => fmtQty(r.stock, unit) },
     { key: "target", label: "Stock cible", get: (r) => r.target, num: true, render: (r) => fmtQty(r.target, unit) },
+    ...(rows.some((r) => r.erp !== null) ? [{ key: "erp", label: "Stock ERP (snapshot)", get: (r: Row) => r.erp, num: true, render: (r: Row) => (r.erp === null ? "" : fmtQty(r.erp, unit)) }] : []),
     { key: "demand", label: "Besoin", get: (r) => -r.demand, num: true, render: (r) => fmtQty(-r.demand, unit) },
     { key: "firm", label: "Ordre ferme", get: (r) => r.firm, num: true, render: (r) => fmtQty(r.firm, unit) },
     { key: "plan", label: "Quantité à retenir (saisie)", get: (r) => r.plan, num: true, render: (r) => fmtQty(r.plan, unit) },
@@ -131,6 +137,8 @@ export function ArticleCharts({ data }: { data: ProjectionResponse }) {
           <Line type="monotone" dataKey="target" name="Stock cible" stroke="var(--s-target)" strokeWidth={1.5} strokeDasharray="2 4" dot={false} activeDot={false} />
           {hasShortage && <Bar dataKey="shortage" name="Manque cumulé" fill="var(--s-shortage)" fillOpacity={0.8} maxBarSize={22} radius={[0, 0, 3, 3]} />}
           <ReferenceLine y={0} stroke="var(--border-strong)" />
+          {rows.some((r) => r.erp !== null) && <Line type="monotone" dataKey="erp" name="Stock ERP (snapshot, passé)" stroke="var(--fg)" strokeWidth={1} strokeDasharray="2 3" connectNulls={false} isAnimationActive={false} activeDot={{ r: 5 }}
+            dot={(p: { cx?: number; cy?: number; payload?: Row; key?: string }) => (p.payload?.erp === null || p.payload?.erp === undefined ? <g key={p.key} /> : <circle key={p.key} cx={p.cx} cy={p.cy} r={p.payload.erpDrift ? 4.5 : 3.5} fill={p.payload.erpDrift ? (p.payload.erp < p.payload.stock ? "var(--warning)" : "var(--info)") : "var(--fg)"} stroke="var(--bg-elev)" strokeWidth={1.5} />)} />}
           {todayLine}
           {today && <ReferenceLine x={today} stroke="none" label={<ViewBoxLabel text="Aujourd'hui" dy={14} />} />}
           {orderDue && <ReferenceDot x={orderDue} y={0} r={0} shape={<OrderDueMarker text={`À commander au plus tard le ${fmtDate(data.kpis.order_due_date ?? "")}${data.kpis.order_due_late ? " !" : ""}`} sub={`${data.kpis.order_due_supplier_id ?? ""}${(() => { const n = data.suppliers.find((s) => s.supplier_id === data.kpis.order_due_supplier_id)?.supplier_name; return n ? ` · ${n}` : ""; })()} · ${fmtQty(data.kpis.order_due_qty ?? 0, unit)} · livraison ${fmtDate(data.kpis.order_due_delivery_date ?? "")}${data.kpis.order_due_off_standard ? " ◇" : ""}`} late={data.kpis.order_due_late} />} />}
@@ -242,7 +250,7 @@ function AllTooltip({ active, label, rows, unit }: { active?: boolean; label?: s
   return (
     <div className="tooltip-box" style={{ minWidth: 230 }}>
       <div className="t">{r.label}{r.current ? " · aujourd'hui" : r.past ? " · passé" : ""}</div>
-      {line("Stock projeté", r.stock)}{line("Stock cible", r.target)}{r.shortage < 0 && line("Manque cumulé", r.shortage)}
+      {line("Stock projeté", r.stock)}{line("Stock cible", r.target)}{r.shortage < 0 && line("Manque cumulé", r.shortage)}{r.erp !== null && line(`Stock ERP${r.erpDrift ? " (dérive)" : ""}`, r.erp)}
       <div className="sep" />
       {line("Besoin", r.demand)}{r.firm > 0 && line(r.past ? "Ordre ferme (commandé)" : "Ordre ferme (restant)", r.firm)}{r.plan > 0 && line("Quantité à retenir (saisie)", r.plan)}{r.cbn > 0 && line("Proposition CBN", r.cbn)}{r.receipts !== null && r.receipts > 0 && line("Quantité reçue", r.receipts)}
       <div className="sep" />

@@ -131,6 +131,9 @@ def cockpit_kpis(result: MrpResult) -> S.CockpitKpis:
         to_order=sum(1 for r in arts if r.kpis.get("status") == "to_order"),
         ok=sum(1 for r in arts if r.kpis.get("status") == "ok"),
         data_issues=sum(1 for r in arts if r.kpis.get("data_issues")),
+        stock_drift=sum(1 for r in arts if r.kpis.get("erp_stock_drift")),
+        stock_drift_low=sum(1 for r in arts if r.kpis.get("erp_stock_drift") and (r.kpis.get("erp_stock_gap") or 0) < 0),
+        stock_drift_high=sum(1 for r in arts if r.kpis.get("erp_stock_drift") and (r.kpis.get("erp_stock_gap") or 0) > 0),
         stockouts=sum(1 for r in arts if r.kpis.get("first_stockout_plan")),
         stockouts_7d=stockouts_7d,
         low_coverage=sum(1 for a in alerts if a.alert_type.value == "LOW_COVERAGE"),
@@ -465,7 +468,7 @@ def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, suppl
         "proposals": [proposal_out(p, ar, supplier_names).model_dump(mode="json") for p in ar.proposals],
         "alerts": [alert_out(a, ar.article.designation).model_dump(mode="json") for a in ar.alerts],
         "kpis": ar.kpis, "suppliers": [link_out(l, supplier_names, suppliers).model_dump(mode="json") for l in ar.suppliers],
-        "programs": programs, "diagnostics": ar.diagnostics + result.diagnostics,
+        "programs": programs, "diagnostics": ar.diagnostics + result.diagnostics, "erp_snapshots": ar.erp_snapshots,
     }
 
 
@@ -488,7 +491,7 @@ def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str]
                       "lanes": [lane_out(l, cols, since=start) for l in ar.lanes], "kpis": ar.kpis,
                       "suppliers": [link_out(l, supplier_names, suppliers).model_dump(mode="json") for l in ar.suppliers],
                       "proposals": [proposal_out(p, ar, supplier_names).model_dump(mode="json") for p in ar.proposals],
-                      "programs": programs_of.get(ar.article.article_id, [])}
+                      "programs": programs_of.get(ar.article.article_id, []), "erp_snapshots": ar.erp_snapshots}
                      for ar in arts],
     }
 

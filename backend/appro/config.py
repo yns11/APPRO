@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     erp_consumption_table: str | None = Field("conso_composants", description="daily actual consumption table per component (article_id, date, qty) ; empty = none")
     erp_desadv_table: str | None = Field("desadv_edi", description="despatch advices (DESADV) table ; empty = none")
     erp_prices_table: str | None = Field("silver_base_article", description="item master with std_cost_price (euros) ; empty = no stock valuation")
+    erp_stock_table: str | None = Field("stock_snapshot", description="daily physical stock snapshot per article and warehouse (item_id, snapshot_date, entrepot, stock_physique) ; empty = no comparison with the ERP stock")
+    stock_warehouses: str = Field("B06,B06VRAC", description="warehouses (column entrepot) summed in the ERP stock, comma separated")
+    stock_history_days: int = Field(30, description="days of ERP stock snapshots kept (drift history)")
     cache_ttl_seconds: float = Field(300.0)
 
     # --- application database ----------------------------------------------------------
@@ -52,7 +55,11 @@ class Settings(BaseSettings):
     app_title: str = Field("Ma Routine Appro – Cockpit approvisionnement")
     log_level: str = Field("INFO")
 
-    @field_validator("seed_reference", "erp_consumption_table", "erp_desadv_table", "erp_prices_table", "db_url", "lakebase_branch", "sync_role",
+    @property
+    def stock_warehouse_list(self) -> tuple[str, ...]:
+        return tuple(w.strip() for w in self.stock_warehouses.split(",") if w.strip())
+
+    @field_validator("seed_reference", "erp_consumption_table", "erp_desadv_table", "erp_prices_table", "erp_stock_table", "db_url", "lakebase_branch", "sync_role",
                      "as_of", "default_planner", mode="before")
     @classmethod
     def _empty_is_none(cls, v):

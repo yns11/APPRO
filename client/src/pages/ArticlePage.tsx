@@ -14,10 +14,12 @@ import { RefRowEditor } from "@/components/RefRowEditor";
 import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { AlertList } from "./CockpitPage";
 import { useLang } from "@/lib/i18n";
+import { ErpStockTab } from "@/components/ErpStockTab";
+import { fmtSigned, fmtSignedPct } from "@/components/CalibrateDialog";
 import { CONSUMPTION_SOURCE_LABELS, CONSUMPTION_SOURCE_SHORT, ORDER_TYPE_LABELS, SOURCING_LABELS, WEEKDAY_SHORT, fmtDate, fmtDateTime, fmtDemandDays, fmtQty, fmtWeekdays } from "@/lib/format";
 import type { ArticleRef, ConsumptionSource, LinkRef, OrderInfo, PlanCellOut, AdjustmentOut, RefRow } from "@/lib/types";
 
-type Tab = "chart" | "delivery" | "params" | "plan" | "orders" | "proposals" | "adjustments" | "alerts";
+type Tab = "chart" | "delivery" | "params" | "plan" | "orders" | "proposals" | "adjustments" | "alerts" | "erp";
 
 export default function ArticlePage() {
   const { articleId } = useParams();
@@ -89,7 +91,8 @@ export default function ArticlePage() {
 
       <div className="grid kpis">
         <Kpi label={t("tile.stock_at_date")} value={k ? fmtQty(k.stock_at_date, unit) : <Skeleton w={60} h={28} />} unit={unit} meta={k ? `${t("tile.stock_meta", { ref: fmtQty(k.stock_reference, unit), d: fmtDate(k.init_date, undefined, lang) })}${k.reference_correction ? t("tile.corrected", { v: `${k.reference_correction > 0 ? "+" : ""}${fmtQty(k.reference_correction, unit)}` }) : ""}` : ""} tone={k?.reference_correction ? "warning" : undefined} onClick={() => setTab("adjustments")} />
-        <Kpi label={t("tile.coverage")} value={k ? k.coverage_plan_days : <Skeleton w={40} h={28} />} unit={t("tile.coverage_unit")} tone={k ? (k.coverage_plan_days <= (a?.alert_red_days ?? 2) ? "critical" : k.coverage_plan_days <= (a?.alert_yellow_days ?? 5) ? "warning" : "ok") : undefined} meta={k ? t("tile.coverage_meta", { e: k.coverage_erp_days, t: k.coverage_target_days, q: fmtQty(k.target_stock, unit) }) : ""} />
+        {k?.erp_stock_date && <Kpi label={t("tile.erp_stock")} value={fmtQty(k.erp_stock_qty ?? 0, unit)} unit={unit} tone={k.erp_stock_drift ? ((k.erp_stock_gap ?? 0) < 0 ? "warning" : "info") : undefined} meta={`${t("tile.erp_gap", { v: fmtSigned(k.erp_stock_gap ?? 0, unit), p: fmtSignedPct(k.erp_stock_gap_pct) })}${k.erp_stock_drift ? t("tile.erp_drift", { n: k.erp_stock_drift_runs }) : ""}${k.erp_stock_stale ? t("tile.erp_stale") : ""} · ${fmtDate(k.erp_stock_date, undefined, lang)}`} onClick={() => setTab("erp")} />}
+        <Kpi label={t("tile.coverage")} value={k ? k.coverage_plan_days : <Skeleton w={40} h={28} />} unit={t("tile.coverage_unit")} tone={k ? (k.coverage_plan_days <= (a?.alert_red_days ?? 2) ? "critical" : k.coverage_plan_days <= (a?.alert_yellow_days ?? 5) ? "warning" : "ok") : undefined} meta={k ? `${t("tile.coverage_meta", { e: k.coverage_erp_days, t: k.coverage_target_days, q: fmtQty(k.target_stock, unit) })}${k.coverage_erp_stock_days !== null && k.coverage_erp_stock_days !== undefined ? t("tile.erp_cov", { d: k.coverage_erp_stock_days }) : ""}` : ""} />
         <Kpi label={t("tile.stockout_firm")} value={k ? (k.first_stockout_erp ? fmtDate(k.first_stockout_erp, undefined, lang) : t("tile.none")) : <Skeleton w={60} h={28} />} tone={k?.first_stockout_erp ? "critical" : "ok"} meta={k ? (k.first_stockout_erp ? t("tile.max_short", { v: fmtQty(k.max_shortage_erp, unit) }) : t("tile.min_stock", { v: fmtQty(k.min_stock_erp, unit) })) : ""} />
         <Kpi label={t("tile.stockout_plan")} value={k ? (k.first_stockout_plan ? fmtDate(k.first_stockout_plan, undefined, lang) : t("tile.none")) : <Skeleton w={60} h={28} />} tone={k?.first_stockout_plan ? "critical" : "ok"} meta={k ? (k.first_stockout_plan ? t("tile.max_short", { v: fmtQty(k.max_shortage_plan, unit) }) : t("tile.min_stock", { v: fmtQty(k.min_stock_plan, unit) })) : ""} />
         <Kpi label={t("tile.late")} value={k ? fmtQty(k.backlog_qty, unit) : <Skeleton w={60} h={28} />} unit={unit} tone={k && k.backlog_qty > 0 ? "warning" : "ok"} meta={k ? (k.backlog_qty > 0 ? t("tile.late_meta", { o: fmtQty(k.backlog_ordered, unit), r: fmtQty(k.backlog_received, unit) }) : t("tile.late_none")) : ""} onClick={() => setTab("orders")} />
@@ -100,7 +103,7 @@ export default function ArticlePage() {
 
       {q.isLoading || !d ? <SkeletonBlock rows={10} /> : (
         <Card flush tight>
-          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, lanes: d.lanes, kpis: d.kpis, suppliers: d.suppliers, proposals: d.proposals }]} planCells={planCells.data ?? []} adjustments={adjustments.data ?? []} flags={flags.data ?? []}
+          <SimulationGrid cols={d} articles={[{ article: d.article, series: d.series, lanes: d.lanes, kpis: d.kpis, suppliers: d.suppliers, proposals: d.proposals, erp_snapshots: d.erp_snapshots }]} planCells={planCells.data ?? []} adjustments={adjustments.data ?? []} flags={flags.data ?? []}
             onSwitchDay={() => set({ granularity: "day" })} />
         </Card>
       )}
@@ -114,7 +117,10 @@ export default function ArticlePage() {
         { id: "proposals", label: "Propositions CBN", count: d?.proposals.length },
         { id: "adjustments", label: "Ajustements", count: adjustments.data?.length },
         { id: "alerts", label: "Alertes", count: d?.alerts.length },
+        ...(d?.erp_snapshots.length ? [{ id: "erp" as Tab, label: "Stock ERP", count: d.kpis.erp_stock_drift ? 1 : undefined }] : []),
       ]} />
+
+      {tab === "erp" && d && <ErpStockTab d={d} adjustments={adjustments.data ?? []} canEdit={!!a && rights.canEditPlanner(a.planner)} />}
 
       {tab === "chart" && (q.isLoading || !d ? <Skeleton h={300} /> : <Card tight><ArticleCharts data={d} /></Card>)}
 

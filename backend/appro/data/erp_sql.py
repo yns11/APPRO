@@ -15,7 +15,10 @@ Sources (schema ``emotors_data_champions.silver_erp_ye`` by default) :
 * ``silver_base_article`` – item master : ``std_cost_price`` (euros) values the stocks ;
 * an optional daily **actual consumption** table (``APPRO_ERP_CONSUMPTION_TABLE``) with the canonical
   columns ``article_id, date, qty`` – the consumption is given **per component, already exploded**
-  through the bill of material (unlike the PDP, exploded by the engine).
+  through the bill of material (unlike the PDP, exploded by the engine) ;
+* an optional daily **physical stock snapshot** (``APPRO_ERP_STOCK_TABLE``, ``stock_snapshot`` : ``item_id,
+  snapshot_date, entrepot, stock_physique``), summed over the configured warehouses, last 30 days : compared
+  with the projected stock of the same day (gap, drift, « caler sur l'ERP »), never a starting stock.
 """
 from __future__ import annotations
 
@@ -34,6 +37,9 @@ class ErpTables:
     consumption: str = ""         # empty: no actual consumption read from the ERP
     desadv: str = ""              # empty: no despatch advices (DESADV) read from the ERP
     prices: str = ""              # empty: no article prices (no stock valuation)
+    stock: str = ""               # empty: no ERP stock snapshot (no comparison with the projected stock)
+    stock_warehouses: tuple[str, ...] = ("B06", "B06VRAC")
+    stock_history_days: int = 30
 
     def fqn(self, table: str) -> str:
         return f"`{self.catalog}`.`{self.schema}`.`{table}`"
@@ -123,6 +129,24 @@ GROUP BY a.item_id
 """.strip()
 
 
+def stock_snapshot_sql(t: ErpTables) -> str:
+    """Physical stock at the end of each day per article and warehouse, configured warehouses only, last
+    ``stock_history_days`` days (the drift history) ; several rows of a warehouse / day are summed."""
+    wh = ", ".join("'" + w.replace("'", "''") + "'" for w in t.stock_warehouses)
+    where_wh = f" AND s.entrepot IN ({wh})" if wh else ""
+    return f"""
+SELECT
+  s.item_id                                                       AS article_id,
+  CAST(s.snapshot_date AS DATE)                                   AS snapshot_date,
+  s.entrepot                                                      AS warehouse,
+  CAST(SUM(s.stock_physique) AS DOUBLE)                           AS qty
+FROM {t.fqn(t.stock)} s
+WHERE s.item_id IS NOT NULL AND s.snapshot_date IS NOT NULL AND s.stock_physique IS NOT NULL
+  AND CAST(s.snapshot_date AS DATE) >= DATE_SUB(CURRENT_DATE(), {int(t.stock_history_days)}){where_wh}
+GROUP BY s.item_id, CAST(s.snapshot_date AS DATE), s.entrepot
+""".strip()
+
+
 def carry_first_seen(previous: dict[str, dt.date | None], order_id: str, today: dt.date) -> dt.date:
     """``first_seen`` of a delivery slot : the day it was first copied by the synchronisation job,
     kept from the previous copy ; a slot unknown so far appeared today."""
@@ -139,6 +163,8 @@ def fact_queries(t: ErpTables) -> dict[str, str]:
         out["fct_desadv"] = desadv_sql(t)
     if t.prices:
         out["fct_prices"] = prices_sql(t)
+    if t.stock:
+        out["fct_stock_snapshot"] = stock_snapshot_sql(t)
     return out
 
 
@@ -146,4 +172,4 @@ def source_of(t: ErpTables, name: str) -> str:
     """Fully qualified source table of a canonical fact table."""
     return {"fct_purchase_orders": t.fqn(t.orders), "fct_receipts": t.fqn(t.receipts),
             "fct_consumption_actual": t.fqn(t.consumption),
-            "fct_desadv": t.fqn(t.desadv), "fct_prices": t.fqn(t.prices)}[name]
+            "fct_desadv": t.fqn(t.desadv), "fct_prices": t.fqn(t.prices), "fct_stock_snapshot": t.fqn(t.stock)}[name]

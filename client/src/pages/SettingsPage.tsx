@@ -45,11 +45,14 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
   const EDITABLE: Record<string, { label: string; unit: string; max: number; aria: string; explain: (v: number) => string }> = {
     target_tolerance_pct: { label: "Tolérance sous la cible", unit: "%", max: 100, aria: "Tolérance sous la cible (%)", explain: (v) => `Avec ${v} % : le CBN propose un retour à la cible dès que le stock projeté passe sous ${100 - v} % de la cible, et la quantité vise 100 % de la cible. Le plancher (!) reste strict.` },
     lead_margin_days: { label: "Marge de délai", unit: "j ouvrés", max: 30, aria: "Marge de délai (jours ouvrés)", explain: (v) => (v === 0 ? "0 = strict : la date limite de commande est livraison − délai ; toute proposition dont la livraison tombe dans le délai est urgente." : `Avec ${v} j : la date limite de commande est livraison − (délai − ${v}) jours ouvrés ; une proposition est tenable (pleine cible) tant que sa date limite n'est pas passée, sinon elle devient urgente (!) : plancher au jour du besoin ou livraison hors jour standard (◇) au premier jour ouvré tenable.`) },
+    stock_drift_pct: { label: "Dérive du stock ERP : seuil", unit: "% de la cible", max: 100, aria: "Seuil de dérive (% du stock cible)", explain: (v) => `Un écart ERP − projeté est significatif au-delà de ${v} % du stock cible du jour.` },
+    stock_drift_min_packs: { label: "Dérive du stock ERP : écart minimal", unit: "UM", max: 100, aria: "Écart minimal de dérive (unités de commande)", explain: (v) => (v === 0 ? "Pas de minimum : le seuil en % suffit." : `… et d'au moins ${v} unité(s) de commande du fournisseur principal.`) },
+    stock_drift_persist: { label: "Dérive du stock ERP : persistance", unit: "snapshots", max: 30, aria: "Persistance de la dérive (snapshots)", explain: (v) => (v <= 1 ? "Dès la veille : un seul snapshot au-delà du seuil signale une dérive." : `Un article dérive quand ses ${v} derniers snapshots dépassent le seuil avec le même signe ; un signe qui change est un décalage de déclaration, pas une dérive.`) },
   };
   const editable = (schema.data ?? []).filter((p) => p.field in EDITABLE);
   return (
     <div className="grid cols-2">
-      <Card title="Règles réglables" hint={canEdit ? "les deux règles communes réglables ; valent pour tous les articles et tous les approvisionneurs" : "lecture seule : modifiables par les managers et administrateurs"}>
+      <Card title="Règles réglables" hint={canEdit ? "les règles communes réglables ; valent pour tous les articles et tous les approvisionneurs" : "lecture seule : modifiables par les managers et administrateurs"}>
         {schema.isError ? <ErrorBox error={schema.error} /> : schema.isLoading || effective.isLoading ? <SkeletonBlock rows={3} /> : editable.map((p) => {
           const cur = effective.data?.[p.field];
           const ov = globalOv.get(p.field);
@@ -258,7 +261,7 @@ function UsersTab() {
           <div><h4>Horizon</h4><div>52 semaines</div></div>
           <div><h4>Version</h4><div>{config?.version}</div></div>
         </dl>
-        {rights.isAdmin && <div style={{ marginTop: 12 }}><Button size="sm" onClick={() => { if (window.confirm("Rétablir les valeurs par défaut des règles communes (tolérance 15 %, marge de délai 1 j) ?")) resetRules.mutate(undefined); }}><RotateCcw />Rétablir les règles par défaut</Button></div>}
+        {rights.isAdmin && <div style={{ marginTop: 12 }}><Button size="sm" onClick={() => { if (window.confirm("Rétablir les valeurs par défaut des règles communes (tolérance 15 %, marge de délai 1 j, dérive du stock ERP 10 % / 1 UM / 3 snapshots) ?")) resetRules.mutate(undefined); }}><RotateCcw />Rétablir les règles par défaut</Button></div>}
       </Card>
     </div>
   );

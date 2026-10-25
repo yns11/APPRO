@@ -17,6 +17,7 @@ from ..engine.models import (
     PdpLine,
     Program,
     Receipt,
+    StockObservation,
     StockSnapshot,
     Supplier,
     SupplierLink,
@@ -143,6 +144,9 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
               for r in _records(t("fct_desadv")) if r["article_id"] in ids and r["issue_date"]]   # no BL yet : still shown
     # prices : the item master holds far more items than the reference ; only the reference articles are valued
     prices = {r["article_id"]: float(r["price"]) for r in _records(t("fct_prices")) if r["article_id"] in ids and not _missing(r["price"])}
+    # ERP stock snapshots (comparison with the projected stock only ; the reference stock stays fct_stock)
+    erp_stock = [StockObservation(r["article_id"], as_date(r["snapshot_date"]), float(r["qty"]), str(r.get("warehouse") or ""))
+                 for r in _records(t("fct_stock_snapshot")) if r["article_id"] in ids and r["snapshot_date"] and not _missing(r["qty"])]
     stock: dict[str, StockSnapshot] = {}
     for r in _records(t("fct_stock")):
         if r["article_id"] not in ids or not r["snapshot_date"]:
@@ -157,4 +161,4 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
 
     return Dataset(articles=articles, suppliers=suppliers, links=links, programs=programs, bom=bom, pdp=pdp,
                    consumption=consumption, desadv=desadv, orders=orders, receipts=receipts, stock=list(stock.values()),
-                   holidays=list(holidays or []), prices=prices)
+                   holidays=list(holidays or []), prices=prices, erp_stock=erp_stock)

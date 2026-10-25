@@ -447,7 +447,7 @@ def sections() -> list[dict[str, str]]:
     page("accueil", "", "", "Mode d'emploi en une page",
          """<p class="lead">Ce que l'application décide, affiche et colore. Une règle par ligne, les exemples dessous. Délais, couvertures et seuils se comptent en <b>jours ouvrés</b> du calendrier usine.</p>
 <div class="callout"><b>Vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se recalcule.</b></div>
-<p><b>Partie A · Tableau d'approvisionnement</b> : une ligne <b>Consommation et besoin</b> (consommé réel dans le passé, besoin du PDP dans le futur) ; par fournisseur actif : <b>Ordre ferme</b>, <b>Prévisionnel EDI</b>, <b>Quantité reçue</b>, <b>Quantité à retenir</b>, <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Stock projeté</b>, seule projection de stock du tableau. Deux lignes se saisissent (Quantité à retenir, Ajustement), trois se cliquent (Ordre ferme, Proposition CBN, Quantité reçue), le reste se lit.</p>
+<p><b>Partie A · Tableau d'approvisionnement</b> : une ligne <b>Consommation et besoin</b> (consommé réel dans le passé, besoin du PDP dans le futur) ; par fournisseur actif : <b>Ordre ferme</b>, <b>Prévisionnel EDI</b>, <b>Quantité reçue</b>, <b>Quantité à retenir</b>, <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Stock projeté</b>, seule projection de stock du tableau, comparée au <b>stock ERP de la veille</b> (5 bis). Deux lignes se saisissent (Quantité à retenir, Ajustement), trois se cliquent (Ordre ferme, Proposition CBN, Quantité reçue), le reste se lit.</p>
 <p><b>Partie B · Cockpit du jour</b> : l'onglet <b>Couvertures et stocks</b> répond à « que dois-je faire aujourd'hui ? » article par article ; l'onglet <b>Flux d'approvisionnement</b> suit commandes, transports et réceptions du jour.</p>
 <p>Les boutons <b>FR | EN</b> du tableau d'approvisionnement et de la fiche article passent les intitulés en anglais, pour un partage d'écran ou une capture envoyée à un fournisseur.</p>
 <p class="cmt">Règles détaillées : <i>docs/regles_metier.md</i> ; calculs pas à pas : <i>docs/guide_moteur.md</i>.</p>""")
@@ -563,6 +563,23 @@ def sections() -> list[dict[str, str]]:
          ], num={1, 2, 3}),
          c["shortage"])
 
+    # ============================================================== A.5 bis Stock ERP
+    page("stock_erp", "A", PART_A, "5 bis. Stock ERP et calage",
+         """<p>Chaque matin, l'ERP photographie le stock physique de la veille (entrepôts B06 et B06VRAC). L'application le compare à son <b>stock projeté de la veille</b> : la différence dit si nos déclarations suivent la réalité. Le stock ERP ne remplace jamais le point zéro ; il sert à mesurer l'écart et à le corriger d'un geste.</p>
+<dl class="rule">
+<dt>Écart</dt><dd>stock ERP de la veille − stock projeté de la veille. <b>Négatif</b> : nous surestimons, une rupture peut se cacher (orange). <b>Positif</b> : nous sous-estimons, risque de commander trop (bleu).</dd>
+<dt>Dérive</dt><dd>un écart au-delà de <b>10 % de la cible</b> (et d'une UM), <b>du même signe sur trois snapshots</b> (règles communes). Un signe qui change d'un jour à l'autre est un décalage de déclaration, pas une dérive. Une dérive est une donnée à corriger (pastille bleue), jamais un statut.</dd>
+<dt>Où la voir</dt><dd>tuile et colonnes <b>Stock ERP (veille)</b> / <b>Écart ERP − projeté</b> du cockpit ; badge <b>dérive ERP</b> sur l'en-tête de l'article et « ERP n » sous le stock projeté des jours passés dans le tableau ; tuile, onglet <b>Stock ERP</b> et courbes de la fiche article ; colonne de la feuille d'inventaire.</dd>
+<dt>Caler</dt><dd>le bouton <b>Caler sur l'ERP</b> (fiche article ; en lot dans le cockpit pour les managers) crée un <b>ajustement signé</b> daté de la veille, égal à l'écart : annulable, journalisé. Le point zéro ne change pas, l'ERP non plus.</dd>
+<dt>Chercher la cause</dt><dd>négatif : consommation ou rebut non déclarés, réception comptée deux fois (PO déclarée en plus de l'ERP). Positif : réception non comptée (fournisseur sans lien, PO non déclarée), retour en stock. Un article calé tous les mois a un problème de déclaration, pas de stock.</dd>
+</dl>
+<div class="legend">
+<div><span class="k">""" + chip("écart −746 · dérive", "warning") + """</span><span>ERP plus bas : stock surestimé</span></div>
+<div><span class="k">""" + chip("écart +960 · dérive", "info") + """</span><span>ERP plus haut : stock sous-estimé</span></div>
+<div><span class="k">""" + chip("écart −39 · sous le seuil", "neutral") + """</span><span>rien à signaler</span></div>
+<div><span class="k">""" + chip("● données : dérive ERP", "brand") + """</span><span>pastille du cockpit</span></div>
+</div>""")
+
     # ============================================================== A.6 Multi-sourcing
     page("multi", "A", PART_A, "6. Multi-sourcing",
          """<p>Les voies du tableau sont les <b>liens actifs</b>, par priorité. Les flux d'un fournisseur sans lien actif restent hors du tableau (Flux, Recherche, fiche fournisseur) ; un ordre ferme à venir chez lui remonte dans « Données ». Le fournisseur est toujours affiché par son code <b>et</b> son nom, filtrables l'un comme l'autre.</p>
@@ -645,12 +662,14 @@ def sections() -> list[dict[str, str]]:
              ["Stock projeté", "petit chiffre vert · orange · rouge · neutre", "couverture : normale · ≤ orange · ≤ rouge · ≥ surstock"],
              ["Stock projeté", "fond rouge foncé −Σ", "manque cumulé du besoin non servi"],
              ["Statut", chip("Critique", "critical") + " " + chip("À commander", "warning") + " " + chip("OK", "ok"), "couverture rouge ou urgence / date limite sous 5 j ou orange non couvert / rien à faire"],
-             ["Statut", "pastille bleue", "données à corriger"],
+             ["Statut", "pastille bleue", "données à corriger (stock, lien, commande, dérive du stock ERP)"],
+             ["En-tête d'article, cockpit", chip("dérive ERP −746", "warning") + " " + chip("dérive ERP +960", "info"), "stock ERP de la veille plus bas / plus haut que le stock projeté, au-delà du seuil et du même signe sur 3 snapshots ; cliquer pour caler"],
+             ["Stock projeté (passé)", "« ERP n » sous la valeur", "snapshot ERP du jour ; orange / bleu au-delà du seuil"],
              ["Partout", "Ctrl+Z · Ctrl+Y · ↶ ↷", "annuler / rétablir chaque geste, 7 jours, dans l'ordre"],
              ["En-tête", "FR | EN", "intitulés du tableau et des tuiles en anglais (partage d'écran, capture)"],
              ["En-tête", "?", "ce pense-bête dans l'application, pour tous ; un administrateur peut le modifier sur place"],
          ]),
-         """<div class="callout warn"><b>Réglable en commun</b> : tolérance (85 % de la cible), marge de délai (1 j ouvré). <b>Par article</b> (et par semaine ISO) : couverture cible, seuils rouge et orange, surstock, jours de consommation, source de consommation, politique de multi-sourcing. <b>Par fournisseur</b> : délai, jours de livraison standard, jours stricts. <b>Par lien</b> : MOQ, UM, quota, priorité, délai spécifique, plafonds.</div>""")
+         """<div class="callout warn"><b>Réglable en commun</b> : tolérance (85 % de la cible), marge de délai (1 j ouvré), dérive du stock ERP (10 % de la cible, 1 UM, 3 snapshots). <b>Par article</b> (et par semaine ISO) : couverture cible, seuils rouge et orange, surstock, jours de consommation, source de consommation, politique de multi-sourcing. <b>Par fournisseur</b> : délai, jours de livraison standard, jours stricts. <b>Par lien</b> : MOQ, UM, quota, priorité, délai spécifique, plafonds.</div>""")
     return S
 
 

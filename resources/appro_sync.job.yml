@@ -54,6 +54,8 @@ resources:
               - --consumption-table=${var.erp_consumption_table}
               - --desadv-table=${var.erp_desadv_table}
               - --prices-table=${var.erp_prices_table}
+              - --stock-table=${var.erp_stock_table}
+              - --stock-warehouses=${var.stock_warehouses}
               - --branch=projects/${var.lakebase_project}/branches/${var.lakebase_branch}
               - --endpoint=projects/${var.lakebase_project}/branches/${var.lakebase_branch}/endpoints/${var.lakebase_endpoint}
               - --pg-database=databricks_postgres

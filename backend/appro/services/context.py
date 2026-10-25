@@ -37,7 +37,8 @@ def erp_tables(settings: Settings) -> ErpTables:
     return ErpTables(catalog=settings.uc_catalog, schema=settings.uc_schema, orders=settings.erp_orders_table,
                      receipts=settings.erp_receipts_table, consumption=settings.erp_consumption_table or "",
                      desadv=settings.erp_desadv_table or "",
-                     prices=settings.erp_prices_table or "")
+                     prices=settings.erp_prices_table or "", stock=settings.erp_stock_table or "",
+                     stock_warehouses=settings.stock_warehouse_list, stock_history_days=settings.stock_history_days)
 
 
 def build_source(settings: Settings, engine) -> FactSource:

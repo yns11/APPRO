@@ -78,6 +78,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--consumption-table", default="", help="table UC de consommation réelle par composant (article_id, date, qty) ; vide = aucune")
     p.add_argument("--desadv-table", default="desadv_edi", help="table UC des avis d'expédition (DESADV) ; vide = aucune")
     p.add_argument("--prices-table", default="silver_base_article", help="table UC des articles avec std_cost_price (prix en euros) ; vide = aucune")
+    p.add_argument("--stock-table", default="stock_snapshot", help="table UC du snapshot quotidien de stock physique (item_id, snapshot_date, entrepot, stock_physique) ; vide = aucune")
+    p.add_argument("--stock-warehouses", default="B06,B06VRAC", help="entrepôts sommés dans le stock ERP, séparés par des virgules")
+    p.add_argument("--stock-history-days", type=int, default=30, help="jours de snapshots conservés")
     p.add_argument("--branch", default="", help="projects/<projet>/branches/<branche>")
     p.add_argument("--endpoint", default="", help="projects/<projet>/branches/<branche>/endpoints/<endpoint>")
     p.add_argument("--pg-host", default="", help="hôte Lakebase si la découverte est impossible")
@@ -108,7 +111,7 @@ def _table_exists(spark, fqn: str) -> bool:
 def _check_sources(spark, tables: ErpTables) -> None:
     """Fail once, naming every missing source, rather than one table per run."""
     missing = [fqn for fqn in (tables.fqn(tables.orders), tables.fqn(tables.receipts)) if not _table_exists(spark, fqn)]
-    for opt in (tables.consumption, tables.desadv, tables.prices):
+    for opt in (tables.consumption, tables.desadv, tables.prices, tables.stock):
         if opt and not _table_exists(spark, tables.fqn(opt)):
             missing.append(tables.fqn(opt))
     if missing:
@@ -174,7 +177,9 @@ def run(args: argparse.Namespace) -> dict[str, int]:
     import psycopg
     tables = ErpTables(catalog=args.catalog, schema=args.schema, orders=args.orders_table, receipts=args.receipts_table,
                        consumption=args.consumption_table or "", desadv=args.desadv_table or "",
-                       prices=args.prices_table or "")
+                       prices=args.prices_table or "", stock=args.stock_table or "",
+                       stock_warehouses=tuple(w.strip() for w in (args.stock_warehouses or "").split(",") if w.strip()),
+                       stock_history_days=int(args.stock_history_days))
     queries = fact_queries(tables)
     wanted = {t.strip() for t in args.tables.split(",") if t.strip()}
     if wanted:

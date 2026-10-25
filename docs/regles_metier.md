@@ -244,6 +244,39 @@ affiche le stock physique et, dans la même cellule, le **manque cumulé** (−�
 depuis le dernier jour où le stock était positif, remise à zéro dès que le stock redevient positif ; fond
 rouge foncé. Les alertes de rupture donnent le manque cumulé maximal.
 
+## 4 bis. Stock ERP de la veille : écart, dérive, calage
+
+L'ERP photographie chaque jour le stock physique par article et entrepôt (`fct_stock_snapshot` ←
+`stock_snapshot` : `item_id, snapshot_date, entrepot, stock_physique` ; entrepôts `B06` et `B06VRAC` par défaut,
+30 jours conservés ; `APPRO_ERP_STOCK_TABLE` vide = fonction absente, aucune colonne, tuile ni onglet). Le
+snapshot d'un jour est connu à sa fin : celui d'aujourd'hui n'est jamais comparé. Ce stock ne remplace **jamais**
+le stock de référence (point zéro) : il sert à mesurer l'écart et à le corriger d'un geste.
+
+* **Écart** = stock ERP du jour − stock projeté du même jour (solde net : stock − manque cumulé quand le stock
+  est à 0). **Négatif** : l'application surestime le stock, une rupture peut se cacher (ton avertissement, en
+  tête du filtre, couverture « selon l'ERP » dans la fiche). **Positif** : elle sous-estime, risque de commander
+  trop ou trop tôt (ton information).
+* **Dérive** : les `stock_drift_persist` [3] derniers snapshots dépassent tous le seuil, `stock_drift_pct` [10] %
+  du stock cible du jour **et** `stock_drift_min_packs` [1] UM du fournisseur principal, avec le **même signe**
+  (règles communes réglables). Un signe qui change d'un jour à l'autre est un décalage de déclaration
+  (consommation déclarée le lendemain, réception comptabilisée après coup), pas une dérive. Une dérive est une
+  **donnée à corriger** (`STOCK_DRIFT`, pastille bleue, compteur *Données*), jamais un statut.
+* **Où** : cockpit (tuile *Écart de stock ERP* qui filtre, dérives négatives d'abord ; colonnes *Stock ERP
+  (veille)* et *Écart ERP − projeté* ; date du snapshot dans l'en-tête, « ancien » au-delà de deux jours
+  ouvrés) ; tableau d'approvisionnement (badge *dérive ERP* sur l'en-tête de l'article, « ERP n » sous le stock
+  projeté des jours passés, orange / bleu au-delà du seuil, infobulle avec les entrepôts) ; fiche article (tuile
+  *Stock ERP (veille)*, couverture « selon l'ERP » quand le snapshot est celui de la veille, onglet *Stock ERP* :
+  30 snapshots en courbe contre le stock projeté, lecture de l'écart par entrepôt, calages passés) ; courbes
+  (points ERP sur le passé) ; feuille d'inventaire (colonnes *Stock ERP* et *Écart appli − ERP*, ● sur les
+  dérives) ; journal de synchronisation (`erp_stock_snapshot`).
+* **Caler sur l'ERP** (fiche article ; en lot sur les articles filtrés du cockpit pour les managers et
+  administrateurs) : un **ajustement signé daté du snapshot**, égal à l'écart (ajouté à un ajustement déjà posé ce
+  jour-là), commenté « Calage sur le stock ERP du … », une seule action annulable et journalisée
+  (`POST /api/entries/adjustments/calibrate`). Le stock projeté rejoint le stock ERP ce jour-là, le CBN et les
+  alertes se recalculent ; le point zéro et l'ERP ne changent pas. Droits des saisies (approvisionneur du carnet,
+  manager, administrateur) ; les articles hors carnet, sans snapshot ou déjà alignés sont ignorés et nommés. Un
+  article calé tous les mois a un problème de déclaration, pas de stock.
+
 ## 5. Couverture et stock cible
 
 * **Couverture (jours ouvrés)**, affichée en entier en petit dans chaque cellule de stock : nombre de jours

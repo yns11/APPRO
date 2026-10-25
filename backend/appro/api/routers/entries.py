@@ -124,6 +124,49 @@ def list_plan_cells(article_id: str | None = None, session: Session = Depends(se
     return session.scalars(q).all()
 
 
+@router.post("/adjustments/calibrate", response_model=S.CalibrateOut)
+def calibrate_on_erp_stock(body: S.CalibrateIn, request: Request, response: Response, ctx: AppContext = Depends(ctx_dep),
+                           session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """« Caler sur l'ERP » : for each article, one **signed adjustment dated the last ERP snapshot**, equal to the
+    gap ERP − projected, so that the projected stock of that day meets the ERP one ; an adjustment already
+    on that day is added up.  Articles outside the caller's portfolio, without a snapshot or already aligned
+    are skipped (named in the answer).  One undoable action for the whole list."""
+    result = mrp_service.compute(ctx, session, article_ids=body.article_ids)
+    rec = actions.Recorder(session, user, actions.group_of(request))
+    created, skipped = [], []
+    for aid in body.article_ids:
+        ar = result.articles.get(aid)
+        if ar is None:
+            skipped.append({"article_id": aid, "reason": "article inconnu"})
+            continue
+        if not access.can_edit_article(aid):
+            skipped.append({"article_id": aid, "reason": "hors de votre carnet"})
+            continue
+        k = ar.kpis
+        if not k.get("erp_stock_date"):
+            skipped.append({"article_id": aid, "reason": "aucun snapshot ERP"})
+            continue
+        gap = float(k["erp_stock_gap"])
+        if abs(gap) < 1e-9:
+            skipped.append({"article_id": aid, "reason": "déjà aligné"})
+            continue
+        day = dt.date.fromisoformat(k["erp_stock_date"])
+        existing = session.scalars(select(AppAdjustment).where(AppAdjustment.article_id == aid, AppAdjustment.date == day)).first()
+        new_qty = (float(existing.qty) if existing else 0.0) + gap
+        expression = f"{new_qty:.3f}".rstrip("0").rstrip(".")
+        note = body.note or f"Calage sur le stock ERP du {day:%d/%m/%Y} (écart {gap:+,.0f})".replace(",", " ")
+        rec.before("adjustment", {"article_id": aid, "date": day})
+        row = mrp_service.set_adjustment(session, user, aid, day, expression, note)
+        if row is not None:
+            created.append(row)
+    one = body.article_ids[0] if len(body.article_ids) == 1 else None
+    rec.done("adjustment", f"Calage ERP {one} : ajustement {created[0].expression} au {created[0].date}" if one and created
+             else f"Calage ERP : {len(created)} article(s)", one, response, group_label="Calage ERP : {n} articles")
+    session.commit()
+    ctx.bump()
+    return S.CalibrateOut(created=[S.AdjustmentOut.model_validate(r) for r in created], skipped=skipped)
+
+
 @router.put("/plan", response_model=S.PlanCellOut | None)
 def set_plan_cell(body: S.PlanCellIn, request: Request, response: Response, ctx: AppContext = Depends(ctx_dep),
                   session: Session = Depends(session_dep), user: str = Depends(current_user), access: Access = Depends(access_dep)):

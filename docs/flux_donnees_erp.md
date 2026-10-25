@@ -257,10 +257,20 @@ classeur ou saisie dans la feuille PDP), voir `docs/regles_metier.md` § 11 bis.
 vient de l'historique des versions (version active si elle contient la semaine, sinon version connue à son lundi,
 sinon première version importée ensuite).
 
+### 2.7 bis `stock_snapshot` → `fct_stock_snapshot` (stock ERP de la veille)
+
+Snapshot quotidien du stock physique (`item_id`, `snapshot_date`, `entrepot`, `stock_physique`). SQL :
+somme de `stock_physique` par article, date et entrepôt, entrepôts configurés (`--stock-warehouses`, défaut
+`B06,B06VRAC`), `snapshot_date ≥ CURRENT_DATE − 30`. Miroir `erp_stock_snapshot` (clé article, date, entrepôt).
+Exploitation : comparaison au stock projeté du même jour (écart, dérive, calage : `docs/regles_metier.md`
+§ 4 bis) ; cockpit, tableau, fiche article, courbes, feuille d'inventaire. Variables : `APPRO_ERP_STOCK_TABLE`
+(vide = fonction absente), `APPRO_STOCK_WAREHOUSES`, `APPRO_STOCK_HISTORY_DAYS`.
+
 ### 2.8 Ce qui n'est pas lu
 
-* Aucune table de stock ERP : le **stock de référence** (`fct_stock`) est une table du référentiel, saisie
-  ou importée dans l'application (une date d'initialisation unique pour tous les articles).
+* Le stock ERP n'est jamais un stock de départ : le **stock de référence** (`fct_stock`) reste une table du
+  référentiel, saisie ou importée dans l'application (une date d'initialisation unique pour tous les articles) ;
+  le snapshot (§ 2.7 bis) ne sert qu'à la comparaison.
 * Aucune table de nomenclature, de fournisseur ni d'article ERP : le référentiel (`ref_*`) est géré dans
   l'application. Les prix sont la seule information d'article lue de l'ERP.
 * Les colonnes de `commandes_edi`, `recep_edi` et `desadv_edi` non citées ci-dessus.
@@ -362,6 +372,7 @@ d'articles). Une ligne ERP d'un article inconnu du référentiel est silencieuse
 | `ConsumptionLine` | `fct_consumption_actual` | `article_id`, `date`, `qty` | sans date |
 | `PdpLine` | versions de l'application (PDP effectif) | `program_id`, `week_start`, `qty`, `version` ; seuls les programmes dont la nomenclature touche les articles retenus | sans lundi |
 | `prices` | `fct_prices` | dictionnaire `article_id → prix` | prix vide |
+| `erp_stock` | `fct_stock_snapshot` | `StockObservation` (article, date, entrepôt, quantité) | sans date ou quantité |
 | `StockSnapshot` | `fct_stock` (référentiel) | la ligne la plus récente par article ; plusieurs lignes à la même date sont sommées | — |
 
 Les tables de référentiel (`Article`, `Supplier`, `SupplierLink`, `Program`, `BomLine`) complètent le

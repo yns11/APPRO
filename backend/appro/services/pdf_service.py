@@ -49,15 +49,31 @@ def inventory_pdf(as_of: dt.date, articles: Iterable[ArticleResult], supplier_na
              Paragraph("Compter chaque article, reporter la quantité comptée et l'écart (compté − théorique) ; saisir ensuite l'écart "
                        "comme <b>Ajustement</b> du jour dans le tableau d'approvisionnement.", meta),
              Spacer(1, 5 * mm)]
+    articles = list(articles)
+    with_erp = any(ar.kpis.get("erp_stock_date") for ar in articles)
+    erp_dates = sorted({ar.kpis["erp_stock_date"] for ar in articles if ar.kpis.get("erp_stock_date")})
+    if with_erp:
+        story.insert(2, Paragraph(f"Stock ERP du {dt.date.fromisoformat(erp_dates[-1]):%d/%m/%Y} (snapshot de la veille, entrepôts configurés) ; "
+                                  "● = écart déjà signalé entre l'application et l'ERP : à compter en priorité.", meta))
     rows = [[Paragraph("Article", head), Paragraph("Désignation", head), Paragraph("Unité", head), Paragraph("Fournisseur(s)", head),
-             Paragraph("Stock théorique", head_r), Paragraph("Quantité comptée", head_r), Paragraph("Écart", head_r), Paragraph("Commentaire", head)]]
+             Paragraph("Stock théorique", head_r)]
+            + ([Paragraph("Stock ERP (veille)", head_r), Paragraph("Écart appli − ERP", head_r)] if with_erp else [])
+            + [Paragraph("Quantité comptée", head_r), Paragraph("Écart compté", head_r), Paragraph("Commentaire", head)]]
     for ar in articles:
         a = ar.article
         sups = [f"{l.supplier_id} · {supplier_names.get(l.supplier_id, l.name) or l.name}" for l in ar.lanes if l.supplier_id]
         stock = float(ar.kpis.get("stock_at_date", 0.0))
-        rows.append([Paragraph(f"<b>{a.article_id}</b>", cell), Paragraph(a.designation or "", cell), Paragraph(a.unit or "", cell),
-                     Paragraph("<br/>".join(sups) or "–", cell), Paragraph(_fmt_qty(stock, a.unit), cell_r), "", "", ""])
-    widths = [30 * mm, 70 * mm, 14 * mm, 58 * mm, 26 * mm, 28 * mm, 22 * mm, 25 * mm]
+        row = [Paragraph(f"<b>{a.article_id}</b>" + (" <font color='#b54708'>●</font>" if ar.kpis.get("erp_stock_drift") else ""), cell),
+               Paragraph(a.designation or "", cell), Paragraph(a.unit or "", cell), Paragraph("<br/>".join(sups) or "–", cell),
+               Paragraph(_fmt_qty(stock, a.unit), cell_r)]
+        if with_erp:
+            q, gap = ar.kpis.get("erp_stock_qty"), ar.kpis.get("erp_stock_gap")
+            row += [Paragraph(_fmt_qty(float(q), a.unit) if q is not None else "–", cell_r),
+                    Paragraph(("<b>" if ar.kpis.get("erp_stock_beyond") else "") + (("+" if -gap > 0 else "") + _fmt_qty(-float(gap), a.unit) if gap is not None else "–")
+                              + ("</b>" if ar.kpis.get("erp_stock_beyond") else ""), cell_r)]
+        rows.append(row + ["", "", ""])
+    widths = ([28 * mm, 54 * mm, 12 * mm, 46 * mm, 24 * mm, 24 * mm, 22 * mm, 24 * mm, 20 * mm, 19 * mm] if with_erp
+              else [30 * mm, 70 * mm, 14 * mm, 58 * mm, 26 * mm, 28 * mm, 22 * mm, 25 * mm])
     table = LongTable(rows, colWidths=widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2f5bea")),

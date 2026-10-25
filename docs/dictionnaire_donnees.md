@@ -10,7 +10,7 @@ Deux familles :
 | Famille | Tables | Source | Où elles vivent |
 |---|---|---|---|
 | **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | **gérées dans l'application** (page Référentiel : ligne par ligne, modèle Excel par table, modification en lot ; fiche article › Paramétrage) | base applicative (Lakebase ; SQLite en local) |
-| **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_desadv` | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
+| **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_desadv`, `fct_prices`, `fct_stock_snapshot` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
 
 ## 1. Référentiel (géré dans l'application)
 
@@ -325,7 +325,25 @@ cible du jour (KPI *Valeur du stock*, sous-ligne +x % / −x % de la cible, roug
 valeur du stock** (Projeté Appro., fin de chaque semaine ISO) dans le cockpit. Un article sans prix n'entre dans
 aucune valeur (compté « sans prix » sur la carte).
 
-### 2.7 Accusés de réception non validés
+### 2.7 `fct_stock_snapshot` ← `silver_erp_ye.stock_snapshot` — stock ERP de la veille
+
+Snapshot quotidien du stock physique par article et entrepôt (`APPRO_ERP_STOCK_TABLE`, variable
+`erp_stock_table`, défaut `stock_snapshot` ; vide = aucune comparaison). Le job ne copie que les entrepôts
+configurés (`APPRO_STOCK_WAREHOUSES`, défaut `B06,B06VRAC`) et les 30 derniers jours.
+
+| Colonne | Type | Source | Règle |
+|---|---|---|---|
+| article_id | texte **clé** | `item_id` | |
+| snapshot_date | date **clé** | `snapshot_date` | stock connu en fin de journée |
+| warehouse | texte **clé** | `entrepot` | entrepôts configurés seulement |
+| qty | nombre | `SUM(stock_physique)` | unité de stock de l'article |
+
+Usage (`docs/regles_metier.md` § 4 bis) : comparé au **stock projeté du même jour** (écart ERP − projeté, en %
+du stock cible), **dérive** quand les derniers snapshots dépassent le seuil avec le même signe (règles communes
+`stock_drift_pct`, `stock_drift_min_packs`, `stock_drift_persist`), **calage** = ajustement signé daté du
+snapshot. Jamais un stock de départ : le point zéro reste `fct_stock`.
+
+### 2.8 Accusés de réception non validés
 
 La table `bl_en_attente` n'est plus lue : le flux **À valider** du cockpit et de la fiche fournisseur est calculé
 depuis les réceptions elles-mêmes (statut *Reçu* depuis 7 jours ou plus), la page *Recherche* ne propose plus
@@ -348,10 +366,10 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `app_pdp_versions`, `app_pdp_lines` | versions de PDP importées (classeur) ou saisies dans la page *Plan de production* (`source_file` = « saisie directe ») ; une active au plus | id |
 | `app_program_scrap` | **taux de rebut par programme**, daté : `rate_pct` s'applique de `week_start` (lundi) jusqu'à la ligne suivante ; besoin = PDP × (1 + taux / 100) ; auteur | (program_id, week_start) |
 | `app_help_pages` | **pense-bête intégré** : texte enregistré par un administrateur pour une page (`slug`, titre, `body_html` nettoyé, auteur, horodatage) ; absent = texte livré (`backend/appro/help/pense_bete.json`) ; `DELETE` revient au texte livré | slug |
-| `app_param_overrides` | règles communes du moteur (`global`, champs `target_tolerance_pct` et `lead_margin_days`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
+| `app_param_overrides` | règles communes du moteur (`global`, champs `target_tolerance_pct`, `lead_margin_days`, `stock_drift_pct`, `stock_drift_min_packs`, `stock_drift_persist`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
 | `app_actions` | annuler / rétablir : un geste utilisateur (horodatage, utilisateur, type, libellé, article, groupe), les lignes touchées avec leur état avant / après (JSON), annulable ou non, état `applied` / `undone` / `discarded`, qui l'a annulée ou rétablie et quand ; purge après 7 jours | id |
-| `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_desadv` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
+| `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_desadv`, `erp_prices`, `erp_stock_snapshot` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
 | `erp_sync_log` | par table miroir : nombre de lignes, horodatage, source, identifiant d'exécution (`/api/health`, `GET /api/data/sync` : âge de chaque table, état *en retard* au-delà de deux heures, bandeau dans l'application) | table_name |
 
 Volumétrie : quelques milliers de lignes par table ; le miroir des commandes suit la source (dizaines de

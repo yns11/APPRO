@@ -32,6 +32,9 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "target_tolerance_pct": ("Tolérance sous la cible (%) : le CBN ne remonte à la cible que si le stock projeté passe sous (100 − n) % de la cible ; la quantité proposée vise 100 %", None),
     "lead_margin_days": ("Marge de délai (jours ouvrés) : la date limite de commande d'une livraison = livraison − (délai − marge) ; une livraison est tenable quand sa date limite est aujourd'hui ou plus tard ; 0 = délai strict", None),
+    "stock_drift_pct": ("Seuil de dérive du stock ERP (%) : un écart ERP − projeté est significatif au-delà de n % du stock cible du jour", None),
+    "stock_drift_min_packs": ("Écart minimal de dérive (UM) : un écart est significatif à partir de n unités de commande du fournisseur principal ; 0 = pas de minimum", None),
+    "stock_drift_persist": ("Persistance de la dérive (snapshots) : un article dérive quand ses n derniers snapshots ERP dépassent le seuil avec le même signe ; 1 = dès la veille", None),
     "horizon_days": ("Horizon de calcul après la date de référence (jours) : 52 semaines, fixé dans l'application", None),
     "history_weeks": ("Affichage : semaines montrées avant la semaine en cours (réglage par utilisateur)", None),
     "focus_weeks": ("Affichage : semaines détaillées jour par jour après la semaine en cours (réglage par utilisateur)", None),
@@ -47,6 +50,7 @@ FIXED_RULES: list[tuple[str, str]] = [
     ("À commander", "statut et carte du cockpit : date limite dans les 5 prochains jours ouvrés ; urgente quand elle est dépassée"),
     ("Horizon", "52 semaines, tableau et PDP compris"),
     ("Commandes comptées", "ordres fermes seulement (les prévisionnels EDI sont affichés, jamais comptés)"),
+    ("Stock ERP", "snapshot physique de la veille (entrepôts configurés, 30 jours d'historique) comparé au stock projeté du même jour ; un stock projeté à 0 se compare sur le solde net ; le calage crée un ajustement signé daté du snapshot, jamais une modification du point zéro"),
 ]
 
 
