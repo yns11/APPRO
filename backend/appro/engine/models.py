@@ -13,6 +13,7 @@ Vocabulary (docs/regles_metier.md):
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal
@@ -65,6 +66,11 @@ class Supplier:
     lead_time_days: int = 5        # default lead time of the supplier, working days, inclusive (Monday + 5 = next Monday)
     active: bool = True
     strict_days: bool = False      # True : deliveries on the standard weekdays only (no « hors jour standard » proposal)
+    transport_contact: str = ""    # e-mail addresses of the transport notices (« ; » or « , » separated)
+
+    @property
+    def transport_emails(self) -> list[str]:
+        return [x.strip() for x in re.split(r"[;,\s]+", self.transport_contact or "") if x.strip()]
 
 
 @dataclass

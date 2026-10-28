@@ -85,6 +85,7 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
         Column("name", "str", "Nom", "raison sociale", True, "ELANTAS EUROPE S.R.L."),
         Column("country", "str", "Pays", "", False, "IT"),
         Column("contact", "str", "Contact", "", False, ""),
+        Column("transport_contact", "str", "Contact transport", "adresses e-mail des destinataires des avis de transport (séparées par ; ou ,) : tout e-mail de transport part vers ces adresses", False, ""),
         Column("delivery_weekdays", "str", "Jours de livraison", "jours de livraison standard, ISO, ex. 1,2,3,4,5 (1 = lundi)", True, "1,2,3,4,5"),
         Column("strict_days", "bool", "Jours stricts", "oui : livraisons uniquement les jours standard, jamais de proposition hors jour standard (◇) ; non (défaut) : un jour ouvré tenable avant le besoin est proposé quand le jour standard ne l'est plus", False, False),
         Column("lead_time_days", "int", "Délai (j ouvrés)", "délai commande → livraison en jours ouvrés, inclus (lundi + 5 = lundi suivant) ; valeur par défaut des liens", True, 5),

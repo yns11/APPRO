@@ -566,3 +566,19 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .pivot td.stock .erpv.high { color: var(--info-fg); font-weight: var(--fw-semibold); }
 .pivot td.stock.erp-low { box-shadow: inset 0 0 0 2px var(--warning); }
 .pivot td.stock.erp-high { box-shadow: inset 0 0 0 2px var(--info); }
+
+/* ---- Planning de livraisons (transports) ---- */
+.pivot.planning th, .pivot.planning td { text-align: left; vertical-align: top; white-space: normal; min-width: 150px; }
+.pivot.planning th.today, .pivot.planning td.today { background: var(--brand-soft); }
+.pivot.planning th.past, .pivot.planning td.past { color: var(--fg-subtle); }
+.pivot.planning .sticky-col { position: sticky; left: 0; z-index: 2; background: var(--bg-elev); min-width: 200px; max-width: 260px; }
+.pivot.planning th.sticky-col { z-index: 4; background: var(--bg-subtle); }
+.pivot.planning td.sup { font-size: var(--fs--1); }
+.pivot.planning .ord { display: flex; gap: 6px; align-items: flex-start; font-size: var(--fs--2); line-height: 1.25; padding: 3px 0; cursor: pointer; border-bottom: 1px dashed var(--border); }
+.pivot.planning .ord:last-of-type { border-bottom: 0; }
+.pivot.planning .ord input { margin-top: 2px; }
+.pivot.planning .ord.muted { opacity: 0.55; text-decoration: line-through; }
+.pivot.planning .tr-mark { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; color: var(--brand); font-weight: var(--fw-semibold); }
+.pivot.planning .tr-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.pivot.planning .tr-list .badge { font-family: var(--font-grid); gap: 4px; }
+.tbl.slots input, .tbl.slots select { width: auto; min-width: 110px; }

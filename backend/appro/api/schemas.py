@@ -55,6 +55,7 @@ class SupplierRef(ORM):
     lead_time_days: int = 5
     active: bool = True
     strict_days: bool = False
+    transport_contact: str = ""
 
 
 class SupplierArticleRow(BaseModel):
@@ -828,3 +829,85 @@ class ConfigOut(BaseModel):
     version: str
     reference_empty: bool
     access: dict[str, Any]
+
+
+# ---------------------------------------------------------------- transports (planning de livraisons)
+class TransportOrderOut(BaseModel):
+    order_id: str
+    article_id: str
+    ref: str = ""
+    expected_date: dt.date | None = None
+    qty: float = 0.0
+
+
+class TransportOut(BaseModel):
+    transport_id: str
+    supplier_id: str
+    supplier_name: str = ""
+    date: dt.date
+    time: str
+    dock: str
+    note: str = ""
+    status: str = "planned"
+    created_by: str = ""
+    created_at: dt.datetime | None = None
+    orders: list[TransportOrderOut] = Field(default_factory=list)
+
+
+class PlanningOrder(BaseModel):
+    order_id: str
+    article_id: str
+    designation: str = ""
+    unit: str = ""
+    ref: str = ""
+    expected_date: dt.date
+    qty_ordered: float
+    qty_open: float
+    ignored: bool = False
+    transports: list[str] = Field(default_factory=list)
+
+
+class PlanningSupplier(BaseModel):
+    supplier_id: str
+    name: str = ""
+    transport_contact: str = ""
+    emails: list[str] = Field(default_factory=list)
+    orders: list[PlanningOrder]
+
+
+class PlanningResponse(BaseModel):
+    as_of: dt.date
+    start: dt.date
+    end: dt.date
+    days: list[dt.date]
+    docks: list[str]
+    suppliers: list[PlanningSupplier]
+    transports: list[TransportOut]
+
+
+class TransportSlotIn(BaseModel):
+    date: dt.date
+    time: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    dock: str
+
+
+class TransportCreateIn(BaseModel):
+    supplier_id: str
+    order_ids: list[str] = Field(..., min_length=1)
+    slots: list[TransportSlotIn] = Field(..., min_length=1)
+    note: str = ""
+
+
+class MailOut(BaseModel):
+    to: list[str]
+    subject: str
+    body: str
+
+
+class TransportPackOut(BaseModel):
+    """What the planner gets after creating transports : the rows, the CSV for the transport tool, the e-mail."""
+
+    transports: list[TransportOut]
+    csv: str
+    csv_filename: str
+    mail: MailOut

@@ -207,3 +207,12 @@ export interface HelpPage extends HelpPageSummary { html: string; }
 export interface ConsumptionSourceOption { article_id: string; designation: string; unit: string; programs: string[]; shared_programs: string[]; }
 export type ExportType = "text" | "number" | "date" | "bool" | "percent";
 export interface ExportColumn { key: string; label: string; type?: ExportType; }
+
+// ---------------------------------------------------------------- transports (planning de livraisons)
+export interface TransportOrderOut { order_id: string; article_id: string; ref: string; expected_date: string | null; qty: number; }
+export interface TransportOut { transport_id: string; supplier_id: string; supplier_name: string; date: string; time: string; dock: string; note: string; status: string; created_by: string; created_at: string | null; orders: TransportOrderOut[]; }
+export interface PlanningOrder { order_id: string; article_id: string; designation: string; unit: string; ref: string; expected_date: string; qty_ordered: number; qty_open: number; ignored: boolean; transports: string[]; }
+export interface PlanningSupplier { supplier_id: string; name: string; transport_contact: string; emails: string[]; orders: PlanningOrder[]; }
+export interface PlanningResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; suppliers: PlanningSupplier[]; transports: TransportOut[]; }
+export interface TransportSlotIn { date: string; time: string; dock: string; }
+export interface TransportPackOut { transports: TransportOut[]; csv: string; csv_filename: string; mail: { to: string[]; subject: string; body: string }; }

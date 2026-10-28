@@ -261,6 +261,47 @@ class AppHelpPage(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class AppCounter(Base):
+    """Named incremental counters (transport identifiers « EM000001 »…) ; read with ``FOR UPDATE`` on
+    PostgreSQL so two planners never draw the same number."""
+
+    __tablename__ = "app_counters"
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AppTransport(Base):
+    """One **transport** (one truck) announced to a supplier for some of his firm orders of a day :
+    identifier ``EM`` + 6 digits, delivery date, time and dock ; exported as one CSV line for the external
+    transport tool (ATR) and announced by e-mail to the supplier's transport contacts."""
+
+    __tablename__ = "app_transports"
+    transport_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    supplier_id: Mapped[str] = mapped_column(String(40), index=True)
+    date: Mapped[dt.date] = mapped_column(Date, index=True)
+    time: Mapped[str] = mapped_column(String(8), default="")          # HH:MM
+    dock: Mapped[str] = mapped_column(String(20), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(12), default="planned")  # planned | cancelled
+    created_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    orders: Mapped[list["AppTransportOrder"]] = relationship(back_populates="transport", cascade="all, delete-orphan", lazy="selectin")
+
+
+class AppTransportOrder(Base):
+    """A firm ERP order slot carried by a transport (the same slot may ride several trucks)."""
+
+    __tablename__ = "app_transport_orders"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    transport_id: Mapped[str] = mapped_column(String(20), ForeignKey("app_transports.transport_id", ondelete="CASCADE"), index=True)
+    order_id: Mapped[str] = mapped_column(String(120), index=True)
+    article_id: Mapped[str] = mapped_column(String(40), index=True)
+    ref: Mapped[str] = mapped_column(Text, default="")                 # purchase order numbers
+    expected_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    qty: Mapped[float] = mapped_column(Float, default=0.0)
+    transport: Mapped["AppTransport"] = relationship(back_populates="orders")
+
+
 def audit(session: Session, user: str, action: str, entity_type: str, entity_id: str = "",
           article_id: str | None = None, payload: dict | None = None) -> None:
     session.add(AuditLog(user=user, action=action, entity_type=entity_type, entity_id=entity_id,

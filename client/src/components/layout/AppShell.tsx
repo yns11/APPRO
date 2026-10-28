@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { Activity, AlertTriangle, BookOpen, CalendarRange, CircleHelp, FileSpreadsheet, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Search, Settings, Sun, Table, Truck } from "lucide-react";
+import { Activity, AlertTriangle, BookOpen, CalendarCheck, CalendarRange, CircleHelp, FileSpreadsheet, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Search, Settings, Sun, Table, Truck } from "lucide-react";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useInvalidateAll, useSyncStatus } from "@/lib/queries";
 import { Button } from "@/components/ui";
@@ -16,6 +16,7 @@ const NAV = [
   { to: "/tableau", label: "Tableau d'approvisionnement", icon: Table },
   { to: "/articles", label: "Fiches articles", icon: Activity },
   { to: "/fournisseurs", label: "Fournisseurs", icon: Truck },
+  { to: "/livraisons", label: "Planning de livraisons", icon: CalendarCheck },
   { to: "/recherche", label: "Recherche", icon: Search },
   { to: "/saisies", label: "Saisies & journal", icon: PenLine },
 ];

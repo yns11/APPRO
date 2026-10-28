@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__
 from ..config import get_settings
 from ..engine.models import DatasetError
-from .routers import actions, data, entries, files, flows, help, mrp, pdp, reference
+from .routers import actions, data, entries, files, flows, help, mrp, pdp, reference, transports
 
 
 @asynccontextmanager
@@ -64,7 +64,7 @@ def create_app() -> FastAPI:
         return out
 
     for r in (reference.router, mrp.router, entries.router, pdp.router, files.router, flows.router, data.router,
-              actions.router, help.router):
+              actions.router, help.router, transports.router):
         app.include_router(r)
 
     @app.middleware("http")
