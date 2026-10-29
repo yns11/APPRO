@@ -92,7 +92,7 @@ Reçu, Plan) ; les stocks sont sommés. Les plafonds et le délai spécifique so
 | source_article_id | Article source | texte **clé** | oui | article dont la consommation déclarée sert de base ; éligible s'il est en source `erp`, présent dans un programme de l'article et dans aucun programme où l'article est absent (`GET /api/reference/consumption-sources?article_id=`) |
 | coef | Coefficient | nombre | oui | > 0 : quantité d'article consommée par unité d'article source |
 
-Consommation dérivée = Σ coef × consommation déclarée des sources ; sans terme, la consommation ERP de
+Consommation dérivée = Σ coef × consommation déclarée des sources ; sans terme, la consommation MOM (déclarée) de
 l'article est utilisée. Les boucles sont refusées.
 
 ### 1.3 ter `ref_closed_orders` — Commandes fermées (PO)

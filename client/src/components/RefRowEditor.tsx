@@ -1,9 +1,10 @@
 import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
+import { WeekdayPicker, splitWeekdays } from "@/components/WeekdayPicker";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useConsumptionSources, useRefRows, useWrite } from "@/lib/queries";
 import { Button, Drawer, Field, useToast } from "@/components/ui";
-import { CONSUMPTION_SOURCE_LABELS, SOURCING_LABELS, WEEKDAY_SHORT } from "@/lib/format";
+import { CONSUMPTION_SOURCE_LABELS, SOURCING_LABELS, WEEKDAY_SHORT, fmtWeekdays } from "@/lib/format";
 import type { RefColumn, RefRow, RefTableInfo } from "@/lib/types";
 
 /** Choice lists of the reference columns that are not free text. */
@@ -41,6 +42,7 @@ export function RefRowEditor({ table, row, onClose, fixed, onSaved }: { table: R
     const set = (v: string) => setValues({ ...values, [c.name]: v });
     const disabled = (c.key && !isNew) || !!fixed?.[c.name];
     if (c.type === "bool") return <select className="select" value={values[c.name] ?? "oui"} onChange={(e) => set(e.target.value)} disabled={disabled}><option value="oui">oui</option><option value="non">non</option></select>;
+    if (table.name === "ref_suppliers" && c.name === "delivery_weekdays") return <span className="row" style={{ height: 34 }}><WeekdayPicker value={splitWeekdays(values[c.name])} onChange={(v) => set(v.join(","))} disabled={disabled} /><span className="small subtle">{fmtWeekdays(values[c.name] || "")}</span></span>;
     if (table.name === "ref_suppliers" && c.name === "docks") return <DockPicker all={DOCKS} value={splitDocks(values[c.name])} onChange={(v) => set(v.join(";"))} disabled={disabled} label="Quais par défaut" />;
     if (choices[c.name]) return <select className="select" value={values[c.name] || choices[c.name][0].value} onChange={(e) => set(e.target.value)} disabled={disabled}>{choices[c.name].map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
     if (table.name === "ref_consumption_terms" && c.name === "source_article_id") {

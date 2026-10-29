@@ -39,6 +39,8 @@ export default function ArticlePage() {
   const unit = a?.unit ?? "";
   const exportUrl = api.downloadUrl("/api/exports/simulation.xlsx", { article_ids: [articleId ?? ""], granularity: perimeter.granularity === "week" ? "week" : "day" });
   const canEdit = !!a && (rights.canEditPlanner(a.planner) || rights.canManageParams);
+  // reference parameters (fiche, politique de stock, fournisseurs et règles) : every declared planner, portfolio or not
+  const canEditRef = !!a && (rights.canEditTable("ref_articles") || canEdit);
   const names = useMemo(() => new Map((d?.suppliers ?? []).map((s) => [s.supplier_id, s.supplier_name])), [d]);
 
   const orders = useMemo(() => (d?.lanes ?? []).flatMap((l) => l.orders), [d]);
@@ -77,7 +79,7 @@ export default function ArticlePage() {
     <div className="page">
       <div className="page-header">
         <div className="title">
-          <div className="row"><Link to="/" className="btn ghost sm"><ArrowLeft />Cockpit</Link>{a && <SeverityBadge severity={k?.severity ?? null} />}{a && a.consumption_source !== "erp" && <Badge tone="info" title={CONSUMPTION_SOURCE_LABELS[a.consumption_source]}>conso {CONSUMPTION_SOURCE_SHORT[a.consumption_source]}</Badge>}{a && a.demand_days < 5 && <Badge tone="brand" title="Besoin hebdomadaire réparti sur les premiers jours ouvrés de la semaine">besoin {fmtDemandDays(a.demand_days)}</Badge>}</div>
+          <div className="row"><Link to="/" className="btn ghost sm"><ArrowLeft />Tableau de bord</Link>{a && <SeverityBadge severity={k?.severity ?? null} />}{a && a.consumption_source !== "erp" && <Badge tone="info" title={CONSUMPTION_SOURCE_LABELS[a.consumption_source]}>conso {CONSUMPTION_SOURCE_SHORT[a.consumption_source]}</Badge>}{a && a.demand_days < 5 && <Badge tone="brand" title="Besoin hebdomadaire réparti sur les premiers jours ouvrés de la semaine">besoin {fmtDemandDays(a.demand_days)}</Badge>}</div>
           <h1 style={{ marginTop: 6 }}>{articleId} {a && <span className="muted" style={{ fontWeight: 400 }}>· {a.designation}</span>}</h1>
           <p>{a ? <>{a.unit} · {t("page.target")} {a.coverage_target_days} {t("page.unit_wd")} · {t("page.red")} {a.alert_red_days} {t("stock.cov_unit")} · {t("page.orange")} {a.alert_yellow_days} {t("stock.cov_unit")} · {t("page.overstock")} {a.overstock_days} {t("stock.cov_unit")} · {d?.suppliers.map((s, i) => <span key={s.supplier_id}>{i > 0 && " · "}<SupplierLink id={s.supplier_id} name={s.supplier_name} inline /> <span className="subtle">({t("grid.lead")} {s.lead_time_days} {t("stock.cov_unit")}, {t("page.moq")} {fmtQty(s.moq, a.unit)}, {t("page.pack")} {fmtQty(s.pack_qty, a.unit)}{s.max_qty_per_delivery ? `, max ${fmtQty(s.max_qty_per_delivery, a.unit)}${t("grid.max_delivery")}` : ""}{s.max_qty_per_week ? `, max ${fmtQty(s.max_qty_per_week, a.unit)}${t("grid.max_week")}` : ""}{s.strict_days ? ", jours stricts" : ""})</span></span>)}</> : <Skeleton w={400} />}</p>
         </div>
@@ -126,7 +128,7 @@ export default function ArticlePage() {
 
       {tab === "delivery" && <DeliveryPlan articleId={articleId} />}
 
-      {tab === "params" && a && d && <ParamsTab article={a} links={d.suppliers} programs={d.programs} canEdit={canEdit} diagnostics={d.diagnostics} />}
+      {tab === "params" && a && d && <ParamsTab article={a} links={d.suppliers} programs={d.programs} canEdit={canEditRef} diagnostics={d.diagnostics} />}
 
       {tab === "plan" && (
         <Card flush title="Cellules saisies dans la ligne Quantité à retenir" hint="tout ce qui n'est pas ici vient de l'ERP ; supprimer une cellule rend la journée à l'ERP">
@@ -196,6 +198,11 @@ function ParamsTab({ article, links, programs, canEdit, diagnostics }: { article
     () => toast.push("Paramètre enregistré", "success"));
   const delTerm = useWrite((src: string) => api.post("/api/reference/ref_consumption_terms/delete", { key: { article_id: article.article_id, source_article_id: src } }), () => toast.push("Terme supprimé"));
   const delLink = useWrite((sid: string) => api.post("/api/reference/ref_article_suppliers/delete", { key: { article_id: article.article_id, supplier_id: sid } }), () => toast.push("Lien supprimé"));
+  const { config } = usePerimeter();
+  const textInput = (key: "designation" | "unit" | "family", width?: number) => (
+    <input className="input sm" key={`${key}-${article[key]}`} defaultValue={String(article[key] ?? "")} disabled={!canEdit} style={{ width: width ?? 320 }} aria-label={key === "designation" ? "Désignation" : key === "unit" ? "Unité" : "Famille"}
+      onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(article[key] ?? "") && (v || key === "family")) saveArticle.mutate({ [key]: v }); }} />
+  );
   const numInput = (key: keyof ArticleRef) => (
     <input className="input sm" type="number" min={0} key={`${key}-${article[key]}`} defaultValue={String(article[key])} disabled={!canEdit} style={{ width: 70 }} aria-label={POLICY_FIELDS.find((f) => f.key === key)?.label}
       onBlur={(e) => { const v = Number(e.target.value); if (!Number.isNaN(v) && v !== article[key]) saveArticle.mutate({ [key]: v }); }} />
@@ -207,7 +214,21 @@ function ParamsTab({ article, links, programs, canEdit, diagnostics }: { article
 
   return (
     <div className="stack">
-      {!canEdit && <div className="note">Lecture seule : cet article est hors de votre carnet. Les paramètres sont modifiables par son approvisionneur, un manager ou un administrateur.</div>}
+      {!canEdit && <div className="note">Lecture seule : les paramètres sont modifiables par les approvisionneurs déclarés, les managers et les administrateurs.</div>}
+      <Card title="Fiche article" hint="données du Référentiel, enregistrées à la sortie du champ" tight>
+        <div className="param-grid identity">
+          <div className={`param ${canEdit ? "editable" : ""}`}><span className="label">Code</span><span className="value"><b className="mono">{article.article_id}</b></span></div>
+          <div className={`param ${canEdit ? "editable" : ""}`}><span className="label">Désignation</span><span className="value">{textInput("designation")}</span></div>
+          <div className={`param ${canEdit ? "editable" : ""}`}><span className="label">Unité</span><span className="value">{textInput("unit", 70)}</span></div>
+          <div className={`param ${canEdit ? "editable" : ""}`}><span className="label">Famille</span><span className="value">{textInput("family", 140)}</span></div>
+          <div className={`param ${canEdit ? "editable" : ""}`} title="Approvisionneur de l'article (colonne Approvisionneur du Référentiel) : son carnet"><span className="label">Approvisionneur</span><span className="value">
+            <select className="select sm" value={article.planner} disabled={!canEdit} aria-label="Approvisionneur" onChange={(e) => e.target.value !== article.planner && saveArticle.mutate({ planner: e.target.value })}>
+              {!(config?.planners ?? []).includes(article.planner) && <option value={article.planner}>{article.planner || "–"}</option>}
+              {(config?.planners ?? []).map((x) => <option key={x} value={x}>{x}</option>)}
+            </select></span></div>
+          <div className={`param ${canEdit ? "editable" : ""}`}><span className="label">Actif</span><span className="value"><select className="select sm" value={article.active ? "oui" : "non"} disabled={!canEdit} aria-label="Actif" onChange={(e) => saveArticle.mutate({ active: e.target.value === "oui" })}><option value="oui">oui</option><option value="non">non</option></select></span></div>
+        </div>
+      </Card>
       <div className="grid cols-2">
         <Card title="Politique de stock" hint="en jours ouvrés ; valeurs de l'article, modifiables semaine par semaine" actions={<Button size="sm" onClick={() => setWeekly(true)} title="Valeurs propres à certaines semaines (saisonnalité, arrêt d'usine…)"><CalendarDays />Par semaine</Button>}>
           <div className="param-grid">
@@ -255,16 +276,16 @@ function ParamsTab({ article, links, programs, canEdit, diagnostics }: { article
               {Object.entries(CONSUMPTION_SOURCE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
             <p className="small subtle">
-              {article.consumption_source === "erp" && "La consommation réelle déclarée dans l'ERP (fct_consumption_actual) remplit le passé ; le reliquat de la semaine en cours est repris sur les jours restants."}
-              {article.consumption_source === "plan" && "Aucune consommation ERP : le besoin passé est le PDP éclaté (nomenclature) comme le futur. À réserver aux articles dont la consommation n'est pas déclarée."}
-              {article.consumption_source === "derived" && "Consommation = Σ coefficient × consommation déclarée des articles sources. Sources éligibles : en mode ERP, présentes dans un programme de l'article et dans aucun programme où il est absent."}
+              {article.consumption_source === "erp" && "La consommation réelle déclarée dans le MOM (fct_consumption_actual) remplit le passé ; le reliquat de la semaine en cours est repris sur les jours restants."}
+              {article.consumption_source === "plan" && "Aucune consommation MOM : le besoin passé est le PDP éclaté (nomenclature) comme le futur. À réserver aux articles dont la consommation n'est pas déclarée."}
+              {article.consumption_source === "derived" && "Consommation = Σ coefficient × consommation déclarée des articles sources. Sources éligibles : en mode MOM, présentes dans un programme de l'article et dans aucun programme où il est absent."}
             </p>
             {article.consumption_source === "derived" && (
               <>
                 <table className="tbl compact terms-table">
                   <thead><tr><th>Article source</th><th className="num">Coefficient</th><th>Programmes communs</th><th /></tr></thead>
                   <tbody>
-                    {article.derived_terms.length === 0 && <tr><td colSpan={4} className="subtle">Aucun terme : sans terme, la consommation ERP de l'article est utilisée.</td></tr>}
+                    {article.derived_terms.length === 0 && <tr><td colSpan={4} className="subtle">Aucun terme : sans terme, la consommation MOM de l'article est utilisée.</td></tr>}
                     {article.derived_terms.map((t) => { const src = sources.data?.find((s) => s.article_id === t.source_article_id); return (
                       <tr key={t.source_article_id}>
                         <td><ArticleLink id={t.source_article_id} designation={src?.designation} /></td>

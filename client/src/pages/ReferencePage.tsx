@@ -4,6 +4,7 @@ import { CalendarDays, Download, Plus, Trash2, Upload, Wand2 } from "lucide-reac
 import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { RefRowEditor } from "@/components/RefRowEditor";
 import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
+import { WeekdayPicker, splitWeekdays } from "@/components/WeekdayPicker";
 import { DataTable, type Column } from "@/components/DataTable";
 import { useRefRows, useRefTables, useSupplierNames, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -68,6 +69,11 @@ export default function ReferencePage() {
   const [mode, setMode] = useState<"replace" | "merge">("merge");
   const del = useWrite(({ name, key }: { name: string; key: Record<string, RefValue> }) => api.post(`/api/reference/${name}/delete`, { key }), () => toast.push("Ligne supprimée"));
   // one click on a dock of the Quais column saves the supplier row (its default docks, preselected when a transport is created)
+  const setWeekdays = useWrite(({ row, days }: { row: RefRow; days: number[] }) => {
+    const values: Record<string, RefValue> = {};
+    (table?.columns ?? []).forEach((c) => { if (row[c.name] !== undefined) values[c.name] = row[c.name]; });
+    return api.put(`/api/reference/ref_suppliers/rows`, { values: { ...values, delivery_weekdays: days.join(",") } });
+  });
   const setDocks = useWrite(({ row, docks }: { row: RefRow; docks: string[] }) => {
     const values: Record<string, RefValue> = {};
     (table?.columns ?? []).forEach((c) => { if (row[c.name] !== undefined) values[c.name] = row[c.name]; });
@@ -92,6 +98,7 @@ export default function ReferencePage() {
         : c.name === "consumption_source" ? <Badge tone={String(r[c.name] ?? "erp") === "erp" ? "neutral" : "info"}>{CONSUMPTION_SOURCE_SHORT[String(r[c.name] ?? "erp")]}</Badge>
         : c.name === "demand_days" ? <span title={fmtDemandDays(Number(r[c.name] ?? 5))}>{Number(r[c.name] ?? 5) === 5 ? <span className="subtle">5</span> : <b>{String(r[c.name])}</b>}</span>
         : c.name === "lead_time_override" ? (r[c.name] == null || r[c.name] === "" ? <span className="inherited" title="Délai du fournisseur">hérité</span> : <b>{String(r[c.name])}</b>)
+        : c.name === "delivery_weekdays" && table.name === "ref_suppliers" ? <span onClick={(e) => e.stopPropagation()} title={fmtWeekdays(String(r[c.name] ?? ""))}><WeekdayPicker label={`Jours de livraison de ${String(r.supplier_id)}`} value={splitWeekdays(r[c.name])} disabled={!rights.canEditTable(table.name)} onChange={(v) => setWeekdays.mutate({ row: r, days: v })} /></span>
         : c.name === "docks" && table.name === "ref_suppliers" ? <span onClick={(e) => e.stopPropagation()}><DockPicker all={DOCKS} size="sm" label={`Quais par défaut de ${String(r.supplier_id)}`} value={splitDocks(r[c.name])} disabled={!rights.canEditTable(table.name)} onChange={(v) => setDocks.mutate({ row: r, docks: v })} /></span>
         : <>{fmtCell(c, r[c.name])}</>,
     }));
@@ -187,7 +194,7 @@ function BulkEditor({ table, rows, onClose }: { table: RefTableInfo; rows: RefRo
         <Field label="Colonne"><select className="select" value={field} onChange={(e) => { setField(e.target.value); setValue(""); }}>{fields.map((c) => <option key={c.name} value={c.name}>{c.label}</option>)}</select></Field>
         <Field label="Valeur" help={col?.description}>
           {col?.type === "bool" ? <select className="select" value={value || "oui"} onChange={(e) => setValue(e.target.value)}><option value="oui">oui</option><option value="non">non</option></select>
-            : col?.name === "consumption_source" ? <select className="select" value={value} onChange={(e) => setValue(e.target.value)}><option value="">choisir…</option><option value="erp">Consommation ERP</option><option value="plan">PDP éclaté</option><option value="derived">Dérivée</option></select>
+            : col?.name === "consumption_source" ? <select className="select" value={value} onChange={(e) => setValue(e.target.value)}><option value="">choisir…</option><option value="erp">Consommation MOM</option><option value="plan">PDP éclaté</option><option value="derived">Dérivée</option></select>
             : col?.name === "sourcing_policy" ? <select className="select" value={value} onChange={(e) => setValue(e.target.value)}><option value="">choisir…</option><option value="quota">Quotas</option><option value="priority">Priorité</option></select>
             : col?.name === "demand_days" ? <select className="select" value={value} onChange={(e) => setValue(e.target.value)}><option value="">choisir…</option>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} – {fmtDemandDays(n)}</option>)}</select>
             : <input className="input" type={col?.type === "float" || col?.type === "int" ? "number" : "text"} step="any" value={value} onChange={(e) => setValue(e.target.value)} placeholder={col?.name.startsWith("max_qty") || col?.name === "lead_time_override" ? "vide = aucun / hérité" : ""} />}

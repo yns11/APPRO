@@ -10,7 +10,7 @@ import { fmtDateTime } from "@/lib/format";
 import type { HelpPage as HelpPageOut, HelpPageSummary } from "@/lib/types";
 import "@/styles/help.css";
 
-const PART_TITLES: Record<string, string> = { A: "Tableau d'approvisionnement", B: "Cockpit du jour" };
+const PART_TITLES: Record<string, string> = { A: "Tableau d'approvisionnement", B: "Tableau de bord" };
 
 /**
  * The in-app pense-bête : one page per section (left navigation grouped by part), the text served by the

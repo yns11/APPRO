@@ -540,18 +540,18 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .ctx-menu { position: fixed; z-index: 60; min-width: 200px; padding: 4px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; }
 .ctx-menu button { text-align: left; background: none; border: 0; padding: 7px 10px; border-radius: var(--r-sm); color: var(--fg); font: inherit; font-size: var(--fs--1); cursor: pointer; }
 .ctx-menu button:hover { background: var(--bg-hover); }
-.day-picker { position: fixed; z-index: 60; width: 320px; max-height: 320px; overflow: auto; padding: 8px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 2px; }
-.day-picker .dp-title { padding: 2px 6px 6px; font-size: var(--fs--2); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--fg-muted); font-weight: var(--fw-semibold); }
-.day-picker .dp-day { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: var(--r-sm); padding: 6px 8px; color: var(--fg); font: inherit; font-size: var(--fs--1); cursor: pointer; }
-.day-picker .dp-day:hover { background: var(--bg-hover); border-color: var(--border); }
-.day-picker .dp-day.std { background: var(--brand-soft); }
-.day-picker .dp-day.std .d { color: var(--brand-fg); font-weight: var(--fw-semibold); }
-.day-picker .dp-day.off { opacity: .6; }
-.day-picker .dp-std { margin-left: 8px; font-size: var(--fs--2); font-weight: var(--fw-regular); color: var(--brand-fg); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
-.day-picker .meta { display: flex; gap: 8px; font-size: var(--fs--2); color: var(--fg-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.day-picker .meta .typed { color: var(--brand-fg); font-weight: var(--fw-semibold); }
-.day-picker .meta .cbn { color: var(--warning-fg); font-style: italic; }
-.day-picker > .btn { align-self: flex-end; margin-top: 4px; }
+.dp-popover { position: fixed; z-index: 60; width: 320px; max-height: 320px; overflow: auto; padding: 8px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 2px; }
+.dp-popover .dp-title { padding: 2px 6px 6px; font-size: var(--fs--2); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--fg-muted); font-weight: var(--fw-semibold); }
+.dp-popover .dp-day { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: var(--r-sm); padding: 6px 8px; color: var(--fg); font: inherit; font-size: var(--fs--1); cursor: pointer; }
+.dp-popover .dp-day:hover { background: var(--bg-hover); border-color: var(--border); }
+.dp-popover .dp-day.std { background: var(--brand-soft); }
+.dp-popover .dp-day.std .d { color: var(--brand-fg); font-weight: var(--fw-semibold); }
+.dp-popover .dp-day.off { opacity: .6; }
+.dp-popover .dp-std { margin-left: 8px; font-size: var(--fs--2); font-weight: var(--fw-regular); color: var(--brand-fg); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
+.dp-popover .meta { display: flex; gap: 8px; font-size: var(--fs--2); color: var(--fg-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dp-popover .meta .typed { color: var(--brand-fg); font-weight: var(--fw-semibold); }
+.dp-popover .meta .cbn { color: var(--warning-fg); font-style: italic; }
+.dp-popover > .btn { align-self: flex-end; margin-top: 4px; }
 .lang-toggle .btn { min-width: 40px; }
 
 /* ---------- ERP stock snapshot in the grid : drift badge on the article head, « ERP n » under the past projected stock ---------- */
@@ -590,3 +590,12 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .pivot td.firm-tr .tr-ico { position: absolute; left: 1px; top: 0; color: var(--brand); line-height: 1; }
 .dock-picker label.off { cursor: default; opacity: 0.7; }
 .tbl .dock-picker, .dock-picker.sm { flex-wrap: nowrap; white-space: nowrap; }
+
+.weekday-picker { display: inline-flex; gap: 3px; white-space: nowrap; vertical-align: middle; }
+.weekday-picker input { margin: 0; width: 15px; height: 15px; accent-color: var(--brand); cursor: pointer; }
+.weekday-picker input:disabled { cursor: default; }
+.impact td.full { color: var(--ok-fg); text-align: center; }
+.impact td.zero { color: var(--fg-subtle); text-align: center; }
+.impact th.wk { min-width: 48px; text-align: center; }
+.param-grid.identity .value .input, .param-grid.identity .value .select { font-weight: var(--fw-regular); }
+.param-grid.identity .param { min-width: 0; }

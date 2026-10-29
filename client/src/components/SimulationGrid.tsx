@@ -323,7 +323,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   };
   useEffect(() => {
     if (!picker && !ctx) return;
-    const close = (e: MouseEvent) => { const el = e.target as HTMLElement; if (!el.closest?.(".day-picker, .ctx-menu")) { setPicker(null); setCtx(null); } };
+    const close = (e: MouseEvent) => { const el = e.target as HTMLElement; if (!el.closest?.(".dp-popover, .ctx-menu")) { setPicker(null); setCtx(null); } };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { setPicker(null); setCtx(null); } };
     window.addEventListener("mousedown", close);
     window.addEventListener("keydown", esc);
@@ -674,7 +674,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
     const cbnOf = (d: string) => (a.proposals ?? []).filter((p) => (p.supplier_id ?? "") === (sid ?? "") && p.delivery_date === d);
     const choose = (d: string) => { write(picker.aid, picker.key, picker.lane, d, picker.value); setPicker(null); setActive({ aid: picker.aid, key: picker.key, lane: picker.lane, i: picker.i }); };
     return (
-      <div className="day-picker" role="dialog" style={{ left: picker.x, top: picker.y }} onMouseDown={(e) => e.stopPropagation()}>
+      <div className="dp-popover" role="dialog" style={{ left: picker.x, top: picker.y }} onMouseDown={(e) => e.stopPropagation()}>
         <div className="dp-title">{t("picker.title", { v: picker.value.trim() ? fmtQty(Number(picker.value.replace(",", ".")) || 0, unit) || picker.value : "∅" })}<span className="subtle"> · {weekChipLabel(weekOf(picker.i), lang)}</span></div>
         {days.map((d) => {
           const std = !!allowed && allowed.has(isoWeekday(d));

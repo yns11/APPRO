@@ -392,7 +392,7 @@ Les paramètres de l'article (couverture cible, seuils rouge et orange, surstock
 | `overstock_days` | 30 (article) | article, semaine | seuil de l'alerte surstock, jours ouvrés |
 | `demand_days` | 5 (article) | article | jours ouvrés de la semaine portant le besoin hebdomadaire (1 = lundi seul … 5 = toute la semaine) |
 | `sourcing_policy` | quota (article) | article | quotas (chaque besoin partagé) ou priorité |
-| `consumption_source` | erp (article) | article | besoin passé : consommation ERP, PDP éclaté, ou dérivée d'autres articles (termes × coefficient) |
+| `consumption_source` | erp (article) | article | besoin passé : consommation MOM (déclarée), PDP éclaté, ou dérivée d'autres articles (termes × coefficient) |
 | `lead_time_days` | 5 (fournisseur) | fournisseur | délai en jours ouvrés, inclusif (lundi + 5 = lundi suivant) ; date limite de commande, urgence, plancher |
 | `delivery_weekdays` | 1-5 (fournisseur) | fournisseur | jours de livraison standard ; saisie en colonne semaine posée sur le premier |
 | `strict_days` | non (fournisseur) | fournisseur | oui : jamais de proposition hors jour standard (◇), le besoin non tenable devient un plancher au jour standard |

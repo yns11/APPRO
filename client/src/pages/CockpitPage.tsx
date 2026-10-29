@@ -76,7 +76,7 @@ export default function CockpitPage() {
     <div className="page">
       <div className="page-header">
         <div className="title">
-          <h1>Cockpit du jour</h1>
+          <h1>Tableau de bord</h1>
           <p>{asOf ? <>Aujourd'hui <b>{fmtDate(asOf)}</b> · stock initialisé le {fmtDate(q.data!.init_date)} · {q.data?.kpis.articles} articles{perimeter.planner ? ` · ${perimeter.planner}` : ""}{erpOn && erpDate ? <> · <span title="Snapshot de stock physique de l'ERP, comparé au stock projeté du même jour">stock ERP du {fmtDate(erpDate)}</span></> : null}</> : <Skeleton w={280} />}</p>
         </div>
         <div className="actions">

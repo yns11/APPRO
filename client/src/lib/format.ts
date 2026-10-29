@@ -70,8 +70,8 @@ export function fmtWeekdays(spec: string | null | undefined): string {
   if (days.length === 5 && days.every((d, i) => d === i + 1)) return "Lun → Ven";
   return days.map((d) => WEEKDAY_SHORT[d - 1]).join(" · ");
 }
-export const CONSUMPTION_SOURCE_LABELS: Record<string, string> = { erp: "Consommation ERP", plan: "PDP éclaté", derived: "Dérivée d'autres articles" };
-export const CONSUMPTION_SOURCE_SHORT: Record<string, string> = { erp: "ERP", plan: "PDP", derived: "Dérivée" };
+export const CONSUMPTION_SOURCE_LABELS: Record<string, string> = { erp: "Consommation MOM", plan: "PDP éclaté", derived: "Dérivée d'autres articles" };
+export const CONSUMPTION_SOURCE_SHORT: Record<string, string> = { erp: "MOM", plan: "PDP", derived: "Dérivée" };
 export const SOURCING_LABELS: Record<string, string> = { quota: "Quotas", priority: "Priorité" };
 /** ``demand_days`` in words : « Lun → Mer (3 j) », « toute la semaine ». */
 export function fmtDemandDays(n: number): string {

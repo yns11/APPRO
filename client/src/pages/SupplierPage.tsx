@@ -1,16 +1,17 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, CalendarCheck, CalendarClock, CheckSquare, Clock, Package, ShoppingCart, Truck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarCheck, CalendarClock, CheckSquare, Clock, Package, Pencil, ShoppingCart, Truck } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useSupplier } from "@/lib/queries";
 import { useRemembered } from "@/lib/pageState";
-import { ArticleLink, Badge, Card, Empty, ErrorBox, Kpi, SeverityBadge, Skeleton, SkeletonBlock, Tabs } from "@/components/ui";
+import { ArticleLink, Badge, Button, Card, Empty, ErrorBox, Kpi, SeverityBadge, Skeleton, SkeletonBlock, Tabs } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
+import { SupplierParamsTab } from "@/components/SupplierParamsTab";
 import { fmtDate, fmtInt, fmtQty, fmtWeekdays } from "@/lib/format";
 import type { BacklogRow, DesadvRow, OrderRow, PendingRow, ProposalOut, SupplierArticleRow, TransportOut } from "@/lib/types";
 
-type Tab = "articles" | "late" | "upcoming" | "transports" | "in_transit" | "to_process" | "to_validate" | "to_order";
+type Tab = "articles" | "late" | "upcoming" | "transports" | "in_transit" | "to_process" | "to_validate" | "to_order" | "params";
 const H = "calc(100vh - 420px)";
 
 const art = <T extends { article_id: string; designation: string }>(): Column<T> => ({ key: "article", label: "Article", get: (r) => `${r.article_id} ${r.designation}`, exportGet: (r) => r.article_id, render: (r) => <ArticleLink id={r.article_id} designation={r.designation} /> });
@@ -110,6 +111,7 @@ export default function SupplierPage() {
     { id: "to_process", label: "À traiter", count: d?.to_process.length },
     { id: "to_validate", label: "À valider", count: d?.to_validate.length },
     { id: "to_order", label: "À commander", count: d?.to_order.filter((p) => !p.ignored).length },
+    { id: "params", label: "Paramétrage" },
   ];
   const title = `Fournisseur ${supplierId}`;
   return (
@@ -120,7 +122,7 @@ export default function SupplierPage() {
           <h1 style={{ marginTop: 6 }}>{supplierId} {s && <span className="muted" style={{ fontWeight: 400 }}>· {s.name}</span>}</h1>
           <p>{s ? <>{s.country && <>{s.country} · </>}{s.contact && <>{s.contact} · </>}{s.transport_contact ? <>contact transport <b>{s.transport_contact}</b> · </> : <><Badge tone="warning" title="Colonne « Contact transport » du Référentiel : destinataires des e-mails de transport, accès à l'espace fournisseur">sans contact transport</Badge> · </>}quais <b>{s.docks || "B15"}</b> · livraisons <b>{fmtWeekdays(s.delivery_weekdays)}</b>{s.strict_days ? <> <Badge tone="neutral" title="Jours stricts : jamais de proposition hors jour standard (◇)">jours stricts</Badge></> : null} · délai <b>{s.lead_time_days} j ouvrés</b> (inclusif : lundi + 5 = lundi suivant){k && k.active_links !== k.articles ? ` · ${k.active_links} lien(s) actif(s) sur ${k.articles}` : ""}</> : <Skeleton w={400} />}</p>
         </div>
-        <div className="actions"><Link className="btn" to="/referentiel?table=ref_suppliers">Modifier dans le Référentiel</Link></div>
+        <div className="actions"><Button variant={tab === "params" ? "primary" : "default"} onClick={() => setTab("params")}><Pencil />Paramétrage</Button><Link className="btn" to="/referentiel?table=ref_suppliers">Référentiel</Link></div>
       </div>
 
       <div className="grid kpis">
@@ -140,6 +142,7 @@ export default function SupplierPage() {
           : tab === "articles" ? <div className="scroll-x"><DataTable rows={d.articles} columns={articleCols} rowKey={(a) => a.article_id} maxHeight={H} storageKey="supplier.articles" exportTitle={`${title} - articles`} emptyTitle="Aucun article lié à ce fournisseur" /></div>
           : tab === "late" ? <DataTable rows={d.late} columns={backlogCols} rowKey={(b) => b.order_id} maxHeight={H} storageKey="supplier.late" exportTitle={`${title} - en retard`} emptyTitle="Aucune commande en retard" />
           : tab === "upcoming" ? <DataTable rows={d.upcoming} columns={orderCols} rowKey={(o) => o.order_id} maxHeight={H} storageKey="supplier.upcoming" exportTitle={`${title} - commandes à venir`} emptyTitle="Aucune commande ferme à venir" />
+          : tab === "params" ? <div style={{ padding: 16 }}><SupplierParamsTab supplierId={supplierId} articles={d.articles} /></div>
           : tab === "transports" ? <DataTable rows={transports.data ?? []} columns={transportCols} rowKey={(t) => t.transport_id} rowClass={(t) => (t.status === "cancelled" ? "muted" : "")} maxHeight={H} storageKey="supplier.transports" exportTitle={`${title} - transports`} emptyTitle="Aucun transport" emptyHint={<>Les transports se créent depuis le <Link to="/livraisons">Planning de livraisons</Link>.</>} />
           : tab === "in_transit" ? <DataTable rows={d.in_transit} columns={desadvCols} rowKey={(x) => x.desadv_id} maxHeight={H} storageKey="supplier.transit" exportTitle={`${title} - en transit`} emptyTitle="Rien en transit" />
           : tab === "to_process" ? <DataTable rows={d.to_process} columns={desadvCols} rowKey={(x) => x.desadv_id} maxHeight={H} storageKey="supplier.process" exportTitle={`${title} - à traiter`} emptyTitle="Aucun DESADV à traiter" />

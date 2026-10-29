@@ -13,7 +13,7 @@ const ROLE_LABELS: Record<string, string> = { reader: "lecture seule", appro: "a
 const SUPPLIER_NAV = [{ to: "/portail", label: "Espace fournisseur", icon: Truck, end: true }];
 
 const NAV = [
-  { to: "/", label: "Cockpit du jour", icon: LayoutDashboard, end: true },
+  { to: "/", label: "Tableau de bord", icon: LayoutDashboard, end: true },
   { to: "/tableau", label: "Tableau d'approvisionnement", icon: Table },
   { to: "/articles", label: "Fiches articles", icon: Activity },
   { to: "/fournisseurs", label: "Fournisseurs", icon: Truck },

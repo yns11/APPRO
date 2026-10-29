@@ -59,7 +59,7 @@ se lit.
    * `plan` : aucune consommation fiable ; le passé est le PDP éclaté, comme le futur.
    * `derived` : consommation = Σ coefficient × consommation déclarée des **articles sources** (table
      `ref_consumption_terms`) ; sources éligibles : en source `erp`, présentes dans un programme de l'article et
-     dans aucun programme où il est absent ; sans terme, la consommation ERP de l'article est utilisée.
+     dans aucun programme où il est absent ; sans terme, la consommation MOM (déclarée) de l'article est utilisée.
 4. Le PDP est une version de l'application, importée ou saisie, **active** ; les semaines passées suivent l'historique des versions (§ 11 bis).
 
 La ligne *Consommation et besoin* affiche le consommé (passé, réel) puis le requis (futur, PDP) ; le classeur exporté les
@@ -419,7 +419,7 @@ par semaine de l'article (`DELETE /api/params/overrides?scope=article_week&key1=
 Production **réalisable** par programme et semaine = PDP × part servable du composant le plus contraint,
 pour trois stocks : à date, Projeté Ferme, Stock projeté (page *Plan de production*, onglet *Impact programmes*).
 
-## 9 bis. Cockpit du jour : deux onglets, et la page Recherche
+## 9 bis. Tableau de bord (ex-cockpit) : deux onglets, et la page Recherche
 
 **Couvertures et stocks** : cinq tuiles qui filtrent le portefeuille d'un clic, *Critiques*, *À commander*,
 *Surstock*, *Données*, *OK* (§ 6), puis une ligne de contexte (couverture médiane, valeur du stock contre la
@@ -635,7 +635,7 @@ verrouille ce qui n'est pas permis (cellules non éditables, cadenas sur l'artic
 | Qui | Peut écrire |
 |---|---|
 | utilisateur non déclaré, ou inactif (**lecteur**) | rien : lecture seule partout |
-| **appro** | les cellules Plan / Ajustement / Ferme / CBN et les paramètres hebdomadaires **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations ; **pour le moment, toutes les tables du référentiel** (articles, fournisseurs, article ↔ fournisseur, termes de consommation, **commandes fermées (PO)** : déclaration depuis Recherche ou le Référentiel, programmes, nomenclatures, stock), ligne par ligne ou par import, carnet ou non (`OPEN_REFERENCE` dans `services/access.py` ; remettre à `False` pour revenir au carnet) |
+| **appro** | les cellules Plan / Ajustement / Ferme / CBN et les paramètres hebdomadaires **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations ; **les données fournisseur et article de tout le référentiel**, depuis la page Référentiel, l'onglet *Paramétrage* de la fiche article (fiche, politique de stock, jours et source de consommation, fournisseurs et règles) et l'onglet *Paramétrage* de la fiche fournisseur (fiche, jours de livraison, quais, contacts, règles article ↔ fournisseur) ; techniquement, **toutes les tables du référentiel** (articles, fournisseurs, article ↔ fournisseur, termes de consommation, **commandes fermées (PO)** : déclaration depuis Recherche ou le Référentiel, programmes, nomenclatures, stock), ligne par ligne ou par import, carnet ou non (`OPEN_REFERENCE` dans `services/access.py` ; remettre à `False` pour revenir au carnet) |
 | **manager** | comme un appro, **plus** la règle commune du moteur (tolérance), les paramètres hebdomadaires de tout article, la saisie, l'import et l'activation des PDP |
 | **admin** | tout, y compris la table des approvisionneurs |
 | **fournisseur** (e-mail présent dans la colonne *Contact transport* d'un fournisseur actif, et absent de la table des approvisionneurs et de `APPRO_ADMINS`) | rien ; **ne voit que l'espace fournisseur** (`/portail`) : ses commandes fermes en cours et leurs transports, son retard, les transports annoncés, le prévisionnel EDI (DELFOR) qui lui est attribué, ses DESADV, ses réceptions, avec leurs KPI et des filtres (article, dates, statut) ; toute autre route de l'API répond 403 (`supplier_gate`). Un manager ou un administrateur prévisualise cet espace avec `?supplier_id=` |
