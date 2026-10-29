@@ -115,3 +115,28 @@ def test_supplier_portal_role_and_gate(client):  # noqa: F811
     assert client.get("/api/portal/overview", headers={"x-forwarded-email": "nobody@example.com"}).status_code == 403
     # a manager / admin previews a supplier's portal
     assert client.get("/api/portal/overview", params={"supplier_id": "S-000378"}).status_code == 200
+
+
+def test_legacy_dock_column_is_retired(tmp_path):
+    """A database created by the first version holds ``app_transports.dock NOT NULL`` : the start-up migration
+    copies it into ``docks`` and drops it, so the new version's INSERT no longer fails (NotNullViolation)."""
+    import datetime as dt
+
+    from sqlalchemy import create_engine, inspect, text
+
+    from appro.data.store import AppTransport, init_store
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE app_transports (transport_id VARCHAR(20) PRIMARY KEY, supplier_id VARCHAR(40) NOT NULL, date DATE NOT NULL, "
+                          "time VARCHAR(8) NOT NULL, dock VARCHAR(20) NOT NULL, note TEXT NOT NULL, status VARCHAR(12) NOT NULL, "
+                          "created_by VARCHAR(120) NOT NULL, created_at DATETIME NOT NULL)"))
+        conn.execute(text("INSERT INTO app_transports VALUES ('EM000001', 'S-1', '2026-10-30', '08:00', 'B15', '', 'planned', 'x', '2026-10-29 06:00:00')"))
+    factory = init_store(engine)
+    cols = {c["name"] for c in inspect(engine).get_columns("app_transports")}
+    assert "dock" not in cols and {"docks", "carrier"} <= cols
+    with factory() as session:
+        assert session.get(AppTransport, "EM000001").docks == "B15"
+        session.add(AppTransport(transport_id="EM000002", supplier_id="S-1", date=dt.date(2026, 10, 30), time="09:00", docks="B15;B6 EST", created_by="y"))
+        session.commit()
+        assert session.get(AppTransport, "EM000002").docks == "B15;B6 EST"

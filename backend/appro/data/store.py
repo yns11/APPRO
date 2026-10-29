@@ -517,6 +517,42 @@ def ensure_columns(engine) -> list[str]:
     return added
 
 
+#: columns an earlier version wrote and the current one no longer maps : ``(table, old column, new column)`` ;
+#: the values are copied into the new column (when it is empty) and the old column is dropped, otherwise an
+#: INSERT of the new version fails on its NOT NULL constraint
+RENAMED_COLUMNS = (("app_transports", "dock", "docks"),)
+
+
+def retire_columns(engine) -> list[str]:
+    """Legacy columns of the application tables : copy them into their successor and drop them
+    (``RENAMED_COLUMNS``) ; any other column the current version does not map loses its NOT NULL so the
+    new version's INSERT no longer fails.  Returns what was changed."""
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    done: list[str] = []
+    with engine.begin() as conn:
+        for table_name, old, new in RENAMED_COLUMNS:
+            if not inspector.has_table(table_name):
+                continue
+            present = {c["name"] for c in inspector.get_columns(table_name)}
+            if old in present and new in present:
+                conn.execute(text(f'UPDATE "{table_name}" SET "{new}" = "{old}" WHERE ("{new}" IS NULL OR "{new}" = \'\') AND "{old}" IS NOT NULL'))
+                conn.execute(text(f'ALTER TABLE "{table_name}" DROP COLUMN "{old}"'))
+                done.append(f"{table_name}.{old} → {new}")
+        if engine.dialect.name == "postgresql":
+            for table in Base.metadata.sorted_tables:
+                if not table.name.startswith("app_") or not inspector.has_table(table.name):
+                    continue
+                mapped = {c.name for c in table.columns}
+                for col in inspector.get_columns(table.name):
+                    if col["name"] not in mapped and not col.get("nullable", True) and (table.name, col["name"]) not in {(t, o) for t, o, _n in RENAMED_COLUMNS}:
+                        conn.execute(text(f'ALTER TABLE "{table.name}" ALTER COLUMN "{col["name"]}" DROP NOT NULL'))
+                        done.append(f"{table.name}.{col['name']} (NULL autorisé)")
+    if done:
+        log.info("Colonnes d'une version antérieure retirées : %s", ", ".join(done))
+    return done
+
+
 def normalise_nullable_numerics(engine) -> int:
     """Optional numeric columns (link caps, lead time override) : a 0 written by an earlier version
     (missing cells were coerced to 0) means « no value » and becomes NULL.  Returns the rows fixed."""
@@ -550,6 +586,7 @@ def apply_text_defaults(engine) -> int:
 def init_store(engine, schema: str | None = None) -> sessionmaker[Session]:
     ensure_schema(engine, schema)
     ensure_columns(engine)
+    retire_columns(engine)
     Base.metadata.create_all(engine)
     normalise_nullable_numerics(engine)
     apply_text_defaults(engine)
