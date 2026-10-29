@@ -582,3 +582,11 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .pivot.planning .tr-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .pivot.planning .tr-list .badge { font-family: var(--font-grid); gap: 4px; }
 .tbl.slots input, .tbl.slots select { width: auto; min-width: 110px; }
+.dock-picker { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.dock-picker label { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: var(--r-pill); font-size: var(--fs--2); cursor: pointer; user-select: none; background: var(--bg-elev); }
+.dock-picker label.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-fg); font-weight: var(--fw-semibold); }
+.dock-picker.sm label { padding: 0 6px; }
+.pivot td.firm-tr { position: relative; }
+.pivot td.firm-tr .tr-ico { position: absolute; left: 1px; top: 0; color: var(--brand); line-height: 1; }
+.dock-picker label.off { cursor: default; opacity: 0.7; }
+.tbl .dock-picker, .dock-picker.sm { flex-wrap: nowrap; white-space: nowrap; }

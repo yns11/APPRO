@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { CalendarDays, Download, Plus, Trash2, Upload, Wand2 } from "lucide-react";
 import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { RefRowEditor } from "@/components/RefRowEditor";
+import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
 import { DataTable, type Column } from "@/components/DataTable";
 import { useRefRows, useRefTables, useSupplierNames, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -66,6 +67,12 @@ export default function ReferencePage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"replace" | "merge">("merge");
   const del = useWrite(({ name, key }: { name: string; key: Record<string, RefValue> }) => api.post(`/api/reference/${name}/delete`, { key }), () => toast.push("Ligne supprimée"));
+  // one click on a dock of the Quais column saves the supplier row (its default docks, preselected when a transport is created)
+  const setDocks = useWrite(({ row, docks }: { row: RefRow; docks: string[] }) => {
+    const values: Record<string, RefValue> = {};
+    (table?.columns ?? []).forEach((c) => { if (row[c.name] !== undefined) values[c.name] = row[c.name]; });
+    return api.put(`/api/reference/ref_suppliers/rows`, { values: { ...values, docks: docks.join(";") } });
+  });
   const importFile = useWrite(async (file: File) => { const fd = new FormData(); fd.append("file", file); fd.append("mode", mode); return api.upload<ImportReport>(`/api/reference/${tab}/import`, fd); },
     (r) => { setReport(r as ImportReport); toast.push(`${(r as ImportReport).created} ligne(s) importée(s)`, "success"); });
 
@@ -85,6 +92,7 @@ export default function ReferencePage() {
         : c.name === "consumption_source" ? <Badge tone={String(r[c.name] ?? "erp") === "erp" ? "neutral" : "info"}>{CONSUMPTION_SOURCE_SHORT[String(r[c.name] ?? "erp")]}</Badge>
         : c.name === "demand_days" ? <span title={fmtDemandDays(Number(r[c.name] ?? 5))}>{Number(r[c.name] ?? 5) === 5 ? <span className="subtle">5</span> : <b>{String(r[c.name])}</b>}</span>
         : c.name === "lead_time_override" ? (r[c.name] == null || r[c.name] === "" ? <span className="inherited" title="Délai du fournisseur">hérité</span> : <b>{String(r[c.name])}</b>)
+        : c.name === "docks" && table.name === "ref_suppliers" ? <span onClick={(e) => e.stopPropagation()}><DockPicker all={DOCKS} size="sm" label={`Quais par défaut de ${String(r.supplier_id)}`} value={splitDocks(r[c.name])} disabled={!rights.canEditTable(table.name)} onChange={(v) => setDocks.mutate({ row: r, docks: v })} /></span>
         : <>{fmtCell(c, r[c.name])}</>,
     }));
     const after = (name: string, col: Column<RefRow>) => out.splice(out.findIndex((c) => c.key === name) + 1, 0, col);

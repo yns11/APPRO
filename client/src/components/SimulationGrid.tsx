@@ -458,14 +458,15 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               // days of the firm orders of the column on / after the reference day (a week column holds several)
               const days = wk ? [...new Map(l.orders.filter((o) => o.order_type === "FIRM" && o.expected_date >= cols.as_of && columnOf(cols, o.expected_date) === i).map((o) => [o.expected_date, o.ignored] as const)).entries()] : [];
               const clickable = qo > 0 && !past && !locked && (!wk || days.length > 0);
-              const cls = [...cellBase(i), qo > 0 ? (ignored ? "ignored" : qr > 0 ? "firm-open" : "firm-settled") : "", clickable ? "clickable" : "", l.orders.length && ordersTitle(i) ? "event" : ""].filter(Boolean).join(" ");
+              const ems = [...new Set(l.orders.filter((o) => o.order_type === "FIRM" && columnOf(cols, o.expected_date) === i).flatMap((o) => o.transports ?? []))];
+              const cls = [...cellBase(i), qo > 0 ? (ignored ? "ignored" : qr > 0 ? "firm-open" : "firm-settled") : "", clickable ? "clickable" : "", l.orders.length && ordersTitle(i) ? "event" : "", ems.length ? "firm-tr" : ""].filter(Boolean).join(" ");
               const text = qo === 0 ? "·" : partial ? <span className="partial">{fmtQty(qr, unit)} / {fmtQty(qo, unit)}</span> : fmtQty(qo, unit);
               const state = qo === 0 ? "" : ignored ? t("firm.ignored") : qr > 0 ? `${t("firm.open", { open: fmtQty(qr, unit), ordered: fmtQty(qo, unit) })}${clickable ? (wk ? t("firm.click_week") : t("firm.click_day")) : ""}` : t("firm.settled", { ordered: fmtQty(qo, unit) });
-              const title = [state, ordersTitle(i)].filter(Boolean).join("\n");
+              const title = [state, ordersTitle(i), ems.length ? `${t("firm.transport")} ${ems.join(", ")}` : ""].filter(Boolean).join("\n");
               // a week column toggles every day of the week : ignore the days not yet ignored, or restore them all
               const onClick = !clickable ? undefined : !wk ? () => toggleFlag.mutate({ article_id: aid, supplier_id: l.supplier_id, date: cols.period_start[i], kind: "order_ignored" })
                 : () => { const all = days.every(([, ig]) => ig); toggleFlags.mutate(days.filter(([, ig]) => all || !ig).map(([d]) => ({ article_id: aid, supplier_id: l.supplier_id, date: d, kind: "order_ignored" as const }))); };
-              return <td key={i} className={cls} title={title} onClick={onClick}>{ignored ? <s>{text}</s> : text}</td>;
+              return <td key={i} className={cls} title={title} onClick={onClick}>{ems.length > 0 && <Truck className="tr-ico" size={9} aria-label={ems.join(", ")} />}{ignored ? <s>{text}</s> : text}</td>;
             })}
             {spacerR}
           </tr>
@@ -749,7 +750,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         <span><span className="sw bar" style={{ background: "var(--brand-soft)", boxShadow: "inset 0 -2px 0 var(--brand)" }} />{t("legend.typed")}</span>
         <span><span className="sw bar" style={{ background: "transparent", border: "1px dashed var(--warning)" }} />{t("legend.cbn")} · <b style={{ color: "var(--critical-fg)" }}>!</b> {t("legend.marks")} · <b style={{ color: "var(--warning-fg)" }}>▲</b> {t("legend.capped")} · <b style={{ color: "var(--brand-fg)" }}>◇</b> {t("legend.off")}</span>
         <span><span className="sw bar" style={{ background: "var(--cell-neg-strong)" }} />{t("legend.short")}</span>
-        <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} />{t("legend.firm")} · <span className="sw bar" style={{ background: "var(--cell-green)" }} />{t("legend.firm_settled")} · <span className="sw bar" style={{ background: "var(--cell-red)" }} />{t("legend.firm_ignored")}</span>
+        <span><span className="sw bar" style={{ background: "var(--cell-yellow)" }} />{t("legend.firm")} · <span className="sw bar" style={{ background: "var(--cell-green)" }} />{t("legend.firm_settled")} · <span className="sw bar" style={{ background: "var(--cell-red)" }} />{t("legend.firm_ignored")} · <Truck size={10} style={{ verticalAlign: -1, color: "var(--brand)" }} /> {t("legend.firm_transport")}</span>
         {hasErp && <span>{t("legend.erp_stock")}</span>}
         <span>{t("legend.week")} · <EyeOff size={11} style={{ verticalAlign: "middle" }} /> {t("legend.hide")}</span>
       </div>

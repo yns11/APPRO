@@ -16,6 +16,7 @@ from ...engine.models import WEEKLY_FIELDS
 from ...engine.runner import resolve_as_of
 from ...services import mrp_service, pdf_service
 from ...services.context import AppContext
+from ...services.transports import transports_by_order
 from .. import presenters as P
 from .. import schemas as S
 from ..deps import ctx_dep, session_dep
@@ -87,7 +88,7 @@ def projection(article_id: str, granularity: Literal["default", "day", "week"] =
     if ar is None:
         raise HTTPException(404, f"Article inconnu : {article_id}")
     return json_response(P.projection_out(ar, result, granularity, _supplier_names(ctx), _programs_for(ctx, article_id, result),
-                                          suppliers=_suppliers(ctx)))
+                                          suppliers=_suppliers(ctx), transports=transports_by_order(session)))
 
 
 @router.get("/articles/{article_id}/delivery-plan", response_model=S.DeliveryPlanResponse)
@@ -123,7 +124,7 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
     total = len(arts)
     page_arts = arts[(page - 1) * page_size: page * page_size]
     return json_response(P.grid_out(result, granularity, names, _programs_of(ctx), articles=page_arts,
-                                    total=total, page=page, page_size=page_size, suppliers=_suppliers(ctx)))
+                                    total=total, page=page, page_size=page_size, suppliers=_suppliers(ctx), transports=transports_by_order(session)))
 
 
 def _select_articles(ctx: AppContext, session: Session, planner: str | None, article_ids: list[str] | None, program_id: str | None,

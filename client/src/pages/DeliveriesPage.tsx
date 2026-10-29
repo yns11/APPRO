@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Download, Mail, Plus, Trash2, Truck, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, FileDown, Mail, Plus, Trash2, Truck, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { Badge, Button, Card, Drawer, Empty, ErrorBox, SkeletonBlock, SupplierLink, useToast } from "@/components/ui";
 import { WEEKDAY_SHORT, fmtDate, fmtQty } from "@/lib/format";
+import { DockPicker } from "@/components/DockPicker";
 import type { PlanningOrder, PlanningResponse, PlanningSupplier, TransportOut, TransportPackOut, TransportSlotIn } from "@/lib/types";
 
 const DEFAULT_TIME = "08:00";
@@ -25,25 +26,14 @@ function addDays(iso: string, n: number): string {
 export function mailtoOf(mail: TransportPackOut["mail"]): string {
   return `mailto:${mail.to.join(";")}?subject=${encodeURIComponent(mail.subject)}&body=${encodeURIComponent(mail.body)}`;
 }
-function downloadCsv(pack: TransportPackOut) {
-  const blob = new Blob([pack.csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = pack.csv_filename; a.style.display = "none";
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-}
-/** CSV for the transport tool first, then the e-mail : both from the same answer of the server. */
-export function deliverPack(pack: TransportPackOut) {
-  downloadCsv(pack);
-  window.setTimeout(() => { window.location.href = mailtoOf(pack.mail); }, 400);
-}
 
 /**
- * « Planning de livraisons » : suppliers in rows, working days in columns, the firm ERP orders of each day in
- * the cells.  Ticking orders of one cell and clicking « Créer le transport » opens the dialog : one or several
- * trucks (date, time, dock) for those orders ; validating creates the transports (EM…), downloads the CSV for
- * the transport tool and opens the e-mail to the supplier's transport contacts in Outlook.
+ * « Planning de livraisons » : suppliers in rows (those with a firm order in the window), working days in columns,
+ * the firm ERP orders of each day in the cells (article and remaining quantity).  Ticking orders of one cell and
+ * clicking « Créer le transport » opens the dialog : one or several trucks (date, time, docks) for those orders ;
+ * validating creates the transports (EM…).  The CSV for the transport tool and the e-mail to the supplier are
+ * downloaded / opened from the list of transports, per transport ; the global CSV (every planned transport from
+ * today on) is one click in the header.
  */
 export default function DeliveriesPage() {
   const { perimeter, config } = usePerimeter();
@@ -57,12 +47,10 @@ export default function DeliveriesPage() {
   const toast = useToast();
   const d = q.data;
   const byTransport = useMemo(() => new Map((d?.transports ?? []).map((t) => [t.transport_id, t])), [d]);
-  const cancel = useWrite((id: string) => api.del<TransportOut>(`/api/transports/${encodeURIComponent(id)}`), (t) => toast.push(`Transport ${t.transport_id} annulé : prévenez le fournisseur et l'outil de transport`, "info"));
-  const again = async (id: string, what: "csv" | "mail") => {
-    try {
-      const pack = await api.get<TransportPackOut>(`/api/transports/${encodeURIComponent(id)}/pack`);
-      if (what === "csv") downloadCsv(pack); else window.location.href = mailtoOf(pack.mail);
-    } catch (e) { toast.push((e as Error).message, "error"); }
+  const cancel = useWrite((id: string) => api.del<TransportOut>(`/api/transports/${encodeURIComponent(id)}`), (t) => toast.push(`Transport ${t.transport_id} annulé : prévenez le fournisseur et retirez-le de l'outil de transport`, "info"));
+  const mailOf = async (id: string) => {
+    try { window.location.href = mailtoOf((await api.get<TransportPackOut>(`/api/transports/${encodeURIComponent(id)}/pack`)).mail); }
+    catch (e) { toast.push((e as Error).message, "error"); }
   };
   const toggle = (s: PlanningSupplier, o: PlanningOrder) => setPicked((p) => {
     const same = p && p.supplier_id === s.supplier_id && p.date === o.expected_date;
@@ -82,9 +70,10 @@ export default function DeliveriesPage() {
       <div className="page-header">
         <div className="title">
           <h1>Planning de livraisons</h1>
-          <p>Les ordres fermes ERP de chaque fournisseur, jour par jour. Cochez les commandes d'un jour puis <b>Créer le transport</b> : un ou plusieurs camions (date, heure, quai) ; l'application numérote les transports (EM…), télécharge le fichier pour l'outil de transport et prépare l'e-mail au fournisseur.</p>
+          <p>Les ordres fermes ERP de chaque fournisseur, jour par jour. Cochez les commandes d'un jour puis <b>Créer le transport</b> : un ou plusieurs camions (date, heure, quais) ; l'application numérote les transports (EM…). Le fichier pour l'outil de transport et l'e-mail au fournisseur se prennent dans la liste des transports, ou en un seul fichier pour tous les transports à venir.</p>
         </div>
         <div className="actions">
+          <a className="btn primary sm" href={api.downloadUrl("/api/transports/atr.csv")} download title="Fichier CSV pour l'outil de transport : tous les transports prévus à partir d'aujourd'hui, tous fournisseurs et tous approvisionneurs (une ligne par transport et par quai)"><FileDown />CSV ATR des transports à venir</a>
           <Button size="sm" onClick={() => first && setStart(addDays(first, -7 * weeks))} title="Période précédente"><ChevronLeft />Précédente</Button>
           <Button size="sm" onClick={() => setStart(null)} title="Revenir à la semaine en cours">Cette semaine</Button>
           <Button size="sm" onClick={() => first && setStart(addDays(first, 7 * weeks))} title="Période suivante">Suivante<ChevronRight /></Button>
@@ -113,7 +102,7 @@ export default function DeliveriesPage() {
                   <tr key={s.supplier_id}>
                     <td className="sticky-col sup">
                       <SupplierLink id={s.supplier_id} name={s.name} />
-                      <div className="small" style={{ marginTop: 4 }}>{s.emails.length ? <span className="subtle" title={s.emails.join("\n")}><Mail size={11} style={{ verticalAlign: -1 }} /> {s.emails.length} destinataire{s.emails.length > 1 ? "s" : ""}</span> : <Badge tone="warning" title="Renseignez la colonne « Contact transport » du fournisseur dans le Référentiel : l'e-mail n'aura pas de destinataire">sans contact transport</Badge>}</div>
+                      <div className="small" style={{ marginTop: 4 }}>{s.emails.length ? <span className="subtle" title={s.emails.join("\n")}><Mail size={11} style={{ verticalAlign: -1 }} /> {s.emails.length} destinataire{s.emails.length > 1 ? "s" : ""}</span> : <Badge tone="warning" title="Renseignez la colonne « Contact transport » du fournisseur dans le Référentiel : l'e-mail n'aura pas de destinataire">sans contact transport</Badge>}<span className="subtle"> · quais {s.docks.join(", ")}</span></div>
                     </td>
                     {d.days.map((day) => {
                       const orders = s.orders.filter((o) => o.expected_date === day);
@@ -124,10 +113,10 @@ export default function DeliveriesPage() {
                           {orders.map((o) => (
                             <label key={o.order_id} className={`ord ${o.ignored ? "muted" : ""}`} title={`${o.ref || o.order_id}\n${o.article_id} ${o.designation}\n${fmtQty(o.qty_open, o.unit)} ${o.unit} restant / ${fmtQty(o.qty_ordered, o.unit)} commandé${o.ignored ? "\nignorée dans le tableau d'approvisionnement" : ""}${o.transports.length ? `\ntransport(s) : ${o.transports.join(", ")}` : ""}`}>
                               <input type="checkbox" checked={here.includes(o.order_id)} onChange={() => toggle(s, o)} aria-label={`${o.ref || o.order_id} ${o.article_id}`} />
-                              <span className="grow"><b>{o.article_id}</b> <span className="subtle">{o.ref}</span><br /><span>{fmtQty(o.qty_open, o.unit)} {o.unit}</span>{o.transports.length > 0 && <span className="tr-mark" title={o.transports.join(", ")}><Truck size={10} /> {o.transports.length}</span>}</span>
+                              <span className="grow"><b>{o.article_id}</b> <span>{fmtQty(o.qty_open, o.unit)} {o.unit}</span>{o.transports.length > 0 && <span className="tr-mark" title={o.transports.join(", ")}><Truck size={10} /> {o.transports.length}</span>}</span>
                             </label>
                           ))}
-                          {ems.length > 0 && <div className="tr-list">{ems.map((id) => { const t = byTransport.get(id); return <span key={id} className="badge brand" title={t ? `${id} · ${fmtDate(t.date)} ${t.time} · quai ${t.dock} · ${t.orders.length} commande(s) · ${t.created_by}` : id}><Truck size={10} /> {id}{t ? ` ${t.time} ${t.dock}` : ""}</span>; })}</div>}
+                          {ems.length > 0 && <div className="tr-list">{ems.map((id) => { const t = byTransport.get(id); return <span key={id} className="badge brand" title={t ? `${id} · ${fmtDate(t.date)} ${t.time} · quai ${t.docks.join(" / ")} · ${t.orders.length} commande(s) · ${t.created_by}` : id}><Truck size={10} /> {id}{t ? ` ${t.time} ${t.docks.join("/")}` : ""}</span>; })}</div>}
                           {here.length > 0 && <button className="btn primary sm" style={{ marginTop: 6, width: "100%" }} onClick={() => openDialog(s, day)}><Truck />Créer le transport ({here.length})</button>}
                         </td>
                       );
@@ -141,20 +130,20 @@ export default function DeliveriesPage() {
       </Card>
 
       {d && d.transports.length > 0 && (
-        <Card title={`Transports de la période · ${d.transports.length}`} hint="fichier et e-mail à nouveau, annulation (le fournisseur et l'outil de transport sont à prévenir par vous)" tight>
+        <Card title={`Transports de la période · ${d.transports.length}`} hint="fichier CSV et e-mail de chaque transport, annulation (le fournisseur et l'outil de transport sont à prévenir par vous)" tight>
           <table className="tbl compact">
-            <thead><tr><th>Transport</th><th>Fournisseur</th><th>Date</th><th>Heure</th><th>Quai</th><th>Commandes</th><th>Créé par</th><th /></tr></thead>
+            <thead><tr><th>Transport</th><th>Fournisseur</th><th>Date</th><th>Heure</th><th>Quais</th><th>Transporteur</th><th>Commandes</th><th>Créé par</th><th /></tr></thead>
             <tbody>
               {d.transports.map((t) => (
                 <tr key={t.transport_id}>
                   <td><b className="mono">{t.transport_id}</b></td>
                   <td><SupplierLink id={t.supplier_id} name={t.supplier_name} inline /></td>
-                  <td>{fmtDate(t.date)}</td><td>{t.time}</td><td>{t.dock}</td>
+                  <td>{fmtDate(t.date)}</td><td>{t.time}</td><td>{t.docks.join(" / ")}</td><td className="small">{t.carrier || <span className="subtle">–</span>}</td>
                   <td className="small">{t.orders.map((o) => `${o.ref || o.order_id} · ${o.article_id}`).join(" ; ")}</td>
                   <td className="small subtle">{t.created_by}</td>
                   <td className="row" style={{ justifyContent: "flex-end" }}>
-                    <Button size="sm" title="Télécharger à nouveau le fichier pour l'outil de transport" onClick={() => again(t.transport_id, "csv")}><Download />CSV</Button>
-                    <Button size="sm" title="Ouvrir à nouveau l'e-mail au fournisseur" onClick={() => again(t.transport_id, "mail")}><Mail />E-mail</Button>
+                    <a className="btn sm" href={api.downloadUrl(`/api/transports/${encodeURIComponent(t.transport_id)}/atr.csv`)} download title="Fichier CSV de ce transport pour l'outil de transport"><Download />CSV</a>
+                    <Button size="sm" title="Ouvrir l'e-mail au fournisseur dans Outlook" onClick={() => mailOf(t.transport_id)}><Mail />E-mail</Button>
                     <Button size="sm" variant="ghost" title="Annuler ce transport" onClick={() => { if (window.confirm(`Annuler le transport ${t.transport_id} ?\nPrévenez le fournisseur et retirez-le de l'outil de transport.`)) cancel.mutate(t.transport_id); }}><Trash2 /></Button>
                   </td>
                 </tr>
@@ -169,23 +158,24 @@ export default function DeliveriesPage() {
   );
 }
 
-/** One or several trucks for the ticked orders of one supplier and one day. */
+/** One or several trucks for the ticked orders of one supplier and one day ; the supplier's default docks are preselected. */
 function TransportDialog({ supplier, date, orders, docks, onClose, onCreated }: { supplier: PlanningSupplier; date: string; orders: PlanningOrder[]; docks: string[]; onClose: () => void; onCreated: () => void }) {
   const toast = useToast();
-  const [slots, setSlots] = useState<TransportSlotIn[]>([{ date, time: DEFAULT_TIME, dock: docks[0] ?? "" }]);
+  const preset = supplier.docks.filter((d) => docks.includes(d));
+  const [slots, setSlots] = useState<TransportSlotIn[]>([{ date, time: DEFAULT_TIME, docks: preset.length ? preset : [docks[0]] }]);
+  const [carrier, setCarrier] = useState("");
   const [note, setNote] = useState("");
-  const run = useWrite((body: { supplier_id: string; order_ids: string[]; slots: TransportSlotIn[]; note: string }) => api.post<TransportPackOut>("/api/transports", body),
+  const run = useWrite((body: { supplier_id: string; order_ids: string[]; slots: TransportSlotIn[]; carrier: string; note: string }) => api.post<TransportPackOut>("/api/transports", body),
     (pack) => {
-      deliverPack(pack);
       const ids = pack.transports.map((t) => t.transport_id).join(", ");
-      toast.push(`Transport ${ids} créé · fichier ${pack.csv_filename} téléchargé · e-mail ${pack.mail.to.length ? `préparé pour ${pack.mail.to.join(", ")}` : "préparé SANS destinataire (contact transport à renseigner)"}`, pack.mail.to.length ? "success" : "info");
+      toast.push(`Transport ${ids} créé · fichier CSV et e-mail disponibles dans la liste des transports${pack.mail.to.length ? "" : " · e-mail SANS destinataire (contact transport du fournisseur à renseigner)"}`, pack.mail.to.length ? "success" : "info");
       onCreated();
     });
   const update = (i: number, patch: Partial<TransportSlotIn>) => setSlots((s) => s.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-  const valid = slots.every((s) => s.date && /^([01]\d|2[0-3]):[0-5]\d$/.test(s.time) && s.dock) && orders.length > 0;
+  const valid = slots.every((s) => s.date && /^([01]\d|2[0-3]):[0-5]\d$/.test(s.time) && s.docks.length > 0) && orders.length > 0;
   return (
-    <Drawer open onClose={onClose} title={<>Transport · {supplier.supplier_id} <span className="muted">{supplier.name}</span> · {fmtDate(date)}</>}
-      footer={<><Button onClick={onClose}>Annuler</Button><Button variant="primary" disabled={!valid || run.isPending} onClick={() => run.mutate({ supplier_id: supplier.supplier_id, order_ids: orders.map((o) => o.order_id), slots, note })}>{run.isPending ? "En cours…" : `Créer ${slots.length} transport${slots.length > 1 ? "s" : ""}`}</Button></>}>
+    <Drawer open onClose={onClose} wide title={<>Transport · {supplier.supplier_id} <span className="muted">{supplier.name}</span> · {fmtDate(date)}</>}
+      footer={<><Button onClick={onClose}>Annuler</Button><Button variant="primary" disabled={!valid || run.isPending} onClick={() => run.mutate({ supplier_id: supplier.supplier_id, order_ids: orders.map((o) => o.order_id), slots, carrier, note })}>{run.isPending ? "En cours…" : `Créer ${slots.length} transport${slots.length > 1 ? "s" : ""}`}</Button></>}>
       <h4 style={{ margin: "0 0 6px" }}>Commandes du transport</h4>
       <table className="tbl compact">
         <thead><tr><th>Commande</th><th>Article</th><th className="num">Quantité</th></tr></thead>
@@ -193,24 +183,25 @@ function TransportDialog({ supplier, date, orders, docks, onClose, onCreated }: 
       </table>
       <h4 style={{ margin: "14px 0 6px" }}>Camion{slots.length > 1 ? "s" : ""}</h4>
       <table className="tbl compact slots">
-        <thead><tr><th>Transport</th><th>Date</th><th>Heure</th><th>Quai</th><th /></tr></thead>
+        <thead><tr><th>Transport</th><th>Date</th><th>Heure</th><th>Quais <span className="subtle small">(un ou plusieurs)</span></th><th /></tr></thead>
         <tbody>
           {slots.map((s, i) => (
             <tr key={i}>
               <td className="subtle small">EM… {i + 1}</td>
               <td><input className="input sm" type="date" value={s.date} onChange={(e) => update(i, { date: e.target.value })} aria-label={`Date du transport ${i + 1}`} /></td>
               <td><input className="input sm" type="time" value={s.time} step={300} onChange={(e) => update(i, { time: e.target.value })} aria-label={`Heure du transport ${i + 1}`} /></td>
-              <td><select className="select sm" value={s.dock} onChange={(e) => update(i, { dock: e.target.value })} aria-label={`Quai du transport ${i + 1}`}>{docks.map((k) => <option key={k} value={k}>{k}</option>)}</select></td>
+              <td><DockPicker all={docks} value={s.docks} onChange={(v) => update(i, { docks: v })} label={`Quais du transport ${i + 1}`} /></td>
               <td>{slots.length > 1 && <Button size="sm" variant="ghost" icon title="Retirer ce transport" onClick={() => setSlots((x) => x.filter((_, j) => j !== i))}><X /></Button>}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <Button size="sm" style={{ marginTop: 8 }} onClick={() => setSlots((x) => [...x, { ...x[x.length - 1] }])}><Plus />Ajouter un transport pour ces commandes</Button>
-      <label className="field" style={{ marginTop: 14 }}><span>Commentaire pour le fournisseur (facultatif)</span>
-        <input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Ex. : prévenir le quai 30 min avant l'arrivée" />
-      </label>
-      <p className="small subtle" style={{ marginTop: 10 }}>À la validation : un identifiant <b>EM</b> + 6 chiffres par camion, le fichier CSV pour l'outil de transport (une ligne par transport, flux R) se télécharge, puis Outlook s'ouvre avec l'e-mail prérempli pour {supplier.emails.length ? <b>{supplier.emails.join(", ")}</b> : <b style={{ color: "var(--warning-fg)" }}>aucun destinataire (colonne « Contact transport » du fournisseur vide)</b>} ; vous le relisez et l'envoyez.</p>
+      <Button size="sm" style={{ marginTop: 8 }} onClick={() => setSlots((x) => [...x, { ...x[x.length - 1], docks: [...x[x.length - 1].docks] }])}><Plus />Ajouter un transport pour ces commandes</Button>
+      <div className="grid cols-2" style={{ marginTop: 14 }}>
+        <label className="field"><span>Transporteur (facultatif)</span><input className="input" value={carrier} onChange={(e) => setCarrier(e.target.value)} maxLength={120} placeholder="colonne TRANSPORTEUR du fichier ATR" /></label>
+        <label className="field"><span>Commentaire pour le fournisseur (facultatif)</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Ex. : prévenir le quai 30 min avant l'arrivée" /></label>
+      </div>
+      <p className="small subtle" style={{ marginTop: 10 }}>À la validation : un identifiant <b>EM</b> + 6 chiffres par camion. Le fichier CSV pour l'outil de transport (en-tête ATR, une ligne par transport et par quai, flux R) et l'e-mail au fournisseur ({supplier.emails.length ? <b>{supplier.emails.join(", ")}</b> : <b style={{ color: "var(--warning-fg)" }}>aucun destinataire : colonne « Contact transport » du fournisseur vide</b>}) se prennent ensuite dans la liste des transports, ou en un seul fichier avec le bouton <b>CSV ATR des transports à venir</b>.</p>
       {run.error && <div className="error-box">{(run.error as Error).message}</div>}
     </Drawer>
   );

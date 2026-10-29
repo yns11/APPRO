@@ -428,11 +428,14 @@ def series_out(ar: ArticleResult, cols: Columns, keys: set[str] | None = None) -
             for key, label in SERIES_LABELS if keys is None or key in keys]
 
 
-def lane_out(l: Lane, cols: Columns, with_orders: bool = True, since: dt.date | None = None) -> dict[str, Any]:
+def lane_out(l: Lane, cols: Columns, with_orders: bool = True, since: dt.date | None = None,
+             transports: dict[str, list[str]] | None = None) -> dict[str, Any]:
     """One lane.  ``since`` keeps only the order / receipt / DESADV lines dated inside the displayed
-    window (the multi-article table, page after page, must stay light) ; ``None`` keeps them all."""
+    window (the multi-article table, page after page, must stay light) ; ``None`` keeps them all.
+    ``transports`` (``order_id → [EM…]``) marks the firm order slots a transport was announced for."""
     def shown(day: dt.date) -> bool:
         return since is None or day >= since
+    tr = transports or {}
     return {
         "supplier_id": l.supplier_id, "name": l.name, "linked": bool(l.linked),
         "series": [{"key": key, "label": label, "values": _agg(key, getattr(l, key), cols)} for key, label in LANE_SERIES],
@@ -443,7 +446,7 @@ def lane_out(l: Lane, cols: Columns, with_orders: bool = True, since: dt.date | 
         "receipts_booked": [bool(a) and not bool(b) for a, b in zip(cols.any(l.receipts > 0), cols.any((l.receipts > 0) & ~l.receipts_booked))]
                            if l.receipts_booked is not None else cols.any(np.zeros(len(l.plan), dtype=bool)),
         "backlog_ordered": l.backlog_ordered, "backlog_received": l.backlog_received, "backlog_qty": l.backlog_qty,
-        "orders": [o.__dict__ for o in l.orders if shown(o.expected_date)] if with_orders else [],
+        "orders": [{**o.__dict__, "transports": tr.get(o.order_id, [])} for o in l.orders if shown(o.expected_date)] if with_orders else [],
         "desadv": [d.__dict__ for d in l.desadv if shown(d.issue_date)] if with_orders else [],
         "receipt_lines": [r.__dict__ for r in l.receipt_lines if shown(r.receipt_date)] if with_orders else [],
     }
@@ -458,13 +461,13 @@ def display_start(result: MrpResult) -> dt.date:
 
 def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, supplier_names: dict[str, str],
                    programs: list[dict[str, Any]], from_date: dt.date | None = None,
-                   suppliers: dict[str, Any] | None = None) -> dict[str, Any]:
+                   suppliers: dict[str, Any] | None = None, transports: dict[str, list[str]] | None = None) -> dict[str, Any]:
     start = from_date or display_start(result)
     cols = Columns.build(ar.dates, result.as_of, granularity, result.params.focus_weeks, start)
     return {
         "article": article_ref(ar).model_dump(mode="json"), "as_of": result.as_of.isoformat(), "init_date": result.init_date.isoformat(), "granularity": granularity,
         **cols.meta(ar.dates),
-        "series": series_out(ar, cols), "lanes": [lane_out(l, cols, since=start) for l in ar.lanes],
+        "series": series_out(ar, cols), "lanes": [lane_out(l, cols, since=start, transports=transports) for l in ar.lanes],
         "proposals": [proposal_out(p, ar, supplier_names).model_dump(mode="json") for p in ar.proposals],
         "alerts": [alert_out(a, ar.article.designation).model_dump(mode="json") for a in ar.alerts],
         "kpis": ar.kpis, "suppliers": [link_out(l, supplier_names, suppliers).model_dump(mode="json") for l in ar.suppliers],
@@ -475,7 +478,8 @@ def projection_out(ar: ArticleResult, result: MrpResult, granularity: str, suppl
 def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str],
              programs_of: dict[str, list[str]], from_date: dt.date | None = None,
              articles: list[ArticleResult] | None = None, total: int | None = None, page: int = 1,
-             page_size: int | None = None, suppliers: dict[str, Any] | None = None) -> dict[str, Any]:
+             page_size: int | None = None, suppliers: dict[str, Any] | None = None,
+             transports: dict[str, list[str]] | None = None) -> dict[str, Any]:
     """Multi-article supply table: every article on the same columns (one page of articles)."""
     start = from_date or display_start(result)
     arts = list(result.articles.values()) if articles is None else articles
@@ -488,7 +492,7 @@ def grid_out(result: MrpResult, granularity: str, supplier_names: dict[str, str]
     return {
         **base, **cols.meta(dates),
         "articles": [{"article": article_ref(ar).model_dump(mode="json"), "series": series_out(ar, cols, GRID_SERIES),
-                      "lanes": [lane_out(l, cols, since=start) for l in ar.lanes], "kpis": ar.kpis,
+                      "lanes": [lane_out(l, cols, since=start, transports=transports) for l in ar.lanes], "kpis": ar.kpis,
                       "suppliers": [link_out(l, supplier_names, suppliers).model_dump(mode="json") for l in ar.suppliers],
                       "proposals": [proposal_out(p, ar, supplier_names).model_dump(mode="json") for p in ar.proposals],
                       "programs": programs_of.get(ar.article.article_id, []), "erp_snapshots": ar.erp_snapshots}

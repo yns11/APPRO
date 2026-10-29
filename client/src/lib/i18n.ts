@@ -14,6 +14,8 @@ const T = {
   "row.adjustments": { fr: "Ajustement", en: "Adjustment" },
   "row.stock_plan": { fr: "Stock projeté", en: "Projected stock" },
   "row.stock_erp": { fr: "Projeté Ferme", en: "Firm projection" },
+  "firm.transport": { fr: "Transport créé :", en: "Transport created:" },
+  "legend.firm_transport": { fr: "transport créé (Planning de livraisons)", en: "transport created (Delivery planning)" },
   "grid.variable": { fr: "Variable", en: "Row" },
   "grid.per_supplier": { fr: "par fournisseur", en: "per supplier" },
   "grid.no_supplier": { fr: "Sans fournisseur", en: "No supplier" },

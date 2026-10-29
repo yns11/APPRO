@@ -15,7 +15,7 @@ export interface LinkRef {
   /** standard delivery weekdays of the supplier (ISO, "1,2,4") and whether it delivers on those days only (no ◇) */
   delivery_weekdays: string; strict_days: boolean;
 }
-export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; strict_days: boolean; }
+export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; strict_days: boolean; transport_contact?: string; docks?: string; }
 export interface ProgramRef { program_id: string; name: string; family: string; active: boolean; components: number; }
 
 /** Reference tables managed in the application (generic CRUD). */
@@ -35,7 +35,7 @@ export interface ProposalOut {
   /** floor : inside the lead time, only what avoids the stockout ; capped : truncated by a supplier cap ; off_standard : ◇, a feasible working day instead of the standard delivery day */
   floor: boolean; capped: boolean; off_standard: boolean;
 }
-export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; ignored: boolean; }
+export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; ignored: boolean; transports?: string[]; }
 export interface SeriesOut { key: string; label: string; values: number[]; }
 /** One supplier of the article: its own Ferme / Prévisionnel / Reçu / Plan rows. */
 /** One despatch advice (DESADV) line of the supplier ; shown in the Reçu row while not received. */
@@ -139,12 +139,14 @@ export interface TouchedCell { entity: "plan_cell" | "adjustment" | "flag"; arti
 export interface ActionResultOut { kind: "undo" | "redo"; actions: ActionOut[]; cells: TouchedCell[]; }
 export interface AuditOut { id: number; ts: string; user: string; action: string; entity_type: string; entity_id: string; article_id: string | null; payload: Record<string, unknown>; }
 /** Rights of the signed-in user (backend/appro/services/access.py). */
-export type Role = "reader" | "appro" | "manager" | "admin";
+export type Role = "reader" | "appro" | "manager" | "admin" | "supplier";
 export interface AccessOut {
   user: string; role: Role; planner_id: string | null; name: string | null; portfolio: string[]; delegated_from: string[]; bootstrap: boolean;
   can_write: boolean; can_edit_all: boolean; can_manage_params: boolean; can_import_pdp: boolean; is_admin: boolean;
   /** edits and imports the open reference tables as a whole (every declared user for now) */
   can_edit_reference: boolean;
+  /** supplier role : the suppliers whose transport contact the user is (espace fournisseur only) */
+  supplier_ids?: string[];
 }
 /** ``as_of`` = today (the real date, or the simulated one) ; ``init_date`` = stock initialisation day, point zero of the application. */
 export interface FixedRule { name: string; value: string; }
@@ -210,9 +212,14 @@ export interface ExportColumn { key: string; label: string; type?: ExportType; }
 
 // ---------------------------------------------------------------- transports (planning de livraisons)
 export interface TransportOrderOut { order_id: string; article_id: string; ref: string; expected_date: string | null; qty: number; }
-export interface TransportOut { transport_id: string; supplier_id: string; supplier_name: string; date: string; time: string; dock: string; note: string; status: string; created_by: string; created_at: string | null; orders: TransportOrderOut[]; }
+export interface TransportOut { transport_id: string; supplier_id: string; supplier_name: string; date: string; time: string; docks: string[]; carrier: string; note: string; status: string; created_by: string; created_at: string | null; orders: TransportOrderOut[]; }
 export interface PlanningOrder { order_id: string; article_id: string; designation: string; unit: string; ref: string; expected_date: string; qty_ordered: number; qty_open: number; ignored: boolean; transports: string[]; }
-export interface PlanningSupplier { supplier_id: string; name: string; transport_contact: string; emails: string[]; orders: PlanningOrder[]; }
+export interface PlanningSupplier { supplier_id: string; name: string; transport_contact: string; emails: string[]; docks: string[]; orders: PlanningOrder[]; }
 export interface PlanningResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; suppliers: PlanningSupplier[]; transports: TransportOut[]; }
-export interface TransportSlotIn { date: string; time: string; dock: string; }
+export interface TransportSlotIn { date: string; time: string; docks: string[]; }
 export interface TransportPackOut { transports: TransportOut[]; csv: string; csv_filename: string; mail: { to: string[]; subject: string; body: string }; }
+export interface PortalKpis { open_orders: number; open_qty_lines: number; late_orders: number; today_orders: number; next_delivery: string | null; transports: number; next_transport: string | null; forecast_lines: number; forecast_weeks: number; desadv_open: number; desadv_ko: number; receipts_30d: number; }
+export interface PortalOrderRow { order_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; linked: boolean; date: string; order_type: string; qty_ordered: number; qty_open: number; purch_id: string; first_seen: string | null; transports: string[]; status: string; }
+export interface PortalDesadvRow { desadv_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string; date: string; qty: number; purch_id: string; packing_slip: string; state: string; final_processing: string; received: boolean; journal: boolean; status: string; }
+export interface PortalReceiptRow { receipt_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string; date: string; qty: number; purch_id: string; packing_slip: string; status: string; order_kind: string; counted: boolean; }
+export interface PortalResponse { suppliers: SupplierRef[]; as_of: string; kpis: PortalKpis; orders: PortalOrderRow[]; backlog: PortalOrderRow[]; forecasts: PortalOrderRow[]; transports: TransportOut[]; desadv: PortalDesadvRow[]; receipts: PortalReceiptRow[]; }

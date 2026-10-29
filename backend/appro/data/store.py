@@ -280,7 +280,8 @@ class AppTransport(Base):
     supplier_id: Mapped[str] = mapped_column(String(40), index=True)
     date: Mapped[dt.date] = mapped_column(Date, index=True)
     time: Mapped[str] = mapped_column(String(8), default="")          # HH:MM
-    dock: Mapped[str] = mapped_column(String(20), default="")
+    docks: Mapped[str] = mapped_column(Text, default="")              # delivery docks, « ; » separated (one CSV line per dock)
+    carrier: Mapped[str] = mapped_column(Text, default="")
     note: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(12), default="planned")  # planned | cancelled
     created_by: Mapped[str] = mapped_column(String(120), default="")
@@ -533,11 +534,25 @@ def normalise_nullable_numerics(engine) -> int:
     return n
 
 
+def apply_text_defaults(engine) -> int:
+    """Text columns added by a newer version with a business default (supplier docks = B15) : rows of an
+    earlier version are empty, they receive the default once.  Returns the rows fixed."""
+    n = 0
+    with engine.begin() as conn:
+        try:
+            res = conn.execute(text("UPDATE ref_suppliers SET docks = 'B15' WHERE docks IS NULL OR docks = ''"))
+            n += res.rowcount or 0
+        except Exception as exc:  # pragma: no cover - table not there yet
+            log.debug("default docks skipped: %s", exc)
+    return n
+
+
 def init_store(engine, schema: str | None = None) -> sessionmaker[Session]:
     ensure_schema(engine, schema)
     ensure_columns(engine)
     Base.metadata.create_all(engine)
     normalise_nullable_numerics(engine)
+    apply_text_defaults(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     with factory() as session:
         if session.get(AppMeta, DATA_VERSION_KEY) is None:

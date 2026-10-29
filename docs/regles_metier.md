@@ -501,6 +501,38 @@ rangée de semaines ISO ; cliquer une semaine, ou glisser d'une semaine à une a
 (Maj+clic étend, « Tout » rétablit la fenêtre entière). Le choix est commun aux deux tableaux et mémorisé ; il ne
 change **ni la fenêtre ni les dates du calcul**, seulement les colonnes montrées.
 
+## 9 ter. Planning de livraisons et transports (identifiants EM)
+
+**Page « Planning de livraisons »** : les fournisseurs du périmètre **qui ont un ordre ferme** sur la période en
+lignes, les jours ouvrés en colonnes (semaine en cours + 1 par défaut, 1 à 4 semaines, navigation), les ordres
+fermes ERP dans les cellules (article et restant à livrer ; numéro de commande, désignation et transports dans
+l'infobulle). Cocher les commandes d'un jour › **Créer le transport** : un ou plusieurs **camions** (date préremplie
+modifiable, heure, **quais** en cases à cocher parmi `B15`, `B6 EST`, `B2 NORD`, `B6 NORD`, plusieurs possibles ;
+bouton *Ajouter un transport pour ces commandes*), transporteur et commentaire facultatifs.
+
+- **Identifiant** : `EM` + 6 chiffres, **incrémental et jamais réutilisé**, tiré d'un compteur partagé
+  (`app_counters`, verrouillé en PostgreSQL : deux approvisionneurs n'obtiennent jamais le même numéro).
+- **Quais par défaut du fournisseur** : colonne *Quais* du Référentiel (cases à cocher à un clic dans le tableau
+  et dans la fiche de ligne ; **`B15` pour tous** à l'initialisation), présélectionnés à chaque création.
+- **Fichier pour l'outil de transport (ATR)** : CSV `;`, en-tête `ID TRANSPORT;FOURNISSEUR;TRANSPORTEUR;DATE;HEURE;
+  CODE FOURNISSEUR;FLUX;CHAMP1;CHAMP2;QUAIS`, **une ligne par transport et par quai** (tous les autres champs
+  répétés, identifiant compris), date `jj/mm/aaaa`, heure `hh:mm:ss`, flux toujours `R`. Rien ne se télécharge
+  automatiquement : bouton *CSV* de chaque transport dans la liste de la période, et **CSV global** *CSV ATR des
+  transports à venir* (tous les transports prévus datés d'aujourd'hui ou plus tard, **tous fournisseurs et tous
+  approvisionneurs**) pour n'importer qu'une fois dans l'outil.
+- **E-mail au fournisseur** : bouton *E-mail* de la liste ouvre Outlook avec destinataires (colonne *Contact
+  transport* du fournisseur, plusieurs adresses séparées par `;` ou `,`), objet et corps préremplis
+  (identifiants, dates, heures, quais, transporteur, commandes ; français puis anglais) ; l'approvisionneur
+  relit et envoie. Sans contact transport, le planning le signale en orange et l'e-mail part sans destinataire.
+- **Marques** : badge du transport sur les commandes du planning, petite icône camion en haut à gauche de la
+  cellule *Ordre ferme* du tableau d'approvisionnement (infobulle : identifiants), onglet **Transports** de la
+  fiche fournisseur (prévu / passé / annulé).
+- **Annulation** : bouton de la liste ; le transport reste avec le statut *annulé* (hors CSV global et hors badges),
+  le fournisseur et l'outil de transport sont à prévenir par l'approvisionneur. Création et annulation sont
+  journalisées ; elles ne sont **pas annulables par Ctrl+Z** (le fichier et l'e-mail ont pu quitter l'application).
+- **Droits** : créer ou annuler un transport demande d'être approvisionneur du carnet de l'article, manager ou
+  administrateur ; le CSV global se télécharge par tout utilisateur connecté à l'application.
+
 ## 10. Traçabilité et règles de date
 
 Chaque écriture (cellule, référentiel, import, paramètre) est journalisée avec l'utilisateur
@@ -606,6 +638,7 @@ verrouille ce qui n'est pas permis (cellules non éditables, cadenas sur l'artic
 | **appro** | les cellules Plan / Ajustement / Ferme / CBN et les paramètres hebdomadaires **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations ; **pour le moment, toutes les tables du référentiel** (articles, fournisseurs, article ↔ fournisseur, termes de consommation, **commandes fermées (PO)** : déclaration depuis Recherche ou le Référentiel, programmes, nomenclatures, stock), ligne par ligne ou par import, carnet ou non (`OPEN_REFERENCE` dans `services/access.py` ; remettre à `False` pour revenir au carnet) |
 | **manager** | comme un appro, **plus** la règle commune du moteur (tolérance), les paramètres hebdomadaires de tout article, la saisie, l'import et l'activation des PDP |
 | **admin** | tout, y compris la table des approvisionneurs |
+| **fournisseur** (e-mail présent dans la colonne *Contact transport* d'un fournisseur actif, et absent de la table des approvisionneurs et de `APPRO_ADMINS`) | rien ; **ne voit que l'espace fournisseur** (`/portail`) : ses commandes fermes en cours et leurs transports, son retard, les transports annoncés, le prévisionnel EDI (DELFOR) qui lui est attribué, ses DESADV, ses réceptions, avec leurs KPI et des filtres (article, dates, statut) ; toute autre route de l'API répond 403 (`supplier_gate`). Un manager ou un administrateur prévisualise cet espace avec `?supplier_id=` |
 
 L'identité est l'e-mail transmis par Databricks Apps (`x-forwarded-email`), comparé sans tenir compte de la
 casse à la colonne *Email*. Une **délégation** (délégant, destinataire, du, au, active) ajoute le carnet du

@@ -56,6 +56,7 @@ class SupplierRef(ORM):
     active: bool = True
     strict_days: bool = False
     transport_contact: str = ""
+    docks: str = "B15"
 
 
 class SupplierArticleRow(BaseModel):
@@ -179,6 +180,7 @@ class OrderInfoOut(BaseModel):
     qty_open: float
     ref: str = ""
     ignored: bool = False
+    transports: list[str] = Field(default_factory=list)
 
 
 class DesadvInfoOut(BaseModel):
@@ -846,7 +848,8 @@ class TransportOut(BaseModel):
     supplier_name: str = ""
     date: dt.date
     time: str
-    dock: str
+    docks: list[str] = Field(default_factory=list)
+    carrier: str = ""
     note: str = ""
     status: str = "planned"
     created_by: str = ""
@@ -872,6 +875,7 @@ class PlanningSupplier(BaseModel):
     name: str = ""
     transport_contact: str = ""
     emails: list[str] = Field(default_factory=list)
+    docks: list[str] = Field(default_factory=list)
     orders: list[PlanningOrder]
 
 
@@ -888,14 +892,44 @@ class PlanningResponse(BaseModel):
 class TransportSlotIn(BaseModel):
     date: dt.date
     time: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
-    dock: str
+    docks: list[str] = Field(..., min_length=1)
 
 
 class TransportCreateIn(BaseModel):
     supplier_id: str
     order_ids: list[str] = Field(..., min_length=1)
     slots: list[TransportSlotIn] = Field(..., min_length=1)
+    carrier: str = ""
     note: str = ""
+
+
+class PortalKpis(BaseModel):
+    open_orders: int = 0
+    open_qty_lines: int = 0
+    late_orders: int = 0
+    today_orders: int = 0
+    next_delivery: dt.date | None = None
+    transports: int = 0
+    next_transport: str | None = None
+    forecast_lines: int = 0
+    forecast_weeks: int = 0
+    desadv_open: int = 0
+    desadv_ko: int = 0
+    receipts_30d: int = 0
+
+
+class PortalResponse(BaseModel):
+    """« Espace fournisseur » : what a supplier's transport contact sees once signed in (nothing else)."""
+
+    suppliers: list[SupplierRef]
+    as_of: dt.date
+    kpis: PortalKpis
+    orders: list[dict[str, Any]]        # firm orders still open (late, today, to come) with their transports
+    backlog: list[dict[str, Any]]       # firm orders past with an ERP remaining quantity
+    forecasts: list[dict[str, Any]]     # EDI forecast lines (DELFOR) from today on
+    transports: list[TransportOut]
+    desadv: list[dict[str, Any]]
+    receipts: list[dict[str, Any]]
 
 
 class MailOut(BaseModel):

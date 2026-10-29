@@ -13,7 +13,10 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__
 from ..config import get_settings
 from ..engine.models import DatasetError
-from .routers import actions, data, entries, files, flows, help, mrp, pdp, reference, transports
+from .routers import actions, data, entries, files, flows, help, mrp, pdp, portal, reference, transports
+
+#: API routes a supplier (transport contact) may call ; everything else answers 403 (``supplier_gate``)
+SUPPLIER_PATHS = ("/api/config", "/api/health", "/api/portal", "/api/help")
 
 
 @asynccontextmanager
@@ -64,8 +67,25 @@ def create_app() -> FastAPI:
         return out
 
     for r in (reference.router, mrp.router, entries.router, pdp.router, files.router, flows.router, data.router,
-              actions.router, help.router, transports.router):
+              actions.router, help.router, transports.router, portal.router):
         app.include_router(r)
+
+    @app.middleware("http")
+    async def supplier_gate(request: Request, call_next):
+        """A supplier's transport contact only reaches the « espace fournisseur » : every other API route
+        answers 403 (the data of the plant never leaves the portal)."""
+        path = request.url.path
+        if path.startswith("/api/") and not any(path.startswith(p) for p in SUPPLIER_PATHS):
+            try:
+                from ..services.context import get_context
+                from .deps import access_dep, current_user
+                ctx = get_context()
+                access = access_dep(ctx, current_user(request))
+            except Exception:  # context not ready, database down : the route itself will say so
+                access = None
+            if access is not None and access.is_supplier:
+                return JSONResponse(status_code=403, content={"detail": "Espace fournisseur : cette page n'est pas accessible aux contacts transport des fournisseurs"})
+        return await call_next(request)
 
     @app.middleware("http")
     async def no_store(request: Request, call_next):

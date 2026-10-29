@@ -449,6 +449,7 @@ def sections() -> list[dict[str, str]]:
 <div class="callout"><b>Vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se recalcule.</b></div>
 <p><b>Partie A · Tableau d'approvisionnement</b> : une ligne <b>Consommation et besoin</b> (consommé réel dans le passé, besoin du PDP dans le futur) ; par fournisseur actif : <b>Ordre ferme</b>, <b>Prévisionnel EDI</b>, <b>Quantité reçue</b>, <b>Quantité à retenir</b>, <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Stock projeté</b>, seule projection de stock du tableau, comparée au <b>stock ERP de la veille</b> (5 bis). Deux lignes se saisissent (Quantité à retenir, Ajustement), trois se cliquent (Ordre ferme, Proposition CBN, Quantité reçue), le reste se lit.</p>
 <p><b>Partie B · Cockpit du jour</b> : l'onglet <b>Couvertures et stocks</b> répond à « que dois-je faire aujourd'hui ? » article par article ; l'onglet <b>Flux d'approvisionnement</b> suit commandes, transports et réceptions du jour.</p>
+<p><b>Planning de livraisons</b> : les ordres fermes de chaque fournisseur jour par jour ; cochez les commandes d'un jour, créez un ou plusieurs <b>transports</b> (date, heure, quais, identifiant <b>EM</b>), prenez le <b>CSV ATR</b> et l'<b>e-mail</b> au fournisseur dans la liste (section 9).</p>
 <p>Les boutons <b>FR | EN</b> du tableau d'approvisionnement et de la fiche article passent les intitulés en anglais, pour un partage d'écran ou une capture envoyée à un fournisseur.</p>
 <p class="cmt">Règles détaillées : <i>docs/regles_metier.md</i> ; calculs pas à pas : <i>docs/guide_moteur.md</i>.</p>""")
 
@@ -648,6 +649,24 @@ def sections() -> list[dict[str, str]]:
              ["CO-09980 prévue le 20/10, restant 400", chip("En retard", "warning"), "→ sort dès que l'ERP solde"],
          ]))
 
+    # ============================================================== Livraisons
+    page("livraisons", "B", PART_B, "9. Planning de livraisons et transports",
+         """<p>Les ordres fermes ERP de chaque fournisseur, <b>jour par jour</b> (fournisseurs en lignes, jours ouvrés en colonnes ; seuls les fournisseurs qui ont une commande sur la période apparaissent ; article et restant à livrer dans la cellule, le reste dans l'infobulle).</p>
+<h4>Créer un transport</h4>
+<ol>
+<li>Cochez les commandes <b>d'un même jour</b> d'un fournisseur, puis <b>Créer le transport</b>.</li>
+<li>Un camion = une date (préremplie, modifiable), une heure et <b>un ou plusieurs quais</b> (cases <b>B15</b>, <b>B6 EST</b>, <b>B2 NORD</b>, <b>B6 NORD</b> ; les quais par défaut du fournisseur, colonne <i>Quais</i> du Référentiel, sont précochés). <b>Ajouter un transport</b> pour un second camion sur les mêmes commandes. Transporteur et commentaire facultatifs.</li>
+<li>À la validation, chaque camion reçoit un identifiant <b>EM</b> + 6 chiffres (incrémental, jamais réutilisé). Les commandes portent un badge, le tableau d'approvisionnement une petite icône camion dans la cellule <i>Ordre ferme</i>.</li>
+</ol>
+<h4>Fichier ATR et e-mail</h4>
+<ul>
+<li><b>CSV ATR des transports à venir</b> (bouton en haut de la page) : tous les transports prévus à partir d'aujourd'hui, tous fournisseurs et tous approvisionneurs : <b>un seul import</b> dans l'outil de transport. Chaque transport a aussi son bouton <i>CSV</i> dans la liste du bas.</li>
+<li>Le fichier contient l'en-tête attendu par ATR et <b>une ligne par transport et par quai</b> (identifiant répété), flux toujours <b>R</b>.</li>
+<li><b>E-mail</b> : le bouton de la liste ouvre Outlook avec les destinataires (colonne <i>Contact transport</i> du fournisseur), l'objet et le corps (identifiants, dates, heures, quais, commandes ; français puis anglais). Relisez, envoyez. Un fournisseur <b>sans contact transport</b> est signalé en orange : complétez le Référentiel.</li>
+<li><b>Annuler</b> un transport le garde avec le statut <i>annulé</i> (hors CSV global) ; prévenez le fournisseur et retirez-le de l'outil de transport. Création et annulation sont journalisées, pas de Ctrl+Z.</li>
+</ul>
+<p>Un <b>contact transport</b> qui se connecte à l'application n'accède qu'à son <b>espace fournisseur</b> : ses commandes fermes en cours et transports, son retard, le prévisionnel, ses DESADV, ses réceptions.</p>""")
+
     # ============================================================== Mémo
     page("memo", "", "", "Mémo : marqueurs, couleurs et gestes",
          table(["Où", "Signe", "Sens"], [
@@ -656,6 +675,8 @@ def sections() -> list[dict[str, str]]:
              ["Proposition CBN, cockpit", '<span class="mk off">◇</span>', "hors jour standard : jour ouvré tenable, pas le jour habituel"],
              ["Proposition CBN", "barré", "refusée d'un clic, ce fournisseur ce jour-là"],
              ["Ordre ferme", "orange / vert / rouge barré", "en cours / soldée / ignorée"],
+             ["Ordre ferme", "petite icône camion en haut à gauche", "transport créé dans le Planning de livraisons (identifiants dans l'infobulle)"],
+             ["Planning de livraisons", '<span class="chip brand">EM000123 09:30 B15</span>', "transport annoncé au fournisseur : date, heure, quais ; CSV ATR et e-mail depuis la liste"],
              ["Quantité reçue", "italique orange 🚚 / blanc / vert", "en transit (jamais compté) / reçu / comptabilisé"],
              ["Quantité reçue", '<span class="dot ok"></span> / <span class="dot ko"></span>', "DESADV traité / aucun DESADV traité"],
              ["Quantité à retenir", "gris / bleu", "ERP (vide) / votre saisie (0 = rien attendu)"],

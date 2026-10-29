@@ -1,3 +1,4 @@
+import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useConsumptionSources, useRefRows, useWrite } from "@/lib/queries";
@@ -40,6 +41,7 @@ export function RefRowEditor({ table, row, onClose, fixed, onSaved }: { table: R
     const set = (v: string) => setValues({ ...values, [c.name]: v });
     const disabled = (c.key && !isNew) || !!fixed?.[c.name];
     if (c.type === "bool") return <select className="select" value={values[c.name] ?? "oui"} onChange={(e) => set(e.target.value)} disabled={disabled}><option value="oui">oui</option><option value="non">non</option></select>;
+    if (table.name === "ref_suppliers" && c.name === "docks") return <DockPicker all={DOCKS} value={splitDocks(values[c.name])} onChange={(v) => set(v.join(";"))} disabled={disabled} label="Quais par défaut" />;
     if (choices[c.name]) return <select className="select" value={values[c.name] || choices[c.name][0].value} onChange={(e) => set(e.target.value)} disabled={disabled}>{choices[c.name].map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
     if (table.name === "ref_consumption_terms" && c.name === "source_article_id") {
       return (

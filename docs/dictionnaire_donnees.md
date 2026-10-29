@@ -58,6 +58,8 @@ plus ; les anciennes colonnes sont ignorées à l'import.
 | name | Nom | texte | oui | |
 | country | Pays | texte | non | |
 | contact | Contact | texte | non | |
+| transport_contact | Contact transport | texte | non | adresses e-mail des avis de transport, séparées par `;` ou `,` ; destinataires des e-mails du Planning de livraisons ; une personne connectée avec l'une de ces adresses n'accède qu'à l'**espace fournisseur** |
+| docks | Quais | texte | non (`B15`) | quais de livraison par défaut, séparés par `;` (`B15`, `B6 EST`, `B2 NORD`, `B6 NORD`), présélectionnés à la création d'un transport ; cases à cocher à un clic dans le Référentiel ; les lignes vides reçoivent `B15` au démarrage |
 | delivery_weekdays | Jours de livraison | texte | oui | jours de livraison **standard**, ISO, `1,2,3,4,5` (1 = lundi) ; saisie en colonne semaine posée sur le premier de ces jours |
 | strict_days | Jours stricts | oui / non | non (non) | oui : livraisons uniquement les jours standard, jamais de proposition hors jour standard (◇) ; non : le CBN peut poser une proposition ◇ sur un autre jour ouvré quand le jour standard n'est plus tenable |
 | lead_time_days | Délai (j ouvrés) | entier | oui | délai du fournisseur en jours **ouvrés**, inclusif (lundi + 5 = lundi suivant) ; initialisé à 5 pour tous |
@@ -368,6 +370,9 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `app_help_pages` | **pense-bête intégré** : texte enregistré par un administrateur pour une page (`slug`, titre, `body_html` nettoyé, auteur, horodatage) ; absent = texte livré (`backend/appro/help/pense_bete.json`) ; `DELETE` revient au texte livré | slug |
 | `app_param_overrides` | règles communes du moteur (`global`, champs `target_tolerance_pct`, `lead_margin_days`, `stock_drift_pct`, `stock_drift_min_packs`, `stock_drift_persist`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
+| `app_transports` | **transports** du Planning de livraisons : identifiant `EM` + 6 chiffres, fournisseur, date, heure, quais (`;`), transporteur, commentaire, statut `planned` / `cancelled`, auteur, horodatage | transport_id |
+| `app_transport_orders` | commandes fermes portées par un transport (`order_id` du créneau ERP, article, numéros de commande, date prévue, quantité restante au moment de la création) | id |
+| `app_counters` | compteurs incrémentaux nommés (`transport` → dernier numéro EM attribué), lus avec `FOR UPDATE` | name |
 | `app_actions` | annuler / rétablir : un geste utilisateur (horodatage, utilisateur, type, libellé, article, groupe), les lignes touchées avec leur état avant / après (JSON), annulable ou non, état `applied` / `undone` / `discarded`, qui l'a annulée ou rétablie et quand ; purge après 7 jours | id |
 | `erp_purchase_orders`, `erp_receipts`, `erp_consumption_actual`, `erp_desadv`, `erp_prices`, `erp_stock_snapshot` | **miroir des faits ERP** (§ 2), écrit par le job de synchronisation (rôle `APPRO_SYNC_ROLE`) | clé de la table |
 | `erp_sync_log` | par table miroir : nombre de lignes, horodatage, source, identifiant d'exécution (`/api/health`, `GET /api/data/sync` : âge de chaque table, état *en retard* au-delà de deux heures, bandeau dans l'application) | table_name |

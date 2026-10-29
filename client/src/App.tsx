@@ -15,15 +15,32 @@ import ImportsPage from "@/pages/ImportsPage";
 import ReferencePage from "@/pages/ReferencePage";
 import SettingsPage from "@/pages/SettingsPage";
 import HelpPage from "@/pages/HelpPage";
+import SupplierPortalPage from "@/pages/SupplierPortalPage";
+import { usePerimeter } from "@/state/PerimeterContext";
 
 /** The search page can be hidden again by turning this off (no menu entry, no route). */
 const SEARCH_ENABLED = true;
 
 export default function App() {
+  const { config } = usePerimeter();
+  // a supplier's transport contact only sees the « espace fournisseur » (the API refuses everything else anyway)
+  if (config?.access?.role === "supplier") {
+    return (
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/portail" element={<SupplierPortalPage />} />
+          <Route path="/aide" element={<HelpPage />} />
+          <Route path="/aide/:slug" element={<HelpPage />} />
+          <Route path="*" element={<Navigate to="/portail" replace />} />
+        </Route>
+      </Routes>
+    );
+  }
   return (
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<CockpitPage />} />
+        <Route path="/portail" element={<SupplierPortalPage />} />
         <Route path="/articles" element={<ArticlesPage />} />
         <Route path="/articles/:articleId" element={<ArticlePage />} />
         <Route path="/fournisseurs" element={<SuppliersPage />} />

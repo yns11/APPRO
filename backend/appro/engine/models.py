@@ -67,10 +67,15 @@ class Supplier:
     active: bool = True
     strict_days: bool = False      # True : deliveries on the standard weekdays only (no « hors jour standard » proposal)
     transport_contact: str = ""    # e-mail addresses of the transport notices (« ; » or « , » separated)
+    docks: str = "B15"             # default delivery docks (« ; » separated), preselected when a transport is created
 
     @property
     def transport_emails(self) -> list[str]:
-        return [x.strip() for x in re.split(r"[;,\s]+", self.transport_contact or "") if x.strip()]
+        return [x.strip().lower() for x in re.split(r"[;,\s]+", self.transport_contact or "") if x.strip()]
+
+    @property
+    def dock_list(self) -> list[str]:
+        return [x.strip() for x in re.split(r"[;,]+", self.docks or "") if x.strip()] or ["B15"]
 
 
 @dataclass
@@ -485,6 +490,7 @@ class OrderInfo:
     qty_open: float
     ref: str = ""
     ignored: bool = False
+    transports: list[str] = field(default_factory=list)   # identifiers of the transports (trucks) announced for the slot
 
 
 @dataclass

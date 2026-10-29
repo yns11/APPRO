@@ -6,7 +6,10 @@
 * a **manager** is an appro who also sets the parameters for everybody (global rules, weekly values
   of any article) and imports the PDP ;
 * an **admin** has every right (reference tables, planners, delegations included) ;
-* while ``ref_planners`` is empty every user is an admin (first installation).
+* while ``ref_planners`` is empty every user is an admin (first installation) ;
+* a **supplier** (an e-mail listed in ``ref_suppliers.transport_contact`` and nowhere in ``ref_planners``)
+  only reaches the « espace fournisseur » (``/api/portal``) : his firm orders and transports, forecasts,
+  backlog, despatch advices and receipts ; every other route answers 403.
 
 **For now** (``OPEN_REFERENCE``), every declared user edits and imports the reference tables of
 ``OPEN_TABLES`` as a whole, his portfolio or not ; the planners stay the admins' and the delegations
@@ -15,6 +18,7 @@ keep their own rule.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -22,6 +26,7 @@ from fastapi import HTTPException
 
 ROLES = ("appro", "manager", "admin")
 READER = "reader"
+SUPPLIER = "supplier"
 # tables an appro may edit for his own articles (row scoped by ``article_id`` or ``planner``)
 ARTICLE_TABLES = ("ref_articles", "ref_article_suppliers", "ref_bom", "fct_stock")
 # tables reserved to admins (a manager edits the others as a whole)
@@ -40,6 +45,7 @@ class Access:
     portfolio: frozenset[str] = frozenset()   # upper-cased planner names the user may write on
     delegated_from: list[str] = field(default_factory=list)   # planner ids delegating to the user
     bootstrap: bool = False               # no planner declared yet: everybody is admin
+    supplier_ids: list[str] = field(default_factory=list)   # supplier role : the suppliers whose transport contact the user is
     _article_planner: dict[str, str] = field(default_factory=dict, repr=False)
     _planner_name: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -54,7 +60,11 @@ class Access:
 
     @property
     def can_write(self) -> bool:
-        return self.role != READER
+        return self.role in ROLES
+
+    @property
+    def is_supplier(self) -> bool:
+        return self.role == SUPPLIER
 
     def can_edit_planner(self, planner_name: str | None) -> bool:
         return self.is_admin or (planner_name or "").upper() in self.portfolio
@@ -134,7 +144,22 @@ class Access:
                 "portfolio": sorted(self.portfolio), "delegated_from": list(self.delegated_from), "bootstrap": self.bootstrap,
                 "can_write": self.can_write, "can_edit_all": self.is_admin, "can_manage_params": self.is_manager,
                 "can_import_pdp": self.is_manager, "is_admin": self.is_admin,
-                "can_edit_reference": self.can_edit_table("ref_articles")}
+                "can_edit_reference": self.can_edit_table("ref_articles"), "supplier_ids": list(self.supplier_ids)}
+
+
+def supplier_ids_of(user: str, suppliers: pd.DataFrame | None) -> list[str]:
+    """Suppliers whose ``transport_contact`` lists the user's e-mail (case-insensitive)."""
+    if suppliers is None or suppliers.empty or "transport_contact" not in suppliers.columns:
+        return []
+    me = (user or "").strip().lower()
+    if not me:
+        return []
+    out = []
+    for r in suppliers.to_dict("records"):
+        mails = [x.strip().lower() for x in re.split(r"[;,\s]+", _s(r.get("transport_contact"))) if x.strip()]
+        if me in mails and bool(r.get("active", True)):
+            out.append(_s(r["supplier_id"]))
+    return out
 
 
 def _s(v) -> str:
@@ -142,23 +167,31 @@ def _s(v) -> str:
 
 
 def resolve_access(user: str, planners: pd.DataFrame, delegations: pd.DataFrame, articles: pd.DataFrame,
-                   today: dt.date | None = None, admins: set[str] | None = None) -> Access:
+                   today: dt.date | None = None, admins: set[str] | None = None, suppliers: pd.DataFrame | None = None) -> Access:
     """Rights of ``user`` (the e-mail forwarded by Databricks Apps) from the three reference frames.
 
     ``admins`` (``APPRO_ADMINS``, the bundle deployer by default) are administrators whatever the
-    planners table says: the person who installs the application can never lock herself out."""
+    planners table says: the person who installs the application can never lock herself out.
+    ``suppliers`` (``ref_suppliers``) gives the **supplier** role to a transport contact who is neither a
+    declared planner nor an administrator."""
     today = today or dt.date.today()
     art_planner = {str(r["article_id"]): _s(r.get("planner")) for r in articles.to_dict("records")}
     names = {_s(r["planner_id"]): _s(r["name"]) for r in planners.to_dict("records")}
     acc = Access(user=user, _article_planner=art_planner, _planner_name=names)
     forced_admin = (user or "").strip().lower() in (admins or set())
+    sids = [] if forced_admin else supplier_ids_of(user, suppliers)
     if planners.empty:
+        if sids:
+            acc.role, acc.supplier_ids = SUPPLIER, sids
+            return acc
         acc.role, acc.bootstrap = "admin", True
         return acc
     me = [r for r in planners.to_dict("records") if _s(r.get("email")).lower() == (user or "").strip().lower() and bool(r.get("active", True))]
     if not me:
         if forced_admin:
             acc.role = "admin"
+        elif sids:
+            acc.role, acc.supplier_ids = SUPPLIER, sids
         return acc
     row = me[0]
     role = _s(row.get("role")).lower()
