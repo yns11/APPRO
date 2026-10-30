@@ -50,7 +50,7 @@ FIXED_RULES: list[tuple[str, str]] = [
     ("À commander", "statut et carte du tableau de bord : date limite dans les 5 prochains jours ouvrés ; urgente quand elle est dépassée"),
     ("Horizon", "52 semaines, tableau et PDP compris"),
     ("Commandes comptées", "ordres fermes seulement (les prévisionnels EDI sont affichés, jamais comptés)"),
-    ("Stock ERP", "snapshot physique de la veille (entrepôts configurés, 30 jours d'historique) comparé au stock projeté du même jour ; un stock projeté à 0 se compare sur le solde net ; le calage crée un ajustement signé daté du snapshot, jamais une modification du point zéro"),
+    ("Stock ERP", "snapshot physique de la veille (entrepôts configurés, 400 jours d'historique) comparé au stock projeté du même jour ; un stock projeté à 0 se compare sur le solde net ; le calage crée un ajustement signé daté du snapshot, jamais une modification du point zéro"),
 ]
 
 

@@ -89,6 +89,9 @@ variables:
   stock_warehouses:
     description: Entrepôts (colonne entrepot) sommés dans le stock ERP, séparés par des virgules.
     default: B06,B06VRAC
+  stock_history_days:
+    description: Jours de snapshots de stock ERP copiés dans le miroir (historique de la dérive et de la courbe).
+    default: 400
 
   # --- Identités et exploitation (propres à chaque cible) ---------------------
   admin_emails:

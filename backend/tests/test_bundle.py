@@ -64,7 +64,7 @@ def test_le_job_et_l_application_partagent_le_sql_de_correspondance() -> None:
     from appro.data.schemas import TABLES
     q = fact_queries(ErpTables(consumption="prod", desadv="desadv_edi", prices="silver_base_article", stock="stock_snapshot"))
     assert set(q) == {"fct_purchase_orders", "fct_receipts", "fct_consumption_actual", "fct_desadv", "fct_prices", "fct_stock_snapshot"}
-    assert "s.entrepot IN ('B06', 'B06VRAC')" in q["fct_stock_snapshot"] and "DATE_SUB(CURRENT_DATE(), 30)" in q["fct_stock_snapshot"]
+    assert "s.entrepot IN ('B06', 'B06VRAC')" in q["fct_stock_snapshot"] and "DATE_SUB(CURRENT_DATE(), 400)" in q["fct_stock_snapshot"]
     job_filled = {"fct_purchase_orders": {"first_seen"}}      # columns the job computes (carried over between two copies)
     for name, sql in q.items():
         for col in TABLES[name].column_names:

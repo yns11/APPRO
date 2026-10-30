@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     erp_prices_table: str | None = Field("silver_base_article", description="item master with std_cost_price (euros) ; empty = no stock valuation")
     erp_stock_table: str | None = Field("stock_snapshot", description="daily physical stock snapshot per article and warehouse (item_id, snapshot_date, entrepot, stock_physique) ; empty = no comparison with the ERP stock")
     stock_warehouses: str = Field("B06,B06VRAC", description="warehouses (column entrepot) summed in the ERP stock, comma separated")
-    stock_history_days: int = Field(30, description="days of ERP stock snapshots kept (drift history)")
+    stock_history_days: int = Field(400, description="days of ERP stock snapshots kept (drift history, curve of the article page)")
     cache_ttl_seconds: float = Field(300.0)
 
     # --- application database ----------------------------------------------------------

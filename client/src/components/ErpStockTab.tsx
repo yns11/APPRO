@@ -10,7 +10,7 @@ import type { AdjustmentOut, ProjectionResponse } from "@/lib/types";
 export const isCalibration = (a: AdjustmentOut) => /^Calage sur le stock ERP/i.test(a.note ?? "");
 
 /**
- * Fiche article › Stock ERP : the ERP stock snapshots against the projected stock of the same day (30 days),
+ * Fiche article › Stock ERP : the ERP stock snapshots against the projected stock of the same day (the copied history, 400 days by default),
  * the reading of the last gap (warehouses, sign, drift), the « Caler sur l'ERP » button and the past calibrations.
  */
 export function ErpStockTab({ d, adjustments, canEdit }: { d: ProjectionResponse; adjustments: AdjustmentOut[]; canEdit: boolean }) {
@@ -26,7 +26,7 @@ export function ErpStockTab({ d, adjustments, canEdit }: { d: ProjectionResponse
   const tone = k.erp_stock_drift ? (low ? "warning" : "info") : "neutral";
   return (
     <div className="grid cols-3">
-      <Card className="span-2" title="Stock ERP et dérive · 30 derniers snapshots" hint="points = stock ERP en fin de journée (entrepôts configurés) · ligne = stock projeté par l'application le même jour · barres = écart signé ERP − projeté"
+      <Card className="span-2" title="Stock ERP et dérive · snapshots copiés" hint="points = stock ERP en fin de journée (entrepôts configurés) · ligne = stock projeté par l'application le même jour · barres = écart signé ERP − projeté"
         actions={canEdit && Math.abs(last.gap) > 1e-9 ? <Button size="sm" variant={k.erp_stock_drift ? "primary" : "default"} onClick={() => setDialog(true)}><Scale />Caler sur l'ERP (ajustement {fmtSigned(last.gap, unit)} au {fmtDate(last.date)})…</Button> : undefined}>
         <ResponsiveContainer width="100%" height={260}>
           <ComposedChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>

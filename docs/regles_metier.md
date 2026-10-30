@@ -248,7 +248,7 @@ rouge foncé. Les alertes de rupture donnent le manque cumulé maximal.
 
 L'ERP photographie chaque jour le stock physique par article et entrepôt (`fct_stock_snapshot` ←
 `stock_snapshot` : `item_id, snapshot_date, entrepot, stock_physique` ; entrepôts `B06` et `B06VRAC` par défaut,
-30 jours conservés ; `APPRO_ERP_STOCK_TABLE` vide = fonction absente, aucune colonne, tuile ni onglet). Le
+400 jours conservés (`stock_history_days`, variable du bundle, `--stock-history-days` du job, widget du notebook, `APPRO_STOCK_HISTORY_DAYS`) ; `APPRO_ERP_STOCK_TABLE` vide = fonction absente, aucune colonne, tuile ni onglet). Le
 snapshot d'un jour est connu à sa fin : celui d'aujourd'hui n'est jamais comparé. Ce stock ne remplace **jamais**
 le stock de référence (point zéro) : il sert à mesurer l'écart et à le corriger d'un geste.
 
@@ -266,7 +266,7 @@ le stock de référence (point zéro) : il sert à mesurer l'écart et à le cor
   ouvrés) ; tableau d'approvisionnement (badge *dérive ERP* sur l'en-tête de l'article, « ERP n » sous le stock
   projeté des jours passés, orange / bleu au-delà du seuil, infobulle avec les entrepôts) ; fiche article (tuile
   *Stock ERP (veille)*, couverture « selon l'ERP » quand le snapshot est celui de la veille, onglet *Stock ERP* :
-  30 snapshots en courbe contre le stock projeté, lecture de l'écart par entrepôt, calages passés) ; courbes
+  snapshots en courbe contre le stock projeté, lecture de l'écart par entrepôt, calages passés) ; courbes
   (points ERP sur le passé) ; feuille d'inventaire (colonnes *Stock ERP* et *Écart appli − ERP*, ● sur les
   dérives) ; journal de synchronisation (`erp_stock_snapshot`).
 * **Caler sur l'ERP** (fiche article ; en lot sur les articles filtrés du cockpit pour les managers et

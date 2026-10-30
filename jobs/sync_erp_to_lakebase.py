@@ -80,7 +80,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--prices-table", default="silver_base_article", help="table UC des articles avec std_cost_price (prix en euros) ; vide = aucune")
     p.add_argument("--stock-table", default="stock_snapshot", help="table UC du snapshot quotidien de stock physique (item_id, snapshot_date, entrepot, stock_physique) ; vide = aucune")
     p.add_argument("--stock-warehouses", default="B06,B06VRAC", help="entrepôts sommés dans le stock ERP, séparés par des virgules")
-    p.add_argument("--stock-history-days", type=int, default=30, help="jours de snapshots conservés")
+    p.add_argument("--stock-history-days", type=int, default=400, help="jours de snapshots de stock ERP copiés (historique de la dérive et de la courbe)")
     p.add_argument("--branch", default="", help="projects/<projet>/branches/<branche>")
     p.add_argument("--endpoint", default="", help="projects/<projet>/branches/<branche>/endpoints/<endpoint>")
     p.add_argument("--pg-host", default="", help="hôte Lakebase si la découverte est impossible")

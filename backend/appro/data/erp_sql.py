@@ -17,7 +17,7 @@ Sources (schema ``emotors_data_champions.silver_erp_ye`` by default) :
   columns ``article_id, date, qty`` – the consumption is given **per component, already exploded**
   through the bill of material (unlike the PDP, exploded by the engine) ;
 * an optional daily **physical stock snapshot** (``APPRO_ERP_STOCK_TABLE``, ``stock_snapshot`` : ``item_id,
-  snapshot_date, entrepot, stock_physique``), summed over the configured warehouses, last 30 days : compared
+  snapshot_date, entrepot, stock_physique``), summed over the configured warehouses, last 400 days by default : compared
   with the projected stock of the same day (gap, drift, « caler sur l'ERP »), never a starting stock.
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ class ErpTables:
     prices: str = ""              # empty: no article prices (no stock valuation)
     stock: str = ""               # empty: no ERP stock snapshot (no comparison with the projected stock)
     stock_warehouses: tuple[str, ...] = ("B06", "B06VRAC")
-    stock_history_days: int = 30
+    stock_history_days: int = 400
 
     def fqn(self, table: str) -> str:
         return f"`{self.catalog}`.`{self.schema}`.`{table}`"

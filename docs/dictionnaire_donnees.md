@@ -331,7 +331,7 @@ aucune valeur (compté « sans prix » sur la carte).
 
 Snapshot quotidien du stock physique par article et entrepôt (`APPRO_ERP_STOCK_TABLE`, variable
 `erp_stock_table`, défaut `stock_snapshot` ; vide = aucune comparaison). Le job ne copie que les entrepôts
-configurés (`APPRO_STOCK_WAREHOUSES`, défaut `B06,B06VRAC`) et les 30 derniers jours.
+configurés (`APPRO_STOCK_WAREHOUSES`, défaut `B06,B06VRAC`) et les 400 derniers jours (`stock_history_days`, 400 par défaut).
 
 | Colonne | Type | Source | Règle |
 |---|---|---|---|

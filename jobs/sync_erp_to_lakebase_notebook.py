@@ -40,6 +40,7 @@ dbutils.widgets.text("desadv_table", "desadv_edi", "9b. Table des avis d'expédi
 dbutils.widgets.text("prices_table", "silver_base_article", "11. Table des articles avec std_cost_price (vide = aucune)")
 dbutils.widgets.text("stock_table", "stock_snapshot", "12. Table du snapshot quotidien de stock physique (vide = aucune)")
 dbutils.widgets.text("stock_warehouses", "B06,B06VRAC", "13. Entrepôts sommés dans le stock ERP (séparés par des virgules)")
+dbutils.widgets.text("stock_history_days", "400", "14. Jours de snapshots de stock ERP copiés (historique)")
 
 # COMMAND ----------
 
@@ -54,7 +55,7 @@ logging.basicConfig(level=logging.INFO)
 LOG = logging.getLogger("appro.sync")
 W = {k: dbutils.widgets.get(k).strip() for k in ("lakebase_endpoint", "pg_host", "pg_database", "pg_schema", "erp_catalog",
                                                   "erp_schema", "orders_table", "receipts_table", "consumption_table", "desadv_table",
-                                                  "prices_table", "stock_table", "stock_warehouses")}
+                                                  "prices_table", "stock_table", "stock_warehouses", "stock_history_days")}
 
 # --- SQL de correspondance (copie de backend/appro/data/erp_sql.py : à tenir identique) ----------
 def fqn(t):
@@ -99,7 +100,7 @@ if W["stock_table"]:
     QUERIES["erp_stock_snapshot"] = (["article_id", "snapshot_date", "warehouse", "qty"], f"""
 SELECT s.item_id AS article_id, CAST(s.snapshot_date AS DATE) AS snapshot_date, s.entrepot AS warehouse, CAST(SUM(s.stock_physique) AS DOUBLE) AS qty
 FROM {fqn(W['stock_table'])} s WHERE s.item_id IS NOT NULL AND s.snapshot_date IS NOT NULL AND s.stock_physique IS NOT NULL
-  AND CAST(s.snapshot_date AS DATE) >= DATE_SUB(CURRENT_DATE(), 30){' AND s.entrepot IN (' + _wh + ')' if _wh else ''}
+  AND CAST(s.snapshot_date AS DATE) >= DATE_SUB(CURRENT_DATE(), {int(W['stock_history_days'] or 400)}){' AND s.entrepot IN (' + _wh + ')' if _wh else ''}
 GROUP BY s.item_id, CAST(s.snapshot_date AS DATE), s.entrepot""")
 
 # COMMAND ----------
