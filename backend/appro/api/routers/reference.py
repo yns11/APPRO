@@ -540,10 +540,11 @@ def reset_overrides(scope: str, response: Response, key1: str = "", ctx: AppCont
 
 @router.delete("/params/overrides/{override_id}", status_code=204)
 def delete_override(override_id: str, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-                    user: str = Depends(current_user)):
+                    user: str = Depends(current_user), access: Access = Depends(access_dep)):
     row = session.get(ParamOverride, override_id)
     if row is None:
         raise HTTPException(404, "Paramètre inconnu")
+    _authorize_override(access, row.scope, row.key1)     # never more rights than the PUT of the same value
     rec = actions.Recorder(session, user)
     rec.before("param_override", {"scope": row.scope, "key1": row.key1, "key2": row.key2, "field": row.field})
     audit(session, user, "delete_param", "param_override", row.id, None, {"field": row.field})

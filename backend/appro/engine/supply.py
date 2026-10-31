@@ -225,13 +225,14 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     # receipts by delivery note (BL).  Green dot = the BL is announced by a processed DESADV, red otherwise.
     hidden_days = {(f.supplier_id or None, f.date) for f in (flags or ()) if f.kind == "desadv_hidden"}
     live = [d for d in (desadv or ()) if d.state.strip().lower() != "annulé" and lane_of(d.supplier_id) is not None]
-    processed_bls = {d.packing_slip.strip() for d in live if d.processed and d.packing_slip.strip()}
-    received_bls = {bl for r in posted for bl in r.packing_slips}
-    transit_bls = {bl for r in transit for bl in r.packing_slips}
+    # a delivery note number is only unique within a supplier : every match carries the supplier
+    processed_bls = {(d.supplier_id, d.packing_slip.strip()) for d in live if d.processed and d.packing_slip.strip()}
+    received_bls = {(r.supplier_id, bl) for r in posted for bl in r.packing_slips}
+    transit_bls = {(r.supplier_id, bl) for r in transit for bl in r.packing_slips}
     for r in sorted(transit, key=lambda r: (r.receipt_date, r.receipt_id)):
         ln = lane_of(r.supplier_id)
         bl = (r.packing_slip or "").strip()
-        processed = any(x in processed_bls for x in r.packing_slips)
+        processed = any((r.supplier_id, x) in processed_bls for x in r.packing_slips)
         hidden = (ln.supplier_id, r.receipt_date) in hidden_days
         ln.desadv.append(DesadvInfo(r.receipt_id, bl, r.receipt_date, float(r.qty), "Journal d'arrivée non validé", "",
                                     processed, False, hidden, r.ref or "", "", False, "journal"))
@@ -244,8 +245,8 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
     for d in live:
         bl = d.packing_slip.strip()
         ln = lane_of(d.supplier_id)
-        received = bl in received_bls
-        journaled = bool(bl) and bl in transit_bls           # shown through its arrival journal
+        received = (d.supplier_id, bl) in received_bls
+        journaled = bool(bl) and (d.supplier_id, bl) in transit_bls           # shown through its arrival journal
         hidden = (ln.supplier_id, d.issue_date) in hidden_days
         ln.desadv.append(DesadvInfo(d.desadv_id, bl, d.issue_date, float(d.qty), d.state, d.final_processing,
                                     d.processed, received, hidden, d.purch_id, d.stock_trans_id, journaled))
@@ -264,7 +265,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         bl = (r.packing_slip or "").strip()
         # green when the BL is announced by a processed DESADV ; a manual receipt (no BL, or a BL unknown to
         # the processed DESADV) is red ; the acknowledgement of receipt gives the green background
-        processed = any(x in processed_bls for x in r.packing_slips)
+        processed = any((r.supplier_id, x) in processed_bls for x in r.packing_slips)
         ln = lane_of(r.supplier_id)
         ln.receipt_lines.append(ReceiptInfo(r.receipt_id, r.receipt_date, float(r.qty), bl, r.ref or "", processed, r.status, r.booked,
                                             order_kind=r.order_kind))

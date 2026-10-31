@@ -25,6 +25,7 @@ def list_actions(user: str | None = None, article_id: str | None = None, mine: b
 
 
 def _run(fn, ctx: AppContext, session: Session, actor: str, access: Access, kind: str) -> S.ActionResultOut:
+    access.require_write()      # current rights, not those of the day the action was written
     try:
         done = fn()
     except actions.ActionError as exc:
@@ -40,14 +41,14 @@ def _run(fn, ctx: AppContext, session: Session, actor: str, access: Access, kind
 def undo_last(ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
               actor: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Ctrl+Z : undo the caller's most recent action."""
-    return _run(lambda: actions.undo_last(session, actor), ctx, session, actor, access, "undo")
+    return _run(lambda: actions.undo_last(session, actor, actions.rights_guard(access)), ctx, session, actor, access, "undo")
 
 
 @router.post("/redo-last", response_model=S.ActionResultOut)
 def redo_last(ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
               actor: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Ctrl+Y : redo the action the caller undid last."""
-    return _run(lambda: actions.redo_last(session, actor), ctx, session, actor, access, "redo")
+    return _run(lambda: actions.redo_last(session, actor, actions.rights_guard(access)), ctx, session, actor, access, "redo")
 
 
 @router.post("/{action_id}/undo", response_model=S.ActionResultOut)
@@ -55,11 +56,11 @@ def undo(action_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = 
          actor: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Undo this action and, first, every newer applied action of the same user (« annuler jusqu'ici ») ;
     all or nothing.  Own actions, or anyone's for an administrator."""
-    return _run(lambda: actions.undo(session, actor, action_id, access.is_admin), ctx, session, actor, access, "undo")
+    return _run(lambda: actions.undo(session, actor, action_id, access.is_admin, actions.rights_guard(access)), ctx, session, actor, access, "undo")
 
 
 @router.post("/{action_id}/redo", response_model=S.ActionResultOut)
 def redo(action_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
          actor: str = Depends(current_user), access: Access = Depends(access_dep)):
     """Redo this action and, first, every older undone action of the same user."""
-    return _run(lambda: actions.redo(session, actor, action_id, access.is_admin), ctx, session, actor, access, "redo")
+    return _run(lambda: actions.redo(session, actor, action_id, access.is_admin, actions.rights_guard(access)), ctx, session, actor, access, "redo")

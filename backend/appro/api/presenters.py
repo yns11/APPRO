@@ -213,14 +213,15 @@ def weekly_stock_value(result: MrpResult, weeks: int = 52) -> list[S.WeeklyStock
 ACR_PENDING_DAYS = 7   # a receipt not booked for a week or more : flow « À valider »
 
 
-def _desadv_received(ds: Dataset) -> set[str]:
-    """BL of the validated receipts (an arrival journal not validated yet receives nothing)."""
-    return {bl for r in ds.receipts if not r.in_transit for bl in r.packing_slips}
+def _desadv_received(ds: Dataset) -> set[tuple[str | None, str]]:
+    """(supplier, BL) of the validated receipts (an arrival journal not validated yet receives nothing) ; a BL
+    number is only unique within a supplier."""
+    return {(r.supplier_id, bl) for r in ds.receipts if not r.in_transit for bl in r.packing_slips}
 
 
-def _desadv_journaled(ds: Dataset) -> set[str]:
-    """BL carried by an arrival journal not validated yet (« En transit »)."""
-    return {bl for r in ds.receipts if r.in_transit for bl in r.packing_slips}
+def _desadv_journaled(ds: Dataset) -> set[tuple[str | None, str]]:
+    """(supplier, BL) carried by an arrival journal not validated yet (« En transit »)."""
+    return {(r.supplier_id, bl) for r in ds.receipts if r.in_transit for bl in r.packing_slips}
 
 
 RECENT_WD = 5   # en transit / à traiter / en retard : the last five working days by default
@@ -256,7 +257,7 @@ def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], pl
         return S.DesadvRow(desadv_id=d.desadv_id, article_id=d.article_id, **art(d.article_id), supplier_id=d.supplier_id,
                            supplier_name=supplier_names.get(d.supplier_id or "", ""), packing_slip=d.packing_slip, purch_id=d.purch_id,
                            issue_date=d.issue_date, qty=d.qty, state=d.state, final_processing=d.final_processing,
-                           received=d.packing_slip.strip() in received_bls, journal=bool(d.stock_trans_id.strip()), issue=issue)
+                           received=(d.supplier_id, d.packing_slip.strip()) in received_bls, journal=bool(d.stock_trans_id.strip()), issue=issue)
 
     def pending_row(r) -> S.PendingRow:
         """A validated receipt whose acknowledgement of receipt is still not validated."""
@@ -286,7 +287,7 @@ def flows_out(result: MrpResult, ds: Dataset, supplier_names: dict[str, str], pl
     # 3. en transit : arrival journals not validated yet, plus the announced DESADV no journal carries ; the
     #    last five working days only (an older line is a receipt that never came : à traiter or en retard)
     in_transit = [journal_row(r) for r in journals]
-    in_transit += [desadv_row(d) for d in live if d.packing_slip.strip() not in received_bls and d.packing_slip.strip() not in journaled_bls]
+    in_transit += [desadv_row(d) for d in live if (d.supplier_id, d.packing_slip.strip()) not in received_bls and (d.supplier_id, d.packing_slip.strip()) not in journaled_bls]
     in_transit = [x for x in in_transit if x.issue_date >= recent_since]
     in_transit.sort(key=lambda d: (d.issue_date, d.article_id), reverse=True)
     # 4. à traiter : in error, or processed without any stock transaction (no entry journal) ; newest first,
@@ -343,7 +344,7 @@ def search_rows(ds: Dataset, supplier_names: dict[str, str], kind: str) -> list[
         received = _desadv_received(ds)
         return [{"desadv_id": d.desadv_id, "article_id": d.article_id, **art(d.article_id), **sup(d.supplier_id, d.article_id), "date": d.issue_date,
                  "qty": d.qty, "purch_id": d.purch_id, "packing_slip": d.packing_slip, "state": d.state, "final_processing": d.final_processing,
-                 "received": d.packing_slip.strip() in received, "journal": bool(d.stock_trans_id.strip())} for d in ds.desadv]
+                 "received": (d.supplier_id, d.packing_slip.strip()) in received, "journal": bool(d.stock_trans_id.strip())} for d in ds.desadv]
     raise ValueError(kind)
 
 

@@ -35,14 +35,14 @@ export default function SupplierPortalPage() {
     art<PortalOrderRow>(),
     { key: "date", label: "Livraison prévue", get: (r) => r.date, render: (r) => fmtDate(r.date) },
     { key: "ordered", label: "Commandé", get: (r) => r.qty_ordered, num: true, render: (r) => <>{fmtQty(r.qty_ordered, r.unit)} <span className="subtle">{r.unit}</span></> },
-    { key: "open", label: "Restant à livrer", get: (r) => r.qty_open, num: true, sum: true, render: (r) => <b>{fmtQty(r.qty_open, r.unit)}</b> },
+    { key: "open", label: "Restant à livrer", get: (r) => r.qty_open, num: true, sum: true, unit: (r) => r.unit, render: (r) => <b>{fmtQty(r.qty_open, r.unit)}</b> },
     { key: "status", label: "Statut", get: (r) => r.status, filter: "select", render: (r) => <Badge tone={r.status === "en retard" ? "critical" : r.status === "aujourd'hui" ? "warning" : r.status === "soldée" ? "ok" : "brand"}>{r.status}</Badge> },
     { key: "transports", label: "Transports", get: (r) => r.transports.join(" "), render: (r) => r.transports.length ? r.transports.map((t) => <span key={t} className="badge brand" style={{ marginRight: 4 }}><Truck size={10} /> {t}</span>) : <span className="subtle">–</span> },
   ], []);
   const forecastCols = useMemo<Column<PortalOrderRow>[]>(() => [
     art<PortalOrderRow>(),
     { key: "date", label: "Date de besoin", get: (r) => r.date, render: (r) => fmtDate(r.date) },
-    { key: "qty", label: "Quantité prévue", get: (r) => r.qty_ordered, num: true, sum: true, render: (r) => <>{fmtQty(r.qty_ordered, r.unit)} <span className="subtle">{r.unit}</span></> },
+    { key: "qty", label: "Quantité prévue", get: (r) => r.qty_ordered, num: true, sum: true, unit: (r) => r.unit, render: (r) => <>{fmtQty(r.qty_ordered, r.unit)} <span className="subtle">{r.unit}</span></> },
     { key: "type", label: "Type", get: (r) => r.order_type, filter: "select" },
     { key: "ref", label: "Référence", get: (r) => r.purch_id, render: (r) => <span className="mono small">{r.purch_id}</span> },
   ], []);
@@ -60,7 +60,7 @@ export default function SupplierPortalPage() {
     { key: "bl", label: "BL (DESADV)", get: (r) => r.packing_slip, render: (r) => <span className="mono small">{r.packing_slip}</span> },
     art<PortalDesadvRow>(),
     { key: "date", label: "Émis le", get: (r) => r.date, render: (r) => fmtDate(r.date) },
-    { key: "qty", label: "Quantité annoncée", get: (r) => r.qty, num: true, sum: true, render: (r) => <>{fmtQty(r.qty, r.unit)} <span className="subtle">{r.unit}</span></> },
+    { key: "qty", label: "Quantité annoncée", get: (r) => r.qty, num: true, sum: true, unit: (r) => r.unit, render: (r) => <>{fmtQty(r.qty, r.unit)} <span className="subtle">{r.unit}</span></> },
     { key: "purch", label: "Commande", get: (r) => r.purch_id, render: (r) => <span className="mono small">{r.purch_id}</span> },
     { key: "state", label: "État EDI", get: (r) => r.state, filter: "select" },
     { key: "status", label: "Statut", get: (r) => r.status, filter: "select", render: (r) => <Badge tone={r.status === "reçu" ? "ok" : r.status === "erreur" ? "critical" : "info"}>{r.status}</Badge> },
@@ -68,7 +68,7 @@ export default function SupplierPortalPage() {
   const receiptCols = useMemo<Column<PortalReceiptRow>[]>(() => [
     { key: "date", label: "Reçu le", get: (r) => r.date, render: (r) => fmtDate(r.date) },
     art<PortalReceiptRow>(),
-    { key: "qty", label: "Quantité reçue", get: (r) => r.qty, num: true, sum: true, render: (r) => <>{fmtQty(r.qty, r.unit)} <span className="subtle">{r.unit}</span></> },
+    { key: "qty", label: "Quantité reçue", get: (r) => r.qty, num: true, sum: true, unit: (r) => r.unit, render: (r) => <>{fmtQty(r.qty, r.unit)} <span className="subtle">{r.unit}</span></> },
     { key: "purch", label: "Commande", get: (r) => r.purch_id, render: (r) => <span className="mono small">{r.purch_id}</span> },
     { key: "bl", label: "BL", get: (r) => r.packing_slip, render: (r) => <span className="mono small">{r.packing_slip}</span> },
     { key: "status", label: "Statut ERP", get: (r) => r.status, filter: "select", render: (r) => <Badge tone={r.status.toLowerCase().includes("transit") ? "info" : "ok"}>{r.status}</Badge> },

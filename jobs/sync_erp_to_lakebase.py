@@ -132,6 +132,16 @@ def _check_targets(conn, pg_schema: str, names: list[str]) -> None:
     _ = sql  # imported for symmetry with the writers
 
 
+def bump_data_version(conn, pg_schema: str) -> None:
+    """Tell the application that its facts changed : the shared counter every worker checks before serving a
+    cached calculation is incremented (``app_meta.data_version``, created by the application)."""
+    from psycopg import sql
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(sql.SQL(
+            "INSERT INTO {}.app_meta (key, value) VALUES ('data_version', '1') "
+            "ON CONFLICT (key) DO UPDATE SET value = (CAST(app_meta.value AS INTEGER) + 1)::text").format(sql.Identifier(pg_schema)))
+
+
 def publish(conn, spark, query: str, name: str, pg_schema: str, run_id: str, source: str) -> int:
     """One fact table: DELETE + COPY in a single transaction, then the sync log."""
     from psycopg import sql
@@ -195,6 +205,7 @@ def run(args: argparse.Namespace) -> dict[str, int]:
         _check_targets(conn, args.pg_schema, [f"erp_{n[4:]}" for n in queries])
         for name, query in queries.items():
             results[name] = publish(conn, spark, query, name, args.pg_schema, args.run_id, source_of(tables, name).replace("`", ""))
+        bump_data_version(conn, args.pg_schema)     # the application drops its cached calculations
     return results
 
 

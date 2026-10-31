@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Iterator
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..services.access import Access, resolve_access
@@ -23,12 +23,17 @@ def session_dep(ctx: AppContext = Depends(ctx_dep)) -> Iterator[Session]:
 
 
 def current_user(request: Request) -> str:
-    """Databricks Apps forwards the identity of the signed-in user in request headers."""
+    """Databricks Apps forwards the identity of the signed-in user in request headers.  Without them, the
+    development fallbacks (``x-appro-user`` header, « local-dev ») only exist on the local seed source :
+    on a deployed source an anonymous request is refused."""
     for header in ("x-forwarded-email", "x-forwarded-preferred-username", "x-forwarded-user"):
         v = request.headers.get(header)
         if v:
             return v
-    return request.headers.get("x-appro-user", "local-dev")
+    from ..config import get_settings
+    if get_settings().data_source.lower() == "local":
+        return request.headers.get("x-appro-user", "local-dev")
+    raise HTTPException(401, "Identité absente : l'application attend les en-têtes d'identité de Databricks Apps")
 
 
 def access_dep(ctx: AppContext = Depends(ctx_dep), user: str = Depends(current_user)) -> Access:

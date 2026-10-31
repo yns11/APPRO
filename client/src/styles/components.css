@@ -478,6 +478,7 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .rule .value { margin-top: 2px; }
 .status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 .status-dot.ok { background: var(--ok); } .status-dot.late { background: var(--critical); } .status-dot.unknown { background: var(--border-strong); }
+.status-dot.missing { background: var(--critical); box-shadow: 0 0 0 2px var(--critical-soft); } .status-dot.disabled { background: transparent; border: 1px dashed var(--border-strong); }
 .banner { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 14px; border-radius: var(--r-md); border: 1px solid var(--warning); background: var(--warning-soft); color: var(--warning-fg); }
 .banner.ok { border-color: var(--ok); background: var(--ok-soft); color: var(--ok-fg); }
 .banner.info { border-color: var(--info-fg); background: var(--info-soft, var(--bg-subtle)); color: var(--info-fg); }

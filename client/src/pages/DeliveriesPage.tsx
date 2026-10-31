@@ -11,16 +11,20 @@ import type { PlanningOrder, PlanningResponse, PlanningSupplier, TransportOut, T
 
 const DEFAULT_TIME = "08:00";
 
-/** Monday of the ISO week of ``iso``. */
-function mondayOf(iso: string): string {
-  const d = new Date(`${iso}T00:00:00`);
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return d.toISOString().slice(0, 10);
+/** ``YYYY-MM-DD`` of a local date (never ``toISOString`` : it converts to UTC and shifts the day in Europe/Paris). */
+export function localIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-function addDays(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00`);
+/** Monday of the ISO week of ``iso`` (civil date arithmetic, same result in every time zone). */
+export function mondayOf(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return localIso(d);
+}
+export function addDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return localIso(d);
 }
 /** Outlook opens the pre-filled message ; the planner reads it and sends it (``;`` between recipients, as Outlook expects). */
 export function mailtoOf(mail: TransportPackOut["mail"]): string {

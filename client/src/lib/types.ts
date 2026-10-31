@@ -174,7 +174,7 @@ export interface SearchRow { article_id: string; designation: string; unit: stri
 export interface SearchResponse { kind: SearchKind; total: number; truncated: boolean; rows: SearchRow[]; }
 
 // ---- Paramètres › Données, supplier page, generic export
-export interface SyncTable { table: string; synced_at: string | null; age_minutes: number | null; rows: number | null; source: string; run_id?: string; status: "ok" | "late" | "unknown"; }
+export interface SyncTable { table: string; synced_at: string | null; age_minutes: number | null; rows: number | null; source: string; run_id?: string; status: "ok" | "late" | "unknown" | "missing" | "disabled"; }
 export interface SyncStatus { data_source: string; mirror: boolean; status: "ok" | "late" | "unknown"; last_sync_at: string | null; late_after_minutes: number; tables: SyncTable[]; }
 export interface OrphanRow { article_id: string; orders: number; receipts: number; desadv: number; consumption: number; last_date: string | null; suppliers: string[]; }
 export interface PlantCalendar { working_weekdays: number[]; holidays: string[]; next_closures: string[]; source: string; }

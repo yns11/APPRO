@@ -163,7 +163,12 @@ function SyncBanner() {
   const s = sync.data;
   if (!s) return null;
   if (!s.mirror) return <div className="banner neutral"><Database size={16} /><span className="small">Source de données : <b>{s.data_source}</b>. Le journal de synchronisation ne concerne que le miroir Lakebase (job Databricks horaire).</span></div>;
-  if (s.status === "late") { const worst = Math.max(...s.tables.filter((t) => t.status === "late").map((t) => t.age_minutes ?? 0)); return <div className="banner"><AlertTriangle size={16} /><span className="small grow"><b>Synchronisation en retard</b> : la dernière copie de l'ERP date de {fmtMinutes(worst)} (seuil {fmtMinutes(s.late_after_minutes)}). Les commandes, réceptions et consommations affichées peuvent être anciennes ; vérifier le job <code>appro_sync</code> dans Databricks.</span></div>; }
+  if (s.status === "late") {
+    const missing = s.tables.filter((t) => t.status === "missing").map((t) => t.table);
+    const lateOnes = s.tables.filter((t) => t.status === "late");
+    const worst = lateOnes.length ? Math.max(...lateOnes.map((t) => t.age_minutes ?? 0)) : null;
+    return <div className="banner"><AlertTriangle size={16} /><span className="small grow"><b>Synchronisation incomplète ou en retard</b>{worst !== null ? <> : la dernière copie de l'ERP date de {fmtMinutes(worst)} (seuil {fmtMinutes(s.late_after_minutes)})</> : null}{missing.length ? <> · table(s) attendue(s) jamais copiée(s) : <code>{missing.join(", ")}</code></> : null}. Les commandes, réceptions et consommations affichées peuvent être anciennes ou absentes ; vérifier le job <code>appro_sync</code> dans Databricks.</span></div>;
+  }
   if (s.status === "unknown") return <div className="banner neutral"><Clock size={16} /><span className="small">Aucune exécution du job de synchronisation enregistrée.</span></div>;
   return <div className="banner ok"><CheckCircle2 size={16} /><span className="small">Synchronisation à jour : dernière copie le {fmtDateTime(s.last_sync_at ?? "")}.</span></div>;
 }
@@ -171,7 +176,7 @@ function SyncBanner() {
 function SyncCard() {
   const sync = useSyncStatus(60_000);
   const cols = useMemo<Column<SyncTable>[]>(() => [
-    { key: "status", label: "", get: (t) => t.status, filter: "none", sortable: false, export: false, render: (t) => <span className={`status-dot ${t.status}`} title={t.status === "ok" ? "à jour" : t.status === "late" ? "en retard" : "inconnu"} /> },
+    { key: "status", label: "", get: (t) => t.status, filter: "none", sortable: false, export: false, render: (t) => <span className={`status-dot ${t.status}`} title={t.status === "ok" ? "à jour" : t.status === "late" ? "en retard" : t.status === "missing" ? "attendue, jamais copiée" : t.status === "disabled" ? "source désactivée dans la configuration" : "inconnu"} /> },
     { key: "table", label: "Table miroir", get: (t) => t.table, render: (t) => <span className="mono">{t.table}</span> },
     { key: "synced", label: "Dernière copie", get: (t) => t.synced_at ?? "", render: (t) => t.synced_at ? fmtDateTime(t.synced_at) : <span className="subtle">jamais</span> },
     { key: "age", label: "Âge", get: (t) => t.age_minutes, num: true, render: (t) => t.age_minutes === null ? <span className="subtle">–</span> : <Badge tone={t.status === "late" ? "critical" : "ok"}>{fmtMinutes(t.age_minutes)}</Badge> },

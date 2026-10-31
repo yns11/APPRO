@@ -32,19 +32,26 @@ def sync_status(ctx: AppContext, session: Session) -> dict[str, Any]:
     rows = {r.table_name: r for r in session.scalars(select(ErpSyncLog)).all()}
     tables = []
     mirror = ctx.settings.data_source.lower() == "lakebase"
+    st = ctx.settings
+    # which fact tables the configuration expects : a disabled optional source is shown as such, an expected
+    # table never copied is « missing » and counts as late (a green light never covers an unknown source)
+    configured = {"fct_purchase_orders": True, "fct_receipts": True, "fct_consumption_actual": bool(st.erp_consumption_table),
+                  "fct_desadv": bool(st.erp_desadv_table), "fct_prices": bool(st.erp_prices_table), "fct_stock_snapshot": bool(st.erp_stock_table)}
     for name in FACT_TABLES:
         target = f"erp_{name[4:]}"
         r = rows.get(target) or rows.get(name)
         if r is None:
-            tables.append({"table": target, "synced_at": None, "age_minutes": None, "rows": None, "source": "", "status": "unknown"})
+            expected = configured.get(name, True)
+            tables.append({"table": target, "synced_at": None, "age_minutes": None, "rows": None, "source": "",
+                           "status": ("missing" if mirror else "unknown") if expected else "disabled"})
             continue
         age = now - r.synced_at
         tables.append({"table": target, "synced_at": r.synced_at.isoformat(), "age_minutes": int(age.total_seconds() // 60),
                        "rows": r.row_count, "source": r.source, "run_id": r.run_id,
                        "status": "late" if age > SYNC_LATE_AFTER else "ok"})
-    known = [t for t in tables if t["status"] != "unknown"]
-    overall = "unknown" if not known else "late" if any(t["status"] == "late" for t in known) else "ok"
-    last = max((t["synced_at"] for t in known), default=None)
+    known = [t for t in tables if t["status"] not in ("unknown", "disabled")]
+    overall = "unknown" if not known else "late" if any(t["status"] in ("late", "missing") for t in known) else "ok"
+    last = max((t["synced_at"] for t in known if t["synced_at"]), default=None)
     return {"data_source": ctx.source.name, "mirror": mirror, "status": overall, "last_sync_at": last,
             "late_after_minutes": int(SYNC_LATE_AFTER.total_seconds() // 60), "tables": tables}
 

@@ -11,6 +11,7 @@ Unity Catalog queries, Excel templates, pandas frames):
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -241,12 +242,41 @@ def _to_bool(v) -> bool:
     return str(v).strip().lower() in ("true", "1", "yes", "oui", "y", "t", "vrai", "x")
 
 
-def coerce(df: pd.DataFrame, schema: TableSchema) -> pd.DataFrame:
-    """Coerce a frame to the canonical schema (missing columns added, types normalised)."""
+def _num_text(v):
+    """A number typed the French way (« 12,5 », « 1 200 », non-breaking spaces) becomes parseable ; other values unchanged."""
+    if isinstance(v, str):
+        t = v.strip().replace("\u00a0", "").replace("\u202f", "").replace(" ", "")
+        if re.fullmatch(r"[-+]?\d+,\d*", t):
+            t = t.replace(",", ".")
+        return t
+    return v
+
+
+def _invalid_numbers(schema: TableSchema, col: str, raw: pd.Series, parsed: pd.Series) -> list[str]:
+    """Cells that are not empty but did not parse as a number (strict imports refuse them)."""
+    bad = []
+    for v, p in zip(raw, parsed):
+        if v is None or (isinstance(v, float) and pd.isna(v)) or (isinstance(v, str) and not v.strip()):
+            continue
+        if pd.isna(p):
+            bad.append(f"{schema.column(col).label} : « {v} » n'est pas un nombre")
+    return bad
+
+
+def coerce(df: pd.DataFrame, schema: TableSchema, strict: bool = False) -> pd.DataFrame:
+    """Coerce a frame to the canonical schema (missing columns added, types normalised).  ``strict`` (rows typed
+    or imported by a user) refuses a non-empty cell that is not a valid number instead of turning it into 0 or
+    « no value » ; the decimal comma is accepted."""
     out = pd.DataFrame(index=df.index)
     nullable = set(schema.nullable_numeric)
+    errors: list[str] = []
     for col, typ in schema.column_types.items():
         s = df[col] if col in df.columns else pd.Series([None] * len(df), index=df.index, dtype=object)
+        if typ in ("int", "float"):
+            raw = s
+            s = s.map(_num_text)
+            if strict:
+                errors.extend(_invalid_numbers(schema, col, raw, pd.to_numeric(s, errors="coerce")))
         if col in nullable:
             # empty stays empty (None) ; 0 is not a value for these columns (no cap / inherited lead time)
             nums = pd.to_numeric(s, errors="coerce")
@@ -264,6 +294,8 @@ def coerce(df: pd.DataFrame, schema: TableSchema) -> pd.DataFrame:
             out[col] = pd.Series([None if pd.isna(v) else v.date() for v in parsed], index=df.index, dtype=object)
         else:
             raise ValueError(typ)
+    if errors:
+        raise ValueError("valeur(s) invalide(s) : " + " ; ".join(errors[:8]) + (" …" if len(errors) > 8 else ""))
     return out.reset_index(drop=True)
 
 

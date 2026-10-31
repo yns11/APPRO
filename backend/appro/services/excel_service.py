@@ -476,7 +476,8 @@ def parse_pdp_workbook(content: bytes, program_names: dict[str, str], sheet: str
     if {"program_id", "qty"} <= set(header) and ("week_start" in header or "iso_week" in header):
         ip, iq = header.index("program_id"), header.index("qty")
         iw = header.index("week_start") if "week_start" in header else header.index("iso_week")
-        for r in rows[1:]:
+        seen: set[tuple[str, dt.date]] = set()
+        for n, r in enumerate(rows[1:], start=2):
             if not r or r[ip] is None:
                 continue
             pid = program_names.get(str(r[ip]).strip().upper())
@@ -484,7 +485,11 @@ def parse_pdp_workbook(content: bytes, program_names: dict[str, str], sheet: str
             if not pid or not monday:
                 notes.append(f"ligne ignorée : {r[ip]!r} / {r[iw]!r}")
                 continue
-            lines.append(ParsedPdpLine(pid, monday, float(r[iq] or 0)))
+            qty = _pdp_qty(r[iq], f"ligne {n}, {r[ip]} / {monday.isoformat()}")
+            if (pid, monday) in seen:
+                raise ValueError(f"doublon : le programme {pid} apparaît deux fois pour la semaine du {monday:%d/%m/%Y} (ligne {n})")
+            seen.add((pid, monday))
+            lines.append(ParsedPdpLine(pid, monday, qty))
         return lines, notes
     # wide (legacy) layout
     week_cols = {}
@@ -498,22 +503,37 @@ def parse_pdp_workbook(content: bytes, program_names: dict[str, str], sheet: str
             notes.append(f"colonne {c + 1} ignorée : {h!r} n'est pas une semaine")
     if not week_cols:
         return lines, ["aucune colonne semaine reconnue (attendu : S11-26, 2026-W11, 2028W24 ou une date)"]
-    for r in rows[1:]:
+    # the identifier column (B of the template) wins over the name : two programmes may share a name
+    id_col = next((c for c, h in enumerate(rows[0]) if c > 0 and c not in week_cols and str(h or "").strip().lower().startswith("program_id")), None)
+    seen_programs: dict[str, int] = {}
+    for n, r in enumerate(rows[1:], start=2):
         if not r or r[0] in (None, ""):
             continue
-        pid = program_names.get(str(r[0]).strip().upper())
+        by_id = program_names.get(str(r[id_col]).strip().upper()) if id_col is not None and id_col < len(r) and r[id_col] not in (None, "") else None
+        pid = by_id or program_names.get(str(r[0]).strip().upper())
         if not pid:
             notes.append(f"programme inconnu ignoré : {r[0]!r}")
             continue
+        if pid in seen_programs:
+            raise ValueError(f"doublon : le programme {pid} ({r[0]}) apparaît aux lignes {seen_programs[pid]} et {n}")
+        seen_programs[pid] = n
         for c, monday in week_cols.items():
             v = r[c] if c < len(r) else None
             if v in (None, ""):
                 continue
-            try:
-                lines.append(ParsedPdpLine(pid, monday, float(v)))
-            except (TypeError, ValueError):
-                notes.append(f"valeur non numérique ignorée : {r[0]} / {monday} = {v!r}")
+            lines.append(ParsedPdpLine(pid, monday, _pdp_qty(v, f"ligne {n}, {r[0]} / {monday.isoformat()}")))
     return lines, notes
+
+
+def _pdp_qty(v: Any, where: str) -> float:
+    """A planned quantity : a number ≥ 0 (decimal comma accepted) ; anything else is refused, never silently dropped."""
+    try:
+        q = float(str(v).replace("\u00a0", "").replace(" ", "").replace(",", ".")) if isinstance(v, str) else float(v or 0)
+    except (TypeError, ValueError):
+        raise ValueError(f"valeur non numérique : {where} = {v!r}")
+    if q < 0:
+        raise ValueError(f"quantité négative refusée : {where} = {q:g}")
+    return q
 
 
 @dataclass

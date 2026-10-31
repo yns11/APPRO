@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,7 +17,9 @@ from ..engine.models import DatasetError
 from .routers import actions, data, entries, files, flows, help, mrp, pdp, portal, reference, transports
 
 #: API routes a supplier (transport contact) may call ; everything else answers 403 (``supplier_gate``)
-SUPPLIER_PATHS = ("/api/config", "/api/health", "/api/portal", "/api/help")
+SUPPLIER_PATHS = ("/api/config", "/api/health", "/api/portal", "/api/help", "/api/exports/table.xlsx")
+#: routes answered even when the rights cannot be resolved (monitoring, the shell's first call)
+OPEN_PATHS = ("/api/health",)
 
 
 @asynccontextmanager
@@ -62,8 +65,10 @@ def create_app() -> FastAPI:
             out["source"] = ctx.source.describe()
             out["reference_rows"] = int(len(ctx.table("ref_articles")))
         except Exception as exc:  # the diagnostic must answer even when the database is down
+            logging.getLogger("appro").warning("Santé dégradée : %s: %s", type(exc).__name__, exc)
             out["status"] = "degraded"
-            out["database_status"] = f"{type(exc).__name__}: {exc}"
+            out["database_status"] = type(exc).__name__       # the kind only : no connection string, no SQL
+            return JSONResponse(status_code=503, content=out)   # a supervisor reading the HTTP code sees it
         return out
 
     for r in (reference.router, mrp.router, entries.router, pdp.router, files.router, flows.router, data.router,
@@ -81,9 +86,10 @@ def create_app() -> FastAPI:
                 from .deps import access_dep, current_user
                 ctx = get_context()
                 access = access_dep(ctx, current_user(request))
-            except Exception:  # context not ready, database down : the route itself will say so
-                access = None
-            if access is not None and access.is_supplier:
+            except Exception as exc:  # rights cannot be determined : refuse rather than let through
+                logging.getLogger("appro").warning("Droits indéterminables sur %s : %s", path, type(exc).__name__)
+                return JSONResponse(status_code=403, content={"detail": "Droits indéterminables pour le moment : réessayez dans un instant"})
+            if access.is_supplier:
                 return JSONResponse(status_code=403, content={"detail": "Espace fournisseur : cette page n'est pas accessible aux contacts transport des fournisseurs"})
         return await call_next(request)
 
@@ -102,17 +108,21 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover - defensive
-        logging.getLogger("appro").exception("Unhandled error on %s", request.url.path)
-        return JSONResponse(status_code=500, content={"detail": f"Erreur interne : {type(exc).__name__}: {exc}"})
+        ref = uuid.uuid4().hex[:8]
+        logging.getLogger("appro").exception("Erreur interne [%s] sur %s", ref, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": f"Erreur interne ({type(exc).__name__}, réf. {ref}) : voir le journal de l'application"})
 
     static = Path(settings.static_dir)
     if static.exists() and (static / "index.html").exists():
         app.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
 
+        root = static.resolve()
+
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa(full_path: str):
-            candidate = static / full_path
-            if full_path and candidate.is_file():
+            """A built file of the frontend, else index.html (React routes) ; never a file outside the build."""
+            candidate = (static / full_path).resolve()
+            if full_path and candidate.is_relative_to(root) and candidate.is_file():
                 return FileResponse(candidate)
             return FileResponse(static / "index.html")
     else:

@@ -133,9 +133,10 @@ conn = psycopg.connect(host=host, port=5432, dbname=W["pg_database"], user=USER,
 with conn.cursor() as cur:
     cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = %s", (W["pg_schema"],))
     present = {x[0] for x in cur.fetchall()}
-missing = [t for t in list(QUERIES) + ["erp_sync_log"] if t not in present]
+missing = [t for t in list(QUERIES) + ["erp_sync_log", "app_meta"] if t not in present]
 if missing:
     raise RuntimeError(f"Tables absentes de Lakebase : {missing}. Déployer et démarrer l'application APPRO d'abord.")
+conn.commit()   # the control SELECT opened a transaction : close it, so that each table below is its own transaction
 for t in (W["orders_table"], W["receipts_table"], W["consumption_table"], W["desadv_table"], W["prices_table"], W["stock_table"]):
     if t and not spark.catalog.tableExists(f"{W['erp_catalog']}.{W['erp_schema']}.{t}"):
         raise RuntimeError(f"Table source introuvable : {W['erp_catalog']}.{W['erp_schema']}.{t}")
@@ -173,5 +174,10 @@ for target, (columns, query) in QUERIES.items():
                     (target, n, dt.datetime.utcnow(), f"{W['erp_catalog']}.{W['erp_schema']}", str(run_id)))
     results[target] = n
     print(f"{target}: {n} ligne(s)")
+# the application drops its cached calculations (shared counter app_meta.data_version)
+with conn.transaction(), conn.cursor() as cur:
+    cur.execute(sql.SQL("INSERT INTO {}.app_meta (key, value) VALUES ('data_version', '1') "
+                        "ON CONFLICT (key) DO UPDATE SET value = (CAST(app_meta.value AS INTEGER) + 1)::text").format(sql.Identifier(W["pg_schema"])))
+conn.commit()   # nothing may stay pending : a connection closed with an open transaction rolls it back
 conn.close()
 display(spark.createDataFrame([(k, v) for k, v in results.items()], ["table", "lignes"]))

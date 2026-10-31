@@ -48,7 +48,7 @@ def rows_out(session: Session, name: str) -> list[dict[str, Any]]:
 
 def _clean(schema: TableSchema, row: dict[str, Any]) -> dict[str, Any]:
     """Coerce one row to the canonical types ; missing keys raise."""
-    df = coerce(pd.DataFrame([row]), schema)
+    df = coerce(pd.DataFrame([row]), schema, strict=True)
     out = df.iloc[0].to_dict()
     for k in schema.key:
         if out[k] in ("", None):
@@ -185,6 +185,26 @@ def template_workbook(name: str, rows: list[dict[str, Any]] | None = None) -> by
     return buf.getvalue()
 
 
+def _same_cell(v: Any, example: Any) -> bool:
+    """Cell of an imported row == example cell of the template (booleans written « oui » / « non », numbers as text)."""
+    def norm(x: Any) -> str:
+        if x is None:
+            return ""
+        if isinstance(x, bool):
+            return "oui" if x else "non"
+        t = str(x).strip().lower()
+        if t in ("true", "vrai", "yes", "1.0"):
+            return "oui" if t != "1.0" else "1"
+        if t in ("false", "faux", "no"):
+            return "non"
+        try:
+            f = float(t.replace(",", "."))
+            return str(int(f)) if f.is_integer() else str(f)
+        except ValueError:
+            return t
+    return norm(v) == norm(example)
+
+
 def parse_workbook(name: str, content: bytes) -> tuple[pd.DataFrame, list[str]]:
     """Read the first sheet of an import file: headers = French labels or canonical names."""
     schema = schema_of(name)
@@ -211,12 +231,14 @@ def parse_workbook(name: str, content: bytes) -> tuple[pd.DataFrame, list[str]]:
         if r is None or all(v in (None, "") for v in r):
             continue
         row = {col: (r[i] if i < len(r) else None) for i, col in cols.items()}
-        if n == 2 and all(str(row.get(k, "")) == str(example.get(k, "")) for k in schema.key):
+        # the example row of the template is skipped only when **every** cell still equals the example :
+        # a real row that happens to share the example key is kept
+        if n == 2 and all(_same_cell(row.get(c.name), example.get(c.name, "")) for c in schema.columns if c.name in cols.values()):
             notes.append("ligne d'exemple ignorée")
             continue
         if any(row.get(k) in (None, "") for k in schema.key):
             notes.append(f"ligne {n} : clé manquante, ignorée")
             continue
         data.append({k: (v.date() if isinstance(v, dt.datetime) else v) for k, v in row.items()})
-    df = coerce(pd.DataFrame(data, columns=list(cols.values())), schema)
+    df = coerce(pd.DataFrame(data, columns=list(cols.values())), schema, strict=True)
     return df, notes

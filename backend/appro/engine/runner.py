@@ -124,11 +124,15 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     demand_eff, actual_mask = build_article_demand(demand_plan, dataset.consumption, articles_by_id, calendar, index, as_of)
 
     # ---------------------------------------------------------------- lookups
+    suppliers = {s.supplier_id: s for s in dataset.suppliers}
     links_by_article: dict[str, list] = defaultdict(list)
     for l in dataset.links:
         if l.active:
             links_by_article[l.article_id].append(l)
-    suppliers = {s.supplier_id: s for s in dataset.suppliers}
+    # sourcing of **new** proposals : the active links of active suppliers only ; an inactive supplier keeps its
+    # lane (orders, receipts, history) but receives no proposal
+    sourcing_by_article: dict[str, list] = {aid: [l for l in ls if l.supplier_id not in suppliers or suppliers[l.supplier_id].active]
+                                            for aid, ls in links_by_article.items()}
     supplier_names = {s.supplier_id: s.name for s in dataset.suppliers}
     bom_articles = {b.article_id for b in dataset.bom}
     orders_by_article = defaultdict(list)
@@ -224,14 +228,14 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
         blocked = blocked_days(flags_by_article.get(aid), aid)
         lane_plan = {l.supplier_id: l.plan for l in lanes}
         proposals, supply_proposed, _, cap_shortfalls = generate_proposals(
-            article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand, target,
+            article, sourcing_by_article.get(aid, []), suppliers, plan_proj.net, demand, target,
             index, calendar, as_of, params, supply_planned=lane_totals(lanes, "orders_forecast", n),
             reproject=lambda extra: project(inflow_plan + extra), blocked=blocked, lane_plan=lane_plan)
         proposals_ignored: list = []
         if blocked:
             # what the engine would have proposed without the refusals : the refused ones stay listed
             # (« ignorée ») in the ordering flow, outside every calculation
-            free, _, _, _ = generate_proposals(article, links_by_article.get(aid, []), suppliers, plan_proj.net, demand,
+            free, _, _, _ = generate_proposals(article, sourcing_by_article.get(aid, []), suppliers, plan_proj.net, demand,
                                                target, index, calendar, as_of, params,
                                                reproject=lambda extra: project(inflow_plan + extra), lane_plan=lane_plan)
             for p in free:

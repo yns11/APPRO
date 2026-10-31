@@ -22,7 +22,7 @@ import datetime as dt
 import json
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 from fastapi import Request, Response
@@ -278,6 +278,23 @@ def _authorize(action: AppAction, actor: str, is_admin: bool) -> None:
         raise ActionError(403, f"Cette action est celle de {action.user} : seul un administrateur peut l'annuler")
 
 
+#: ``guard(action)`` raises :class:`ActionError` when the caller may no longer write what the action touched
+Guard = Callable[[AppAction], None]
+
+
+def rights_guard(access: Any) -> Guard:
+    """Undo / redo re-check the **current** rights of the caller (an appro whose portfolio or delegation ended
+    cannot revert his old writes ; a reader cannot revert anything) ; an administrator keeps every reprise."""
+    def guard(action: AppAction) -> None:
+        if access.is_admin:
+            return
+        if not access.can_write:
+            raise ActionError(403, "Lecture seule : vous ne pouvez plus annuler ni rétablir d'action")
+        if action.article_id and not (access.is_manager or access.can_edit_article(action.article_id)):
+            raise ActionError(403, f"« {action.label} » touche l'article {action.article_id}, hors de votre carnet aujourd'hui")
+    return guard
+
+
 def _sig(it: dict[str, Any]) -> tuple[str, str]:
     return (it["entity"], json.dumps(it["key"], sort_keys=True))
 
@@ -351,7 +368,7 @@ def _get(session: Session, action_id: str) -> AppAction:
     return action
 
 
-def undo(session: Session, actor: str, action_id: str, is_admin: bool = False) -> list[AppAction]:
+def undo(session: Session, actor: str, action_id: str, is_admin: bool = False, guard: Guard | None = None) -> list[AppAction]:
     """Undo ``action_id`` – and first every newer applied action of the same user.  All or nothing :
     a conflict on any of them raises before anything is written."""
     action = _get(session, action_id)
@@ -362,8 +379,12 @@ def undo(session: Session, actor: str, action_id: str, is_admin: bool = False) -
         raise ActionError(409, f"« {action.label} » est déjà annulée")
     if _expired(action):
         raise ActionError(409, f"« {action.label} » date de plus de {RETENTION_DAYS} jours")
+    chain = undo_chain(session, action)
+    for a in chain:
+        if guard is not None:
+            guard(a)
     done = []
-    for a in undo_chain(session, action):
+    for a in chain:
         _check(session, a, "after")
         for it in reversed(a.items):
             apply_state(session, it["entity"], it["key"], it["before"], actor)
@@ -374,7 +395,7 @@ def undo(session: Session, actor: str, action_id: str, is_admin: bool = False) -
     return done
 
 
-def redo(session: Session, actor: str, action_id: str, is_admin: bool = False) -> list[AppAction]:
+def redo(session: Session, actor: str, action_id: str, is_admin: bool = False, guard: Guard | None = None) -> list[AppAction]:
     """Redo ``action_id`` – and first every older undone action of the same user."""
     action = _get(session, action_id)
     _authorize(action, actor, is_admin)
@@ -382,8 +403,12 @@ def redo(session: Session, actor: str, action_id: str, is_admin: bool = False) -
         raise ActionError(409, f"« {action.label} » ne peut plus être rétablie : une autre action a été faite depuis")
     if action.state != "undone":
         raise ActionError(409, f"« {action.label} » n'est pas annulée")
+    chain = redo_chain(session, action)
+    for a in chain:
+        if guard is not None:
+            guard(a)
     done = []
-    for a in redo_chain(session, action):
+    for a in chain:
         _check(session, a, "before")
         for it in a.items:
             apply_state(session, it["entity"], it["key"], it["after"], actor)
@@ -406,18 +431,18 @@ def first_redoable(session: Session, user: str) -> AppAction | None:
                            .order_by(AppAction.ts.asc(), AppAction.id.asc())).first()
 
 
-def undo_last(session: Session, actor: str) -> list[AppAction]:
+def undo_last(session: Session, actor: str, guard: Guard | None = None) -> list[AppAction]:
     action = last_undoable(session, actor)
     if action is None:
         raise ActionError(409, "Rien à annuler")
-    return undo(session, actor, action.id)
+    return undo(session, actor, action.id, guard=guard)
 
 
-def redo_last(session: Session, actor: str) -> list[AppAction]:
+def redo_last(session: Session, actor: str, guard: Guard | None = None) -> list[AppAction]:
     action = first_redoable(session, actor)
     if action is None:
         raise ActionError(409, "Rien à rétablir")
-    return redo(session, actor, action.id)
+    return redo(session, actor, action.id, guard=guard)
 
 
 # =============================================================================

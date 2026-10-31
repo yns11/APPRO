@@ -274,6 +274,8 @@ async def import_pdp(response: Response, file: UploadFile = File(...), name: str
         names[str(r["name"]).upper()] = r["program_id"]
     try:
         lines, notes = excel_service.parse_pdp_workbook(content, names, sheet)
+    except ValueError as exc:   # duplicates, negative or non-numeric quantities : the file is refused as a whole
+        raise HTTPException(422, f"PDP refusé : {exc}")
     except Exception as exc:  # openpyxl errors on non-xlsx files
         raise HTTPException(422, f"Classeur illisible : {exc}")
     if not lines:

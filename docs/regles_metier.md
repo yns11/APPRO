@@ -170,7 +170,8 @@ Une ligne de `recep_edi` est un **journal d'arrivée** de l'ERP, porteur d'un st
 | **Comptabilisé** | journal validé, ACR validé | réception, **fond vert** |
 
 Chaque ligne porte un **point** qui dit si son BL est annoncé par un DESADV traité : **vert** si un DESADV à
-l'état *Traité* et au traitement final *OK* porte ce BL, **rouge** sinon (réception manuelle, DESADV absent, en
+l'état *Traité* et au traitement final *OK* porte ce BL **chez le même fournisseur** (un numéro de BL n'est unique
+que chez son émetteur : jamais de rapprochement croisé entre fournisseurs), **rouge** sinon (réception manuelle, DESADV absent, en
 erreur, créé, en attente ou annulé). Le point et le fond sont indépendants : un reçu comptabilisé sans DESADV
 traité a un fond vert et un point rouge.
 
@@ -536,7 +537,10 @@ bouton *Ajouter un transport pour ces commandes*), transporteur et commentaire f
 ## 10. Traçabilité et règles de date
 
 Chaque écriture (cellule, référentiel, import, paramètre) est journalisée avec l'utilisateur
-(`x-forwarded-email` sur Databricks Apps), l'action et le contenu.
+(`x-forwarded-email` sur Databricks Apps), l'action et le contenu. **Annuler ou rétablir** une action revérifie
+les **droits du moment** : un utilisateur redevenu lecteur, ou dont le carnet ne contient plus l'article touché,
+ne peut plus revenir sur ses anciennes écritures ; un administrateur le peut toujours. Supprimer un paramètre
+(règle commune, valeur hebdomadaire) demande le même droit que le poser.
 
 | Objet | Date admise |
 |---|---|
@@ -571,6 +575,14 @@ sauvegarde ou un import de la feuille PDP, l'activation ou la désactivation d'u
 Dans l'application : boutons ↶ / ↷ de l'en-tête (le badge compte les actions annulables), historique
 « Mes actions » avec « Annuler jusqu'ici », raccourcis **Ctrl+Z** / **Ctrl+Y** (ou Ctrl+Shift+Z) hors d'un
 champ de saisie, toast « Annuler » (8 s) après chaque écriture, cellules réécrites surlignées un instant.
+
+**Imports** (référentiel, PDP, classeur de simulation) : une cellule non vide qui n'est pas un nombre valide est
+**refusée avec son libellé** (jamais transformée en 0 ni en « sans valeur ») ; la virgule décimale française est
+acceptée ; la ligne d'exemple du modèle n'est ignorée que si **toutes** ses cellules sont encore celles de
+l'exemple ; un PDP qui répète un programme sur une même semaine, ou porte une quantité négative, est refusé en
+bloc ; dans le modèle large, la colonne *program_id* l'emporte sur le nom (deux programmes peuvent porter le même
+nom). Un **fournisseur inactif** garde sa voie, ses commandes et ses réceptions, mais ne reçoit plus aucune
+proposition CBN. Un plafond hebdomadaire inférieur au MOQ est refusé.
 
 ## 11. Classeur Excel « vivant »
 

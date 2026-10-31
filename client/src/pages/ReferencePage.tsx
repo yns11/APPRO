@@ -180,7 +180,7 @@ function BulkEditor({ table, rows, onClose }: { table: RefTableInfo; rows: RefRo
     for (const r of rows) {
       const values: Record<string, unknown> = {};
       table.columns.forEach((c) => { values[c.name] = r[c.name] === undefined ? null : r[c.name]; });
-      values[field] = col?.type === "bool" ? value === "oui" : value === "" ? null : value;
+      values[field] = col?.type === "bool" ? (value || "oui") === "oui" : value === "" ? null : value;
       await api.put(`/api/reference/${table.name}/rows`, { values }, { group });
       n += 1;
     }

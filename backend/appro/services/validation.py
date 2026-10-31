@@ -48,6 +48,8 @@ def check_links(rows: Iterable[dict[str, Any]], suppliers: dict[str, dict[str, A
         if week is not None:
             if week <= 0:
                 raise ValueError(f"{who} : le plafond par semaine doit être positif (vide = aucun plafond)")
+            if moq > 0 and week < moq - 1e-9:
+                raise ValueError(f"{who} : le plafond par semaine ({week:g}) doit être ≥ MOQ ({moq:g}) : sinon aucune livraison conforme n'est possible")
             if pack > 0 and not _is_multiple(week, pack):
                 raise ValueError(f"{who} : le plafond par semaine ({week:g}) doit être un multiple de l'UM ({pack:g})")
             if per is not None:

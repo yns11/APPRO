@@ -213,7 +213,7 @@ export function DataTable<T>({ rows, columns: allColumns, rowKey, onRowClick, ro
           </tbody>
           {footer === "auto" ? (hasSums && sorted.length > 0 && (
             <tfoot className="dt-sums"><tr>
-              {columns.map((c, i) => <td key={c.key} className={c.num ? "num" : ""}>{i === 0 ? <span className="subtle">{sorted.length} ligne(s)</span> : sums[c.key] ? <b title="Total des lignes filtrées">{fmtQty(sums[c.key].total, sums[c.key].unit ?? undefined)}{sums[c.key].unit ? <span className="subtle"> {sums[c.key].unit}</span> : null}</b> : null}</td>)}
+              {columns.map((c, i) => <td key={c.key} className={c.num ? "num" : ""}>{i === 0 ? <span className="subtle">{sorted.length} ligne(s)</span> : sums[c.key] ? (sums[c.key].unit === null ? <span className="subtle" title="Les lignes filtrées mélangent plusieurs unités : pas de total">unités mixtes</span> : <b title="Total des lignes filtrées">{fmtQty(sums[c.key].total, sums[c.key].unit ?? undefined)}{sums[c.key].unit ? <span className="subtle"> {sums[c.key].unit}</span> : null}</b>) : null}</td>)}
             </tr></tfoot>
           )) : footer ? <tfoot><tr><td colSpan={columns.length}>{footer}</td></tr></tfoot> : null}
         </table>
