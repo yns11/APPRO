@@ -48,7 +48,9 @@ class Settings(BaseSettings):
     horizon_days: int = Field(364, description="Projection horizon after today : 52 weeks (fixed in the application)")
     history_weeks: int = Field(2, description="Weeks shown before the current week in the supply table")
     working_weekdays: str = Field("1,2,3,4,5")
-    holidays: str = Field("", description="Comma separated ISO dates of plant closures")
+    holidays: str = Field("", description="Comma separated ISO dates of plant closures (the Calendriers table adds to them)")
+    timezone: str = Field("Europe/Paris", description="Local time zone of the plant (order cut-off hours of the suppliers)")
+    cache_budget_mb: int = Field(256, description="Memory budget of the in-process cache of engine results (least recently used results evicted beyond it)")
 
     # --- web -------------------------------------------------------------------------------
     static_dir: Path = Field(REPO_ROOT / "client" / "dist")

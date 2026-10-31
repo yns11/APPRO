@@ -600,3 +600,24 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .impact th.wk { min-width: 48px; text-align: center; }
 .param-grid.identity .value .input, .param-grid.identity .value .select { font-weight: var(--fw-regular); }
 .param-grid.identity .param { min-width: 0; }
+
+/* ---- keyboard model of the supply table (F35) and provisional data */
+.pivot td[tabindex]:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; box-shadow: inset 0 0 0 1px var(--bg-elev); }
+.pivot th[role="button"]:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.pivot.pending { opacity: 0.55; pointer-events: none; filter: grayscale(0.4); }
+.pivot-pending { padding: 6px 10px; background: var(--warning-soft); color: var(--warning-fg); border-bottom: 1px solid var(--warning); }
+
+/* ---- performance (OTD), segmentation, exception queue */
+.score-bar { display: inline-flex; align-items: center; gap: 6px; min-width: 110px; }
+.score-bar .track { flex: 1; height: 8px; border-radius: 4px; background: var(--bg-subtle); overflow: hidden; }
+.score-bar .fill { height: 100%; border-radius: 4px; background: var(--brand); }
+.score-bar.critical .fill { background: var(--critical); } .score-bar.warning .fill { background: var(--warning); } .score-bar.ok .fill { background: var(--ok); }
+.seg-grid { display: grid; grid-template-columns: auto repeat(3, minmax(90px, 1fr)); gap: 4px; align-items: stretch; }
+.seg-grid .cell { border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px 8px; font-size: var(--fs--2); background: var(--bg-elev); }
+.seg-grid .cell.head { background: var(--bg-subtle); font-weight: var(--fw-semibold); text-align: center; }
+.seg-grid .cell b { display: block; font-size: var(--fs-0); }
+.profile-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 22px; }
+.profile-bars span { width: 9px; background: var(--s-firm); border-radius: 2px 2px 0 0; min-height: 1px; }
+.profile-bars span.we { background: var(--border-strong); }
+.exc-why { color: var(--fg-muted); font-size: var(--fs--2); }
+.kind-chips { display: flex; flex-wrap: wrap; gap: 6px; }

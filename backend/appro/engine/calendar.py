@@ -25,10 +25,13 @@ class WorkCalendar:
 
     working_weekdays: frozenset[int] = frozenset({1, 2, 3, 4, 5})
     holidays: frozenset[dt.date] = field(default_factory=frozenset)
+    #: days worked although their weekday is not a working weekday (a Saturday of catch-up) ; a closure wins
+    extra_open: frozenset[dt.date] = field(default_factory=frozenset)
 
     @classmethod
     def from_spec(cls, weekdays: Iterable[int] | str | None = None,
-                  holidays: Iterable[dt.date | str] | None = None) -> "WorkCalendar":
+                  holidays: Iterable[dt.date | str] | None = None,
+                  extra_open: Iterable[dt.date | str] | None = None) -> "WorkCalendar":
         """Build a calendar from loosely-typed specs (``"1,2,3,4,5"`` or ``[1, 2, 3]``)."""
         if weekdays is None:
             wd = {1, 2, 3, 4, 5}
@@ -41,11 +44,14 @@ class WorkCalendar:
         hd = set()
         for h in holidays or ():
             hd.add(dt.date.fromisoformat(h) if isinstance(h, str) else h)
-        return cls(frozenset(wd), frozenset(hd))
+        xo = set()
+        for h in extra_open or ():
+            xo.add(dt.date.fromisoformat(h) if isinstance(h, str) else h)
+        return cls(frozenset(wd), frozenset(hd), frozenset(xo))
 
     # ------------------------------------------------------------------ predicates
     def is_working_day(self, day: dt.date) -> bool:
-        return day.isoweekday() in self.working_weekdays and day not in self.holidays
+        return (day.isoweekday() in self.working_weekdays or day in self.extra_open) and day not in self.holidays
 
     def is_open_weekday(self, day: dt.date, allowed_weekdays: frozenset[int] | None = None) -> bool:
         """Working day *and* (optionally) an allowed delivery weekday for a supplier."""

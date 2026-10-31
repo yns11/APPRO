@@ -91,8 +91,21 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
         Column("delivery_weekdays", "str", "Jours de livraison", "jours de livraison standard, ISO, ex. 1,2,3,4,5 (1 = lundi)", True, "1,2,3,4,5"),
         Column("strict_days", "bool", "Jours stricts", "oui : livraisons uniquement les jours standard, jamais de proposition hors jour standard (◇) ; non (défaut) : un jour ouvré tenable avant le besoin est proposé quand le jour standard ne l'est plus", False, False),
         Column("lead_time_days", "int", "Délai (j ouvrés)", "délai commande → livraison en jours ouvrés, inclus (lundi + 5 = lundi suivant) ; valeur par défaut des liens", True, 5),
+        Column("cutoff_time", "str", "Heure limite", "heure limite de commande (HH:MM, heure de Paris) : une commande passée après cette heure part le jour ouvré suivant, le délai compte à partir de là ; vide = aucune", False, ""),
         Column("active", "bool", "Actif", "", True, True),
     ]),
+    _t("ref_calendars", "Calendriers", "Fermetures et jours exceptionnels, au-delà des jours ouvrés de la configuration : usine (fermeture : ni besoin, "
+       "ni livraison ; ouvert : un samedi travaillé), fournisseur (le fournisseur n'expédie ni ne livre), transit (transporteur ou pays : "
+       "aucune livraison de ces fournisseurs), quai (quai fermé : les fournisseurs dont tous les quais par défaut sont fermés ne livrent pas).",
+       ("calendar", "key", "date_from"), [
+           Column("calendar", "str", "Calendrier", "usine, fournisseur, transit ou quai", True, "usine"),
+           Column("key", "str", "Clé", "vide pour l'usine ; code fournisseur (fournisseur, transit) ; code pays (transit : tous les fournisseurs du pays) ; nom du quai (quai)", False, ""),
+           Column("date_from", "date", "Du", "premier jour", True, dt.date(2026, 12, 24)),
+           Column("date_to", "date", "Au", "dernier jour inclus (vide = le jour seul)", False, dt.date(2027, 1, 1)),
+           Column("kind", "str", "Nature", "fermeture (défaut) ou ouvert (jour exceptionnellement travaillé : usine seulement)", False, "fermeture"),
+           Column("note", "str", "Motif", "", False, "fermeture de fin d'année"),
+           Column("active", "bool", "Actif", "", True, True),
+       ]),
     _t("ref_article_suppliers", "Article ↔ fournisseur", "Règles d'approvisionnement de chaque couple article / fournisseur.",
        ("article_id", "supplier_id"), [
            Column("article_id", "str", "Article", "", True, "P-00001046"),

@@ -43,7 +43,12 @@ python main.py                             # http://localhost:8000 — données 
 ```
 
 Tests : `cd backend && pytest -q` (moteur et scénarios du guide, API, formules du classeur via LibreOffice,
-bundle, guide à jour). Lint : `ruff check backend scripts jobs main.py` ; frontend : `cd client && npm run build`.
+bundle, guide à jour, correctifs de l'audit). Lint : `ruff check backend scripts jobs main.py` ; frontend :
+`cd client && npm run lint && npm run build` (ESLint + TypeScript + Vite) ; parcours navigateur :
+`npm run e2e` (Playwright, serveur temporaire : droits, fuseau, brouillon et conflit du PDP, clavier de la grille,
+espace fournisseur). **Contrôle de livraison** en une commande : `scripts/check.sh` (ruff, pytest, lint, build ;
+`APPRO_CHECK_E2E=1` ajoute le parcours) : chaque exécution ajoute un relevé horodaté au commit dans
+`docs/validation.log`. Mesures de performance : `python scripts/bench.py` ([`docs/performance.md`](docs/performance.md)).
 La CI GitHub Actions est en lancement manuel.
 
 ## Déploiement Databricks
@@ -65,6 +70,7 @@ databricks bundle run appro_sync_erp -t dev --profile PROD           # première
 * [`docs/recommandations_simplification.md`](docs/recommandations_simplification.md) — liste des simplifications et règles décidées (toutes implémentées)
 * [`docs/dictionnaire_donnees.md`](docs/dictionnaire_donnees.md) — référentiel géré dans l'application, faits ERP et leur correspondance avec `commandes_edi` / `recep_edi`, base applicative
 * [`docs/flux_donnees_erp.md`](docs/flux_donnees_erp.md) — **flux de données ERP de bout en bout** : colonnes lues dans chaque table Unity Catalog (SQL exact), miroir Lakebase écrit par le job, objets du moteur, exploitation de chaque colonne dans les écrans
+* [`docs/performance.md`](docs/performance.md) — mesures de référence (moteur, API, cache) et comment les refaire
 * [`docs/modele_donnees.md`](docs/modele_donnees.md) — vue d'ensemble des tables
 * [`docs/architecture.md`](docs/architecture.md) — architecture et principes
 * [`docs/deploiement.md`](docs/deploiement.md) — déploiement Databricks pas à pas (terminal et interface), diagnostic

@@ -68,8 +68,7 @@ def set_adjustment(body: S.AdjustmentIn, request: Request, response: Response, c
         raise HTTPException(422, str(exc))
     rec.done("adjustment", _cell_label("Ajustement", body.article_id, body.date, body.expression), body.article_id, response,
              group_label="Ajustements : {n} cellules")
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return row
 
 
@@ -93,8 +92,7 @@ def set_adjustments(body: S.AdjustmentBatchIn, request: Request, response: Respo
     aid = _one_article(body.cells)
     rec.done("adjustment", f"Ajustements {aid or ''} : {len(body.cells)} cellules".replace("  ", " "), aid, response,
              group_label="Ajustements : {n} cellules")
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return out
 
 
@@ -110,8 +108,7 @@ def delete_adjustment(cell_id: str, response: Response, ctx: AppContext = Depend
     audit(session, user, "delete", "adjustment", row.id, row.article_id, {"date": str(row.date), "qty": row.qty})
     session.delete(row)
     rec.done("adjustment", _cell_label("Ajustement", row.article_id, row.date, ""), row.article_id, response)
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
 
 
 # ---------------------------------------------------------------- plan cells
@@ -162,8 +159,7 @@ def calibrate_on_erp_stock(body: S.CalibrateIn, request: Request, response: Resp
     one = body.article_ids[0] if len(body.article_ids) == 1 else None
     rec.done("adjustment", f"Calage ERP {one} : ajustement {created[0].expression} au {created[0].date}" if one and created
              else f"Calage ERP : {len(created)} article(s)", one, response, group_label="Calage ERP : {n} articles")
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return S.CalibrateOut(created=[S.AdjustmentOut.model_validate(r) for r in created], skipped=skipped)
 
 
@@ -187,8 +183,7 @@ def set_plan_cell(body: S.PlanCellIn, request: Request, response: Response, ctx:
         raise HTTPException(422, str(exc))
     rec.done("plan_cell", _cell_label("Quantité à retenir", body.article_id, body.date, body.expression, body.supplier_id), body.article_id,
              response, group_label="Quantité à retenir : {n} cellules")
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return row
 
 
@@ -217,8 +212,7 @@ def set_plan_cells(body: S.PlanCellBatchIn, request: Request, response: Response
     aid = _one_article(body.cells)
     rec.done("plan_cell", f"Quantité à retenir {aid or ''} : {len(body.cells)} cellules".replace("  ", " "), aid, response,
              group_label="Quantité à retenir : {n} cellules")
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return out
 
 
@@ -234,8 +228,7 @@ def delete_plan_cell(cell_id: str, response: Response, ctx: AppContext = Depends
     audit(session, user, "delete", "plan_cell", row.id, row.article_id, {"date": str(row.date), "supplier_id": row.supplier_id})
     session.delete(row)
     rec.done("plan_cell", _cell_label("Quantité à retenir", row.article_id, row.date, "", row.supplier_id), row.article_id, response)
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
 
 
 # ---------------------------------------------------------------- cell flags (clicks on read-only cells)
@@ -266,8 +259,7 @@ def toggle_flag(body: S.FlagIn, request: Request, response: Response, ctx: AppCo
     row = mrp_service.toggle_flag(session, user, body.article_id, body.supplier_id, body.date, body.kind, body.qty, body.note)
     rec.done("flag", f"{FLAG_LABELS.get(body.kind, body.kind)} {body.article_id}" + (f" · {body.supplier_id}" if body.supplier_id else "")
              + f" · {_d(body.date)}" + (" : retiré" if row is None else ""), body.article_id, response)
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return row
 
 
@@ -284,8 +276,7 @@ def delete_flag(flag_id: str, response: Response, ctx: AppContext = Depends(ctx_
     session.delete(row)
     rec.done("flag", f"{FLAG_LABELS.get(row.kind, row.kind)} {row.article_id}" + (f" · {row.supplier_id}" if row.supplier_id else "")
              + f" · {_d(row.date)} : retiré", row.article_id, response)
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
 
 
 # ---------------------------------------------------------------- audit

@@ -667,6 +667,21 @@ def sections() -> list[dict[str, str]]:
 </ul>
 <p>Un <b>contact transport</b> qui se connecte à l'application n'accède qu'à son <b>espace fournisseur</b> : ses commandes fermes en cours et transports, son retard, le prévisionnel, ses DESADV, ses réceptions.</p>""")
 
+    # ============================================================== Performance et exceptions
+    page("performance", "B", PART_B, "10. File d'exceptions, performance fournisseurs, calendriers",
+         """<p><b>File d'exceptions</b> (troisième onglet du tableau de bord) : tout ce qui appelle une décision aujourd'hui, une ligne par exception, classée par un <b>score</b> lisible : <b>urgence</b> de l'échéance (0 – 50), <b>production à risque</b> (0 – 30), <b>criticité</b> de l'article (0 – 20, classe ABC). Chaque ligne dit <i>quoi faire</i> (commander 1 440 chez S-000545 avant le 03/11, relancer, corriger le DESADV, valider l'ACR, caler), <i>qui</i> (l'approvisionneur de l'article), <i>pour quand</i> et le <i>délai de résolution</i>. Aucune alerte sans action n'y entre : le surstock et l'article dormant restent dans les alertes de la fiche.</p>
+<h4>Performance fournisseurs (menu)</h4>
+<dl class="rule">
+<dt>OTD d'une commande</dt><dd>30 % <b>QUANTITÉ</b> (100 si la quantité commandée est reçue) + 50 % <b>PONCTUALITÉ</b> (100 le bon jour ; 60 à ±1-2 jours ; 20 à ±3-4 jours ; 0 au-delà) + 20 % <b>DESADV</b> (100 si chaque BL reçu a été annoncé par un DESADV traité). Poids et tranches : <i>Paramètres › Règles communes</i>.</dd>
+<dt>OTD d'un fournisseur</dt><dd>moyenne de ses commandes <b>attendues sur la période</b> choisie (3, 6, 12, 24 mois ou dates libres) ; courbes par semaine, mois, trimestre ou année ; détail par commande, export. Une commande reçue d'après l'ERP mais sans ligne de réception dans l'extraction n'est <b>pas notée</b> (comptée à part).</dd>
+<dt>Délais observés</dt><dd>retard moyen et dispersion (p50, p90, écart-type), part à l'heure / en avance / en retard, retards <b>récurrents</b>, délai observé contre délai paramétré (<b>biais</b>) dès que l'ERP date la commande, expédition → réception, urgences, livraisons partielles, profils par jour de la semaine.</dd>
+<dt>Segmentation ABC / XYZ</dt><dd>ABC par valeur annuelle (A = 80 % de la valeur cumulée, B jusqu'à 95 %), XYZ par régularité de la consommation hebdomadaire (X régulier, Y variable, Z irrégulier). Chaque segment <b>suggère</b> une couverture cible (AX 3 j … CZ 15 j) ; « Appliquer la suggestion » l'écrit dans les articles choisis, en une action annulable ; rien ne change tout seul.</dd>
+</dl>
+<h4>Calendriers et heure limite</h4>
+<p>Table <b>Calendriers</b> du Référentiel : fermetures <b>usine</b> (ou samedi exceptionnellement <b>ouvert</b>), fermetures <b>fournisseur</b>, <b>transit</b> (transporteur ou pays entier) et <b>quai</b>. Un jour fermé pour un fournisseur sort de ses jours de livraison possibles : la proposition CBN glisse, comme pour un jour refusé. L'<b>heure limite</b> de commande du fournisseur (colonne du Référentiel) : passée, une commande part le jour ouvré suivant et la première livraison tenable recule d'un jour (badge « dépassée aujourd'hui » sur la fiche fournisseur).</p>
+<h4>Travail à plusieurs</h4>
+<p>Une ligne du Référentiel ou une feuille PDP enregistrée par un collègue entre votre chargement et votre enregistrement n'est jamais écrasée : l'application refuse, garde vos valeurs à l'écran et propose de recharger. Les cellules PDP non enregistrées restent en <b>brouillon</b> dans votre navigateur ; quitter la page avec des saisies en attente demande confirmation. Le tableau d'approvisionnement se parcourt au <b>clavier</b> (Tab, flèches, Entrée ou un chiffre pour saisir, Espace pour cliquer un ordre ferme ou une proposition, Échap) ; pendant le chargement d'un nouveau périmètre, les cellules de l'ancien sont grisées et verrouillées.</p>""")
+
     # ============================================================== Mémo
     page("memo", "", "", "Mémo : marqueurs, couleurs et gestes",
          table(["Où", "Signe", "Sens"], [
@@ -687,6 +702,10 @@ def sections() -> list[dict[str, str]]:
              ["En-tête d'article, tableau de bord", chip("dérive ERP −746", "warning") + " " + chip("dérive ERP +960", "info"), "stock ERP de la veille plus bas / plus haut que le stock projeté, au-delà du seuil et du même signe sur 3 snapshots ; cliquer pour caler"],
              ["Stock projeté (passé)", "« ERP n » sous la valeur", "snapshot ERP du jour ; orange / bleu au-delà du seuil"],
              ["Partout", "Ctrl+Z · Ctrl+Y · ↶ ↷", "annuler / rétablir chaque geste, 7 jours, dans l'ordre"],
+             ["Tableau de bord › File d'exceptions", '<span class="chip critical">85</span> <span class="chip warning">45</span>', "score = urgence (0-50) + production à risque (0-30) + criticité (0-20) ; une ligne = une action, un propriétaire, une échéance"],
+             ["Performance fournisseurs", "OTD 30 / 50 / 20", "quantité / ponctualité (100 · 60 · 20 · 0) / DESADV, moyenne des commandes de la période ; courbes semaine, mois, trimestre, année"],
+             ["Fiche fournisseur, tableau de bord", chip("heure limite dépassée", "warning"), "une commande passée maintenant part le prochain jour ouvré : la première livraison tenable recule d'un jour"],
+             ["Référentiel, PDP", chip("modifiée depuis par X", "critical"), "un collègue a enregistré entre-temps : vos valeurs restent à l'écran, rechargez puis enregistrez"],
              ["En-tête", "FR | EN", "intitulés du tableau et des tuiles en anglais (partage d'écran, capture)"],
              ["En-tête", "?", "ce pense-bête dans l'application, pour tous ; un administrateur peut le modifier sur place"],
          ]),
@@ -712,7 +731,7 @@ def page() -> str:
 </header>
 <nav class="toc" aria-label="Sommaire">
 <span class="part">Tableau d'appro</span><a href="#cbn">CBN</a><a href="#ferme">Ordre ferme</a><a href="#recu">Quantité reçue</a><a href="#appro">Quantité à retenir</a><a href="#stock">Stock projeté</a><a href="#multi">Multi-sourcing</a>
-<span class="part">Cockpit</span><a href="#stocks">Couvertures et stocks</a><a href="#flux">Flux d'approvisionnement</a><a href="#memo">Mémo</a>
+<span class="part">Cockpit</span><a href="#stocks">Couvertures et stocks</a><a href="#flux">Flux d'approvisionnement</a><a href="#livraisons">Planning de livraisons</a><a href="#performance">Exceptions, performance, calendriers</a><a href="#memo">Mémo</a>
 </nav>
 <main>""")
     parts.append(f'<section class="part" id="tableau">\n<h2><span class="part">Partie A</span>{PART_A}</h2>\n{by["accueil"]["html"]}')
@@ -720,7 +739,7 @@ def page() -> str:
         parts.append(f'<h3 id="{slug}">{by[slug]["title"]}</h3>\n{by[slug]["html"]}')
     parts.append("</section>")
     parts.append(f'<section class="part" id="cockpit">\n<h2><span class="part">Partie B</span>{PART_B}</h2>')
-    for slug in ("stocks", "flux"):
+    for slug in ("stocks", "flux", "livraisons", "performance"):
         parts.append(f'<h3 id="{slug}">{by[slug]["title"]}</h3>\n{by[slug]["html"]}')
     parts.append("</section>")
     parts.append(f'<section class="part" id="memo">\n<h2><span class="part">Mémo</span>Marqueurs, couleurs et gestes</h2>\n{by["memo"]["html"]}\n</section>')

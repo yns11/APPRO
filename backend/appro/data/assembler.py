@@ -77,6 +77,58 @@ def _tables(source) -> Tables:
     return source if callable(source) else source.table
 
 
+CALENDARS = ("usine", "fournisseur", "transit", "quai")
+
+
+def _days(r: dict) -> list[dt.date]:
+    a, b = as_date(r.get("date_from")), as_date(r.get("date_to"))
+    if a is None:
+        return []
+    b = b or a
+    if b < a:
+        a, b = b, a
+    return [a + dt.timedelta(days=i) for i in range((b - a).days + 1)][:400]
+
+
+def calendar_sets(rows: Iterable[dict], suppliers: Iterable[Supplier]) -> tuple[set[dt.date], set[dt.date], dict[str, set[dt.date]]]:
+    """From the ``ref_calendars`` rows : the plant closures, the plant days exceptionally worked and, per supplier,
+    the days he cannot deliver (his own closures, the carrier / country closures, the docks closed when every one
+    of his default docks is)."""
+    closed: set[dt.date] = set()
+    opened: set[dt.date] = set()
+    by_sup: dict[str, set[dt.date]] = {}
+    dock_closed: dict[str, set[dt.date]] = {}
+    sups = list(suppliers)
+    by_country: dict[str, list[Supplier]] = {}
+    for sp in sups:
+        by_country.setdefault((sp.country or "").strip().upper(), []).append(sp)
+    for r in rows:
+        if not bool(r.get("active", True)):
+            continue
+        cal = str(r.get("calendar") or "").strip().lower()
+        key = str(r.get("key") or "").strip()
+        kind = str(r.get("kind") or "fermeture").strip().lower()
+        days = _days(r)
+        if cal == "usine":
+            (opened if kind == "ouvert" else closed).update(days)
+        elif cal == "fournisseur":
+            by_sup.setdefault(key, set()).update(days)
+        elif cal == "transit":
+            targets = [key] if any(sp.supplier_id == key for sp in sups) else [sp.supplier_id for sp in by_country.get(key.upper(), [])]
+            for sid in targets:
+                by_sup.setdefault(sid, set()).update(days)
+        elif cal == "quai":
+            dock_closed.setdefault(key.upper(), set()).update(days)
+    if dock_closed:
+        for sp in sups:
+            docks = [d.upper() for d in sp.dock_list]
+            if docks and all(d in dock_closed for d in docks):
+                common = set.intersection(*(dock_closed[d] for d in docks))
+                if common:
+                    by_sup.setdefault(sp.supplier_id, set()).update(common)
+    return closed, opened - closed, by_sup
+
+
 def erp_dataset(source, planner: str | None = None, article_ids: list[str] | None = None,
                 holidays: list[dt.date] | None = None) -> Dataset:
     """Convert the canonical frames into engine records.  ``source`` is a callable ``name → frame``
@@ -108,8 +160,14 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
 
     suppliers = [Supplier(r["supplier_id"], r["name"], r["country"], r["contact"], parse_weekdays(r["delivery_weekdays"]),
                           _lead(r.get("lead_time_days")), bool(r["active"]), strict_days=bool(r.get("strict_days") or False),
-                          transport_contact=str(r.get("transport_contact") or ""), docks=str(r.get("docks") or "") or "B15")
+                          transport_contact=str(r.get("transport_contact") or ""), docks=str(r.get("docks") or "") or "B15",
+                          cutoff_time=str(r.get("cutoff_time") or "").strip())
                  for r in _records(t("ref_suppliers"))]
+    # business calendars : plant closures and exceptional open days, supplier / carrier / dock closures
+    plant_closed, plant_open, sup_closed = calendar_sets(_records(t("ref_calendars")), suppliers)
+    for sp in suppliers:
+        if sp.supplier_id in sup_closed:
+            sp.closures = frozenset(sup_closed[sp.supplier_id])
     links = [SupplierLink(r["article_id"], r["supplier_id"], float(r["moq"]), float(r["pack_qty"]),
                           _optional_int(r.get("lead_time_override")), float(r["quota_pct"]), _int(r["priority"], 1), bool(r["active"]),
                           _optional_float(r.get("max_qty_per_delivery")), _optional_float(r.get("max_qty_per_week")))
@@ -162,4 +220,5 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
 
     return Dataset(articles=articles, suppliers=suppliers, links=links, programs=programs, bom=bom, pdp=pdp,
                    consumption=consumption, desadv=desadv, orders=orders, receipts=receipts, stock=list(stock.values()),
-                   holidays=list(holidays or []), prices=prices, erp_stock=erp_stock)
+                   holidays=sorted(set(holidays or []) | plant_closed), open_days=sorted(plant_open - set(holidays or [])),
+                   prices=prices, erp_stock=erp_stock)

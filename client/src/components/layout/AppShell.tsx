@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { Activity, AlertTriangle, BookOpen, CalendarCheck, CalendarRange, CircleHelp, FileSpreadsheet, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Search, Settings, Sun, Table, Truck } from "lucide-react";
+import { Activity, AlertTriangle, BookOpen, CalendarCheck, CalendarRange, CircleHelp, FileSpreadsheet, Gauge, LayoutDashboard, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PenLine, RefreshCw, Search, Settings, Sun, Table, Truck } from "lucide-react";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useInvalidateAll, useSyncStatus } from "@/lib/queries";
-import { Button } from "@/components/ui";
+import { Button, SkeletonBlock } from "@/components/ui";
 import { ActionsBar } from "@/components/ActionsBar";
 import { fmtDate, fmtMinutes } from "@/lib/format";
 import { api } from "@/lib/api";
@@ -18,6 +18,7 @@ const NAV = [
   { to: "/articles", label: "Fiches articles", icon: Activity },
   { to: "/fournisseurs", label: "Fournisseurs", icon: Truck },
   { to: "/livraisons", label: "Planning de livraisons", icon: CalendarCheck },
+  { to: "/performance", label: "Performance fournisseurs", icon: Gauge },
   { to: "/recherche", label: "Recherche", icon: Search },
   { to: "/saisies", label: "Saisies & journal", icon: PenLine },
 ];
@@ -92,7 +93,7 @@ export default function AppShell() {
             <Button variant="ghost" icon title={`Thème : ${THEME_LABELS[perimeter.theme]} (cliquer pour changer)`} aria-label="Changer de thème" onClick={cycleTheme}><ThemeIcon /></Button>
           </div>
         </header>
-        <main className="content"><Outlet /></main>
+        <main className="content"><Suspense fallback={<div className="page"><SkeletonBlock rows={6} /></div>}><Outlet /></Suspense></main>
       </div>
       <style>{`@media (max-width: 900px) { #menu-btn { display: inline-flex !important; } }`}</style>
     </div>

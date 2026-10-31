@@ -1,0 +1,6 @@
+## 2026-10-31T22:11:37Z · commit 465a76d · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+

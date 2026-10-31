@@ -8,7 +8,7 @@ import json
 import logging
 import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -38,7 +38,24 @@ log = logging.getLogger(__name__)
 ARTICLE_WEEK_FIELDS = {"coverage_target_days": int, "alert_red_days": int, "alert_yellow_days": int, "overstock_days": int}
 GLOBAL_FIELDS = {f.name: f.type for f in dataclasses.fields(EngineParams)}
 #: the rules a user may change from the Paramètres screen (the others are display or technical)
-EDITABLE_GLOBAL_FIELDS = ("target_tolerance_pct", "lead_margin_days", "stock_drift_pct", "stock_drift_min_packs", "stock_drift_persist")
+EDITABLE_GLOBAL_FIELDS = ("target_tolerance_pct", "lead_margin_days", "stock_drift_pct", "stock_drift_min_packs", "stock_drift_persist",
+                          "otd_weight_qty", "otd_weight_punctuality", "otd_weight_desadv", "otd_band1_days", "otd_band1_score",
+                          "otd_band2_days", "otd_band2_score", "abc_a_pct", "abc_b_pct", "xyz_x_cv", "xyz_y_cv",
+                          "segment_coverage_days", "segment_service_pct")
+
+
+def cutoff_passed(suppliers: Iterable[Any], now: dt.datetime | None = None, tz: str = "Europe/Paris") -> tuple[str, ...]:
+    """Suppliers whose order cut-off hour (``ref_suppliers.cutoff_time``, Paris time) is already past : an order
+    placed now leaves on the next working day.  The tuple is part of the cache key, so a result is recomputed
+    only when a cut-off is crossed, never at every minute."""
+    if now is None:
+        try:
+            from zoneinfo import ZoneInfo
+            now = dt.datetime.now(ZoneInfo(tz))
+        except Exception:   # unknown zone : the server clock
+            now = dt.datetime.now()
+    t = now.time().replace(tzinfo=None)
+    return tuple(sorted(s.supplier_id for s in suppliers if s.cutoff is not None and t >= s.cutoff))
 
 
 def apply_weekly_overrides(ds: Dataset, overrides: list[ParamOverride]) -> list[str]:
@@ -69,6 +86,8 @@ def _coerce_param(field: str, value: Any) -> Any:
         return str(value).lower() in ("true", "1", "oui", "yes")
     if isinstance(default, int):
         return int(value)
+    if isinstance(default, float):
+        return float(str(value).replace(",", "."))
     if isinstance(default, tuple):
         if isinstance(value, str):
             return tuple(x.strip() for x in value.split(",") if x.strip())
@@ -252,6 +271,11 @@ def compute(ctx: AppContext, session: Session, planner: str | None = None, artic
             **param_overrides: Any) -> MrpResult:
     """Run (or fetch from cache) the MRP for the given perimeter / parameters."""
     params = build_params(ctx, session, **{k: v for k, v in param_overrides.items() if v is not None})
+    if not params.cutoff_passed:
+        passed = cutoff_passed(erp_dataset(ctx.table).suppliers, tz=ctx.settings.timezone) if ctx.table("ref_suppliers").get("cutoff_time") is not None \
+            and ctx.table("ref_suppliers")["cutoff_time"].astype(str).str.strip().any() else ()
+        if passed:
+            params = params.copy_with(cutoff_passed=passed)
     key = _cache_key(ctx.sync_version(session), planner, article_ids, params)
     cached = ctx.cache_get(key)
     if cached is not None:

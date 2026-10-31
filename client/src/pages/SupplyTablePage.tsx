@@ -89,7 +89,7 @@ export default function SupplyTablePage() {
         : articles.length === 0 ? <Card><Empty title="Aucun article" hint="Modifier les filtres ou le périmètre (approvisionneur) en haut de page." /></Card> : (
           <Card flush tight>
             <SimulationGrid cols={grid.data} articles={articles} planCells={planCells.data ?? []} adjustments={adjustments.data ?? []} flags={flags.data ?? []} showArticleRows
-              onSwitchDay={() => set({ granularity: "day" })} />
+              onSwitchDay={() => set({ granularity: "day" })} pending={grid.isPlaceholderData} />
           </Card>
         )}
     </div>

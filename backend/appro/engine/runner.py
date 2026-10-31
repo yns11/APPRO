@@ -101,7 +101,7 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
             article_ids: list[str] | None = None) -> MrpResult:
     """Run the full computation for the articles of the dataset (or a subset)."""
     params = params or EngineParams()
-    calendar = WorkCalendar.from_spec(params.working_weekdays, dataset.holidays)
+    calendar = WorkCalendar.from_spec(params.working_weekdays, dataset.holidays, dataset.open_days)
     as_of = resolve_as_of(dataset, params)
     init_date = resolve_init_date(dataset, as_of)
     snapshots = {s.article_id: s for s in dataset.stock}
@@ -404,7 +404,8 @@ def run_mrp(dataset: Dataset, params: EngineParams | None = None,
     names = {p.program_id: p.name for p in dataset.programs}
     impact = program_impact(results, dataset.bom, program_plan, names, index, as_of)
     return MrpResult(as_of=as_of, init_date=init_date, start_date=start, end_date=end, params=params, articles=results,
-                     program_daily=program_daily, diagnostics=diagnostics, program_impact=impact, holidays=list(dataset.holidays))
+                     program_daily=program_daily, diagnostics=diagnostics, program_impact=impact, holidays=list(dataset.holidays),
+                     open_days=list(dataset.open_days))
 
 
 __all__ = ["run_mrp", "resolve_as_of", "resolve_init_date", "Alert", "OrderType"]

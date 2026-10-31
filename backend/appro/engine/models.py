@@ -68,6 +68,19 @@ class Supplier:
     strict_days: bool = False      # True : deliveries on the standard weekdays only (no « hors jour standard » proposal)
     transport_contact: str = ""    # e-mail addresses of the transport notices (« ; » or « , » separated)
     docks: str = "B15"             # default delivery docks (« ; » separated), preselected when a transport is created
+    cutoff_time: str = ""          # order cut-off hour « HH:MM » : an order placed later leaves the next working day ; "" = none
+    closures: frozenset[dt.date] = frozenset()   # days the supplier cannot deliver (own closures, carrier / country, docks closed)
+
+    @property
+    def cutoff(self) -> dt.time | None:
+        t = (self.cutoff_time or "").strip()
+        if not t:
+            return None
+        try:
+            h, m = t.split(":")[:2]
+            return dt.time(int(h), int(m))
+        except (TypeError, ValueError):
+            return None
 
     @property
     def transport_emails(self) -> list[str]:
@@ -317,7 +330,8 @@ class Dataset:
     orders: list[OrderLine]
     receipts: list[Receipt]
     stock: list[StockSnapshot]
-    holidays: list[dt.date] = field(default_factory=list)
+    holidays: list[dt.date] = field(default_factory=list)          # plant closures (configuration + Calendriers table)
+    open_days: list[dt.date] = field(default_factory=list)         # plant days exceptionally worked (Calendriers table, nature « ouvert »)
     adjustments: list[AdjustCell] = field(default_factory=list)
     plan: list[PlanCell] = field(default_factory=list)
     flags: list[CellFlag] = field(default_factory=list)
@@ -346,6 +360,22 @@ class EngineParams:
     stock_drift_pct: float = 10.0                 # ERP stock vs projected stock : |gap| above n % of the target stock of the day…
     stock_drift_min_packs: float = 1.0            # … and at least n packs of the main link (0 = no minimum)…
     stock_drift_persist: int = 3                  # … on the last n snapshots, same sign = « dérive » (data issue)
+    cutoff_passed: tuple[str, ...] = ()           # suppliers whose order cut-off hour is already past today : their orders leave tomorrow
+    # --- supplier service (OTD) : weights (%) and punctuality bands (days early or late → score)
+    otd_weight_qty: int = 30                      # QUANTITÉ : 100 when the ordered quantity was received, 0 otherwise
+    otd_weight_punctuality: int = 50              # PONCTUALITÉ : 100 on the day ; band 1 → score 1 ; band 2 → score 2 ; beyond → 0
+    otd_weight_desadv: int = 20                   # DESADV : 100 when every delivery note was announced by a processed DESADV
+    otd_band1_days: int = 2                       # early / late by 1 … n days → otd_band1_score
+    otd_band1_score: int = 60
+    otd_band2_days: int = 4                       # early / late by band1 + 1 … n days → otd_band2_score ; beyond → 0
+    otd_band2_score: int = 20
+    # --- stock policy segmentation (ABC by yearly value, XYZ by variability of the weekly consumption)
+    abc_a_pct: int = 80                           # A : articles making the first n % of the cumulated yearly value
+    abc_b_pct: int = 95                           # B : up to n % ; C : the rest
+    xyz_x_cv: float = 0.5                         # X : coefficient of variation of the weekly consumption below n
+    xyz_y_cv: float = 1.0                         # Y : below n ; Z : beyond (or no consumption)
+    segment_coverage_days: str = "AX:3,AY:5,AZ:8,BX:5,BY:8,BZ:10,CX:8,CY:10,CZ:15"   # suggested coverage target (working days) per segment
+    segment_service_pct: str = "A:98,B:95,C:90"   # service target per class (information)
 
     def copy_with(self, **changes: Any) -> "EngineParams":
         data = self.__dict__.copy()
@@ -562,6 +592,13 @@ class MrpResult:
     diagnostics: list[str] = field(default_factory=list)
     program_impact: dict[str, Any] = field(default_factory=dict)   # see engine/programs.py
     holidays: list[dt.date] = field(default_factory=list)          # plant closures of the dataset (Excel export)
+    open_days: list[dt.date] = field(default_factory=list)         # plant days exceptionally worked
+
+    @property
+    def calendar(self):
+        """The working-day calendar of the computation (plant closures and exceptional open days included)."""
+        from .calendar import WorkCalendar
+        return WorkCalendar.from_spec(self.params.working_weekdays, self.holidays, self.open_days)
 
     @property
     def alerts(self) -> list[Alert]:

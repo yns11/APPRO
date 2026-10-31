@@ -1,22 +1,27 @@
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "@/components/layout/AppShell";
-import CockpitPage from "@/pages/CockpitPage";
-import ArticlesPage from "@/pages/ArticlesPage";
-import ArticlePage from "@/pages/ArticlePage";
-import SuppliersPage from "@/pages/SuppliersPage";
-import DeliveriesPage from "@/pages/DeliveriesPage";
-import SupplierPage from "@/pages/SupplierPage";
-import SearchPage from "@/pages/SearchPage";
-import SupplyTablePage from "@/pages/SupplyTablePage";
-import ProgramsPage from "@/pages/ProgramsPage";
-import PdpPage from "@/pages/PdpPage";
-import EntriesPage from "@/pages/EntriesPage";
-import ImportsPage from "@/pages/ImportsPage";
-import ReferencePage from "@/pages/ReferencePage";
-import SettingsPage from "@/pages/SettingsPage";
-import HelpPage from "@/pages/HelpPage";
-import SupplierPortalPage from "@/pages/SupplierPortalPage";
+import { SkeletonBlock } from "@/components/ui";
 import { usePerimeter } from "@/state/PerimeterContext";
+
+// every page is loaded **on demand** : the first screen only downloads the shell and the page it shows (F33)
+const CockpitPage = lazy(() => import("@/pages/CockpitPage"));
+const ArticlesPage = lazy(() => import("@/pages/ArticlesPage"));
+const ArticlePage = lazy(() => import("@/pages/ArticlePage"));
+const SuppliersPage = lazy(() => import("@/pages/SuppliersPage"));
+const DeliveriesPage = lazy(() => import("@/pages/DeliveriesPage"));
+const SupplierPage = lazy(() => import("@/pages/SupplierPage"));
+const SearchPage = lazy(() => import("@/pages/SearchPage"));
+const SupplyTablePage = lazy(() => import("@/pages/SupplyTablePage"));
+const ProgramsPage = lazy(() => import("@/pages/ProgramsPage"));
+const PdpPage = lazy(() => import("@/pages/PdpPage"));
+const EntriesPage = lazy(() => import("@/pages/EntriesPage"));
+const ImportsPage = lazy(() => import("@/pages/ImportsPage"));
+const ReferencePage = lazy(() => import("@/pages/ReferencePage"));
+const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
+const HelpPage = lazy(() => import("@/pages/HelpPage"));
+const SupplierPortalPage = lazy(() => import("@/pages/SupplierPortalPage"));
+const PerformancePage = lazy(() => import("@/pages/PerformancePage"));
 
 /** The search page can be hidden again by turning this off (no menu entry, no route). */
 const SEARCH_ENABLED = true;
@@ -24,8 +29,10 @@ const SEARCH_ENABLED = true;
 export default function App() {
   const { config } = usePerimeter();
   // a supplier's transport contact only sees the « espace fournisseur » (the API refuses everything else anyway)
+  const fallback = <div className="page"><SkeletonBlock rows={6} /></div>;
   if (config?.access?.role === "supplier") {
     return (
+      <Suspense fallback={fallback}>
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/portail" element={<SupplierPortalPage />} />
@@ -34,9 +41,11 @@ export default function App() {
           <Route path="*" element={<Navigate to="/portail" replace />} />
         </Route>
       </Routes>
+      </Suspense>
     );
   }
   return (
+    <Suspense fallback={fallback}>
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<CockpitPage />} />
@@ -54,11 +63,13 @@ export default function App() {
         <Route path="/saisies" element={<EntriesPage />} />
         <Route path="/imports" element={<ImportsPage />} />
         <Route path="/referentiel" element={<ReferencePage />} />
+        <Route path="/performance" element={<PerformancePage />} />
         <Route path="/parametres" element={<SettingsPage />} />
         <Route path="/aide" element={<HelpPage />} />
         <Route path="/aide/:slug" element={<HelpPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
+    </Suspense>
   );
 }

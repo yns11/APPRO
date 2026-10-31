@@ -106,18 +106,45 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: 
 }
 
 /* ---------------------------------------------------------------- Drawer */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Side dialog : ``aria-modal`` with the focus **moved inside** when it opens (the first field, else the panel), **kept
+ * inside** while it is open (Tab and Shift+Tab wrap), and **given back** to the element that opened it when it closes ;
+ * Escape and a click on the overlay close it.
+ */
 export function Drawer({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const titleId = useId();
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    opener.current = document.activeElement as HTMLElement | null;
+    const el = panel.current;
+    const first = el?.querySelector<HTMLElement>(".body " + FOCUSABLE) ?? el?.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? el)?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab" || !el) return;
+      const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((x) => x.offsetParent !== null);
+      if (!items.length) { e.preventDefault(); el.focus(); return; }
+      const [head, tail] = [items[0], items[items.length - 1]];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === head || !el.contains(active))) { e.preventDefault(); tail.focus(); }
+      else if (!e.shiftKey && (active === tail || !el.contains(active))) { e.preventDefault(); head.focus(); }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      const back = opener.current;
+      if (back && document.contains(back)) back.focus();
+    };
   }, [open, onClose]);
   if (!open) return null;
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`drawer ${wide ? "wide" : ""}`} role="dialog" aria-modal="true">
-        <header><h2 className="grow">{title}</h2><Button variant="ghost" icon aria-label="Fermer" onClick={onClose}><X /></Button></header>
+      <div className={`drawer ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId} ref={panel} tabIndex={-1}>
+        <header><h2 className="grow" id={titleId}>{title}</h2><Button variant="ghost" icon aria-label="Fermer" onClick={onClose}><X /></Button></header>
         <div className="body">{children}</div>
         {footer && <footer>{footer}</footer>}
       </div>

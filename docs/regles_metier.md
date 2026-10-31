@@ -28,11 +28,26 @@ se lit.
   **tableau d'approvisionnement** commence au plus tard du point zéro et du lundi de la semaine en cours
   moins les *semaines passées* choisies par l'utilisateur [2] (la semaine en cours est toujours affichée en
   entier depuis son lundi) ; le moteur calcule la fenêtre entière, seul l'affichage est tronqué.
-* **Calendrier ouvré** : `working_weekdays` [1-5] + fermetures (`APPRO_HOLIDAYS`), visibles dans *Paramètres ›
-  Données › Calendrier usine*. Couvertures, seuils, surstock, délais : tout compte en **jours
-  ouvrés**. Le **délai fournisseur** (`ref_suppliers.lead_time_days` [5], remplaçable par lien :
-  `lead_time_override`) est **inclusif** : commandé lundi avec un délai de 5, livrable le lundi suivant. Les
-  jours de livraison autorisés sont par fournisseur (`delivery_weekdays`).
+* **Calendrier ouvré** : `working_weekdays` [1-5] + fermetures (`APPRO_HOLIDAYS`) **+ la table Calendriers du
+  Référentiel** (`ref_calendars`), visibles dans *Paramètres › Données › Calendrier usine*. Couvertures, seuils,
+  surstock, délais : tout compte en **jours ouvrés**. Le **délai fournisseur** (`ref_suppliers.lead_time_days` [5],
+  remplaçable par lien : `lead_time_override`) est **inclusif** : commandé lundi avec un délai de 5, livrable le lundi
+  suivant. Les jours de livraison autorisés sont par fournisseur (`delivery_weekdays`).
+* **Calendriers métier** (table *Calendriers*, une ligne = un calendrier, une clé, une période, une nature) :
+  * *usine* : une **fermeture** (ni besoin, ni livraison, ni jour ouvré compté) ou un jour **ouvert**
+    exceptionnellement (un samedi travaillé : il compte comme jour ouvré, reçoit du besoin et des livraisons) ;
+    une fermeture l'emporte sur un jour ouvert ;
+  * *fournisseur* (clé : code fournisseur) : le fournisseur n'expédie ni ne livre ; *transit* (clé : code fournisseur
+    ou **code pays** : tous les fournisseurs du pays) : transporteur ou pays à l'arrêt, aucune livraison ; *quai* (clé :
+    nom du quai) : quai fermé, les fournisseurs dont **tous** les quais par défaut sont fermés ne livrent pas ce jour-là.
+    Ces jours sont retirés des **jours de livraison possibles** du fournisseur : la proposition CBN glisse au jour
+    standard précédent tenable, ou ◇ sur un autre jour ouvré, exactement comme un jour refusé ; le besoin de l'usine
+    et le calendrier ouvré ne changent pas. Une « fermeture d'expédition » se déclare comme une fermeture fournisseur
+    sur les jours de livraison qu'elle empêche.
+* **Heure limite de commande** (`ref_suppliers.cutoff_time`, HH:MM, heure de Paris : `APPRO_TIMEZONE`) : une
+  commande passée **après** cette heure part le **jour ouvré suivant** ; le délai du fournisseur compte à partir de
+  là, la première livraison tenable recule donc d'un jour ouvré dès que l'heure est passée (le tableau de bord et la
+  fiche fournisseur le signalent : « heure limite dépassée aujourd'hui »). Vide = aucune heure limite.
 
 ## 2. Besoin (une seule ligne du tableau)
 
@@ -534,6 +549,29 @@ bouton *Ajouter un transport pour ces commandes*), transporteur et commentaire f
 - **Droits** : créer ou annuler un transport demande d'être approvisionneur du carnet de l'article, manager ou
   administrateur ; le CSV global se télécharge par tout utilisateur connecté à l'application.
 
+## 9 quater. File d'exceptions
+
+L'onglet **File d'exceptions** du tableau de bord ne liste que des situations qui **appellent une décision** (une
+alerte d'information – surstock, article dormant – n'y entre jamais), une ligne par exception, avec son
+**propriétaire** (l'approvisionneur de l'article), son **échéance**, l'**action** à faire et un **délai de résolution**
+estimé (délai du fournisseur pour une commande, un jour pour une correction de données) :
+
+| Exception | Déclencheur | Échéance | Action proposée |
+|---|---|---|---|
+| commande en retard de passation | proposition CBN urgente (date limite dépassée, plancher) | la date limite | commander immédiatement |
+| commande à passer | proposition dont la date limite tombe sous 5 jours ouvrés | la date limite | commander au plus tard le… |
+| rupture projetée non couverte | manque qu'aucun plafond ne peut absorber, ou rupture sous 4 semaines sans proposition possible | le jour de la rupture | livraison supplémentaire, autre fournisseur |
+| livraison fournisseur en retard | ordre ferme passé avec un restant ERP | la date prévue | relancer le fournisseur |
+| DESADV à corriger | message EDI en erreur | son émission | corriger dans l'ERP |
+| accusé de réception à valider | réception non comptabilisée depuis 7 jours ou plus | réception + 7 j | valider l'ACR |
+| dérive du stock ERP, stock de référence négatif, commandes hors lien actif, article sans fournisseur actif | données (§ 4 bis, § 3, § 6) | aujourd'hui | vérifier, caler, créer le lien, déclarer un fournisseur |
+
+**Score** (0 – 100, affiché avec sa décomposition) = **urgence** (0 – 50 : échéance dépassée 50, aujourd'hui 45,
+sous 2 jours ouvrés 35, sous 5 jours 25, au-delà 10) + **production à risque** (0 – 30 : rupture projetée dans le
+délai 30, sous quatre semaines 20, livraison en retard 15, rien 0) + **criticité de l'article** (0 – 20 : classe
+ABC A 20, B 12, C 5, inconnue 8 ; 20 pour un article mono-source utilisé par trois programmes ou plus). La file
+se filtre par exception, par propriétaire et sur les échéances dépassées ; une ligne ouvre la fiche article.
+
 ## 10. Traçabilité et règles de date
 
 Chaque écriture (cellule, référentiel, import, paramètre) est journalisée avec l'utilisateur
@@ -583,6 +621,30 @@ l'exemple ; un PDP qui répète un programme sur une même semaine, ou porte une
 bloc ; dans le modèle large, la colonne *program_id* l'emporte sur le nom (deux programmes peuvent porter le même
 nom). Un **fournisseur inactif** garde sa voie, ses commandes et ses réceptions, mais ne reçoit plus aucune
 proposition CBN. Un plafond hebdomadaire inférieur au MOQ est refusé.
+
+### 10 ter. Écritures concurrentes
+
+Plusieurs approvisionneurs travaillent en même temps ; aucune écriture n'écrase silencieusement celle d'un autre :
+
+* **Référentiel** : chaque ligne porte `updated_at` ; l'écran renvoie ce tampon avec la ligne complète qu'il
+  enregistre (`expected_updated_at`). Si quelqu'un a enregistré la ligne entre-temps, le serveur refuse (HTTP 409
+  « modifiée depuis par X le … ») sans rien écrire ; l'écran garde les valeurs saisies et propose de recharger.
+  Les modifications en lot s'arrêtent à la première ligne en conflit (les lignes déjà écrites restent une seule
+  action annulable). Un import ou un script sans tampon écrit comme avant.
+* **PDP** : la feuille mémorise la version active sur laquelle les cellules ont été saisies (`base_version_id`).
+  Si une autre version est devenue active avant l'enregistrement (saisie ou import d'un collègue), le serveur
+  refuse (409) et l'écran affiche le conflit : les cellules saisies **restent affichées en bleu**, « Recharger en
+  conservant mes saisies » recharge la base, retire les cellules devenues identiques et laisse enregistrer à
+  nouveau après vérification. Les cellules non enregistrées sont aussi gardées en **brouillon** dans le navigateur,
+  par utilisateur : un rechargement ou un onglet fermé ne les perd pas (notice « brouillon restauré »). Quitter
+  la page avec des saisies en attente demande une confirmation.
+* **Cellules du tableau** : chaque cellule est une écriture unitaire datée et signée ; deux planificateurs ne
+  travaillent jamais le même article sans délégation, le journal « annuler » signale « modifié depuis par X ».
+* **Version des données** : l'incrément de `data_version` est écrit **dans la même transaction** que les données
+  et le journal (`AppContext.commit`) ; une panne entre les deux ne peut plus laisser un cache ancien servir de
+  nouvelles données. Les migrations de schéma du démarrage s'exécutent **sous un verrou** de base
+  (`pg_advisory_lock`) et les corrections de données ponctuelles sont journalisées (`app_migrations`) : plusieurs
+  workers qui démarrent ensemble ne rejouent ni la même modification ni les mêmes corrections.
 
 ## 11. Classeur Excel « vivant »
 
@@ -671,3 +733,45 @@ du classeur historique par `scripts/extract_seed_from_excel.py`. Le référentie
 base locale au premier démarrage (`APPRO_SEED_REFERENCE`, oui en local seulement). Conditionnements et quotas
 n'existent pas dans le classeur : valeurs indicatives, à remplacer dans le référentiel ; le délai de tous les
 fournisseurs est initialisé à 5 jours ouvrés.
+
+## 14. Performance fournisseurs : service (OTD), délais observés, segmentation
+
+Page **Performance fournisseurs** (et onglet *Performance* de la fiche fournisseur). Tout part du **rapprochement
+des réceptions avec les créneaux fermes** : les réceptions validées d'un même (fournisseur, article, numéro de
+commande) sont affectées aux créneaux de cette commande dans l'ordre des dates (premier créneau servi d'abord) ;
+un créneau est **complet** le jour où la quantité commandée est atteinte.
+
+**OTD d'une commande** (règles communes, *Paramètres › Règles communes*) :
+
+* **QUANTITÉ** : 100 si la quantité commandée a été reçue, 0 sinon ;
+* **PONCTUALITÉ** : 100 si la quantité est complète le jour prévu ; avance ou retard de 1 à `otd_band1_days` [2]
+  jours → `otd_band1_score` [60] ; jusqu'à `otd_band2_days` [4] jours → `otd_band2_score` [20] ; au-delà 0 ;
+* **DESADV** : 100 si chaque BL reçu a été annoncé par un DESADV traité sans erreur, 0 sinon ;
+* **OTD** = `otd_weight_qty` [30] % × QUANTITÉ + `otd_weight_punctuality` [50] % × PONCTUALITÉ +
+  `otd_weight_desadv` [20] % × DESADV.
+
+Une commande est **évaluable** une fois complète, ou `otd_band2_days` jours après sa date prévue si elle ne l'est
+pas (tout à 0 : « non livrée »). Une commande que l'ERP montre reçue sans aucune ligne de réception dans
+l'extraction est **non évaluable** (écart de données, comptée à part, jamais notée). L'OTD d'un fournisseur sur une
+période est la **moyenne des OTD de ses commandes attendues sur la période** ; les trois indicateurs sont moyennés
+de même. La vue propose les périodes (3, 6, 12, 24 mois ou dates libres), le pas des courbes (semaine, mois,
+trimestre, année), les filtres fournisseur et article, le détail par commande et l'export.
+
+**Délais observés** : par fournisseur (et par article dès qu'un fournisseur ou un article est choisi) : retard
+moyen et dispersion (p50, p90, écart-type, min, max) entre la date prévue et la quantité complète ; part à l'heure,
+en avance, en retard, au-delà de la seconde tranche ; **retard récurrent** (au moins la moitié des livraisons en
+retard sur trois commandes ou plus) ; **délai observé** première apparition dans l'ERP → quantité complète (jours
+ouvrés) et **biais** = observé − délai paramétré (dès que le job renseigne `first_seen`) ; délai expédition
+(DESADV) → réception ; part d'**urgences** (commandes créées dans le délai) ; livraisons partielles ; quantité
+médiane par réception ; **profils** par jour de la semaine des livraisons prévues et des réceptions.
+
+**Segmentation ABC / XYZ** (onglet *Segmentation*) : **ABC** par valeur annuelle = consommation des 52 dernières
+semaines × prix standard (besoin de l'horizon sans consommation) : A = les premiers `abc_a_pct` [80] % de la
+valeur cumulée, B jusqu'à `abc_b_pct` [95] %, C au-delà, « – » sans prix ; **XYZ** par coefficient de variation
+(écart-type / moyenne) de la consommation hebdomadaire sur les 26 dernières semaines complètes depuis la première
+semaine consommée : X < `xyz_x_cv` [0,5], Y < `xyz_y_cv` [1,0], Z au-delà ou sans consommation (quatre semaines au
+moins). Criticité : programmes utilisateurs, mono-source. Chaque segment porte une **couverture cible suggérée**
+(`segment_coverage_days`, « AX:3,AY:5,AZ:8,BX:5,BY:8,BZ:10,CX:8,CY:10,CZ:15 » jours ouvrés) et un **objectif de
+service** par classe (`segment_service_pct`, « A:98,B:95,C:90 », information). « Appliquer la suggestion » écrit la
+couverture cible suggérée dans les articles choisis (une action annulable, droits du référentiel) ; rien n'est
+jamais appliqué automatiquement.

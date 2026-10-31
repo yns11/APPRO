@@ -5,6 +5,7 @@ import datetime as dt
 import logging
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,7 +59,8 @@ class AppContext:
     source: FactSource
     session_factory: sessionmaker[Session]
     _version: int = 0
-    _cache: dict[str, Any] = field(default_factory=dict)
+    _cache: "OrderedDict[str, tuple[Any, int]]" = field(default_factory=OrderedDict)   # key → (value, bytes), least recently used first
+    _cache_bytes: int = 0
     _ref_cache: dict[str, pd.DataFrame] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _checked_at: float = 0.0
@@ -81,6 +83,7 @@ class AppContext:
             if v != self._version:
                 self._version = v
                 self._cache.clear()
+                self._cache_bytes = 0
                 self._ref_cache.clear()
         return v
 
@@ -89,22 +92,58 @@ class AppContext:
         return self.sync_version()
 
     def bump(self) -> None:
+        """Invalidate every cache after a change made outside a request transaction (ERP refresh)."""
         with self.session() as session:
             v = bump_data_version(session)
+        self._set_version(v)
+
+    def commit(self, session: Session) -> int:
+        """Validate the writes of a request **and** the version bump in the same transaction : a failure
+        between the two can no longer leave new data with an old version (the other processes would keep
+        serving their stale cache).  Returns the new version."""
+        v = bump_data_version(session, commit=False)
+        session.commit()
+        self._set_version(v)
+        return v
+
+    def _set_version(self, v: int) -> None:
         with self._lock:
             self._version, self._checked_at = v, time.monotonic()
             self._cache.clear()
+            self._cache_bytes = 0
             self._ref_cache.clear()
 
     def cache_get(self, key: str):
         with self._lock:
-            return self._cache.get(key)
+            hit = self._cache.get(key)
+            if hit is None:
+                return None
+            self._cache.move_to_end(key)
+            return hit[0]
 
-    def cache_set(self, key: str, value: Any) -> None:
+    @property
+    def cache_budget(self) -> int:
+        return max(int(getattr(self.settings, "cache_budget_mb", 256)), 1) * 1024 * 1024
+
+    def cache_set(self, key: str, value: Any, size: int | None = None) -> None:
+        """Keep the result under a **memory budget** (``APPRO_CACHE_BUDGET_MB``) : the least recently used results
+        leave first ; a single result larger than the budget is served but not kept."""
+        size = int(size if size is not None else estimate_size(value))
         with self._lock:
-            if len(self._cache) > 64:
-                self._cache.clear()
-            self._cache[key] = value
+            old = self._cache.pop(key, None)
+            if old is not None:
+                self._cache_bytes -= old[1]
+            if size > self.cache_budget:
+                return
+            while self._cache and self._cache_bytes + size > self.cache_budget:
+                _k, (_v, b) = self._cache.popitem(last=False)
+                self._cache_bytes -= b
+            self._cache[key] = (value, size)
+            self._cache_bytes += size
+
+    def cache_stats(self) -> dict[str, int]:
+        with self._lock:
+            return {"entries": len(self._cache), "bytes": self._cache_bytes, "budget": self.cache_budget}
 
     def session(self) -> Session:
         return self.session_factory()
@@ -123,6 +162,27 @@ class AppContext:
         with self._lock:
             self._ref_cache[name] = df
         return df
+
+
+def estimate_size(value: Any) -> int:
+    """Rough memory footprint of a cached engine result : the NumPy arrays of every article (the bulk), plus a fixed
+    allowance per article for the Python objects (lanes, orders, alerts, proposals)."""
+    import numpy as np
+    total = 4096
+    arts = getattr(value, "articles", None)
+    if isinstance(arts, dict):
+        for ar in arts.values():
+            total += 16_384
+            for v in ar.__dict__.values():
+                if isinstance(v, np.ndarray):
+                    total += int(v.nbytes)
+                elif isinstance(v, list):
+                    for x in v:
+                        for w in getattr(x, "__dict__", {}).values():
+                            if isinstance(w, np.ndarray):
+                                total += int(w.nbytes)
+                        total += 256
+    return total
 
 
 _context: AppContext | None = None

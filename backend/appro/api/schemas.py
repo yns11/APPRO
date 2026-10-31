@@ -128,6 +128,9 @@ class RefTableInfo(BaseModel):
 
 class RefRowIn(BaseModel):
     values: dict[str, Any]
+    #: ``updated_at`` of the row as the screen loaded it : the write is refused (409) when someone else saved the
+    #: row since (optimistic lock) ; omitted = no check (imports, scripts)
+    expected_updated_at: dt.datetime | None = None
 
 
 class RefKeyIn(BaseModel):
@@ -747,6 +750,11 @@ class PdpSheetIn(BaseModel):
     name: str = ""
     note: str = ""
     cells: list[PdpCellIn] = Field(min_length=1)
+    #: the active version the sheet was loaded on (``None`` = no active version) ; the save is refused (409) when
+    #: another version became active since, so that nobody overwrites a colleague's entry without seeing it
+    base_version_id: str | None = None
+    #: ``True`` when the client sends ``base_version_id`` on purpose (a missing field keeps the old behaviour : no check)
+    check_version: bool = False
 
 
 class ImportReport(BaseModel):

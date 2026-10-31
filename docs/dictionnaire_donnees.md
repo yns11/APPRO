@@ -63,6 +63,22 @@ plus ; les anciennes colonnes sont ignorées à l'import.
 | delivery_weekdays | Jours de livraison | texte | oui | jours de livraison **standard**, ISO, `1,2,3,4,5` (1 = lundi) ; saisie en colonne semaine posée sur le premier de ces jours |
 | strict_days | Jours stricts | oui / non | non (non) | oui : livraisons uniquement les jours standard, jamais de proposition hors jour standard (◇) ; non : le CBN peut poser une proposition ◇ sur un autre jour ouvré quand le jour standard n'est plus tenable |
 | lead_time_days | Délai (j ouvrés) | entier | oui | délai du fournisseur en jours **ouvrés**, inclusif (lundi + 5 = lundi suivant) ; initialisé à 5 pour tous |
+| cutoff_time | Heure limite | texte | non | `HH:MM` (heure de Paris, `APPRO_TIMEZONE`) : une commande passée après part le jour ouvré suivant, le délai compte à partir de là ; vide = aucune |
+| active | Actif | oui / non | oui | |
+
+### 1.2 bis `ref_calendars` — Calendriers
+
+Fermetures et jours exceptionnels au-delà des jours ouvrés de la configuration (`APPRO_WORKING_WEEKDAYS`, `APPRO_HOLIDAYS`),
+règles § 1 de `regles_metier.md`.
+
+| Colonne | Libellé | Type | Obligatoire | Description |
+|---|---|---|---|---|
+| calendar | Calendrier | texte **clé** | oui | `usine`, `fournisseur`, `transit` ou `quai` |
+| key | Clé | texte **clé** | non | vide pour l'usine ; code fournisseur (`fournisseur`, `transit`) ; code pays (`transit` : tous les fournisseurs du pays) ; nom du quai (`quai`) |
+| date_from | Du | date **clé** | oui | premier jour |
+| date_to | Au | date | non | dernier jour inclus (vide = le jour seul ; 400 jours au plus) |
+| kind | Nature | texte | non (`fermeture`) | `fermeture`, ou `ouvert` (jour exceptionnellement travaillé : usine seulement) |
+| note | Motif | texte | non | |
 | active | Actif | oui / non | oui | |
 
 ### 1.3 `ref_article_suppliers` — Article ↔ fournisseur
@@ -360,15 +376,16 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 
 | Table | Contenu | Clé |
 |---|---|---|
-| `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) + `updated_by`, `updated_at` ; les colonnes ajoutées sont créées au démarrage (`ensure_columns`), les anciennes (stock de sécurité, cycle de commande, délai du lien) ignorées puis supprimables ; un 0 hérité dans un délai spécifique ou un plafond est remis à vide au démarrage | clé de la table |
-| `app_meta` | clé / valeur partagées par tous les processus de l'App : `data_version`, incrémentée à chaque écriture pour invalider les caches mémoire de chaque worker | key |
+| `ref_articles`, `ref_suppliers`, `ref_calendars`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) ; `updated_at` sert de **tampon de version** (une écriture d'écran qui renvoie un tampon périmé est refusée, HTTP 409) + `updated_by`, `updated_at` ; les colonnes ajoutées sont créées au démarrage (`ensure_columns`), les anciennes (stock de sécurité, cycle de commande, délai du lien) ignorées puis supprimables ; un 0 hérité dans un délai spécifique ou un plafond est remis à vide au démarrage | clé de la table |
+| `app_meta` | clé / valeur partagées par tous les processus de l'App : `data_version`, incrémentée **dans la transaction** de chaque écriture (et par le job de synchronisation) pour invalider les caches mémoire de chaque worker | key |
+| `app_migrations` | corrections de données ponctuelles déjà appliquées (nom, horodatage) : chacune s'exécute une seule fois par base ; les migrations de schéma du démarrage tournent sous `pg_advisory_lock` | name |
 | `app_plan_cells` | **cellules du plan** : article, fournisseur (`""` si aucun), date, expression saisie, quantité, commentaire, auteur | (article, fournisseur, date) |
 | `app_adjustments` | **cellules d'ajustement** : article, date (toute date), expression, quantité signée, commentaire, auteur | (article, date) |
 | `app_cell_flags` | **clics sur les cellules en lecture** : `kind` = `order_ignored` (commande ferme ignorée : article, fournisseur, jour), `proposal_refused` (proposition CBN refusée : article, fournisseur, jour, quantité refusée affichée ; bloque les propositions à ce fournisseur **ce jour-là seulement**) ou `desadv_hidden` (DESADV non reçu masqué : article, fournisseur, jour, BL en note), auteur | (kind, article, fournisseur, date) |
 | `app_pdp_versions`, `app_pdp_lines` | versions de PDP importées (classeur) ou saisies dans la page *Plan de production* (`source_file` = « saisie directe ») ; une active au plus | id |
 | `app_program_scrap` | **taux de rebut par programme**, daté : `rate_pct` s'applique de `week_start` (lundi) jusqu'à la ligne suivante ; besoin = PDP × (1 + taux / 100) ; auteur | (program_id, week_start) |
 | `app_help_pages` | **pense-bête intégré** : texte enregistré par un administrateur pour une page (`slug`, titre, `body_html` nettoyé, auteur, horodatage) ; absent = texte livré (`backend/appro/help/pense_bete.json`) ; `DELETE` revient au texte livré | slug |
-| `app_param_overrides` | règles communes du moteur (`global`, champs `target_tolerance_pct`, `lead_margin_days`, `stock_drift_pct`, `stock_drift_min_packs`, `stock_drift_persist`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
+| `app_param_overrides` | règles communes du moteur (`global`, champs `target_tolerance_pct`, `lead_margin_days`, `stock_drift_pct`, `stock_drift_min_packs`, `stock_drift_persist`, poids et tranches de l'OTD `otd_*`, seuils de segmentation `abc_*`, `xyz_*`, `segment_coverage_days`, `segment_service_pct`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
 | `app_transports` | **transports** du Planning de livraisons : identifiant `EM` + 6 chiffres, fournisseur, date, heure, quais (`;`), transporteur, commentaire, statut `planned` / `cancelled`, auteur, horodatage | transport_id |
 | `app_transport_orders` | commandes fermes portées par un transport (`order_id` du créneau ERP, article, numéros de commande, date prévue, quantité restante au moment de la création) | id |

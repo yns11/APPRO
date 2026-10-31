@@ -51,7 +51,8 @@ def _clean(schema: TableSchema, row: dict[str, Any]) -> dict[str, Any]:
     df = coerce(pd.DataFrame([row]), schema, strict=True)
     out = df.iloc[0].to_dict()
     for k in schema.key:
-        if out[k] in ("", None):
+        # a key column declared optional (the « clé » of a plant calendar row) may stay empty
+        if out[k] in ("", None) and (schema.column(k).required or schema.column(k).type != "str"):
             raise ValueError(f"clé manquante : {schema.column(k).label}")
     for c in schema.columns:
         if c.type == "date":
@@ -65,16 +66,39 @@ def _clean(schema: TableSchema, row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def upsert_row(session: Session, name: str, row: dict[str, Any], user: str, rec: Any = None) -> dict[str, Any]:
+class StaleRowError(Exception):
+    """The row was saved by someone else since the screen loaded it (optimistic lock)."""
+
+    def __init__(self, who: str, when: dt.datetime | None):
+        self.who, self.when = who, when
+        stamp = f" le {when:%d/%m/%Y à %H:%M}" if when else ""
+        super().__init__(f"Ligne modifiée depuis par {who or 'un autre utilisateur'}{stamp} : rechargez la ligne avant "
+                         "d'enregistrer (vos valeurs restent affichées)")
+
+
+def _same_stamp(a: dt.datetime | None, b: dt.datetime | None) -> bool:
+    """Two timestamps of the same save (the client sends back what it received, to the second)."""
+    if a is None or b is None:
+        return a is b
+    a, b = a.replace(tzinfo=None), b.replace(tzinfo=None)
+    return abs((a - b).total_seconds()) < 0.001     # the JSON round trip keeps the microseconds
+
+
+def upsert_row(session: Session, name: str, row: dict[str, Any], user: str, rec: Any = None,
+               expected_updated_at: dt.datetime | None = None) -> dict[str, Any]:
     """Create or update one row identified by the key columns.  Does not commit.
-    ``rec`` : the :class:`appro.services.actions.Recorder` of the request (undo), when any."""
+    ``rec`` : the :class:`appro.services.actions.Recorder` of the request (undo), when any.
+    ``expected_updated_at`` : the ``updated_at`` the screen loaded ; a row saved since by someone else raises
+    :class:`StaleRowError` (nothing is written : the screen shows the conflict and keeps the user's values)."""
     schema = schema_of(name)
     model = REF_MODELS[name]
     clean = _clean(schema, row)
     key = tuple(clean[k] for k in schema.key)
+    obj = session.get(model, key if len(key) > 1 else key[0])
+    if expected_updated_at is not None and obj is not None and not _same_stamp(obj.updated_at, expected_updated_at):
+        raise StaleRowError(str(obj.updated_by or ""), obj.updated_at)
     if rec is not None:
         rec.before(f"ref:{name}", {k: clean[k] for k in schema.key})
-    obj = session.get(model, key if len(key) > 1 else key[0])
     action = "update" if obj is not None else "create"
     if obj is None:
         obj = model(**{k: clean[k] for k in schema.key})

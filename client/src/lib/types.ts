@@ -15,7 +15,7 @@ export interface LinkRef {
   /** standard delivery weekdays of the supplier (ISO, "1,2,4") and whether it delivers on those days only (no ◇) */
   delivery_weekdays: string; strict_days: boolean;
 }
-export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; strict_days: boolean; transport_contact?: string; docks?: string; }
+export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; strict_days: boolean; transport_contact?: string; docks?: string; cutoff_time?: string; }
 export interface ProgramRef { program_id: string; name: string; family: string; active: boolean; components: number; }
 
 /** Reference tables managed in the application (generic CRUD). */
@@ -177,7 +177,8 @@ export interface SearchResponse { kind: SearchKind; total: number; truncated: bo
 export interface SyncTable { table: string; synced_at: string | null; age_minutes: number | null; rows: number | null; source: string; run_id?: string; status: "ok" | "late" | "unknown" | "missing" | "disabled"; }
 export interface SyncStatus { data_source: string; mirror: boolean; status: "ok" | "late" | "unknown"; last_sync_at: string | null; late_after_minutes: number; tables: SyncTable[]; }
 export interface OrphanRow { article_id: string; orders: number; receipts: number; desadv: number; consumption: number; last_date: string | null; suppliers: string[]; }
-export interface PlantCalendar { working_weekdays: number[]; holidays: string[]; next_closures: string[]; source: string; }
+export interface CalendarSupplier { supplier_id: string; name: string; cutoff_time: string; closures: string[]; closure_count: number; }
+export interface PlantCalendar { working_weekdays: number[]; holidays: string[]; holiday_sources: Record<string, "configuration" | "table">; open_days: string[]; next_closures: string[]; suppliers: CalendarSupplier[]; cutoff_passed: string[]; timezone: string; source: string; }
 export interface AdherenceRow {
   article_id: string; designation: string; unit: string; planner: string; consumption_source: ConsumptionSource; demand_days: number;
   plan: number; real: number; bias_pct: number | null; net_pct: number | null; gross_pct: number | null; weekday_share: number[]; suggested_demand_days: number | null;
@@ -223,3 +224,49 @@ export interface PortalOrderRow { order_id: string; article_id: string; designat
 export interface PortalDesadvRow { desadv_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string; date: string; qty: number; purch_id: string; packing_slip: string; state: string; final_processing: string; received: boolean; journal: boolean; status: string; }
 export interface PortalReceiptRow { receipt_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string; date: string; qty: number; purch_id: string; packing_slip: string; status: string; order_kind: string; counted: boolean; }
 export interface PortalResponse { suppliers: SupplierRef[]; as_of: string; kpis: PortalKpis; orders: PortalOrderRow[]; backlog: PortalOrderRow[]; forecasts: PortalOrderRow[]; transports: TransportOut[]; desadv: PortalDesadvRow[]; receipts: PortalReceiptRow[]; }
+
+// ---------------------------------------------------------------- supplier performance (OTD, observed lead times), segmentation, exceptions
+export type OtdBucket = "week" | "month" | "quarter" | "year";
+export interface OtdScores { n: number; otd: number | null; qty: number | null; punctuality: number | null; desadv: number | null; on_time: number; early: number; late: number; not_delivered: number; }
+export interface OtdPeriod extends OtdScores { period: string; start: string; }
+export interface OtdSupplier extends OtdScores { supplier_id: string | null; name: string; series: OtdPeriod[]; articles: number; }
+export interface OtdOrder {
+  order_id: string; supplier_id: string | null; supplier_name: string; article_id: string; designation: string; unit: string; planner: string; purch_id: string;
+  expected_date: string; qty_ordered: number; qty_open: number; received_qty: number; receipt_count: number; first_receipt: string | null; completed_date: string | null;
+  status: "ouverte" | "reçue" | "non livrée" | "non évaluable"; evaluable: boolean; qty_score: number | null; punct_score: number | null; desadv_score: number | null; otd: number | null;
+  delta_days: number | null; first_seen: string | null; lead_promised: number; lead_observed_wd: number | null; bias_wd: number | null; order_to_ship_days: number | null; ship_to_receipt_days: number | null;
+  urgent_order: boolean; bls: string[]; desadv_missing: string[];
+}
+export interface OtdResponse {
+  as_of: string; from: string; to: string; bucket: OtdBucket; periods: string[];
+  params: { weights: { qty: number; punctuality: number; desadv: number }; band1_days: number; band1_score: number; band2_days: number; band2_score: number };
+  totals: OtdScores & { series: OtdPeriod[] }; suppliers: OtdSupplier[]; not_evaluable: number; open: number; unmatched_receipts: number; first_seen_available: boolean; orders: OtdOrder[]; truncated: boolean;
+}
+export interface Dist { n: number; mean: number | null; p50: number | null; p90: number | null; std: number | null; min: number | null; max: number | null; }
+export interface LeadRow {
+  n: number; evaluated: number; received: number; not_delivered: number; delay: Dist; on_time_pct: number | null; early_pct: number | null; late_pct: number | null; late_beyond_pct: number | null;
+  recurring_late: boolean; lead_promised: number | string | null; lead_observed: Dist; bias: Dist; order_to_ship: Dist; ship_to_receipt: Dist; urgent_pct: number | null; partial_pct: number | null;
+  qty_per_receipt: Dist; profile_expected: number[]; profile_receipts: number[]; profile_orders: number[];
+}
+export interface LeadSupplier extends LeadRow { supplier_id: string | null; name: string; }
+export interface LeadArticle extends LeadRow { supplier_id: string | null; supplier_name: string; article_id: string; designation: string; unit: string; }
+export interface LeadTimeResponse { as_of: string; from: string; to: string; totals: LeadRow; suppliers: LeadSupplier[]; articles: LeadArticle[]; first_seen_available: boolean; band2_days: number; }
+export interface SegmentRow {
+  article_id: string; designation: string; unit: string; planner: string; family: string; price: number | null; qty_year: number; value_year: number | null; value_basis: string;
+  cv: number | null; weeks_used: number; xyz: "X" | "Y" | "Z"; programs: number; suppliers: number; single_source: boolean; lead_time_days: number | null; coverage_target_days: number;
+  abc: "A" | "B" | "C" | "–"; value_share_pct: number | null; cum_share_pct: number | null; segment: string; criticality: "haute" | "moyenne" | "basse";
+  suggested_coverage_days: number | null; coverage_delta: number | null; service_target_pct: number | null;
+}
+export interface SegmentSummary { segment: string; abc: string; xyz: string; articles: number; value_year: number; value_share_pct: number | null; suggested_coverage_days: number | null; service_target_pct: number | null; changes: number; }
+export interface SegmentationResponse {
+  as_of: string; weeks: number; from: string; to: string; params: { abc_a_pct: number; abc_b_pct: number; xyz_x_cv: number; xyz_y_cv: number; coverage: Record<string, number>; service: Record<string, number> };
+  total_value_year: number; valued: number; unvalued: number; segments: SegmentSummary[]; rows: SegmentRow[];
+}
+export type ExceptionKind = "order_late" | "order_due" | "stockout" | "backlog" | "desadv_error" | "acr_pending" | "stock_drift" | "negative_stock" | "unlinked_orders" | "no_supplier";
+export interface ExceptionItem {
+  id: string; kind: ExceptionKind; kind_label: string; article_id: string; designation: string; unit: string; owner: string; supplier_id: string | null; supplier_name: string;
+  deadline: string | null; days_to_deadline: number | null; overdue: boolean; qty: number | null; ref: string; action: string; detail: string;
+  production_at_risk: { first_stockout: string | null; shortage_20wd: number; programs: string[]; program_count: number };
+  resolution_days: number; score: number; score_urgency: number; score_risk: number; score_criticality: number; why: string[]; status: ArticleStatus | null; abc: string | null;
+}
+export interface ExceptionQueue { as_of: string; total: number; overdue: number; today: number; by_kind: { kind: ExceptionKind; label: string; count: number }[]; by_owner: { owner: string; count: number }[]; items: ExceptionItem[]; }

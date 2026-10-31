@@ -1,9 +1,10 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, CalendarCheck, CalendarClock, CheckSquare, Clock, Package, Pencil, ShoppingCart, Truck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarCheck, CalendarClock, CheckSquare, Clock, Gauge, Package, Pencil, ShoppingCart, Truck } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { useSupplier } from "@/lib/queries";
+import { useOtd, usePlantCalendar, useSupplier } from "@/lib/queries";
+import { OtdChart } from "@/components/charts/OtdChart";
 import { useRemembered } from "@/lib/pageState";
 import { ArticleLink, Badge, Button, Card, Empty, ErrorBox, Kpi, SeverityBadge, Skeleton, SkeletonBlock, Tabs } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
@@ -11,7 +12,7 @@ import { SupplierParamsTab } from "@/components/SupplierParamsTab";
 import { fmtDate, fmtInt, fmtQty, fmtWeekdays } from "@/lib/format";
 import type { BacklogRow, DesadvRow, OrderRow, PendingRow, ProposalOut, SupplierArticleRow, TransportOut } from "@/lib/types";
 
-type Tab = "articles" | "late" | "upcoming" | "transports" | "in_transit" | "to_process" | "to_validate" | "to_order" | "params";
+type Tab = "articles" | "late" | "upcoming" | "transports" | "in_transit" | "to_process" | "to_validate" | "to_order" | "performance" | "params";
 const H = "calc(100vh - 420px)";
 
 const art = <T extends { article_id: string; designation: string }>(): Column<T> => ({ key: "article", label: "Article", get: (r) => `${r.article_id} ${r.designation}`, exportGet: (r) => r.article_id, render: (r) => <ArticleLink id={r.article_id} designation={r.designation} /> });
@@ -24,6 +25,9 @@ export default function SupplierPage() {
   const transports = useQuery({ queryKey: ["supplier-transports", supplierId], enabled: !!supplierId, staleTime: 30_000,
     queryFn: () => api.get<TransportOut[]>("/api/transports", { supplier_id: supplierId, include_cancelled: true }) });
   const [tab, setTab] = useRemembered<Tab>("supplier.tab", "articles");
+  const otd = useOtd({ supplier_id: supplierId, bucket: "month" }, !!supplierId);
+  const calendar = usePlantCalendar();
+  const closures = calendar.data?.suppliers.find((x) => x.supplier_id === supplierId);
   const d = q.data;
   const s = d?.supplier;
   const k = d?.kpis;
@@ -111,6 +115,7 @@ export default function SupplierPage() {
     { id: "to_process", label: "À traiter", count: d?.to_process.length },
     { id: "to_validate", label: "À valider", count: d?.to_validate.length },
     { id: "to_order", label: "À commander", count: d?.to_order.filter((p) => !p.ignored).length },
+    { id: "performance", label: "Performance", count: otd.data?.totals.n },
     { id: "params", label: "Paramétrage" },
   ];
   const title = `Fournisseur ${supplierId}`;
@@ -120,7 +125,7 @@ export default function SupplierPage() {
         <div className="title">
           <div className="row"><Link to="/fournisseurs" className="btn ghost sm"><ArrowLeft />Fournisseurs</Link>{s && !s.active && <Badge tone="neutral">inactif</Badge>}</div>
           <h1 style={{ marginTop: 6 }}>{supplierId} {s && <span className="muted" style={{ fontWeight: 400 }}>· {s.name}</span>}</h1>
-          <p>{s ? <>{s.country && <>{s.country} · </>}{s.contact && <>{s.contact} · </>}{s.transport_contact ? <>contact transport <b>{s.transport_contact}</b> · </> : <><Badge tone="warning" title="Colonne « Contact transport » du Référentiel : destinataires des e-mails de transport, accès à l'espace fournisseur">sans contact transport</Badge> · </>}quais <b>{s.docks || "B15"}</b> · livraisons <b>{fmtWeekdays(s.delivery_weekdays)}</b>{s.strict_days ? <> <Badge tone="neutral" title="Jours stricts : jamais de proposition hors jour standard (◇)">jours stricts</Badge></> : null} · délai <b>{s.lead_time_days} j ouvrés</b> (inclusif : lundi + 5 = lundi suivant){k && k.active_links !== k.articles ? ` · ${k.active_links} lien(s) actif(s) sur ${k.articles}` : ""}</> : <Skeleton w={400} />}</p>
+          <p>{s ? <>{s.country && <>{s.country} · </>}{s.contact && <>{s.contact} · </>}{s.transport_contact ? <>contact transport <b>{s.transport_contact}</b> · </> : <><Badge tone="warning" title="Colonne « Contact transport » du Référentiel : destinataires des e-mails de transport, accès à l'espace fournisseur">sans contact transport</Badge> · </>}quais <b>{s.docks || "B15"}</b> · livraisons <b>{fmtWeekdays(s.delivery_weekdays)}</b>{s.strict_days ? <> <Badge tone="neutral" title="Jours stricts : jamais de proposition hors jour standard (◇)">jours stricts</Badge></> : null} · délai <b>{s.lead_time_days} j ouvrés</b> (inclusif : lundi + 5 = lundi suivant){s.cutoff_time ? <> · heure limite <b>{s.cutoff_time}</b>{calendar.data?.cutoff_passed.includes(supplierId) ? <> <Badge tone="warning" title="Une commande passée maintenant part le prochain jour ouvré">dépassée aujourd'hui</Badge></> : null}</> : null}{closures && closures.closure_count > 0 ? <> · <span title={closures.closures.map((x) => fmtDate(x)).join(", ")}><b>{closures.closure_count}</b> jour(s) sans livraison à venir</span></> : null}{k && k.active_links !== k.articles ? ` · ${k.active_links} lien(s) actif(s) sur ${k.articles}` : ""}</> : <Skeleton w={400} />}</p>
         </div>
         <div className="actions"><Button variant={tab === "params" ? "primary" : "default"} onClick={() => setTab("params")}><Pencil />Paramétrage</Button><Link className="btn" to="/referentiel?table=ref_suppliers">Référentiel</Link></div>
       </div>
@@ -134,6 +139,7 @@ export default function SupplierPage() {
         <Kpi label="À traiter" icon={<AlertTriangle size={14} />} value={k ? fmtInt(k.to_process) : <Skeleton w={40} h={28} />} meta="DESADV en erreur ou sans journal" tone={k && k.to_process > 0 ? "warning" : undefined} onClick={() => setTab("to_process")} active={tab === "to_process"} />
         <Kpi label="À valider" icon={<CheckSquare size={14} />} value={k ? fmtInt(k.to_validate) : <Skeleton w={40} h={28} />} meta="réceptions sans ACR depuis 7 j" tone={k && k.to_validate > 0 ? "warning" : undefined} onClick={() => setTab("to_validate")} active={tab === "to_validate"} />
         <Kpi label="À commander" icon={<ShoppingCart size={14} />} value={k ? fmtInt(k.to_order) : <Skeleton w={40} h={28} />} meta={k ? `${k.urgent_proposals} date(s) limite dépassée(s) · sous 5 j ouvrés` : ""} tone={k && k.urgent_proposals > 0 ? "critical" : k && k.to_order > 0 ? "warning" : "ok"} onClick={() => setTab("to_order")} active={tab === "to_order"} />
+        <Kpi label="OTD 12 mois" icon={<Gauge size={14} />} value={otd.data ? (otd.data.totals.otd === null ? "–" : `${otd.data.totals.otd.toFixed(0)} %`) : <Skeleton w={40} h={28} />} meta={otd.data ? `${otd.data.totals.n} commande(s) · quantité ${otd.data.totals.qty ?? "–"} · ponctualité ${otd.data.totals.punctuality ?? "–"} · DESADV ${otd.data.totals.desadv ?? "–"}` : ""} tone={otd.data?.totals.otd === null || otd.data?.totals.otd === undefined ? undefined : otd.data.totals.otd < 60 ? "critical" : otd.data.totals.otd < 85 ? "warning" : "ok"} onClick={() => setTab("performance")} active={tab === "performance"} />
       </div>
 
       <Tabs value={tab} onChange={setTab} tabs={tabs} />
@@ -143,6 +149,10 @@ export default function SupplierPage() {
           : tab === "late" ? <DataTable rows={d.late} columns={backlogCols} rowKey={(b) => b.order_id} maxHeight={H} storageKey="supplier.late" exportTitle={`${title} - en retard`} emptyTitle="Aucune commande en retard" />
           : tab === "upcoming" ? <DataTable rows={d.upcoming} columns={orderCols} rowKey={(o) => o.order_id} maxHeight={H} storageKey="supplier.upcoming" exportTitle={`${title} - commandes à venir`} emptyTitle="Aucune commande ferme à venir" />
           : tab === "params" ? <div style={{ padding: 16 }}><SupplierParamsTab supplierId={supplierId} articles={d.articles} /></div>
+          : tab === "performance" ? <div style={{ padding: 16 }}>
+              <p className="small subtle" style={{ marginBottom: 8 }}>OTD = 30 % quantité + 50 % ponctualité + 20 % DESADV par commande ferme, moyenne mensuelle sur douze mois ; détail, périodes et délais observés dans <Link to={`/performance?supplier_id=${encodeURIComponent(supplierId)}`}>Performance fournisseurs</Link>.</p>
+              {otd.isLoading || !otd.data ? <Skeleton h={240} /> : otd.data.totals.series.length === 0 ? <Empty title="Aucune commande évaluable sur douze mois" /> : <OtdChart series={otd.data.totals.series} height={240} target={90} />}
+            </div>
           : tab === "transports" ? <DataTable rows={transports.data ?? []} columns={transportCols} rowKey={(t) => t.transport_id} rowClass={(t) => (t.status === "cancelled" ? "muted" : "")} maxHeight={H} storageKey="supplier.transports" exportTitle={`${title} - transports`} emptyTitle="Aucun transport" emptyHint={<>Les transports se créent depuis le <Link to="/livraisons">Planning de livraisons</Link>.</>} />
           : tab === "in_transit" ? <DataTable rows={d.in_transit} columns={desadvCols} rowKey={(x) => x.desadv_id} maxHeight={H} storageKey="supplier.transit" exportTitle={`${title} - en transit`} emptyTitle="Rien en transit" />
           : tab === "to_process" ? <DataTable rows={d.to_process} columns={desadvCols} rowKey={(x) => x.desadv_id} maxHeight={H} storageKey="supplier.process" exportTitle={`${title} - à traiter`} emptyTitle="Aucun DESADV à traiter" />

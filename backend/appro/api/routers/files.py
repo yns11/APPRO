@@ -84,7 +84,6 @@ async def import_simulation(response: Response, file: UploadFile = File(...), ct
                 created += 1
     audit(session, user, "import", "simulation", file.filename or "", None, {"cells": created, "articles": len(cells)})
     rec.done("import", f"Import de saisies « {file.filename or 'classeur'} » ({created} cellules)", None, response)
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return S.ImportReport(created=created, ignored=len(notes), notes=notes)
 

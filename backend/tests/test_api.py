@@ -208,7 +208,8 @@ def test_weekly_article_parameters_api(client):
 def test_params_overrides(client):
     """Two common rules : the tolerance under the target and the lead-time margin ; the fixed rules are listed, not editable."""
     schema = client.get("/api/params/schema").json()
-    assert [p["field"] for p in schema] == ["target_tolerance_pct", "lead_margin_days", "stock_drift_pct", "stock_drift_min_packs", "stock_drift_persist"]
+    assert [p["field"] for p in schema][:5] == ["target_tolerance_pct", "lead_margin_days", "stock_drift_pct", "stock_drift_min_packs", "stock_drift_persist"]
+    assert {"otd_weight_qty", "otd_band1_days", "abc_a_pct", "xyz_x_cv", "segment_coverage_days"} <= {p["field"] for p in schema}
     assert schema[0]["default"] == 15 and schema[1]["default"] == 1 and schema[2]["default"] == 10 and schema[4]["default"] == 3
     assert client.put("/api/params/overrides", json={"scope": "global", "field": "lead_margin_days", "value": 0}).status_code == 200
     assert client.get("/api/params/effective").json()["lead_margin_days"] == 0
@@ -230,8 +231,8 @@ def test_params_overrides(client):
 def test_reference_crud_template_and_import(client):
     tables = client.get("/api/reference/tables").json()
     names = {t["name"]: t for t in tables}
-    assert set(names) == {"ref_articles", "ref_suppliers", "ref_article_suppliers", "ref_consumption_terms", "ref_closed_orders", "ref_programs",
-                          "ref_bom", "fct_stock", "ref_planners", "ref_delegations"}
+    assert set(names) == {"ref_articles", "ref_suppliers", "ref_calendars", "ref_article_suppliers", "ref_consumption_terms", "ref_closed_orders",
+                          "ref_programs", "ref_bom", "fct_stock", "ref_planners", "ref_delegations"}
     assert names["ref_articles"]["rows"] == 16 and names["ref_suppliers"]["rows"] == 11 and names["ref_programs"]["rows"] == 25
     assert names["ref_articles"]["key"] == ["article_id"] and any(c["label"] == "Couverture cible (j ouvrés)" for c in names["ref_articles"]["columns"])
     # edit a threshold directly: the engine sees it
@@ -259,8 +260,8 @@ def test_reference_crud_template_and_import(client):
     wb = load_workbook(io.BytesIO(t.content))
     assert wb.sheetnames == ["Fournisseurs", "NOTICE"]
     ws = wb["Fournisseurs"]
-    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Pays", "Contact", "Contact transport", "Quais", "Jours de livraison", "Jours stricts", "Délai (j ouvrés)", "Actif"]
-    ws["A2"], ws["B2"], ws["F2"], ws["G2"], ws["H2"], ws["I2"], ws["J2"] = "S-NEW", "New supplier", "B15;B6 EST", "1,3", "oui", 7, "oui"
+    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Pays", "Contact", "Contact transport", "Quais", "Jours de livraison", "Jours stricts", "Délai (j ouvrés)", "Heure limite", "Actif"]
+    ws["A2"], ws["B2"], ws["F2"], ws["G2"], ws["H2"], ws["I2"], ws["J2"], ws["K2"] = "S-NEW", "New supplier", "B15;B6 EST", "1,3", "oui", 7, "11:30", "oui"
     buf = io.BytesIO()
     wb.save(buf)
     rep = client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", buf.getvalue())}, data={"mode": "merge"})

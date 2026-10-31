@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__
 from ..config import get_settings
 from ..engine.models import DatasetError
-from .routers import actions, data, entries, files, flows, help, mrp, pdp, portal, reference, transports
+from .routers import actions, data, entries, files, flows, help, mrp, pdp, performance, portal, reference, transports
 
 #: API routes a supplier (transport contact) may call ; everything else answers 403 (``supplier_gate``)
 SUPPLIER_PATHS = ("/api/config", "/api/health", "/api/portal", "/api/help", "/api/exports/table.xlsx")
@@ -64,6 +64,7 @@ def create_app() -> FastAPI:
             out["database_status"] = "ok"
             out["source"] = ctx.source.describe()
             out["reference_rows"] = int(len(ctx.table("ref_articles")))
+            out["cache"] = ctx.cache_stats()
         except Exception as exc:  # the diagnostic must answer even when the database is down
             logging.getLogger("appro").warning("Santé dégradée : %s: %s", type(exc).__name__, exc)
             out["status"] = "degraded"
@@ -72,7 +73,7 @@ def create_app() -> FastAPI:
         return out
 
     for r in (reference.router, mrp.router, entries.router, pdp.router, files.router, flows.router, data.router,
-              actions.router, help.router, transports.router, portal.router):
+              actions.router, help.router, transports.router, portal.router, performance.router):
         app.include_router(r)
 
     @app.middleware("http")

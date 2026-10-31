@@ -10,11 +10,12 @@ import { useRemembered } from "@/lib/pageState";
 import { DataTable, type Column } from "@/components/DataTable";
 import { StockValueChart } from "@/components/charts/StockValueChart";
 import { FlowsPanel } from "@/components/FlowsPanel";
+import { ExceptionsPanel } from "@/components/ExceptionsPanel";
 import { CalibrateDialog, fmtSigned, fmtSignedPct } from "@/components/CalibrateDialog";
 import type { ArticleSummary, Severity } from "@/lib/types";
 
 type Filter = "all" | "critical" | "to_order" | "overstock" | "data" | "drift" | "ok";
-type CockpitTab = "stocks" | "flux";
+type CockpitTab = "stocks" | "flux" | "exceptions";
 const FILTERS: Filter[] = ["all", "critical", "to_order", "overstock", "data", "drift", "ok"];
 
 export default function CockpitPage() {
@@ -23,7 +24,7 @@ export default function CockpitPage() {
   const [calibrate, setCalibrate] = useState(false);
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
-  const tab: CockpitTab = params.get("tab") === "flux" ? "flux" : "stocks";
+  const tab: CockpitTab = params.get("tab") === "flux" ? "flux" : params.get("tab") === "exceptions" ? "exceptions" : "stocks";
   const setTab = (t: CockpitTab) => setParams(t === "stocks" ? {} : { tab: t }, { replace: true });
   const [savedFilter, setFilter] = useRemembered<Filter>("cockpit.filter2", "all");
   const filter: Filter = FILTERS.includes(savedFilter) ? savedFilter : "all";
@@ -84,8 +85,9 @@ export default function CockpitPage() {
           <a className="btn primary" href={exportUrl}><Download />Simulation (xlsx)</a>
         </div>
       </div>
-      <Tabs<CockpitTab> tabs={[{ id: "stocks", label: "Couvertures et stocks" }, { id: "flux", label: "Flux d'approvisionnement" }]} value={tab} onChange={setTab} />
+      <Tabs<CockpitTab> tabs={[{ id: "stocks", label: "Couvertures et stocks" }, { id: "flux", label: "Flux d'approvisionnement" }, { id: "exceptions", label: "File d'exceptions" }]} value={tab} onChange={setTab} />
       {tab === "flux" && <FlowsPanel />}
+      {tab === "exceptions" && <ExceptionsPanel />}
       {tab === "stocks" && <>
       {config?.reference_empty && <div className="note">Le référentiel est vide : chargez d'abord les articles, fournisseurs, règles article ↔ fournisseur, programmes, nomenclatures et le stock de référence dans la page <Link to="/referentiel">Référentiel</Link> (modèles Excel à télécharger).</div>}
 

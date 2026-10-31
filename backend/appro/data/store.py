@@ -18,6 +18,7 @@ import os
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from typing import Any
 
 from sqlalchemy import (
@@ -268,6 +269,15 @@ class AppCounter(Base):
     __tablename__ = "app_counters"
     name: Mapped[str] = mapped_column(String(40), primary_key=True)
     value: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AppMigration(Base):
+    """One-shot data migrations already applied on this database (``DATA_MIGRATIONS``) : each runs once,
+    whatever the number of worker processes or restarts."""
+
+    __tablename__ = "app_migrations"
+    name: Mapped[str] = mapped_column(String(80), primary_key=True)
+    applied_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class AppTransport(Base):
@@ -583,13 +593,64 @@ def apply_text_defaults(engine) -> int:
     return n
 
 
+MIGRATION_LOCK_KEY = 7_419_301          # pg_advisory_lock key shared by every worker of the application
+#: one-shot data fixes, run once per database (journalised in ``app_migrations``) ; the schema steps
+#: (``ensure_columns``, ``retire_columns``, ``create_all``) stay idempotent and run at every start-up, under the lock
+DATA_MIGRATIONS: tuple[tuple[str, Any], ...] = (
+    ("nullable_numerics_zero_to_null", normalise_nullable_numerics),
+    ("supplier_docks_default_b15", apply_text_defaults),
+)
+
+
+@contextmanager
+def migration_lock(engine):
+    """Serialise the start-up migrations of the worker processes (PostgreSQL advisory lock held on a dedicated
+    connection for the whole DDL sequence) : two workers starting together never race on the same ALTER.
+    Other dialects (SQLite, one process) need no lock."""
+    if engine.dialect.name != "postgresql":
+        yield
+        return
+    conn = engine.connect()
+    try:
+        conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": MIGRATION_LOCK_KEY})
+        conn.commit()
+        yield
+    finally:
+        try:
+            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": MIGRATION_LOCK_KEY})
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def run_data_migrations(engine) -> list[str]:
+    """Apply the ``DATA_MIGRATIONS`` not yet journalised in ``app_migrations`` (the table exists : ``create_all``
+    ran before).  Returns the names applied."""
+    done: list[str] = []
+    with engine.connect() as conn:
+        applied = {r[0] for r in conn.execute(text("SELECT name FROM app_migrations")).all()}
+    for name, fn in DATA_MIGRATIONS:
+        if name in applied:
+            continue
+        fn(engine)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO app_migrations (name, applied_at) VALUES (:n, :t)"), {"n": name, "t": utcnow()})
+        done.append(name)
+    if done:
+        log.info("Migrations de données appliquées : %s", ", ".join(done))
+    return done
+
+
 def init_store(engine, schema: str | None = None) -> sessionmaker[Session]:
+    """Create / upgrade the application schema, **once at a time** : the whole sequence runs under a
+    database lock so that several worker processes starting together do not run the same DDL, and the
+    one-shot data fixes are journalised and never replayed."""
     ensure_schema(engine, schema)
-    ensure_columns(engine)
-    retire_columns(engine)
-    Base.metadata.create_all(engine)
-    normalise_nullable_numerics(engine)
-    apply_text_defaults(engine)
+    with migration_lock(engine):
+        ensure_columns(engine)
+        retire_columns(engine)
+        Base.metadata.create_all(engine)
+        run_data_migrations(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     with factory() as session:
         if session.get(AppMeta, DATA_VERSION_KEY) is None:
@@ -606,14 +667,19 @@ def read_data_version(session: Session) -> int:
     return int(row.value or 0) if row else 0
 
 
-def bump_data_version(session: Session) -> int:
-    """Increment the shared counter (row lock on PostgreSQL: concurrent writers serialise)."""
+def bump_data_version(session: Session, commit: bool = True) -> int:
+    """Increment the shared counter (row lock on PostgreSQL: concurrent writers serialise).  ``commit=False``
+    leaves the increment in the caller's transaction : the data and the version are then validated together
+    (:meth:`appro.services.context.AppContext.commit`)."""
     row = session.get(AppMeta, DATA_VERSION_KEY, with_for_update=session.bind.dialect.name == "postgresql")
     if row is None:
         row = AppMeta(key=DATA_VERSION_KEY, value="0")
         session.add(row)
     row.value = str(int(row.value or 0) + 1)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
     return int(row.value)
 
 

@@ -52,8 +52,8 @@ def next_transport_id(session: Session) -> str:
 
 
 # ----------------------------------------------------------------------------- queries
-def working_days(start: dt.date, weeks: int, holidays: list[dt.date]) -> list[dt.date]:
-    cal = WorkCalendar.from_spec(holidays=holidays)
+def working_days(start: dt.date, weeks: int, holidays: list[dt.date], open_days: list[dt.date] | None = None) -> list[dt.date]:
+    cal = WorkCalendar.from_spec(holidays=holidays, extra_open=open_days)
     end = start + dt.timedelta(days=7 * weeks - 1)
     return [start + dt.timedelta(days=i) for i in range((end - start).days + 1) if cal.is_working_day(start + dt.timedelta(days=i))]
 
@@ -92,7 +92,7 @@ def transport_out(t: AppTransport, names: dict[str, str]) -> dict[str, Any]:
 def planning(ds: Dataset, session: Session, start: dt.date, weeks: int, holidays: list[dt.date], as_of: dt.date) -> dict[str, Any]:
     """Suppliers × working days : the firm ERP orders of the window (active articles of the dataset), with
     the transports already created for them.  Only the suppliers with an order in the window appear."""
-    days = working_days(start, weeks, holidays)
+    days = working_days(start, weeks, sorted(set(holidays) | set(ds.holidays)), ds.open_days)
     end = days[-1] if days else start
     arts = {a.article_id: a for a in ds.articles if a.active}
     ignored = {(f.article_id, f.supplier_id or None, f.date) for f in ds.flags if f.kind == "order_ignored"}

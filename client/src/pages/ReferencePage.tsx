@@ -69,15 +69,16 @@ export default function ReferencePage() {
   const [mode, setMode] = useState<"replace" | "merge">("merge");
   const del = useWrite(({ name, key }: { name: string; key: Record<string, RefValue> }) => api.post(`/api/reference/${name}/delete`, { key }), () => toast.push("Ligne supprimée"));
   // one click on a dock of the Quais column saves the supplier row (its default docks, preselected when a transport is created)
+  // every one-click write sends the row as the screen loaded it (``expected_updated_at``) : a colleague's save in between is refused, never overwritten
   const setWeekdays = useWrite(({ row, days }: { row: RefRow; days: number[] }) => {
     const values: Record<string, RefValue> = {};
     (table?.columns ?? []).forEach((c) => { if (row[c.name] !== undefined) values[c.name] = row[c.name]; });
-    return api.put(`/api/reference/ref_suppliers/rows`, { values: { ...values, delivery_weekdays: days.join(",") } });
+    return api.put(`/api/reference/ref_suppliers/rows`, { values: { ...values, delivery_weekdays: days.join(",") }, expected_updated_at: row.updated_at });
   });
   const setDocks = useWrite(({ row, docks }: { row: RefRow; docks: string[] }) => {
     const values: Record<string, RefValue> = {};
     (table?.columns ?? []).forEach((c) => { if (row[c.name] !== undefined) values[c.name] = row[c.name]; });
-    return api.put(`/api/reference/ref_suppliers/rows`, { values: { ...values, docks: docks.join(";") } });
+    return api.put(`/api/reference/ref_suppliers/rows`, { values: { ...values, docks: docks.join(";") }, expected_updated_at: row.updated_at });
   });
   const importFile = useWrite(async (file: File) => { const fd = new FormData(); fd.append("file", file); fd.append("mode", mode); return api.upload<ImportReport>(`/api/reference/${tab}/import`, fd); },
     (r) => { setReport(r as ImportReport); toast.push(`${(r as ImportReport).created} ligne(s) importée(s)`, "success"); });
@@ -181,7 +182,12 @@ function BulkEditor({ table, rows, onClose }: { table: RefTableInfo; rows: RefRo
       const values: Record<string, unknown> = {};
       table.columns.forEach((c) => { values[c.name] = r[c.name] === undefined ? null : r[c.name]; });
       values[field] = col?.type === "bool" ? (value || "oui") === "oui" : value === "" ? null : value;
-      await api.put(`/api/reference/${table.name}/rows`, { values }, { group });
+      try {
+        // each row carries the stamp the screen loaded : a row saved by a colleague in between stops the lot (the rows done stay done, undoable as one action)
+        await api.put(`/api/reference/${table.name}/rows`, { values, expected_updated_at: r.updated_at }, { group });
+      } catch (e) {
+        throw new Error(`${(e as Error).message} – arrêt après ${n} ligne(s) modifiée(s) sur ${rows.length} (ligne ${table.key.map((k) => String(r[k])).join(" | ")}) ; rechargez puis relancez le lot`);
+      }
       n += 1;
     }
     return n;

@@ -97,6 +97,7 @@ class _Link:
     proposed: np.ndarray
     refused: set[dt.date]
     week_of: list[str]
+    closed: frozenset[dt.date] = frozenset()     # supplier / carrier / dock closures : no delivery those days
     _plan_week: dict[str, float] | None = None
 
     def plan_week(self, wk: str) -> float:
@@ -148,7 +149,11 @@ def _delivery_day(st: _Link, need: dt.date, earliest: dt.date, latest: dt.date, 
     one = dt.timedelta(days=1)
 
     def standard(d: dt.date) -> bool:
-        return calendar.is_open_weekday(d, st.weekdays)
+        return calendar.is_open_weekday(d, st.weekdays) and d not in st.closed
+
+    def deliverable(d: dt.date) -> bool:
+        """A working day of the plant the supplier can deliver on (closures of the supplier excluded)."""
+        return calendar.is_working_day(d) and d not in st.closed
 
     def ok(d: dt.date) -> bool:
         if not with_constraints:
@@ -184,10 +189,10 @@ def _delivery_day(st: _Link, need: dt.date, earliest: dt.date, latest: dt.date, 
             if not st.strict:
                 d = max(st.tenable, earliest)               # 3. ◇ : first tenable working day before the need
                 while d <= day:
-                    if calendar.is_working_day(d) and ok(d):
+                    if deliverable(d) and ok(d):
                         return d, not standard(d)
                     d += one
-                floor_day = last_before(day, calendar.is_working_day)   # 4. floor on the need day
+                floor_day = last_before(day, deliverable)   # 4. floor on the need day
                 if floor_day is not None and ok(floor_day):
                     return floor_day, not standard(floor_day)
             elif std is not None and ok(std):               # 4. strict supplier : floor on the standard day
@@ -246,9 +251,12 @@ def generate_proposals(
         sup = suppliers.get(sid) if sid else None
         lead = link.lead_time(suppliers) if link else 0
         order_lead = max(lead - margin, 0)
+        # cut-off hour passed : an order placed now only leaves on the next working day (the lead time counts from there)
+        start = calendar.next_working_day(today, inclusive=False) if sid and sid in (params.cutoff_passed or ()) else today
         states[sid] = _Link(
             link=link, supplier_id=sid, lead=lead, weekdays=sup.delivery_weekdays if sup else None,
-            tenable=calendar.add_working_days(today, order_lead), strict=bool(sup.strict_days) if sup else False,
+            tenable=calendar.add_working_days(start, order_lead), strict=bool(sup.strict_days) if sup else False,
+            closed=sup.closures if sup else frozenset(),
             order_lead=order_lead, cap_day=link.max_qty_per_delivery if link else None,
             cap_week=link.max_qty_per_week if link else None, pack=float(link.pack_qty) if link else 0.0,
             moq=float(link.moq) if link else 0.0,

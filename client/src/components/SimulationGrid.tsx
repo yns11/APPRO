@@ -108,17 +108,19 @@ function laneSeries(l: LaneOut, k: string): number[] | undefined { return l.seri
  * clearing a week cell sends every typed cell of the week back to the ERP ; clicking a week header switches
  * to the day view.  The labels follow the FR | EN choice of the page.
  */
-export function SimulationGrid({ cols, articles, planCells, adjustments, flags = [], showArticleRows, onSwitchDay }: {
+export function SimulationGrid({ cols, articles, planCells, adjustments, flags = [], showArticleRows, onSwitchDay, pending }: {
   cols: GridColumns; articles: GridRowArticle[]; planCells: PlanCellOut[]; adjustments: AdjustmentOut[]; flags?: FlagOut[];
   showArticleRows?: boolean; onSwitchDay?: (date: string) => void;
+  /** the rows shown belong to a previous filter / page while the new one loads : nothing may be typed or clicked (F35) */
+  pending?: boolean;
 }) {
   const toast = useToast();
   const { lang, t } = useLang();
   const { perimeter, set, rights } = usePerimeter();
   const calendar = usePlantCalendar();
   const hidden = useMemo(() => new Set(perimeter.hiddenRows), [perimeter.hiddenRows]);
-  /** read-only article: outside the user's portfolio (the server refuses the writes too) */
-  const lockedOf = useCallback((a: GridRowArticle) => !rights.canEditPlanner(a.article.planner), [rights]);
+  /** read-only article: outside the user's portfolio (the server refuses the writes too), or provisional data on screen */
+  const lockedOf = useCallback((a: GridRowArticle) => !!pending || !rights.canEditPlanner(a.article.planner), [rights, pending]);
   const LOCK = t("grid.readonly");
   const NO_BL = t("rec.no_bl");   // réception manuelle ou DESADV sans BL dans l'ERP
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -361,13 +363,54 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
   }, [fill, articles, asOfIdx, editDate, savePlanBatch, saveAdjBatch]);
   const inFill = (aid: string, key: string, lane: number, i: number) => !!fill && fill.aid === aid && fill.key === key && fill.lane === lane && i >= Math.min(fill.from, fill.to) && i <= Math.max(fill.from, fill.to);
 
+  /* ---------------- keyboard model (F35) : every editable or clickable cell is focusable ; arrows move between them,
+     Enter / F2 / a digit start typing, Space (or Enter) clicks a Ferme / CBN cell, Escape leaves the cell */
+  const KEY_ROWS: RowKind[] = ["firm", "plan", "cbn", "adj"];
+  const cellRef = (kind: RowKind, aid: string, li: number, i: number) => `${kind}|${aid}|${li}|${i}`;
+  const focusCell = useCallback((ref: string) => {
+    const el = wrap.current?.querySelector<HTMLElement>(`td[data-cell="${ref.replace(/"/g, '\\"')}"]`);
+    el?.focus();
+  }, []);
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
+  useEffect(() => { if (pendingFocus) { focusCell(pendingFocus); setPendingFocus(null); } }, [pendingFocus, focusCell, rows]);
+  const moveFocus = useCallback((kind: RowKind, aid: string, li: number, i: number, dr: number, dc: number) => {
+    const keyRows = rows.filter((r) => KEY_ROWS.includes(r.kind));
+    const k = keyRows.findIndex((r) => r.kind === kind && r.a.article.article_id === aid && r.li === li);
+    let ni = i;
+    if (dc) { ni = nextShown(i, dc > 0 ? 1 : -1); if (ni < 0) return; }
+    const target = keyRows[Math.min(keyRows.length - 1, Math.max(0, k + dr))];
+    if (!target) return;
+    const ref = cellRef(target.kind, target.a.article.article_id, target.li, ni);
+    const row = rows.indexOf(target);
+    const el = wrap.current;
+    if (el) {   // bring the target row into view (virtualised rows are only in the DOM when visible)
+      const top = offsets[row], bottom = offsets[row + 1];
+      if (top < el.scrollTop + HEAD_H) el.scrollTop = Math.max(0, top - HEAD_H);
+      else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
+      const x = LABEL_W + shown.indexOf(ni) * COL_W;
+      if (x < el.scrollLeft + LABEL_W) el.scrollLeft = Math.max(0, x - LABEL_W);
+      else if (x + COL_W > el.scrollLeft + el.clientWidth) el.scrollLeft = x + COL_W - el.clientWidth;
+    }
+    setPendingFocus(ref);
+  }, [rows, nextShown, offsets, shown]);
+  /** key handler of a focusable cell : ``start(initial?)`` opens the editor, ``click`` triggers the cell's click */
+  const cellKeys = (kind: RowKind, aid: string, li: number, i: number, start?: (initial?: string) => void, click?: () => void) => (ev: React.KeyboardEvent<HTMLTableCellElement>) => {
+    if (ev.target !== ev.currentTarget) return;         // keys typed inside the input are the input's
+    const moves: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+    if (moves[ev.key]) { ev.preventDefault(); const [dr, dc] = moves[ev.key]; moveFocus(kind, aid, li, i, dr, dc); return; }
+    if (ev.key === "Tab") { ev.preventDefault(); moveFocus(kind, aid, li, i, 0, ev.shiftKey ? -1 : 1); return; }
+    if ((ev.key === "Enter" || ev.key === "F2") && start) { ev.preventDefault(); start(); return; }
+    if ((ev.key === "Enter" || ev.key === " ") && click) { ev.preventDefault(); click(); return; }
+    if (start && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && /[\d\-.,]/.test(ev.key)) { ev.preventDefault(); start(ev.key); }
+  };
+
   const input = (e: Edit, label: string, initial: (i: number) => string, canTab: (ni: number) => boolean) => (
     <input className="cell-input" autoFocus value={e.value} aria-label={label}
       onChange={(ev) => setEditing({ ...e, value: ev.target.value })} onBlur={() => { if (!fillRef.current && !picker) commit(); }}
       onKeyDown={(ev) => {
         if (ev.key === "Enter" && ev.shiftKey && weekCol(e.i)) { ev.preventDefault(); const r = (ev.target as HTMLElement).getBoundingClientRect(); openPicker(e.aid, e.key, e.lane, e.i, e.value, { x: r.left, y: r.bottom + 4 }); setEditing(null); }
-        else if (ev.key === "Enter") { ev.preventDefault(); commit(); }
-        else if (ev.key === "Escape") { ev.preventDefault(); setEditing(null); }
+        else if (ev.key === "Enter") { ev.preventDefault(); commit(); setPendingFocus(cellRef(e.key === "plan" ? "plan" : "adj", e.aid, e.key === "plan" ? e.lane : 0, e.i)); }
+        else if (ev.key === "Escape") { ev.preventDefault(); setEditing(null); setPendingFocus(cellRef(e.key === "plan" ? "plan" : "adj", e.aid, e.key === "plan" ? e.lane : 0, e.i)); }
         else if (ev.key === "Tab") { ev.preventDefault(); const ni = nextShown(e.i, ev.shiftKey ? -1 : 1); if (ni >= 0 && ni < n && canTab(ni)) { const nv = initial(ni); setActive({ aid: e.aid, key: e.key, lane: e.lane, i: ni }); commit({ ...e, i: ni, value: nv, initial: nv, date: undefined }); } else commit(); }
       }} />
   );
@@ -466,7 +509,9 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               // a week column toggles every day of the week : ignore the days not yet ignored, or restore them all
               const onClick = !clickable ? undefined : !wk ? () => toggleFlag.mutate({ article_id: aid, supplier_id: l.supplier_id, date: cols.period_start[i], kind: "order_ignored" })
                 : () => { const all = days.every(([, ig]) => ig); toggleFlags.mutate(days.filter(([, ig]) => all || !ig).map(([d]) => ({ article_id: aid, supplier_id: l.supplier_id, date: d, kind: "order_ignored" as const }))); };
-              return <td key={i} className={cls} title={title} onClick={onClick}>{ems.length > 0 && <Truck className="tr-ico" size={9} aria-label={ems.join(", ")} />}{ignored ? <s>{text}</s> : text}</td>;
+              return <td key={i} className={cls} title={title} onClick={onClick} tabIndex={locked || past ? undefined : 0} role="gridcell" data-cell={cellRef("firm", aid, r.li, i)}
+                aria-label={`${t("row.orders_firm")} ${l.supplier_id ?? ""} ${periodLabel(cols.periods[i], lang)}`} onKeyDown={locked || past ? undefined : cellKeys("firm", aid, r.li, i, undefined, onClick)}>
+                {ems.length > 0 && <Truck className="tr-ico" size={9} aria-label={ems.join(", ")} />}{ignored ? <s>{text}</s> : text}</td>;
             })}
             {spacerR}
           </tr>
@@ -550,13 +595,16 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
                 wk ? `${t("plan.week_target", { d: dayLabel(target) })} ${isStandardDay(a, l.supplier_id, target) ? t("plan.week_standard") : t("plan.week_monday")} · ${t("plan.week_more")}` : "", t("plan.gestures")].filter(Boolean).join("\n");
               // a CBN proposal taken from a week column keeps its own delivery date (◇ included)
               const ghostDate = ghost && wk && ps.length ? ps.map((p) => p.delivery_date).sort()[0] : undefined;
-              const onClick = past || isEd || locked ? undefined : () => { setActive({ aid, key: "plan", lane: li, i }); setEditing({ aid, key: "plan", lane: li, i, value: initial, initial: shownV, date: ghostDate }); };
+              const start = past || locked ? undefined : (first?: string) => { setActive({ aid, key: "plan", lane: li, i }); setEditing({ aid, key: "plan", lane: li, i, value: first ?? initial, initial: shownV, date: ghostDate }); };
+              const onClick = past || isEd || locked ? undefined : () => start?.();
               const onCtx = past || locked ? undefined : (e: React.MouseEvent) => {
                 e.preventDefault();
                 if (!wk) { comment(aid, "plan", l, i, cell?.note ?? "", initial); return; }
                 setCtx({ aid, key: "plan", lane: li, i, value: isEd ? editing!.value : initial, current: "", x: e.clientX, y: e.clientY });
               };
-              return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined} onContextMenu={onCtx}>
+              return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined} onContextMenu={onCtx}
+                tabIndex={past || locked ? undefined : 0} role="gridcell" data-cell={cellRef("plan", aid, li, i)} aria-label={`${t("row.plan")} ${l.supplier_id ?? ""} ${periodLabel(cols.periods[i], lang)}`}
+                onKeyDown={past || locked ? undefined : cellKeys("plan", aid, li, i, start)} onFocus={past || locked || isEd ? undefined : () => setActive({ aid, key: "plan", lane: li, i })}>
                 {isEd ? input(editing!, `${t("row.plan")} ${l.supplier_id ?? ""} ${periodLabel(cols.periods[i], lang)}`, shownOf, (ni) => ni >= asOfIdx)
                   : past ? "" : ghost ? <span className="ghostv">{fmtQty(cbn, unit)}</span> : <>{v === 0 && !typed ? "·" : fmtQty(v, unit)}{cbn > 0 && !ghost && <span className="ghostv small"> +{fmtQty(cbn, unit)}</span>}</>}
                 {(isEd || isActive) && !past && handle(aid, "plan", li, i, isEd ? editing!.value : shownV)}
@@ -589,7 +637,9 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               // a refusal blocks the supplier that day only ; a week column refuses (or restores) every proposal day of the week
               const onClick = !clickable ? undefined : !wk ? () => toggleFlag.mutate({ article_id: aid, supplier_id: flag ? (flag.supplier_id || null) : (sid || null), date: flag ? flag.date : cols.period_start[i], kind: "proposal_refused", qty: v })
                 : () => { const existing = flagsOf(i); if (existing.length) toggleFlags.mutate(existing.map((f) => ({ article_id: aid, supplier_id: f.supplier_id || null, date: f.date, kind: "proposal_refused" as const }))); else toggleFlags.mutate(ps.map((p) => ({ article_id: aid, supplier_id: sid || null, date: p.delivery_date, kind: "proposal_refused" as const, qty: p.qty }))); };
-              return <td key={i} className={cls} title={title} onClick={onClick}>{flag ? <s>{fmtQty(flag.qty, unit)}</s> : v === 0 ? "·" : <>{fmtQty(v, unit)}{urgent && <span className="mark urgent" aria-label="urgent">!</span>}{capped && <span className="mark capped" aria-label="plafonnée">▲</span>}{off && <span className="mark off" aria-label="hors jour standard">◇</span>}</>}</td>;
+              return <td key={i} className={cls} title={title} onClick={onClick} tabIndex={locked || past ? undefined : 0} role="gridcell" data-cell={cellRef("cbn", aid, r.li, i)}
+                aria-label={`${t("row.supply_proposed")} ${sid} ${periodLabel(cols.periods[i], lang)}`} onKeyDown={locked || past ? undefined : cellKeys("cbn", aid, r.li, i, undefined, onClick)}>
+                {flag ? <s>{fmtQty(flag.qty, unit)}</s> : v === 0 ? "·" : <>{fmtQty(v, unit)}{urgent && <span className="mark urgent" aria-label="urgent">!</span>}{capped && <span className="mark capped" aria-label="plafonnée">▲</span>}{off && <span className="mark off" aria-label="hors jour standard">◇</span>}</>}</td>;
             })}
             {spacerR}
           </tr>
@@ -612,13 +662,16 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
               const initial = initialOf(i);
               const title = [cell && !wk ? `${cell.expression || cell.qty} = ${fmtQty(cell.qty, unit)}${cell.note ? ` – ${cell.note}` : ""}` : i <= initIdx ? t("adj.initial") : t("adj.any"),
                 wk ? `${t("adj.week", { d: dayLabel(target) })}${cell ? ` – ${t("adj.this_day")} : ${cell.expression || cell.qty}${cell.note ? ` – ${cell.note}` : ""}` : ""} · ${t("plan.week_more")}` : "", t("plan.gestures")].filter(Boolean).join("\n");
-              const onClick = isEd || locked ? undefined : () => { setActive({ aid, key: "adjustments", lane: 0, i }); setEditing({ aid, key: "adjustments", lane: 0, i, value: initial, initial }); };
+              const start = locked ? undefined : (first?: string) => { setActive({ aid, key: "adjustments", lane: 0, i }); setEditing({ aid, key: "adjustments", lane: 0, i, value: first ?? initial, initial }); };
+              const onClick = isEd || locked ? undefined : () => start?.();
               const onCtx = locked ? undefined : (e: React.MouseEvent) => {
                 e.preventDefault();
                 if (!wk) { comment(aid, "adjustments", null, i, cell?.note ?? "", initial); return; }
                 setCtx({ aid, key: "adjustments", lane: 0, i, value: isEd ? editing!.value : initial, current: cell?.note ?? "", x: e.clientX, y: e.clientY });
               };
-              return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined} onContextMenu={onCtx}>
+              return <td key={i} className={cls} title={title} onClick={onClick} onMouseEnter={fill ? () => extendFill(i) : undefined} onContextMenu={onCtx}
+                tabIndex={locked ? undefined : 0} role="gridcell" data-cell={cellRef("adj", aid, 0, i)} aria-label={`${t("row.adjustments")} ${periodLabel(cols.periods[i], lang)}`}
+                onKeyDown={locked ? undefined : cellKeys("adj", aid, 0, i, start)} onFocus={locked || isEd ? undefined : () => setActive({ aid, key: "adjustments", lane: 0, i })}>
                 {isEd ? input(editing!, `${t("row.adjustments")} ${periodLabel(cols.periods[i], lang)}`, initialOf, () => true) : v === 0 ? "·" : `${v > 0 ? "+" : ""}${fmtQty(v, unit)}`}
                 {(isEd || isActive) && handle(aid, "adjustments", 0, i, isEd ? editing!.value : initial)}
               </td>;
@@ -724,14 +777,15 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         <span className="subtle small" style={{ marginLeft: "auto" }}>{articles.length} {t("grid.articles")} · {m} {t("grid.columns")}</span>
       </div>
       {weeks.length > 1 && <WeekRangeBar weeks={weeks} range={range} onChange={(r) => set({ weekRange: r })} lang={lang} />}
-      <div className="pivot virtual" ref={wrap} onScroll={onScroll}>
+      {pending && <div className="pivot-pending small" role="status" aria-live="polite">{t("grid.pending")}</div>}
+      <div className={`pivot virtual ${pending ? "pending" : ""}`} ref={wrap} onScroll={onScroll} aria-busy={pending || undefined}>
         <table style={{ width: LABEL_W + m * COL_W }}>
           <thead>
             <tr style={{ height: HEAD_H }}>
               <th style={{ width: LABEL_W, minWidth: LABEL_W, maxWidth: LABEL_W }}>{t("grid.variable")}</th>
               {leftW > 0 && <th className="spacer" style={{ width: leftW, minWidth: leftW, maxWidth: leftW }} />}
-              {visibleCols.map((i) => { const p = cols.periods[i]; return <th key={p} style={{ width: COL_W, minWidth: COL_W, maxWidth: COL_W }} className={`${i === asOfIdx ? "today" : ""} ${isWeekKey(p) ? "wk wkcol" : ""}`} title={isWeekKey(p) ? `${cols.period_start[i]} → ${cols.period_end[i]}${onSwitchDay ? ` · ${t("grid.week_detail")}` : ""}` : `${fmtDate(cols.period_start[i], "EEEE dd/MM/yyyy", lang)} · ${t("grid.week")} ${isoWeekOf(cols.period_start[i])}`}
-                onClick={isWeekKey(p) && onSwitchDay ? () => onSwitchDay(cols.period_start[i]) : undefined}>{periodLabel(p, lang)}</th>; })}
+              {visibleCols.map((i) => { const p = cols.periods[i]; const sw = isWeekKey(p) && onSwitchDay ? () => onSwitchDay(cols.period_start[i]) : undefined; return <th key={p} style={{ width: COL_W, minWidth: COL_W, maxWidth: COL_W }} className={`${i === asOfIdx ? "today" : ""} ${isWeekKey(p) ? "wk wkcol" : ""}`} title={isWeekKey(p) ? `${cols.period_start[i]} → ${cols.period_end[i]}${onSwitchDay ? ` · ${t("grid.week_detail")}` : ""}` : `${fmtDate(cols.period_start[i], "EEEE dd/MM/yyyy", lang)} · ${t("grid.week")} ${isoWeekOf(cols.period_start[i])}`}
+                onClick={sw} tabIndex={sw ? 0 : undefined} role={sw ? "button" : undefined} onKeyDown={sw ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sw(); } } : undefined}>{periodLabel(p, lang)}</th>; })}
               {rightW > 0 && <th className="spacer" style={{ width: rightW, minWidth: rightW, maxWidth: rightW }} />}
             </tr>
           </thead>

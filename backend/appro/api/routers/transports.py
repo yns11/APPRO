@@ -93,8 +93,7 @@ def create(body: S.TransportCreateIn, response: Response, ctx: AppContext = Depe
     ids = ", ".join(t.transport_id for t in rows)
     actions.record_fixed(session, user, "transport", f"Transport {ids} : {_names(ctx).get(body.supplier_id, body.supplier_id)}, "
                          f"{len(body.order_ids)} commande(s), {rows[0].date:%d/%m/%Y}", None, response)
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return json_response(S.TransportPackOut(**_pack(ctx, ds, rows, user)).model_dump(mode="json"), status_code=201)
 
 
@@ -126,6 +125,5 @@ def cancel(transport_id: str, response: Response, ctx: AppContext = Depends(ctx_
     if t.status != "cancelled":
         T.cancel_transport(session, user, t)
         actions.record_fixed(session, user, "transport", f"Transport {transport_id} annulé", None, response)
-        session.commit()
-        ctx.bump()
+        ctx.commit(session)
     return json_response(S.TransportOut(**T.transport_out(t, _names(ctx))).model_dump(mode="json"))

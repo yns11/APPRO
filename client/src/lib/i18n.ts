@@ -30,6 +30,7 @@ const T = {
   "grid.articles": { fr: "article(s)", en: "article(s)" },
   "grid.columns": { fr: "colonnes", en: "columns" },
   "grid.readonly": { fr: "Lecture seule : article hors de votre carnet", en: "Read only: article outside your portfolio" },
+  "grid.pending": { fr: "Chargement du nouveau périmètre… les cellules affichées sont celles du périmètre précédent : aucune saisie possible", en: "Loading the new perimeter… the cells shown belong to the previous one: nothing can be typed" },
   "grid.open_supplier": { fr: "Ouvrir la fiche fournisseur", en: "Open the supplier page" },
   "grid.show_block": { fr: "Afficher le bloc", en: "Show the block" },
   "grid.hide_block": { fr: "Masquer le bloc", en: "Hide the block" },

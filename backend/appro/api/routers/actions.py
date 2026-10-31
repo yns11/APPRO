@@ -31,8 +31,7 @@ def _run(fn, ctx: AppContext, session: Session, actor: str, access: Access, kind
     except actions.ActionError as exc:
         session.rollback()
         raise HTTPException(exc.status, str(exc))
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return S.ActionResultOut(kind=kind, actions=[S.ActionOut(**actions.to_out(session, a, actor, access.is_admin))
                                                  for a in done], cells=actions.touched_cells(done))
 

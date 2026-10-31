@@ -99,12 +99,25 @@ def orphan_articles(ctx: AppContext) -> list[dict[str, Any]]:
 # Plant calendar
 # =============================================================================
 def plant_calendar(ctx: AppContext, session: Session, weeks: int = 26) -> dict[str, Any]:
+    """The plant calendar : working weekdays, closures (configuration **and** Calendriers table), exceptional open
+    days, and the supplier / carrier / dock closures of the table (per supplier) for the screens."""
     params = mrp_service.build_params(ctx, session)
     today = params.as_of or dt.date.today()
-    closures = sorted(d for d in ctx.settings.holiday_dates if d >= today - dt.timedelta(days=7))
+    ds = erp_dataset(ctx.table, holidays=ctx.settings.holiday_dates)
+    since = today - dt.timedelta(days=7)
+    closures = sorted(d for d in ds.holidays if d >= since)
+    config = set(ctx.settings.holiday_dates)
+    opened = sorted(d for d in ds.open_days if d >= since)
+    suppliers = [{"supplier_id": s.supplier_id, "name": s.name, "cutoff_time": s.cutoff_time,
+                  "closures": [d.isoformat() for d in sorted(s.closures) if d >= since][:60], "closure_count": sum(1 for d in s.closures if d >= today)}
+                 for s in ds.suppliers if s.closures or s.cutoff_time]
     return {"working_weekdays": list(params.working_weekdays), "holidays": [d.isoformat() for d in closures],
+            "holiday_sources": {d.isoformat(): ("configuration" if d in config else "table") for d in closures},
+            "open_days": [d.isoformat() for d in opened],
             "next_closures": [d.isoformat() for d in closures if d >= today][:weeks],
-            "source": "APPRO_HOLIDAYS / APPRO_WORKING_WEEKDAYS"}
+            "suppliers": suppliers, "cutoff_passed": list(mrp_service.cutoff_passed(ds.suppliers, tz=ctx.settings.timezone)),
+            "timezone": ctx.settings.timezone,
+            "source": "APPRO_HOLIDAYS / APPRO_WORKING_WEEKDAYS + table Calendriers du Référentiel"}
 
 
 # =============================================================================

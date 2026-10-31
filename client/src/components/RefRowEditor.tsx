@@ -10,6 +10,11 @@ import type { RefColumn, RefRow, RefTableInfo } from "@/lib/types";
 /** Choice lists of the reference columns that are not free text. */
 const CHOICES: Record<string, Record<string, { value: string; label: string }[]>> = {
   ref_planners: { role: [{ value: "appro", label: "appro – écrit sur son carnet" }, { value: "manager", label: "manager – + paramètres pour tous, import PDP" }, { value: "admin", label: "admin – tous les droits" }] },
+  ref_calendars: {
+    calendar: [{ value: "usine", label: "usine – fermeture (ni besoin, ni livraison) ou jour exceptionnellement ouvert" }, { value: "fournisseur", label: "fournisseur – n'expédie ni ne livre (clé : code fournisseur)" },
+      { value: "transit", label: "transit – transporteur ou pays : aucune livraison (clé : code fournisseur ou code pays)" }, { value: "quai", label: "quai – quai fermé (clé : B15, B6 EST, B2 NORD, B6 NORD)" }],
+    kind: [{ value: "fermeture", label: "fermeture" }, { value: "ouvert", label: "ouvert – jour exceptionnellement travaillé (usine seulement)" }],
+  },
   ref_articles: {
     sourcing_policy: Object.entries(SOURCING_LABELS).map(([value, label]) => ({ value, label: `${label}${value === "quota" ? " – chaque besoin réparti selon les quotas des liens" : " – le fournisseur prioritaire d'abord"}` })),
     consumption_source: Object.entries(CONSUMPTION_SOURCE_LABELS).map(([value, label]) => ({ value, label })),
@@ -32,7 +37,8 @@ export function RefRowEditor({ table, row, onClose, fixed, onSaved }: { table: R
     table.columns.forEach((c) => { const x = row[c.name]; v[c.name] = x === undefined || x === null ? (c.type === "bool" ? "oui" : c.name === "demand_days" ? "5" : c.name === "sourcing_policy" ? "quota" : c.name === "consumption_source" ? "erp" : "") : c.type === "bool" ? (x ? "oui" : "non") : String(x); });
     setValues({ ...v, ...(fixed ?? {}) });
   }, [row, table, fixed]);
-  const save = useWrite((vals: Record<string, string>) => api.put(`/api/reference/${table.name}/rows`, { values: vals }), () => { toast.push("Ligne enregistrée", "success"); onSaved?.(); onClose(); });
+  // the row's ``updated_at`` travels with the save : a colleague's write in between is refused (409) and the drawer stays open with the values typed
+  const save = useWrite((vals: Record<string, string>) => api.put(`/api/reference/${table.name}/rows`, { values: vals, expected_updated_at: isNew ? undefined : row?.updated_at ?? undefined }), () => { toast.push("Ligne enregistrée", "success"); onSaved?.(); onClose(); });
   const termArticle = table.name === "ref_consumption_terms" ? (values.article_id || fixed?.article_id || "") : "";
   const sources = useConsumptionSources(termArticle || undefined, !!termArticle);
   const suppliers = useRefRows(table.name === "ref_article_suppliers" || table.name === "ref_articles" ? "ref_suppliers" : null);
@@ -65,7 +71,7 @@ export function RefRowEditor({ table, row, onClose, fixed, onSaved }: { table: R
           <Field key={c.name} label={`${c.label}${c.required ? " *" : ""}`} help={c.description}>{control(c)}</Field>
         ))}
       </div>
-      {save.error && <div className="error-box">{(save.error as Error).message}</div>}
+      {save.error && <div className="error-box" role="alert">{(save.error as Error).message}{(save.error as { status?: number }).status === 409 && <> <Button size="xs" onClick={() => { onSaved?.(); onClose(); }}>Fermer et recharger</Button></>}</div>}
       <p className="small subtle">* obligatoire · les colonnes clé ({table.key.join(", ")}) identifient la ligne et ne se modifient pas.</p>
     </Drawer>
   );

@@ -49,7 +49,39 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
     stock_drift_min_packs: { label: "Dérive du stock ERP : écart minimal", unit: "UM", max: 100, aria: "Écart minimal de dérive (unités de commande)", explain: (v) => (v === 0 ? "Pas de minimum : le seuil en % suffit." : `… et d'au moins ${v} unité(s) de commande du fournisseur principal.`) },
     stock_drift_persist: { label: "Dérive du stock ERP : persistance", unit: "snapshots", max: 30, aria: "Persistance de la dérive (snapshots)", explain: (v) => (v <= 1 ? "Dès la veille : un seul snapshot au-delà du seuil signale une dérive." : `Un article dérive quand ses ${v} derniers snapshots dépassent le seuil avec le même signe ; un signe qui change est un décalage de déclaration, pas une dérive.`) },
   };
+  /** Service fournisseur (OTD) and segmentation : the second card */
+  const PERF: Record<string, { label: string; unit: string; max: number; step?: number; text?: boolean; aria: string; explain: (v: number) => string }> = {
+    otd_weight_qty: { label: "OTD : poids de la quantité", unit: "%", max: 100, aria: "Poids de l'indicateur quantité", explain: () => "QUANTITÉ = 100 si la quantité commandée a été reçue, 0 sinon." },
+    otd_weight_punctuality: { label: "OTD : poids de la ponctualité", unit: "%", max: 100, aria: "Poids de l'indicateur ponctualité", explain: () => "PONCTUALITÉ = 100 le bon jour, puis les deux tranches ci-dessous, 0 au-delà." },
+    otd_weight_desadv: { label: "OTD : poids du DESADV", unit: "%", max: 100, aria: "Poids de l'indicateur DESADV", explain: () => "DESADV = 100 si chaque BL reçu a été annoncé par un DESADV traité sans erreur, 0 sinon. Les trois poids sont ramenés à 100 s'ils ne font pas 100." },
+    otd_band1_days: { label: "Ponctualité : tranche 1 (jours)", unit: "j", max: 30, aria: "Tranche 1 de ponctualité (jours)", explain: (v) => `Avance ou retard de 1 à ${v} jour(s) calendaire(s).` },
+    otd_band1_score: { label: "Ponctualité : score tranche 1", unit: "/ 100", max: 100, aria: "Score de la tranche 1", explain: () => "Score attribué dans la tranche 1." },
+    otd_band2_days: { label: "Ponctualité : tranche 2 (jours)", unit: "j", max: 60, aria: "Tranche 2 de ponctualité (jours)", explain: (v) => `Jusqu'à ${v} jour(s) d'avance ou de retard ; au-delà, 0. Une commande est évaluable ${v} jours après sa date prévue si elle n'est pas complète.` },
+    otd_band2_score: { label: "Ponctualité : score tranche 2", unit: "/ 100", max: 100, aria: "Score de la tranche 2", explain: () => "Score attribué dans la tranche 2." },
+    abc_a_pct: { label: "Segmentation : classe A", unit: "% de la valeur", max: 100, aria: "Seuil de la classe A", explain: (v) => `Les articles qui font les premiers ${v} % de la valeur annuelle cumulée sont en A.` },
+    abc_b_pct: { label: "Segmentation : classe B", unit: "% de la valeur", max: 100, aria: "Seuil de la classe B", explain: (v) => `Jusqu'à ${v} % : B ; au-delà : C.` },
+    xyz_x_cv: { label: "Segmentation : classe X", unit: "CV <", max: 10, step: 0.1, aria: "Seuil de la classe X", explain: (v) => `Coefficient de variation (écart-type / moyenne) de la consommation hebdomadaire inférieur à ${v} : régulier.` },
+    xyz_y_cv: { label: "Segmentation : classe Y", unit: "CV <", max: 10, step: 0.1, aria: "Seuil de la classe Y", explain: (v) => `Inférieur à ${v} : variable ; au-delà, ou sans consommation : Z, irrégulier.` },
+    segment_coverage_days: { label: "Couverture cible suggérée par segment", unit: "j ouvrés", max: 0, text: true, aria: "Couvertures suggérées par segment", explain: () => "Neuf valeurs « AX:3,AY:5,… », en jours ouvrés de besoin ; appliquées aux articles depuis Performance › Segmentation." },
+    segment_service_pct: { label: "Objectif de service par classe", unit: "%", max: 0, text: true, aria: "Objectifs de service par classe", explain: () => "« A:98,B:95,C:90 » : information pour les revues de politique de stock." },
+  };
   const editable = (schema.data ?? []).filter((p) => p.field in EDITABLE);
+  const perf = (schema.data ?? []).filter((p) => p.field in PERF);
+  const ruleRow = (p: { field: string; default: unknown; description: string }, meta: { label: string; unit: string; max: number; step?: number; text?: boolean; aria: string; explain: (v: number) => string }) => {
+    const cur = effective.data?.[p.field];
+    const ov = globalOv.get(p.field);
+    const val = Number(cur ?? p.default ?? 0);
+    return (
+      <div key={p.field} className="param editable">
+        <span className="label">{meta.label}{ov && <Badge tone="brand">surchargée</Badge>}</span>
+        <span className="value">{meta.text
+          ? <input className="input sm" type="text" disabled={!canEdit} defaultValue={String(cur ?? "")} style={{ width: 320 }} aria-label={meta.aria} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== String(cur ?? "")) setParam.mutate({ scope: "global", field: p.field, value: v }); }} />
+          : <input className="input sm" type="number" min={0} max={meta.max} step={meta.step ?? 1} disabled={!canEdit} defaultValue={String(cur ?? "")} style={{ width: 80 }} aria-label={meta.aria} onBlur={(e) => { if (e.target.value !== String(cur ?? "") && e.target.value !== "") setParam.mutate({ scope: "global", field: p.field, value: Number(e.target.value) }); }} />}<small>{meta.unit}</small>
+          {ov && canEdit && <Button size="xs" variant="ghost" title={`Rétablir la valeur par défaut (${String(p.default)} ${meta.unit})`} onClick={() => del.mutate(ov.id)}><RotateCcw /></Button>}</span>
+        <span className="small subtle">{p.description}. Défaut : {String(p.default)} {meta.unit}. {meta.explain(val)}</span>
+      </div>
+    );
+  };
   return (
     <div className="grid cols-2">
       <Card title="Règles réglables" hint={canEdit ? "les règles communes réglables ; valent pour tous les articles et tous les approvisionneurs" : "lecture seule : modifiables par les managers et administrateurs"}>
@@ -68,6 +100,10 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
             </div>
           );
         })}
+      </Card>
+      <Card title="Service fournisseur (OTD) et segmentation" hint={canEdit ? "poids et tranches de l'OTD, seuils ABC / XYZ et couvertures suggérées ; valent pour la page Performance fournisseurs et la file d'exceptions" : "lecture seule : modifiables par les managers et administrateurs"}>
+        {schema.isError ? <ErrorBox error={schema.error} /> : schema.isLoading || effective.isLoading ? <SkeletonBlock rows={3} /> : perf.map((p) => ruleRow(p, PERF[p.field]))}
+        <p className="small subtle" style={{ marginTop: 8 }}>OTD d'une commande = Σ poids × indicateur ; OTD d'un fournisseur sur une période = moyenne de ses commandes attendues sur la période (<Link to="/performance">Performance fournisseurs</Link>).</p>
       </Card>
       <Card title="Règles figées dans l'application" hint="communes à tous les articles ; détaillées dans le guide du moteur (docs/guide_moteur.md)">
         {fixed.isLoading ? <SkeletonBlock rows={6} /> : (
@@ -215,17 +251,25 @@ function CalendarCard() {
   const c = q.data;
   return (
     <div className="grid cols-2">
-      <Card title="Jours ouvrés" hint="les couvertures, seuils et délais comptent en jours ouvrés de ce calendrier">
+      <Card title="Jours ouvrés" hint="les couvertures, seuils et délais comptent en jours ouvrés de ce calendrier" actions={<Link className="btn sm" to="/referentiel?table=ref_calendars">Table Calendriers</Link>}>
         {!c ? <SkeletonBlock rows={3} /> : (
           <>
             <div className="day-picker" aria-label="Jours ouvrés">{[1, 2, 3, 4, 5, 6, 7].map((n) => <button key={n} type="button" disabled className={c.working_weekdays.includes(n) ? "on" : ""} title={WEEKDAY_LONG[n - 1]}>{WEEKDAY_SHORT[n - 1]}</button>)}</div>
-            <p className="small subtle" style={{ marginTop: 10 }}>Défini par la configuration de l'application ({c.source}) ; les fermetures s'ajoutent en dates ISO séparées par des virgules. Modifiable par l'administrateur Databricks (variables d'environnement de l'app).</p>
+            <p className="small subtle" style={{ marginTop: 10 }}>Jours de la semaine : configuration de l'application (APPRO_WORKING_WEEKDAYS). Fermetures et jours exceptionnels : variable APPRO_HOLIDAYS <b>et</b> table <b>Calendriers</b> du Référentiel (usine, fournisseur, transit, quai), modifiable par les approvisionneurs déclarés. Heure de référence : {c.timezone}.</p>
+            {c.open_days.length > 0 && <p className="small"><b>Jours exceptionnellement ouverts</b> : {c.open_days.map((h) => fmtDate(h, "EEE dd/MM/yyyy")).join(", ")}.</p>}
           </>
         )}
       </Card>
       <Card title="Fermetures d'usine" hint="jours fériés et arrêts : aucun besoin, aucune livraison, non comptés dans les couvertures">
         {!c ? <SkeletonBlock rows={3} /> : c.holidays.length === 0 ? <p className="small subtle">Aucune fermeture déclarée.</p> : (
-          <div className="calendar-strip">{c.holidays.map((h) => <span key={h} className="closure" title={h}>{fmtDate(h, "EEE dd/MM/yyyy")}</span>)}</div>
+          <div className="calendar-strip">{c.holidays.map((h) => <span key={h} className="closure" title={`${h} · ${c.holiday_sources?.[h] === "table" ? "table Calendriers" : "configuration"}`}>{fmtDate(h, "EEE dd/MM/yyyy")}{c.holiday_sources?.[h] === "table" ? " *" : ""}</span>)}</div>
+        )}
+        {c && c.holidays.some((h) => c.holiday_sources?.[h] === "table") && <p className="small subtle" style={{ marginTop: 6 }}>* déclarée dans la table Calendriers.</p>}
+      </Card>
+      <Card title="Fermetures fournisseurs, transit, quais et heures limites" hint="jours sans livraison possible par fournisseur (ses fermetures, celles de son transporteur ou de son pays, ses quais fermés) et heure limite de commande" className="span-2">
+        {!c ? <SkeletonBlock rows={3} /> : c.suppliers.length === 0 ? <p className="small subtle">Aucune fermeture fournisseur ni heure limite déclarée (table Calendriers, colonne « Heure limite » des fournisseurs).</p> : (
+          <table className="tbl compact"><thead><tr><th>Fournisseur</th><th>Heure limite</th><th className="num">Jours fermés à venir</th><th>Prochaines fermetures</th></tr></thead>
+            <tbody>{c.suppliers.map((s) => <tr key={s.supplier_id}><td><SupplierLink id={s.supplier_id} name={s.name} inline /></td><td>{s.cutoff_time ? <>{s.cutoff_time}{c.cutoff_passed.includes(s.supplier_id) && <Badge tone="warning" title="Heure limite dépassée aujourd'hui : une commande passée maintenant part le prochain jour ouvré">dépassée</Badge>}</> : <span className="subtle">–</span>}</td><td className="num">{s.closure_count}</td><td className="small">{s.closures.filter((d) => d >= (c.holidays[0] ?? "")).slice(0, 8).map((d) => fmtDate(d, "EEE dd/MM")).join(", ")}{s.closures.length > 8 ? " …" : ""}</td></tr>)}</tbody></table>
         )}
       </Card>
     </div>

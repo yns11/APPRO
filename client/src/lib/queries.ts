@@ -4,6 +4,7 @@ import { api, type Params } from "./api";
 import type {
   ActionOut, AdherenceResponse, AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, ConsumptionSourceOption, DeliveryPlanResponse, FixedRule, FlagOut, GridResponse, HelpPage, HelpPageSummary, LinkRef, OrphanRow, ParamDoc, ParamOverrideOut,
   FlowsResponse, PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, PlantCalendar, SearchResponse, ProgramImpactResponse, ProgramRef, ProjectionResponse, RefRow, RefTableInfo, SupplierDetail, SupplierRef, SyncStatus, WeeklyParamsResponse,
+  ExceptionQueue, LeadTimeResponse, OtdResponse, SegmentationResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
@@ -106,6 +107,15 @@ export const useSyncStatus = (refetchMs = 120_000) => useQuery({ queryKey: ["dat
 export const useOrphans = () => useQuery({ queryKey: ["data-orphans"], queryFn: () => api.get<OrphanRow[]>("/api/data/orphans"), staleTime: 60_000 });
 export const usePlantCalendar = () => useQuery({ queryKey: ["data-calendar"], queryFn: () => api.get<PlantCalendar>("/api/data/calendar"), staleTime: 300_000 });
 export const useAdherence = (params: Params, enabled = true) => useQuery({ queryKey: ["data-adherence", params], queryFn: () => api.get<AdherenceResponse>("/api/data/adherence", params), enabled, staleTime: 60_000, placeholderData: keepPreviousData });
+
+/** Supplier performance (OTD, observed lead times), segmentation and the exception queue. */
+export const useOtd = (params: Params, enabled = true) => useQuery({ queryKey: ["perf-otd", params], queryFn: () => api.get<OtdResponse>("/api/performance/otd", params), enabled, staleTime: 60_000, placeholderData: keepPreviousData });
+export const useLeadTimes = (params: Params, enabled = true) => useQuery({ queryKey: ["perf-lead", params], queryFn: () => api.get<LeadTimeResponse>("/api/performance/lead-times", params), enabled, staleTime: 60_000, placeholderData: keepPreviousData });
+export const useSegmentation = (params: Params) => useQuery({ queryKey: ["perf-seg", params], queryFn: () => api.get<SegmentationResponse>("/api/performance/segmentation", params), staleTime: 60_000, placeholderData: keepPreviousData });
+export function useExceptions() {
+  const { engineParams } = usePerimeter();
+  return useQuery({ queryKey: ["exceptions", engineParams.planner], queryFn: () => api.get<ExceptionQueue>("/api/exceptions", { planner: engineParams.planner }), staleTime: 30_000, placeholderData: keepPreviousData });
+}
 
 /** Generic mutation that invalidates everything on success and shows the server message on failure
  * (a refused write – 403 outside the user's portfolio, 422 invalid value – is never silent). */

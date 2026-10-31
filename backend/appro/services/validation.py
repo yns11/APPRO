@@ -115,3 +115,41 @@ def check_terms(session: Session, rows: Iterable[dict[str, Any]], replace: bool 
                 continue
             seen.add(cur)
             stack.extend(edges.get(cur, ()))
+
+
+CALENDARS = ("usine", "fournisseur", "transit", "quai")
+CALENDAR_KINDS = ("fermeture", "ouvert")
+
+
+def check_calendars(rows: list[dict], supplier_ids: set[str]) -> None:
+    """Rows of the Calendriers table : known calendar and nature, a key where one is needed, dates in order."""
+    import datetime as dt
+
+    import pandas as pd
+    for r in rows:
+        cal = str(r.get("calendar") or "").strip().lower()
+        if cal not in CALENDARS:
+            raise ValueError(f"calendrier « {r.get('calendar')} » inconnu : {', '.join(CALENDARS)}")
+        r["calendar"] = cal
+        kind = str(r.get("kind") or "fermeture").strip().lower() or "fermeture"
+        if kind not in CALENDAR_KINDS:
+            raise ValueError(f"nature « {r.get('kind')} » inconnue : {', '.join(CALENDAR_KINDS)}")
+        if kind == "ouvert" and cal != "usine":
+            raise ValueError("un jour exceptionnellement ouvert ne se déclare que sur le calendrier usine")
+        r["kind"] = kind
+        key = str(r.get("key") or "").strip()
+        if cal == "usine":
+            r["key"] = ""
+        elif not key:
+            raise ValueError(f"calendrier {cal} : la clé est obligatoire (fournisseur, pays ou quai)")
+        elif cal == "fournisseur" and key not in supplier_ids:
+            raise ValueError(f"calendrier fournisseur : fournisseur inconnu « {key} »")
+        a, b = r.get("date_from"), r.get("date_to")
+        a = pd.Timestamp(a).date() if a not in (None, "") else None
+        b = pd.Timestamp(b).date() if b not in (None, "") and not (isinstance(b, float) and pd.isna(b)) else None
+        if a is None:
+            raise ValueError("calendrier : la date de début est obligatoire")
+        if b is not None and b < a:
+            raise ValueError(f"calendrier : la fin ({b.isoformat()}) précède le début ({a.isoformat()})")
+        if b is not None and (b - a) > dt.timedelta(days=400):
+            raise ValueError("calendrier : une période ne peut pas dépasser 400 jours")

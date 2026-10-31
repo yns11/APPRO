@@ -16,6 +16,7 @@ const FIELDS: { key: string; label: string; help: string; width?: number }[] = [
   { key: "contact", label: "Contact", help: "contact commercial ou logistique (texte libre)", width: 320 },
   { key: "transport_contact", label: "Contact transport", help: "adresses e-mail des avis de transport, séparées par ; ou , ; elles donnent accès à l'espace fournisseur", width: 420 },
   { key: "lead_time_days", label: "Délai (j ouvrés)", help: "délai commande → livraison, inclusif (lundi + 5 = lundi suivant) ; valeur par défaut des liens", width: 80 },
+  { key: "cutoff_time", label: "Heure limite", help: "HH:MM (heure de Paris) : une commande passée après part le jour ouvré suivant ; vide = aucune", width: 90 },
 ];
 
 /**

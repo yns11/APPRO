@@ -19,7 +19,7 @@ export function usePageState<T extends object>(key: string, defaults: T): [T, (p
     try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch { /* private mode */ }
   }, [state, storageKey]);
   const patch = useCallback((p: Partial<T> | ((prev: T) => Partial<T>)) => setState((prev) => ({ ...prev, ...(typeof p === "function" ? p(prev) : p) })), []);
-  const reset = useCallback(() => setState(defaults), [defaults]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const reset = useCallback(() => setState(defaults), [defaults]);
   return [state, patch, reset];
 }
 

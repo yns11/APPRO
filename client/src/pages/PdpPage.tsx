@@ -4,6 +4,7 @@ import { CheckCircle2, Download, FileUp, History, Power, PowerOff, RotateCcw, Sa
 import { api } from "@/lib/api";
 import { usePdpSheet, usePdpVersions, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
+import { useUnsavedGuard } from "@/lib/unsaved";
 import { Badge, Button, Card, Empty, ErrorBox, Field, SkeletonBlock, Tabs, useToast } from "@/components/ui";
 import { AdherenceCard } from "@/components/AdherencePanel";
 import { ProgramsImpact } from "@/components/ProgramsImpact";
@@ -32,8 +33,9 @@ export default function PdpPage() {
   const tab: PdpTab = (["sheet", "adherence", "impact"] as PdpTab[]).find((t) => t === params.get("tab")) ?? "sheet";
   const setTab = (t: PdpTab) => setParams(t === "sheet" ? {} : { tab: t }, { replace: true });
   const toast = useToast();
-  const { rights, perimeter } = usePerimeter();
+  const { rights, perimeter, config } = usePerimeter();
   const canEdit = rights.canImportPdp;
+  const draftKey = `appro.pdp.draft.${config?.user ?? "anonyme"}`;
   const isAdmin = rights.isAdmin;
   const [program, setProgram] = useState("");
   const [onlyNoBom, setOnlyNoBom] = useState(false);
@@ -51,10 +53,41 @@ export default function PdpPage() {
   const [pdpName, setPdpName] = useState("");
   const [activate, setActivate] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
-  useEffect(() => { setEdits(new Map()); }, [d?.active_version?.id]);
+  /** the active version the pending cells were typed on : the save is refused when it changed since (optimistic lock) */
+  const [base, setBase] = useState<string | null | undefined>(undefined);
+  const draftLoaded = useRef(false);
+  // a per-user draft survives a reload or a closed tab : restored once, with a notice
+  useEffect(() => {
+    if (draftLoaded.current || !config?.user) return;
+    draftLoaded.current = true;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const saved = JSON.parse(raw) as { base: string | null; cells: [string, number][] };
+        if (saved.cells?.length) { setEdits(new Map(saved.cells)); setBase(saved.base); toast.push(`Brouillon restauré : ${saved.cells.length} cellule(s) non enregistrée(s)`, "info", { ms: 6000 }); }
+      }
+    } catch { /* private mode */ }
+  }, [config?.user, draftKey, toast]);
+  useEffect(() => {
+    if (!draftLoaded.current) return;
+    try { if (edits.size) localStorage.setItem(draftKey, JSON.stringify({ base: base ?? null, cells: Array.from(edits.entries()) })); else localStorage.removeItem(draftKey); } catch { /* private mode */ }
+  }, [edits, base, draftKey]);
+  // without pending cells the base follows the active version ; with cells it stays frozen on the version they were typed on
+  useEffect(() => { if (d && edits.size === 0) setBase(d.active_version?.id ?? null); }, [d, edits.size]);
+  // the sheet was refetched (a colleague saved) : a pending cell equal to the new base is no longer a change
+  useEffect(() => {
+    if (!d || !edits.size) return;
+    const next = new Map(edits);
+    d.programs.forEach((p) => d.weeks.forEach((w, i) => { const k = `${p.program_id}|${w.week_start}`; if (next.has(k) && next.get(k) === p.values[i]) next.delete(k); }));
+    if (next.size !== edits.size) setEdits(next);
+  }, [d]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const remoteChanged = !!d && edits.size > 0 && base !== undefined && (d.active_version?.id ?? null) !== base;
+  useUnsavedGuard(edits.size > 0, `${edits.size} cellule(s) du PDP ne sont pas enregistrées. Quitter la page et les perdre ? (un brouillon reste dans ce navigateur)`);
 
-  const save = useWrite((cells: { program_id: string; week_start: string; qty: number }[]) => api.put<PdpVersionOut>("/api/pdp/sheet", { name, cells }),
+  const save = useWrite((cells: { program_id: string; week_start: string; qty: number }[]) => api.put<PdpVersionOut>("/api/pdp/sheet", { name, cells, base_version_id: base ?? null, check_version: true }),
     (v) => { setEdits(new Map()); setName(""); toast.push(`PDP enregistré : version « ${v.name} » active`, "success"); });
+  const conflict = save.error && (save.error as { status?: number }).status === 409 ? (save.error as Error).message : null;
+  const reloadKeepingEdits = async () => { const r = await q.refetch(); setBase(r.data?.active_version?.id ?? null); save.reset(); };
   const importPdp = useWrite(async (file: File) => {
     const fd = new FormData(); fd.append("file", file); fd.append("name", pdpName || file.name); fd.append("activate", String(activate));
     return api.upload<ImportReport>("/api/pdp/import", fd);
@@ -158,6 +191,13 @@ export default function PdpPage() {
           <span className="subtle small" style={{ marginLeft: "auto" }}>{programs.length} / {allPrograms.length} programme(s){perimeter.planner ? ` · approvisionneur ${perimeter.planner}` : ""}</span>
         </div>
         {weekChips.length > 1 && <WeekRangeBar weeks={weekChips} range={effRange} onChange={setRange} />}
+        {(conflict || remoteChanged) && (
+          <div className="banner" role="alert" style={{ margin: 12 }}>
+            <span className="small grow">{conflict ?? <><b>La version active du PDP a changé</b> depuis vos saisies ({d?.active_version ? <>« {d.active_version.name} » par {d.active_version.imported_by} le {fmtDateTime(d.active_version.imported_at)}</> : "aucune version active"}). Vos {edits.size} cellule(s) sont conservées : les cellules affichées en bleu sont vos valeurs, comparez-les à la nouvelle base avant d'enregistrer.</>}</span>
+            <Button size="sm" onClick={reloadKeepingEdits}>Recharger en conservant mes saisies</Button>
+            <Button size="sm" variant="ghost" onClick={() => { setEdits(new Map()); save.reset(); }}>Abandonner mes saisies</Button>
+          </div>
+        )}
         {q.isError ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : q.isLoading || !d ? <div style={{ padding: 20 }}><SkeletonBlock rows={8} /></div>
           : programs.length === 0 ? <Empty title="Aucun programme" hint={allPrograms.length ? "Aucun programme ne correspond aux filtres." : "Déclarer des programmes et leurs nomenclatures dans le Référentiel, ou importer un PDP."} /> : (
             <SheetGrid ariaLabel="Plan de production" className="pdp-sheet" canEdit={canEdit} cells={cells} onCommit={apply} onClear={clear} fillAxis="both" colWidth={78}
@@ -168,7 +208,7 @@ export default function PdpPage() {
               colHeaders={cols.map((w) => <span title={w.past ? `Semaine passée : ${ORIGIN_LABELS[w.origin ?? "none"]}${w.origin_version ? ` (« ${w.origin_version} »)` : ""}` : undefined}>{w.week.replace("-W", " S")}<span className="sub">{fmtDate(w.week_start, "dd/MM")}{w.past && w.origin && w.origin !== "active" && w.origin !== "none" ? " · hist." : ""}</span></span>)}
               rowHeaders={programs.map((p) => <><b>{p.name}</b> <span className="subtle mono small">{p.program_id}</span>{p.source === "none" && <Badge tone="outline" title="Aucune quantité planifiée sur les semaines affichées">aucun plan</Badge>}{!p.active && <Badge tone="outline">inactif</Badge>}{!p.has_bom && <Badge tone="warning" title="Aucune nomenclature : ce plan n'éclate en aucun besoin de composant (Référentiel › Nomenclatures)">sans nomenclature</Badge>}</>)} />
           )}
-        {save.error && <div className="error-box" style={{ margin: 12 }}>{(save.error as Error).message}</div>}
+        {save.error && !conflict && <div className="error-box" style={{ margin: 12 }}>{(save.error as Error).message}</div>}
         <p className="small subtle" style={{ padding: "8px 12px" }}>Semaine en cours et suivantes : la version active. Semaines passées : la version active si elle les contient, sinon la version connue au lundi de la semaine, sinon la première importée ensuite (« hist. » dans l'en-tête, détail au survol). Une saisie crée une nouvelle version active à partir de la précédente ; une semaine passée modifiée par un administrateur y est enregistrée entière. Désactiver la version revient à l'état précédent.</p>
       </Card>
 

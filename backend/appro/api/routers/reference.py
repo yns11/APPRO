@@ -35,6 +35,19 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "stock_drift_pct": ("Seuil de dérive du stock ERP (%) : un écart ERP − projeté est significatif au-delà de n % du stock cible du jour", None),
     "stock_drift_min_packs": ("Écart minimal de dérive (UM) : un écart est significatif à partir de n unités de commande du fournisseur principal ; 0 = pas de minimum", None),
     "stock_drift_persist": ("Persistance de la dérive (snapshots) : un article dérive quand ses n derniers snapshots ERP dépassent le seuil avec le même signe ; 1 = dès la veille", None),
+    "otd_weight_qty": ("OTD : poids (%) de l'indicateur QUANTITÉ (100 si la quantité commandée a été reçue, 0 sinon)", None),
+    "otd_weight_punctuality": ("OTD : poids (%) de l'indicateur PONCTUALITÉ (100 le bon jour, puis les deux tranches d'avance / retard, 0 au-delà)", None),
+    "otd_weight_desadv": ("OTD : poids (%) de l'indicateur DESADV (100 si chaque BL reçu a été annoncé par un DESADV traité sans erreur, 0 sinon)", None),
+    "otd_band1_days": ("PONCTUALITÉ : avance ou retard de 1 à n jours → score de la tranche 1", None),
+    "otd_band1_score": ("PONCTUALITÉ : score (sur 100) de la tranche 1", None),
+    "otd_band2_days": ("PONCTUALITÉ : avance ou retard jusqu'à n jours → score de la tranche 2 ; au-delà 0", None),
+    "otd_band2_score": ("PONCTUALITÉ : score (sur 100) de la tranche 2", None),
+    "abc_a_pct": ("Segmentation : classe A = les articles qui font les premiers n % de la valeur annuelle cumulée", None),
+    "abc_b_pct": ("Segmentation : classe B jusqu'à n % de la valeur annuelle cumulée ; C au-delà", None),
+    "xyz_x_cv": ("Segmentation : classe X = coefficient de variation de la consommation hebdomadaire inférieur à n", None),
+    "xyz_y_cv": ("Segmentation : classe Y = coefficient de variation inférieur à n ; Z au-delà (ou sans consommation)", None),
+    "segment_coverage_days": ("Segmentation : couverture cible suggérée (jours ouvrés) par segment, « AX:3,AY:5,… »", None),
+    "segment_service_pct": ("Segmentation : objectif de service (%) par classe, « A:98,B:95,C:90 » (information)", None),
     "horizon_days": ("Horizon de calcul après la date de référence (jours) : 52 semaines, fixé dans l'application", None),
     "history_weeks": ("Affichage : semaines montrées avant la semaine en cours (réglage par utilisateur)", None),
     "focus_weeks": ("Affichage : semaines détaillées jour par jour après la semaine en cours (réglage par utilisateur)", None),
@@ -109,6 +122,13 @@ def _check_rows(session: Session, name: str, rows: list[dict], replace: bool) ->
                 lead = r.get("lead_time_days")
                 if lead not in (None, "") and float(lead) < 1:
                     raise ValueError(f"{r.get('supplier_id')} : le délai doit être d'au moins 1 jour ouvré")
+                cutoff = str(r.get("cutoff_time") or "").strip()
+                if cutoff and not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", cutoff):
+                    raise ValueError(f"{r.get('supplier_id')} : heure limite « {cutoff} » attendue au format HH:MM")
+                if cutoff:
+                    r["cutoff_time"] = f"{int(cutoff.split(':')[0]):02d}:{cutoff.split(':')[1]}"
+        elif name == "ref_calendars":
+            validation.check_calendars(rows, {r["supplier_id"] for r in reference.rows_out(session, "ref_suppliers")})
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 
@@ -235,13 +255,14 @@ def upsert_row(name: str, body: S.RefRowIn, request: Request, response: Response
     _check_rows(session, name, [body.values], replace=False)
     rec = actions.Recorder(session, user, actions.group_of(request))
     try:
-        out = reference.upsert_row(session, name, body.values, user, rec)
+        out = reference.upsert_row(session, name, body.values, user, rec, expected_updated_at=body.expected_updated_at)
+    except reference.StaleRowError as exc:
+        raise HTTPException(409, str(exc))
     except (ValueError, KeyError) as exc:
         raise HTTPException(422, f"Ligne invalide : {exc}")
     rec.done("reference", f"{t.label} : {' | '.join(str(out[k]) for k in t.key)}", out.get("article_id") if "article_id" in out else None,
              response, group_label=f"{t.label} : {{n}} lignes")
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return out
 
 
@@ -259,8 +280,7 @@ def delete_row(name: str, body: S.RefKeyIn, request: Request, response: Response
         raise HTTPException(404, "Ligne inconnue")
     rec.done("reference", f"{t.label} : suppression de {' | '.join(str(body.key.get(k, '')) for k in t.key)}",
              str(body.key["article_id"]) if body.key.get("article_id") else None, response, group_label=f"{t.label} : {{n}} lignes supprimées")
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
 
 
 @router.get("/reference/{name}/template.xlsx")
@@ -308,8 +328,7 @@ async def import_table(name: str, response: Response, file: UploadFile = File(..
         actions.record_fixed(session, user, "import", f"{t.label} : table remplacée par un fichier ({n} lignes)", response=response)
     else:
         rec.done("import", f"{t.label} : import par fusion ({n} lignes)", None, response)
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return S.ImportReport(created=n, ignored=len(notes), notes=notes)
 
 
@@ -401,7 +420,7 @@ def params_schema():
             continue
         doc, options = PARAM_DOCS.get(f.name, (f.name, None))
         val = getattr(defaults, f.name)
-        typ = "bool" if isinstance(val, bool) else "int" if isinstance(val, int) else "list" if isinstance(val, tuple) else "str"
+        typ = "bool" if isinstance(val, bool) else "int" if isinstance(val, int) else "float" if isinstance(val, float) else "list" if isinstance(val, tuple) else "str"
         if val is None:
             typ = "int?"
         out.append(S.ParamDoc(field=f.name, default=list(val) if isinstance(val, tuple) else val, type=typ,
@@ -484,8 +503,7 @@ def upsert_override(body: S.ParamOverrideIn, request: Request, response: Respons
     shown = "vide" if body.value in (None, "") else str(body.value)
     rec.done("param", f"Règle {body.field} : {shown}" if body.scope == "global" else f"Paramètre {body.field} {body.key1} · {body.key2} : {shown}",
              body.key1 if body.scope == "article_week" else None, response, group_label="Paramètres : {n} valeurs")
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
     return row
 
 
@@ -509,13 +527,12 @@ def upsert_overrides(body: S.ParamOverrideBatchIn, request: Request, response: R
             rec.done("param", f"Paramètres {body.key1} : {len(body.items)} valeurs" if body.scope == "article_week"
                      else f"Règles : {len(body.items)} valeurs", body.key1 if body.scope == "article_week" else None, response,
                      group_label="Paramètres : {n} valeurs")
-            session.commit()
+            ctx.commit(session)
             break
         except IntegrityError:
             session.rollback()
             if attempt:
                 raise
-    ctx.bump()
     return out
 
 
@@ -534,8 +551,7 @@ def reset_overrides(scope: str, response: Response, key1: str = "", ctx: AppCont
     audit(session, user, "reset_params", "param_override", f"{scope}/{key1}", key1 or None, {"rows": len(rows)})
     rec.done("param", f"Paramètres {key1} : retour aux valeurs de l'article ({len(rows)} valeurs)" if scope == "article_week"
              else f"Règles : retour aux valeurs par défaut ({len(rows)} valeurs)", key1 or None, response)
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
 
 
 @router.delete("/params/overrides/{override_id}", status_code=204)
@@ -551,5 +567,4 @@ def delete_override(override_id: str, response: Response, ctx: AppContext = Depe
     session.delete(row)
     rec.done("param", f"Paramètre {row.field}" + (f" {row.key1} · {row.key2}" if row.scope == "article_week" else "") + " : retiré",
              row.key1 if row.scope == "article_week" else None, response)
-    session.commit()
-    ctx.bump()
+    ctx.commit(session)
