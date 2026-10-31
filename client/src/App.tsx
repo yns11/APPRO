@@ -1,0 +1,64 @@
+import { Navigate, Route, Routes } from "react-router-dom";
+import AppShell from "@/components/layout/AppShell";
+import CockpitPage from "@/pages/CockpitPage";
+import ArticlesPage from "@/pages/ArticlesPage";
+import ArticlePage from "@/pages/ArticlePage";
+import SuppliersPage from "@/pages/SuppliersPage";
+import DeliveriesPage from "@/pages/DeliveriesPage";
+import SupplierPage from "@/pages/SupplierPage";
+import SearchPage from "@/pages/SearchPage";
+import SupplyTablePage from "@/pages/SupplyTablePage";
+import ProgramsPage from "@/pages/ProgramsPage";
+import PdpPage from "@/pages/PdpPage";
+import EntriesPage from "@/pages/EntriesPage";
+import ImportsPage from "@/pages/ImportsPage";
+import ReferencePage from "@/pages/ReferencePage";
+import SettingsPage from "@/pages/SettingsPage";
+import HelpPage from "@/pages/HelpPage";
+import SupplierPortalPage from "@/pages/SupplierPortalPage";
+import { usePerimeter } from "@/state/PerimeterContext";
+
+/** The search page can be hidden again by turning this off (no menu entry, no route). */
+const SEARCH_ENABLED = true;
+
+export default function App() {
+  const { config } = usePerimeter();
+  // a supplier's transport contact only sees the « espace fournisseur » (the API refuses everything else anyway)
+  if (config?.access?.role === "supplier") {
+    return (
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/portail" element={<SupplierPortalPage />} />
+          <Route path="/aide" element={<HelpPage />} />
+          <Route path="/aide/:slug" element={<HelpPage />} />
+          <Route path="*" element={<Navigate to="/portail" replace />} />
+        </Route>
+      </Routes>
+    );
+  }
+  return (
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route index element={<CockpitPage />} />
+        <Route path="/portail" element={<SupplierPortalPage />} />
+        <Route path="/articles" element={<ArticlesPage />} />
+        <Route path="/articles/:articleId" element={<ArticlePage />} />
+        <Route path="/fournisseurs" element={<SuppliersPage />} />
+        <Route path="/fournisseurs/:supplierId" element={<SupplierPage />} />
+        <Route path="/tableau" element={<SupplyTablePage />} />
+        <Route path="/livraisons" element={<DeliveriesPage />} />
+        <Route path="/propositions" element={<Navigate to="/?tab=flux" replace />} />
+        {SEARCH_ENABLED && <Route path="/recherche" element={<SearchPage />} />}
+        <Route path="/programmes" element={<ProgramsPage />} />
+        <Route path="/pdp" element={<PdpPage />} />
+        <Route path="/saisies" element={<EntriesPage />} />
+        <Route path="/imports" element={<ImportsPage />} />
+        <Route path="/referentiel" element={<ReferencePage />} />
+        <Route path="/parametres" element={<SettingsPage />} />
+        <Route path="/aide" element={<HelpPage />} />
+        <Route path="/aide/:slug" element={<HelpPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
