@@ -145,3 +145,43 @@ Une page « Procédure OTD » qui tient en une colonne : la maille (4.1), la dat
 questions par ligne (5, 6, 8) avec leurs barèmes, les exclusions (9), l'agrégation (10), l'arrêté (11), et dix
 exemples chiffrés couvrant : jour parfait, partiel, avance, un jour de retard, quatre jours, jamais livré, rattrapage
 groupé, créneau sur jour fermé, urgence, fournisseur sans EDI. Chaque exemple devient un test de l'application.
+
+## Annexe : exemples chiffrés d'un OTIF binaire avec fenêtre par protocole
+
+Principe : une ligne = un article, un fournisseur, un jour attendu. Elle est **bonne** si tout ce qui était dû ce
+jour-là est arrivé dans la fenêtre du protocole du fournisseur, en quantité complète (à la tolérance près) ; sinon
+elle est **mauvaise**. OTIF = lignes bonnes ÷ lignes. Le reliquat cumulé (Σ attendu − Σ reçu) s'affiche à côté.
+
+| Protocole | Fréquence | Fenêtre (jours ouvrés) | Tolérance quantité |
+|---|---|---|---|
+| A · synchrone | quotidien | 0 / 0 | aucune en moins ; excédent accepté |
+| B · hebdomadaire | le mardi | −1 / +1 | +1 UM, rien en moins |
+| C · import lointain | mensuel (conteneur) | −5 / +2 | ± 5 % |
+| D · commande ponctuelle | à la demande | −3 / +1 | aucune |
+
+**Fournisseur A** (512 pièces attendues chaque jour ouvré d'octobre, 20 lignes) : 17 jours reçus 512 le jour ;
+06/10 : 192 attendues, 384 reçues (bonne : l'excédent va au reliquat) ; 02/10 : 336 reçues le jour, 176 le 05/10
+(mauvaise) ; 14/10 : 320 le jour, 192 le lendemain (mauvaise) ; 22/10 : rien, 512 le 23/10 (mauvaise).
+**OTIF 85 %** (17 / 20). Avec la règle à trois indicateurs et le DESADV acquis : (17 × 100 + 3 × 50) ÷ 20 = 92,5.
+Le binaire est plus sévère et se lit sans barème. Si le 22/10 est codé « programme modifié la veille par
+l'approvisionneur », la ligne sort : **OTIF net 89 %** (17 / 19), brut 85 %, les deux affichés.
+
+**Fournisseur A avec un reliquat permanent** de 800 pièces hérité de septembre et 512 reçues chaque jour : 20 lignes
+bonnes, **OTIF 100 %**, reliquat affiché **800 pièces = 1,6 jour de livraison**. L'OTIF dit « il tient son
+protocole », le reliquat dit « il nous doit un jour et demi ». Les deux sont vrais.
+
+**Fournisseur B** (1 000 pièces chaque mardi, UM de 50, 4 lignes) : 07/10 reçu 1 000 le jour (bonne) ; 14/10 reçu
+1 050 le lundi 13 (bonne : −1 jour et +1 UM tolérés) ; 21/10 reçu 950 le jour et 50 le 28 (mauvaise : quantité) ;
+28/10 reçu 1 000 le jeudi 30 (mauvaise : +2 jours). **OTIF 50 %**. Jugé avec la fenêtre 0 / 0 du protocole A, il
+tomberait à 25 % ; jugé « dans la semaine », il monterait à 75 %. D'où la fenêtre par protocole.
+
+**Fournisseur C** (un conteneur de 20 000 pièces attendu le 15/10) : 19 400 reçues le 13/10, soit −2 jours et
+−3 % : **bonne, OTIF 100 %**, affiché avec la mention « 1 ligne ». Sur le trimestre, trois conteneurs dont un à
++4 jours : 67 %.
+
+**Fournisseur D** (deux commandes ponctuelles) : 200 attendues le 09/10, reçues le 10/10 (bonne, +1) ; 100
+attendues le 16/10, reçues le 20/10 (mauvaise, +2). **OTIF 50 %**.
+
+**Portefeuille du mois** : moyenne des fournisseurs (85 + 50 + 100 + 50) ÷ 4 = **71 %** ; moyenne des lignes
+(17 + 2 + 1 + 1) ÷ 27 = 78 %. La seconde est tirée par le fournisseur quotidien ; c'est pourquoi l'usage est la
+moyenne des fournisseurs, parfois pondérée par le montant d'achats.
