@@ -4,6 +4,25 @@
 (EUROCAST DELLE) : des livraisons de 512 pièces reçues chaque jour prévu, notées « complétées en 2 réceptions,
 +5 / +6 jours », OTD 50 ou 80 au lieu de 100.*
 
+## En bref : la règle en cinq lignes
+
+1. **La maille** : un fournisseur, un article, un jour. *Attendu du jour* = somme des ordres fermes du jour ;
+   *reçu du jour* = somme des réceptions du jour. Les numéros de commande et d'ordre ne servent plus.
+2. **QUANTITÉ** : 100 si le reçu du jour couvre l'attendu du jour, sinon 0.
+3. **PONCTUALITÉ** : à partir du jour J, on compte les jours ouvrés jusqu'à ce que le fournisseur ait livré tout ce
+   qui était dû **depuis J** (ce qui manquait avant J ne compte pas) : 0 jour → 100, 1–2 → 60, 3–4 → 20, au-delà → 0.
+   Une livraison reçue avant J, un jour où rien n'était attendu, est une avance, même barème.
+4. **DESADV** : inchangé. **OTD** = 30 % QUANTITÉ + 50 % PONCTUALITÉ + 20 % DESADV ; l'OTD du mois d'un fournisseur
+   est la moyenne de ses jours.
+5. **À côté de l'OTD, un chiffre** : le reliquat (ce qui manque au total, en jours de livraison). Un jour attendu
+   sur une fermeture usine est déplacé au jour ouvré suivant ; le chiffre du mois est figé cinq jours ouvrés après
+   la fin du mois.
+
+Sur l'exemple des captures : onze jours à 100 au lieu de 50 ou 80, et le manque de septembre compté une fois.
+Limite connue : un fournisseur toujours en retard d'un jour ressemble à un fournisseur parfait avec un jour de
+reliquat ; c'est le reliquat qui le montre. La suite de la note détaille, scénario par scénario, pourquoi ces
+cinq lignes suffisent et ce qu'elles changent.
+
 ## 1. Diagnostic : d'où vient la cascade
 
 L'application **n'utilise pas les numéros d'ordre** (les sous-lignes d'une commande ferme, une par unité de
