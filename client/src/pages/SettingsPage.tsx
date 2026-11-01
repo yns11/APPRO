@@ -51,15 +51,13 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
   };
   /** Service fournisseur (OTD) and segmentation : the second card */
   const PERF: Record<string, { label: string; unit: string; max: number; step?: number; text?: boolean; choices?: [string, string][]; aria: string; explain: (v: number) => string }> = {
-    otd_weight_qty: { label: "OTD : poids de la quantité", unit: "%", max: 100, aria: "Poids de l'indicateur quantité", explain: () => "QUANTITÉ = 100 si le reçu du jour couvre l'attendu du jour (maille jour), 0 sinon." },
-    otd_weight_punctuality: { label: "OTD : poids de la ponctualité", unit: "%", max: 100, aria: "Poids de l'indicateur ponctualité", explain: () => "PONCTUALITÉ = 100 le bon jour, puis les deux tranches ci-dessous, 0 au-delà." },
-    otd_weight_desadv: { label: "OTD : poids du DESADV", unit: "%", max: 100, aria: "Poids de l'indicateur DESADV", explain: () => "DESADV = 100 si chaque BL reçu a été annoncé par un DESADV traité sans erreur, 0 sinon. Les trois poids sont ramenés à 100 s'ils ne font pas 100." },
-    otd_band1_days: { label: "Ponctualité : tranche 1 (jours)", unit: "j", max: 30, aria: "Tranche 1 de ponctualité (jours)", explain: (v) => `Avance ou retard de 1 à ${v} jour(s) (ouvrés à la maille jour, calendaires en cumul).` },
-    otd_band1_score: { label: "Ponctualité : score tranche 1", unit: "/ 100", max: 100, aria: "Score de la tranche 1", explain: () => "Score attribué dans la tranche 1." },
-    otd_band2_days: { label: "Ponctualité : tranche 2 (jours)", unit: "j", max: 60, aria: "Tranche 2 de ponctualité (jours)", explain: (v) => `Jusqu'à ${v} jour(s) d'avance ou de retard ; au-delà, 0. Une commande est évaluable ${v} jours après sa date prévue si elle n'est pas complète.` },
-    otd_band2_score: { label: "Ponctualité : score tranche 2", unit: "/ 100", max: 100, aria: "Score de la tranche 2", explain: () => "Score attribué dans la tranche 2." },
-    otd_matching: { label: "OTD : maille du rapprochement", unit: "", max: 0, choices: [["jour", "jour (fournisseur × article × jour)"], ["cumul", "cumul par commande (ancienne règle)"]], aria: "Maille du rapprochement OTD", explain: () => "Jour : QUANTITÉ 100 seulement si le reçu du jour couvre l'attendu du jour ; PONCTUALITÉ en jours ouvrés jusqu'à ce que tout ce qui était dû depuis ce jour soit livré. Cumul : premier créneau servi d'abord, un manque décale tous les créneaux suivants." },
-    otd_backlog_max_days: { label: "OTD : rattrapage d'un jour manqué", unit: "j", max: 365, aria: "Horizon de rattrapage (jours)", explain: (v) => `Un jour incomplet peut être complété par les livraisons des ${v} jours suivants ; au-delà il reste « non livré ».` },
+    otd_weight_qty: { label: "OTD : poids de la quantité", unit: "%", max: 100, aria: "Poids de l'indicateur quantité", explain: () => "" },
+    otd_weight_punctuality: { label: "OTD : poids de la ponctualité", unit: "%", max: 100, aria: "Poids de l'indicateur ponctualité", explain: () => "" },
+    otd_weight_desadv: { label: "OTD : poids du DESADV", unit: "%", max: 100, aria: "Poids de l'indicateur DESADV", explain: () => "Les trois poids sont ramenés à 100 s'ils ne font pas 100." },
+    otd_band1_days: { label: "Ponctualité : tranche 1 (jours)", unit: "j ouvrés", max: 30, aria: "Tranche 1 de ponctualité (jours)", explain: (v) => `1 à ${v} jour(s) au-delà de la fenêtre du fournisseur (±1 jusqu'à deux jours de livraison par semaine, 0 au-delà).` },
+    otd_band1_score: { label: "Ponctualité : score tranche 1", unit: "/ 100", max: 100, aria: "Score de la tranche 1", explain: () => "" },
+    otd_band2_days: { label: "Ponctualité : tranche 2 (jours)", unit: "j ouvrés", max: 60, aria: "Tranche 2 de ponctualité (jours)", explain: (v) => `Jusqu'à ${v} jour(s) au-delà de la fenêtre ; ensuite 0, et le jour est « non livré ».` },
+    otd_band2_score: { label: "Ponctualité : score tranche 2", unit: "/ 100", max: 100, aria: "Score de la tranche 2", explain: () => "" },
     abc_a_pct: { label: "Segmentation : classe A", unit: "% de la valeur", max: 100, aria: "Seuil de la classe A", explain: (v) => `Les articles qui font les premiers ${v} % de la valeur annuelle cumulée sont en A.` },
     abc_b_pct: { label: "Segmentation : classe B", unit: "% de la valeur", max: 100, aria: "Seuil de la classe B", explain: (v) => `Jusqu'à ${v} % : B ; au-delà : C.` },
     xyz_x_cv: { label: "Segmentation : classe X", unit: "CV <", max: 10, step: 0.1, aria: "Seuil de la classe X", explain: (v) => `Coefficient de variation (écart-type / moyenne) de la consommation hebdomadaire inférieur à ${v} : régulier.` },
@@ -107,7 +105,7 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
       </Card>
       <Card title="Service fournisseur (OTD) et segmentation" hint={canEdit ? "poids et tranches de l'OTD, seuils ABC / XYZ et couvertures suggérées ; valent pour la page Performance fournisseurs et la file d'exceptions" : "lecture seule : modifiables par les managers et administrateurs"}>
         {schema.isError ? <ErrorBox error={schema.error} /> : schema.isLoading || effective.isLoading ? <SkeletonBlock rows={3} /> : perf.map((p) => ruleRow(p, PERF[p.field]))}
-        <p className="small subtle" style={{ marginTop: 8 }}>OTD d'un jour de livraison = Σ poids × indicateur ; OTD d'un fournisseur sur une période = moyenne de ses jours attendus sur la période ; le solde (attendu − reçu) de la période s'affiche à côté (<Link to="/performance">Performance fournisseurs</Link>).</p>
+        <p className="small subtle" style={{ marginTop: 8 }}>OTD = Σ poids × indicateur, par fournisseur, article et jour de livraison attendu (<Link to="/performance">Performance fournisseurs</Link>).</p>
       </Card>
       <Card title="Règles figées dans l'application" hint="communes à tous les articles ; détaillées dans le guide du moteur (docs/guide_moteur.md)">
         {fixed.isLoading ? <SkeletonBlock rows={6} /> : (

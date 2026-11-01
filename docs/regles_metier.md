@@ -736,51 +736,47 @@ fournisseurs est initialisé à 5 jours ouvrés.
 
 ## 14. Performance fournisseurs : service (OTD), délais observés, segmentation
 
-Page **Performance fournisseurs** (et onglet *Performance* de la fiche fournisseur). Deux rapprochements existent
-(règle commune `otd_matching`, défaut **jour** ; conception et scénarios dans `docs/otd_maille_jour.md`) :
+Page **Performance fournisseurs** (et onglet *Performance* de la fiche fournisseur). Règle arrêtée le 01/11/2026
+(genèse et scénarios chiffrés : `docs/otd_maille_jour.md`, `docs/otd_atelier_questions.md`) ; calcul dans
+`services/otd.py`, scénarios rejoués par `tests/test_otd.py`.
 
-* **Maille jour** (défaut) : la maille est **un fournisseur, un article, un jour**. *Attendu du jour* = somme des
-  ordres fermes du jour (un créneau ERP posé sur une fermeture usine est déplacé au jour ouvré suivant, une
-  réception datée d'un jour fermé aussi) ; *reçu du jour* = somme des réceptions validées du jour. Les numéros de
-  commande et d'ordre ne jouent pas. Une réception d'un article sans ordre ferme chez ce fournisseur est comptée à
-  part, jamais notée.
-* **Cumul par commande** (ancienne règle, gardée pour comparaison) : les réceptions validées d'un même (fournisseur,
-  article, numéro de commande) sont affectées aux créneaux de cette commande dans l'ordre des dates (premier créneau
-  servi d'abord) ; un créneau est complet le jour où la quantité commandée est atteinte, l'écart est en jours
-  calendaires. Un manque décale tous les créneaux suivants (« complétée en 2 réceptions, +6 j »).
+**La maille** : une ligne = un fournisseur, un article, un jour ouvré attendu. *Attendu du jour* = somme des ordres
+fermes du jour ; *reçu du jour* = somme des réceptions validées du jour. Un créneau ou une réception sur une
+fermeture usine compte au jour ouvré suivant. Les numéros de commande et d'ordre ne jouent pas. Une réception d'un
+article sans ordre ferme chez ce fournisseur est comptée à part, jamais notée.
 
-**OTD d'un jour de livraison** (règles communes, *Paramètres › Règles communes*) :
+**Déduits du référentiel fournisseur** (jours de livraison) : la **fenêtre** de ponctualité, ±1 jour ouvré jusqu'à
+deux jours de livraison par semaine, 0 au-delà ; la **tolérance d'excédent**, un jour de besoin à partir de deux
+jours de livraison par semaine, deux jours sinon (jour de besoin = attendu moyen par jour ouvré du couple).
 
-* **QUANTITÉ** : 100 si le **reçu du jour couvre l'attendu du jour** (un excédent ne pénalise pas), 0 sinon ; en
-  cumul, 100 si la quantité commandée a été reçue un jour ou l'autre ;
-* **PONCTUALITÉ** : à partir du jour J, on compte les **jours ouvrés usine** jusqu'à ce que le fournisseur ait livré
-  tout ce qui était dû **depuis J** (ce qui manquait avant J ne compte pas) : 0 jour → 100, 1 à `otd_band1_days` [2]
-  → `otd_band1_score` [60], jusqu'à `otd_band2_days` [4] → `otd_band2_score` [20], au-delà → 0. Une livraison reçue
-  avant J, un jour où rien n'était attendu (ou au-delà de l'attendu de ce jour-là), dans les `otd_band2_days` jours
-  précédents, est une **avance**, même barème. Un jour incomplet peut être complété par les livraisons des
-  `otd_backlog_max_days` [30] jours suivants ; au-delà il reste **non livré** ;
-* **DESADV** : 100 si chaque BL reçu a été annoncé par un DESADV traité sans erreur, 0 sinon ;
-* **OTD** = `otd_weight_qty` [30] % × QUANTITÉ + `otd_weight_punctuality` [50] % × PONCTUALITÉ +
-  `otd_weight_desadv` [20] % × DESADV.
+**Les trois indicateurs d'une ligne** (règles communes, *Paramètres › Règles communes*) :
 
-Un jour est **évaluable** une fois complet, ou `otd_band2_days` jours après sa date s'il ne l'est pas (tout à 0 :
-« non livré »). Un jour que l'ERP montre reçu sans aucune ligne de réception dans l'extraction est **non évaluable**
-(écart de données, compté à part, jamais noté). L'OTD d'un fournisseur sur une période est la **moyenne des OTD de
-ses jours attendus sur la période** ; les trois indicateurs sont moyennés de même. Le **solde** de la période
-(Σ attendu − Σ reçu, en pièces et en jours de livraison : positif = reliquat, négatif = avance) est affiché à côté de
-l'OTD, par fournisseur et par période : c'est ce que la maille jour ne note pas (un reliquat ancien, un décalage
-systématique d'une livraison, qui lui sont indiscernables). La vue propose les périodes (3, 6, 12, 24 mois ou dates
-libres), le pas des courbes (semaine, mois, trimestre, année), le **choix de la méthode** avec, pour comparaison,
-l'OTD de l'autre méthode sur la même période (colonne et courbe en pointillés), les filtres fournisseur et article,
-le détail par jour (créneaux et commandes regroupés, reçu le jour, date de complétude) et l'export.
+* **QUANTITÉ** : 100 si l'attendu du jour est couvert au plus tard le jour même (par les réceptions du jour, ou par
+  une avance reçue juste avant) et si le jour ne crée pas d'avance au-delà de la tolérance ; 0 sinon. L'avance se
+  lit sur le solde reçu − attendu, remis à zéro au premier lundi de chaque mois ;
+* **PONCTUALITÉ** : jours ouvrés, à partir du jour attendu, jusqu'à ce que tout ce qui était dû **depuis ce jour**
+  soit livré (ce qui manquait avant ne compte pas) ; une réception avant le jour, un jour sans attendu, est une
+  avance. Dans la fenêtre : 100 ; 1 à `otd_band1_days` [2] jours au-delà : `otd_band1_score` [60] ; jusqu'à
+  `otd_band2_days` [4] : `otd_band2_score` [20] ; au-delà, ou jamais livré : 0 ;
+* **DESADV** : part des BL reçus sur la période annoncés par un DESADV traité (lu par fournisseur et période, pas
+  par ligne).
 
-**Délais observés** : par fournisseur (et par article dès qu'un fournisseur ou un article est choisi) : retard
-moyen et dispersion (p50, p90, écart-type, min, max) entre la date prévue et la quantité complète (jours ouvrés à la maille jour, calendaires en cumul) ; part à l'heure,
-en avance, en retard, au-delà de la seconde tranche ; **retard récurrent** (au moins la moitié des livraisons en
-retard sur trois commandes ou plus) ; **délai observé** première apparition dans l'ERP → quantité complète (jours
-ouvrés) et **biais** = observé − délai paramétré (dès que le job renseigne `first_seen`) ; délai expédition
-(DESADV) → réception ; part d'**urgences** (commandes créées dans le délai) ; livraisons partielles ; quantité
-médiane par réception ; **profils** par jour de la semaine des livraisons prévues et des réceptions.
+**OTD** d'un fournisseur sur une période = `otd_weight_qty` [30] % × QUANTITÉ moyenne + `otd_weight_punctuality`
+[50] % × PONCTUALITÉ moyenne + `otd_weight_desadv` [20] % × DESADV, sur ses lignes de la période. Une ligne est
+évaluée une fois complète, ou `otd_band2_days` jours ouvrés après la fenêtre si elle ne l'est pas (« non livrée »,
+tout à 0). Une ligne que l'ERP montre reçue sans aucune réception dans l'extraction est **non évaluable** (comptée à
+part). Les périodes sont des **semaines entières** ; une semaine appartient au mois de son mercredi. Le chiffre du
+portefeuille est la **moyenne des fournisseurs** (chacun compte une fois). Un regroupement de livraisons au-delà de
+la tolérance pénalise le jour du regroupement (QUANTITÉ) et les jours regroupés (avance) : double effet accepté pour
+garder la règle en quatre lignes. Le calcul se fait une fois par version des données et reste en cache.
+
+**Délais observés** : par fournisseur (et par article dès qu'un fournisseur ou un article est choisi) : retard moyen
+en jours ouvrés entre le jour attendu et la quantité complète ; parts à l'heure, en avance, en retard, au-delà de la
+seconde tranche ; **retard récurrent** (au moins la moitié des livraisons en retard sur trois lignes ou plus) ;
+**délai observé** création de la commande → quantité complète (jours ouvrés) et **biais** = observé − paramétré (dès
+que le job renseigne `first_seen`) ; expédition (DESADV) → réception ; part d'**urgences** (commandes créées dans le
+délai) ; jours servis en plusieurs réceptions ; **profils** par jour de la semaine. Des moyennes seulement, pas
+de dispersion.
 
 **Segmentation ABC / XYZ** (onglet *Segmentation*) : **ABC** par valeur annuelle = consommation des 52 dernières
 semaines × prix standard (besoin de l'horizon sans consommation) : A = les premiers `abc_a_pct` [80] % de la

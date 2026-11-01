@@ -33,6 +33,11 @@ Mémoire Python : 15 Mo courants, pic 77 Mo. Cache : 1 résultat de 3,8 Mo pour 
 (`APPRO_CACHE_BUDGET_MB`, éviction du résultat le moins récemment utilisé au-delà ; un résultat plus grand que le
 budget est servi sans être gardé). `/api/health` expose `cache.entries`, `cache.bytes`, `cache.budget`.
 
+Relevé du 01/11/2026 après la réécriture de l'OTD (`services/otd.py` : grille de jours ouvrés, lignes évaluées une
+fois par version des données et gardées en cache) : `GET /api/performance/otd` **17 ms** à chaud (166 ms avant) ;
+construction des lignes 850 ms pour 38 600 créneaux et 24 000 réceptions (jeu de démonstration répliqué 50 fois),
+rapport 170 ms sur 19 000 lignes.
+
 ## Ce que les chiffres disent
 
 * Le **moteur** coûte ~11 ms par article sur 400 jours : 500 articles ≈ 5 s à froid, servis ensuite depuis le

@@ -1,6 +1,6 @@
 # OTD à la maille jour : proposition
 
-*Note de conception du 01/11/2026, **implémentée le même jour** (règle commune `otd_matching`, « jour » par défaut ; l'ancienne règle « cumul » reste disponible pour comparaison dans la page Performance fournisseurs ; scénarios rejoués par `backend/tests/test_otd_jour.py`). Elle répond au constat fait sur l'article P-00150525
+*Note de conception du 01/11/2026. **Dépassée le même jour** par la règle finale, plus simple, décrite dans `docs/regles_metier.md` § 14 (fenêtre et tolérance déduites des jours de livraison, semaines entières, DESADV par BL, une seule méthode) ; gardée pour la genèse du raisonnement. Elle répond au constat fait sur l'article P-00150525
 (EUROCAST DELLE) : des livraisons de 512 pièces reçues chaque jour prévu, notées « complétées en 2 réceptions,
 +5 / +6 jours », OTD 50 ou 80 au lieu de 100.*
 

@@ -10,12 +10,11 @@ import { DataTable, type Column } from "@/components/DataTable";
 import { SearchSelect } from "@/components/SearchSelect";
 import { OtdChart } from "@/components/charts/OtdChart";
 import { fmtDate, fmtEur, fmtInt, fmtQty } from "@/lib/format";
-import type { Dist, LeadArticle, LeadSupplier, OtdBucket, OtdMethod, OtdOrder, OtdSupplier, SegmentRow } from "@/lib/types";
+import type { LeadArticle, LeadSupplier, OtdBucket, OtdLine, OtdSupplier, SegmentRow } from "@/lib/types";
 
 type Tab = "otd" | "lead" | "segments";
 const TABS: { id: Tab; label: string }[] = [{ id: "otd", label: "Service fournisseur (OTD)" }, { id: "lead", label: "Délais observés" }, { id: "segments", label: "Segmentation ABC / XYZ" }];
 const BUCKETS: { id: OtdBucket; label: string }[] = [{ id: "week", label: "Semaines" }, { id: "month", label: "Mois" }, { id: "quarter", label: "Trimestres" }, { id: "year", label: "Années" }];
-const METHODS: { id: OtdMethod; label: string; short: string }[] = [{ id: "jour", label: "Maille jour", short: "jour" }, { id: "cumul", label: "Par commande (ancienne règle)", short: "cumul" }];
 const PRESETS: { id: string; label: string; months: number }[] = [{ id: "3m", label: "3 mois", months: 3 }, { id: "6m", label: "6 mois", months: 6 }, { id: "12m", label: "12 mois", months: 12 }, { id: "24m", label: "24 mois", months: 24 }];
 
 const pct = (v: number | null | undefined, digits = 0) => (v === null || v === undefined ? "–" : `${v.toFixed(digits)} %`);
@@ -26,16 +25,16 @@ function ScoreBar({ v }: { v: number | null | undefined }) {
   if (v === null || v === undefined) return <span className="subtle">–</span>;
   return <span className={`score-bar ${tone(v)}`}><span className="track"><span className="fill" style={{ width: `${Math.max(0, Math.min(100, v))}%` }} /></span><b>{v.toFixed(0)}</b></span>;
 }
-const distText = (d: Dist, unit = "j") => (d.n ? `${d.mean ?? "–"} ${unit} · p50 ${d.p50 ?? "–"} · p90 ${d.p90 ?? "–"}` : "–");
+const days = (v: number | null | undefined) => (v === null || v === undefined ? "–" : `${v > 0 ? "+" : ""}${v} j`);
 function Profile({ shares, title }: { shares: number[]; title: string }) {
   const max = Math.max(1, ...shares);
   return <span className="profile-bars" title={`${title} : ${["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d, i) => `${d} ${shares[i] ?? 0} %`).join(" · ")}`}>{shares.map((s, i) => <span key={i} className={i >= 5 ? "we" : ""} style={{ height: `${Math.max(1, (22 * s) / max)}px` }} />)}</span>;
 }
 
 /**
- * Performance fournisseurs : the service (OTD = 30 % quantity + 50 % punctuality + 20 % DESADV, weights and bands set in
- * Paramètres › Règles communes) averaged per supplier over a period, with the evolution per week / month / quarter / year ;
- * the observed lead times and delivery profiles ; the ABC / XYZ segmentation of the articles and the coverage target it suggests.
+ * Performance fournisseurs : the service (OTD per expected day : quantity, punctuality, DESADV ; weights and bands in
+ * Paramètres › Règles communes) per supplier over whole weeks, with the evolution per week / month / quarter / year ;
+ * the observed lead times ; the ABC / XYZ segmentation of the articles and the coverage target it suggests.
  */
 export default function PerformancePage() {
   const [params, setParams] = useSearchParams();
@@ -45,7 +44,6 @@ export default function PerformancePage() {
   const names = useSupplierNames();
   const supplierOptions = useMemo(() => Array.from(names.entries()).map(([id, name]) => ({ id, label: name || id, hint: id })).sort((a, b) => a.label.localeCompare(b.label, "fr")), [names]);
   const [bucket, setBucket] = useRemembered<OtdBucket>("perf.bucket", "month");
-  const [method, setMethod] = useRemembered<OtdMethod | "">("perf.method", "");     // "" = the common rule otd_matching
   const [preset, setPreset] = useRemembered<string>("perf.preset", "12m");
   const [custom, setCustom] = useState<{ from: string; to: string }>({ from: "", to: "" });
   const [supplier, setSupplier] = useState<string>(params.get("supplier_id") ?? "");
@@ -60,13 +58,12 @@ export default function PerformancePage() {
     const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     return { date_from: iso(from), date_to: iso(to) };
   }, [custom, preset, asOf]);
-  const common = { ...range, planner: perimeter.planner ?? undefined, supplier_id: supplier || undefined, article_id: article.trim() || undefined, method: method || undefined };
-  const jour = method !== "cumul";
+  const common = { ...range, planner: perimeter.planner ?? undefined, supplier_id: supplier || undefined, article_id: article.trim() || undefined };
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Performance fournisseurs</h1><p>{tab === "otd" ? (jour ? "Pour chaque fournisseur, article et jour de livraison attendu : QUANTITÉ (100 si le reçu du jour couvre l'attendu du jour), PONCTUALITÉ (jours ouvrés jusqu'à ce que tout ce qui était dû depuis ce jour soit livré : 100 le jour même, puis deux tranches), DESADV (100 si chaque BL reçu a été annoncé par un DESADV traité) ; OTD = 30 % + 50 % + 20 %. Les numéros de commande ne jouent pas. Un fournisseur sur une période = la moyenne de ses jours ; le solde (attendu − reçu) est affiché à côté." : "Ancienne règle, pour comparaison : pour chaque créneau ferme, les réceptions de la commande servent le premier créneau d'abord ; QUANTITÉ 100 si la quantité est reçue un jour ou l'autre, PONCTUALITÉ en jours calendaires jusqu'à la quantité complète. Un manque décale tous les créneaux suivants.") : tab === "lead" ? "Délais mesurés sur les réceptions : retard moyen et dispersion (p50 / p90), biais contre le délai paramétré quand l'ERP date la commande, part d'urgences, retards récurrents, profils par jour de la semaine." : "ABC par valeur annuelle (consommation 52 semaines × prix), XYZ par régularité de la consommation hebdomadaire ; chaque segment suggère une couverture cible (Paramètres › Règles communes)."}</p></div>
-        <div className="actions"><Link className="btn sm" to="/parametres" title="Poids de l'OTD, tranches de ponctualité, seuils ABC / XYZ, couvertures suggérées">Règles</Link></div>
+        <div className="title"><h1>Performance fournisseurs</h1><p>{tab === "otd" ? "Par fournisseur, article et jour de livraison attendu : quantité, ponctualité, DESADV. Semaines entières ; un fournisseur = la moyenne de ses jours." : tab === "lead" ? "Délais mesurés sur les réceptions : retard moyen, parts à l'heure et en retard, biais contre le délai paramétré, urgences, profils par jour de la semaine." : "ABC par valeur annuelle, XYZ par régularité de la consommation ; chaque segment suggère une couverture cible."}</p></div>
+        <div className="actions"><Link className="btn sm" to="/parametres" title="Poids de l'OTD, tranches de ponctualité, seuils ABC / XYZ">Règles</Link></div>
       </div>
       <Tabs<Tab> tabs={TABS} value={tab} onChange={setTab} />
       {tab !== "segments" && (
@@ -76,14 +73,13 @@ export default function PerformancePage() {
             <label className="field"><span className="sr-only">Du</span><input className="input sm" type="date" value={custom.from} onChange={(e) => setCustom({ ...custom, from: e.target.value })} aria-label="Du" /></label>
             <label className="field"><span className="sr-only">Au</span><input className="input sm" type="date" value={custom.to} onChange={(e) => setCustom({ ...custom, to: e.target.value })} aria-label="Au" /></label>
             {tab === "otd" && <Segmented size="sm" value={bucket} onChange={setBucket} options={BUCKETS} />}
-            <Segmented size="sm" value={method || "jour"} onChange={(m) => setMethod(m === "jour" ? "" : m)} options={METHODS.map((m) => ({ id: m.id, label: m.label }))} />
             <SearchSelect value={supplier} onChange={setSupplier} options={supplierOptions} placeholder="Tous les fournisseurs" ariaLabel="Fournisseur" width={280} />
             <input className="input sm" placeholder="Article (code exact)" value={article} onChange={(e) => setArticle(e.target.value)} style={{ width: 170 }} aria-label="Article" />
             <span className="subtle small" style={{ marginLeft: "auto" }}>{range.date_from ? `${fmtDate(range.date_from)} → ${fmtDate(range.date_to)}` : ""}{perimeter.planner ? ` · approvisionneur ${perimeter.planner}` : ""}</span>
           </div>
         </Card>
       )}
-      {tab === "otd" && <OtdTab params={{ ...common, bucket }} supplier={supplier} />}
+      {tab === "otd" && <OtdTab params={{ ...common, bucket }} />}
       {tab === "lead" && <LeadTab params={common} />}
       {tab === "segments" && <SegmentsTab />}
     </div>
@@ -91,69 +87,58 @@ export default function PerformancePage() {
 }
 
 /* ---------------------------------------------------------------- OTD */
-function OtdTab({ params, supplier }: { params: Record<string, string | undefined>; supplier: string }) {
+function OtdTab({ params }: { params: Record<string, string | undefined> }) {
   const q = useOtd(params);
   const d = q.data;
-  const [showOrders, setShowOrders] = useRemembered("perf.otd.orders", false);
-  const jour = (d?.method ?? "jour") === "jour";
-  const other = d?.compare?.method ?? (jour ? "cumul" : "jour");
-  const otherLabel = METHODS.find((m) => m.id === other)?.short ?? other;
-  const otherOf = (sid: string | null) => d?.compare?.suppliers[sid ?? ""]?.otd ?? null;
-  const unitLabel = jour ? "jour(s)" : "commande(s)";
+  const [showLines, setShowLines] = useRemembered("perf.otd.lines", false);
   const supCols = useMemo<Column<OtdSupplier>[]>(() => [
     { key: "supplier", label: "Fournisseur", get: (s) => `${s.supplier_id ?? ""} ${s.name}`, render: (s) => <SupplierLink id={s.supplier_id} name={s.name} /> },
-    { key: "n", label: jour ? "Jours" : "Commandes", get: (s) => s.n, num: true, title: jour ? "Jours de livraison attendus et évaluables sur la période (fournisseur × article × jour)" : "Créneaux fermes évaluables sur la période" },
+    { key: "n", label: "Jours", get: (s) => s.n, num: true, title: "Jours de livraison attendus et évalués sur la période" },
     { key: "otd", label: "OTD", get: (s) => s.otd, num: true, export: "number", render: (s) => <ScoreBar v={s.otd} /> },
-    { key: "otd_other", label: `OTD (${otherLabel})`, get: (s) => otherOf(s.supplier_id), num: true, export: "number", title: `La même période calculée avec l'autre méthode (${otherLabel})`, render: (s) => { const v = otherOf(s.supplier_id); return v === null ? <span className="subtle">–</span> : <span className="subtle" title={`écart ${(s.otd ?? 0) - v > 0 ? "+" : ""}${((s.otd ?? 0) - v).toFixed(0)} pt`}>{v.toFixed(0)} %</span>; } },
-    { key: "balance", label: "Solde", get: (s) => s.balance_qty, num: true, export: "number", title: "Attendu − reçu sur la période : positif = reliquat, négatif = avance ; en jours de livraison dans l'infobulle", render: (s) => <span title={`attendu ${fmtQty(s.expected_qty)} · reçu ${fmtQty(s.received_qty)}${s.balance_days !== null ? ` · ${s.balance_days > 0 ? "+" : ""}${s.balance_days} jour(s) de livraison` : ""}`} style={{ color: s.balance_qty > 0 ? "var(--critical-fg)" : s.balance_qty < 0 ? "var(--info-fg)" : undefined }}>{s.balance_qty > 0 ? "+" : ""}{fmtQty(s.balance_qty)}{s.balance_days !== null && s.balance_days !== 0 && <span className="sub">{s.balance_days > 0 ? "+" : ""}{s.balance_days} j de livraison</span>}</span> },
     { key: "qty", label: "Quantité", get: (s) => s.qty, num: true, export: "number", render: (s) => <Badge tone={tone(s.qty)}>{pct(s.qty)}</Badge> },
     { key: "punct", label: "Ponctualité", get: (s) => s.punctuality, num: true, export: "number", render: (s) => <Badge tone={tone(s.punctuality)}>{pct(s.punctuality)}</Badge> },
-    { key: "desadv", label: "DESADV", get: (s) => s.desadv, num: true, export: "number", render: (s) => <Badge tone={tone(s.desadv)}>{pct(s.desadv)}</Badge> },
-    { key: "on_time", label: "À l'heure", get: (s) => s.on_time, num: true }, { key: "early", label: "En avance", get: (s) => s.early, num: true }, { key: "late", label: "En retard", get: (s) => s.late, num: true },
-    { key: "nd", label: "Non livrées", get: (s) => s.not_delivered, num: true, render: (s) => s.not_delivered ? <b style={{ color: "var(--critical-fg)" }}>{s.not_delivered}</b> : <span className="subtle">0</span> },
-    { key: "articles", label: "Articles", get: (s) => s.articles, num: true },
-  ], [jour, otherLabel, d?.compare]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const orderCols = useMemo<Column<OtdOrder>[]>(() => [
-    { key: "date", label: "Livraison prévue", get: (o) => o.expected_date, render: (o) => <>{fmtDate(o.expected_date)}{o.shifted_from && <span className="sub" title="Créneau ERP sur un jour fermé, déplacé au jour ouvré suivant">ERP {fmtDate(o.shifted_from)}</span>}</> },
+    { key: "desadv", label: "DESADV", get: (s) => s.desadv, num: true, export: "number", title: "Part des BL de la période annoncés par un DESADV traité", render: (s) => <Badge tone={tone(s.desadv)}>{pct(s.desadv)}</Badge> },
+    { key: "nd", label: "Non livrés", get: (s) => s.not_delivered, num: true, render: (s) => s.not_delivered ? <b style={{ color: "var(--critical-fg)" }}>{s.not_delivered}</b> : <span className="subtle">0</span> },
+    { key: "window", label: "Fenêtre", get: (s) => s.window, num: true, hidden: true, title: "Jours ouvrés tolérés de part et d'autre du jour attendu", render: (s) => `±${s.window} j` },
+    { key: "articles", label: "Articles", get: (s) => s.articles, num: true, hidden: true },
+  ], []);
+  const lineCols = useMemo<Column<OtdLine>[]>(() => [
+    { key: "date", label: "Jour", get: (o) => o.date, render: (o) => <>{fmtDate(o.date)}{o.shifted_from && <span className="sub" title="Créneau ERP sur un jour fermé, déplacé au jour ouvré suivant">ERP {fmtDate(o.shifted_from)}</span>}</> },
     { key: "supplier", label: "Fournisseur", get: (o) => `${o.supplier_id ?? ""} ${o.supplier_name}`, render: (o) => <SupplierLink id={o.supplier_id} name={o.supplier_name} inline /> },
     { key: "article", label: "Article", get: (o) => `${o.article_id} ${o.designation}`, exportGet: (o) => o.article_id, render: (o) => <ArticleLink id={o.article_id} designation={o.designation} /> },
-    { key: "purch", label: "Commande", get: (o) => o.purch_id, render: (o) => <span className="mono small" title={o.order_ids.join(", ")}>{o.purch_id}{o.slot_count > 1 && <span className="sub">{o.slot_count} créneaux</span>}</span> },
-    { key: "ordered", label: jour ? "Attendu" : "Commandé", get: (o) => o.qty_ordered, num: true, render: (o) => fmtQty(o.qty_ordered, o.unit) },
-    { key: "received", label: jour ? "Reçu le jour" : "Reçu", get: (o) => jour ? (o.received_on_day ?? 0) : o.received_qty, num: true, title: jour ? "Quantité reçue le jour attendu lui-même (QUANTITÉ 100 si elle couvre l'attendu)" : "Quantité affectée au créneau", render: (o) => <>{fmtQty(jour ? (o.received_on_day ?? 0) : o.received_qty, o.unit)}{jour && o.completed_date && o.completed_date !== o.expected_date && <span className="sub">complète {fmtDate(o.completed_date)}</span>}{!jour && o.receipt_count > 1 && <span className="sub">{o.receipt_count} réceptions</span>}</> },
-    { key: "completed", label: "Complète le", get: (o) => o.completed_date ?? "", render: (o) => o.completed_date ? <>{fmtDate(o.completed_date)}{o.delta_days ? <span className="sub" style={{ color: o.delta_days > 0 ? "var(--critical-fg)" : "var(--info-fg)" }}>{o.delta_days > 0 ? `+${o.delta_days} j` : `${o.delta_days} j`}{jour ? " ouvrés" : ""}</span> : <span className="sub">le bon jour</span>}</> : <span className="subtle">–</span> },
-    { key: "status", label: "Statut", get: (o) => o.status, filter: "select", render: (o) => <Badge tone={o.status === "reçue" ? "ok" : o.status === "non livrée" ? "critical" : "neutral"}>{o.status}</Badge> },
+    { key: "expected", label: "Attendu", get: (o) => o.expected, num: true, render: (o) => fmtQty(o.expected, o.unit) },
+    { key: "received", label: "Reçu le jour", get: (o) => o.received, num: true, render: (o) => <>{fmtQty(o.received, o.unit)}{o.excess > o.tolerance && <span className="sub" style={{ color: "var(--critical-fg)" }}>excédent {fmtQty(o.excess)}</span>}</> },
+    { key: "delta", label: "Écart", get: (o) => o.delta, num: true, title: "Jours ouvrés entre le jour attendu et la quantité complète (négatif = avance)", render: (o) => o.delta === null ? <span className="subtle">–</span> : <span style={{ color: o.delta > o.window ? "var(--critical-fg)" : o.delta < -o.window ? "var(--info-fg)" : undefined }}>{o.delta === 0 ? "le jour" : days(o.delta)}</span> },
     { key: "qs", label: "Quantité", get: (o) => o.qty_score, num: true, export: "number", render: (o) => o.qty_score === null ? <span className="subtle">–</span> : <Badge tone={tone(o.qty_score)}>{o.qty_score}</Badge> },
     { key: "ps", label: "Ponctualité", get: (o) => o.punct_score, num: true, export: "number", render: (o) => o.punct_score === null ? <span className="subtle">–</span> : <Badge tone={tone(o.punct_score)}>{o.punct_score}</Badge> },
-    { key: "ds", label: "DESADV", get: (o) => o.desadv_score, num: true, export: "number", title: "100 si chaque BL reçu est annoncé par un DESADV traité sans erreur", render: (o) => o.desadv_score === null ? <span className="subtle">–</span> : <Badge tone={tone(o.desadv_score)} title={o.desadv_missing.length ? `BL sans DESADV traité : ${o.desadv_missing.join(", ")}` : o.bls.join(", ")}>{o.desadv_score}</Badge> },
-    { key: "otd", label: "OTD", get: (o) => o.otd, num: true, export: "number", render: (o) => <ScoreBar v={o.otd} /> },
+    { key: "status", label: "Statut", get: (o) => o.status, filter: "select", render: (o) => <Badge tone={o.status === "reçue" ? "ok" : o.status === "non livrée" ? "critical" : "neutral"}>{o.status}</Badge> },
+    { key: "purch", label: "Commandes", get: (o) => o.purch, hidden: true, render: (o) => <span className="mono small">{o.purch}{o.order_count > 1 ? ` (${o.order_count})` : ""}</span> },
+    { key: "completed", label: "Complet le", get: (o) => o.completed ?? "", hidden: true, render: (o) => o.completed ? fmtDate(o.completed) : <span className="subtle">–</span> },
+    { key: "bls", label: "BL", get: (o) => o.bls.join(", "), hidden: true },
     { key: "planner", label: "Approvisionneur", get: (o) => o.planner, filter: "select", hidden: true },
-    { key: "lead", label: "Délai observé", get: (o) => o.lead_observed_wd, num: true, hidden: true, title: "Première apparition dans l'ERP → quantité complète, jours ouvrés (biais = observé − paramétré)", render: (o) => o.lead_observed_wd === null ? <span className="subtle">–</span> : <>{o.lead_observed_wd} j <span className="subtle">/ {o.lead_promised}</span>{o.bias_wd ? <span className="sub">biais {o.bias_wd > 0 ? "+" : ""}{o.bias_wd} j</span> : null}</> },
-  ], [jour]);
+  ], []);
   if (q.isError) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   const t = d?.totals;
-  const compare = supplier && d ? [] : (d?.suppliers ?? []).filter((s) => s.n >= 3).slice(0, 5).map((s) => ({ name: s.supplier_id ?? "?", series: s.series }));
   return (
     <>
       <div className="grid kpis">
-        <Kpi label="OTD du périmètre" icon={<Gauge size={14} />} value={t ? pct(t.otd) : <Skeleton w={60} h={28} />} meta={t ? `${fmtInt(t.n)} ${unitLabel} évaluable(s)${d?.compare?.totals.otd !== null && d?.compare?.totals.otd !== undefined ? ` · ${otherLabel} : ${pct(d.compare.totals.otd)}` : ""}` : ""} tone={ktone(t?.otd)} />
+        <Kpi label="OTD" icon={<Gauge size={14} />} value={t ? pct(t.otd) : <Skeleton w={60} h={28} />} meta={t ? `${fmtInt(t.suppliers)} fournisseur(s) · ${fmtInt(t.n)} jour(s)` : ""} tone={ktone(t?.otd)} />
         <Kpi label="Quantité" icon={<PackageCheck size={14} />} value={t ? pct(t.qty) : <Skeleton w={60} h={28} />} meta={d ? `poids ${d.params.weights.qty} %` : ""} tone={ktone(t?.qty)} />
-        <Kpi label="Ponctualité" icon={<Timer size={14} />} value={t ? pct(t.punctuality) : <Skeleton w={60} h={28} />} meta={d ? `poids ${d.params.weights.punctuality} % · 100 le jour, ${d.params.band1_score} à ±${d.params.band1_days} j, ${d.params.band2_score} à ±${d.params.band2_days} j` : ""} tone={ktone(t?.punctuality)} />
+        <Kpi label="Ponctualité" icon={<Timer size={14} />} value={t ? pct(t.punctuality) : <Skeleton w={60} h={28} />} meta={d ? `poids ${d.params.weights.punctuality} %` : ""} tone={ktone(t?.punctuality)} />
         <Kpi label="DESADV" icon={<Truck size={14} />} value={t ? pct(t.desadv) : <Skeleton w={60} h={28} />} meta={d ? `poids ${d.params.weights.desadv} %` : ""} tone={ktone(t?.desadv)} />
-        <Kpi label="À l'heure / avance / retard" icon={<CheckCircle2 size={14} />} value={t ? `${t.on_time} / ${t.early} / ${t.late}` : <Skeleton w={60} h={28} />} meta={t ? `${t.not_delivered} non livré(e)s` : ""} tone={t && t.not_delivered ? "critical" : undefined} />
-        <Kpi label="Solde de la période" icon={<Layers size={14} />} value={t ? `${t.balance_qty > 0 ? "+" : ""}${fmtQty(t.balance_qty)}` : <Skeleton w={60} h={28} />} meta={t ? `attendu ${fmtQty(t.expected_qty)} − reçu ${fmtQty(t.received_qty)}${t.balance_days !== null ? ` · ${t.balance_days > 0 ? "+" : ""}${t.balance_days} j de livraison` : ""}` : ""} tone={t && t.balance_qty > 0 ? "warning" : undefined} />
       </div>
-      {d && (d.not_evaluable > 0 || d.unmatched_receipts > 0 || !d.first_seen_available) && (
-        <p className="small subtle">{d.not_evaluable > 0 ? `${d.not_evaluable} ${unitLabel} non évaluable(s) : reçues d'après l'ERP sans ligne de réception dans l'extraction (ni pénalisées, ni comptées). ` : ""}{d.open > 0 ? `${d.open} encore ouverte(s). ` : ""}{d.unmatched_receipts > 0 ? `${d.unmatched_receipts} réception(s) ${jour ? "d'articles sans commande ferme chez ce fournisseur" : "sans commande ferme correspondante"}. ` : ""}{!d.first_seen_available ? "La date de création des commandes n'est pas encore connue (colonne « première apparition » posée par le job de synchronisation) : délai observé et urgences viendront avec elle." : ""}</p>
+      {d && (d.not_evaluable > 0 || !d.first_seen_available) && (
+        <p className="small subtle">{d.not_evaluable > 0 ? `${d.not_evaluable} jour(s) reçu(s) d'après l'ERP sans réception dans l'extraction : non notés. ` : ""}{!d.first_seen_available ? "La date de création des commandes viendra avec le job de synchronisation (délai observé, urgences)." : ""}</p>
       )}
-      <Card title="Évolution" hint={`OTD et ses trois indicateurs par ${BUCKETS.find((b) => b.id === d?.bucket)?.label.toLowerCase() ?? "période"} · pointillés gris : OTD selon l'autre méthode (${otherLabel})${compare.length ? " · lignes fines : OTD des cinq fournisseurs les plus actifs" : ""}`} collapsible storageKey="perf.otd.chart">
-        {q.isLoading || !d ? <Skeleton h={260} /> : d.totals.series.length === 0 ? <Empty title={`Aucun ${jour ? "jour" : "commande"} évaluable sur la période`} hint="Élargir la période ou retirer les filtres." /> : <OtdChart series={d.totals.series} compare={compare} extra={d.compare ? { name: `OTD (${otherLabel})`, series: d.compare.totals.series } : undefined} target={90} />}
+      <Card title="Évolution" hint={`par ${BUCKETS.find((b) => b.id === d?.bucket)?.label.toLowerCase() ?? "période"}`} collapsible storageKey="perf.otd.chart">
+        {q.isLoading || !d ? <Skeleton h={240} /> : d.totals.series.length === 0 ? <Empty title="Aucun jour évalué sur la période" hint="Élargir la période ou retirer les filtres." /> : <OtdChart series={d.totals.series} target={90} height={240} />}
       </Card>
-      <Card flush title="Par fournisseur" hint={`moyenne des ${jour ? "jours de livraison" : "commandes"} attendus sur la période ; solde = attendu − reçu ; cliquer un fournisseur ouvre sa fiche`} actions={<Button size="sm" variant={showOrders ? "primary" : "default"} onClick={() => setShowOrders(!showOrders)}>{jour ? "Détail par jour" : "Détail par commande"}</Button>}>
-        {q.isLoading || !d ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={d.suppliers} columns={supCols} rowKey={(s) => s.supplier_id ?? "none"} compact maxHeight="50vh" storageKey="perf.otd.suppliers" exportTitle="OTD par fournisseur" emptyTitle="Aucune commande évaluable" />}
+      <Card flush title="Par fournisseur" actions={<Button size="sm" variant={showLines ? "primary" : "default"} onClick={() => setShowLines(!showLines)}>Détail par jour</Button>}>
+        {q.isLoading || !d ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={d.suppliers} columns={supCols} rowKey={(s) => s.supplier_id ?? "none"} compact maxHeight="50vh" storageKey="perf.otd.suppliers2" exportTitle="OTD par fournisseur" emptyTitle="Aucun jour évalué" />}
       </Card>
-      {showOrders && d && (
-        <Card flush title={jour ? "Détail par jour de livraison" : "Détail par commande"} hint={`${d.orders.length} ${jour ? "jour(s) fournisseur × article" : "créneau(x)"} de la période${d.truncated ? " (liste tronquée à 5 000)" : ""} ; statut « ouverte » = attendue ou encore dans le délai d'évaluation`}>
-          <DataTable rows={d.orders} columns={orderCols} rowKey={(o) => o.order_id} compact maxHeight="60vh" storageKey={jour ? "perf.otd.days" : "perf.otd.orders2"} exportTitle={jour ? "OTD par jour" : "OTD par commande"} emptyTitle="Aucune ligne" />
+      {showLines && d && (
+        <Card flush title="Détail par jour" hint={`${fmtInt(d.lines.length)} ligne(s)${d.truncated ? ", liste tronquée à 5 000" : ""}`}>
+          <DataTable rows={d.lines} columns={lineCols} rowKey={(o) => o.id} compact maxHeight="60vh" storageKey="perf.otd.lines2" exportTitle="OTD par jour" emptyTitle="Aucune ligne" />
         </Card>
       )}
     </>
@@ -165,45 +150,45 @@ function LeadTab({ params }: { params: Record<string, string | undefined> }) {
   const q = useLeadTimes(params);
   const d = q.data;
   const base = <T extends LeadSupplier | LeadArticle>(): Column<T>[] => [
-    { key: "n", label: "Commandes", get: (r) => r.n, num: true, title: "Créneaux fermes attendus sur la période" },
-    { key: "received", label: "Reçues", get: (r) => r.received, num: true },
-    { key: "nd", label: "Non livrées", get: (r) => r.not_delivered, num: true, render: (r) => r.not_delivered ? <b style={{ color: "var(--critical-fg)" }}>{r.not_delivered}</b> : <span className="subtle">0</span> },
-    { key: "delay", label: "Retard moyen", get: (r) => r.delay.mean, num: true, export: "number", title: `Jours ${d?.method === "cumul" ? "calendaires" : "ouvrés"} entre la livraison prévue et la quantité complète (négatif = en avance) ; dispersion p50 / p90 / écart-type dans l'infobulle`, render: (r) => r.delay.n ? <span title={`p50 ${r.delay.p50} · p90 ${r.delay.p90} · écart-type ${r.delay.std} · min ${r.delay.min} · max ${r.delay.max}`}><b style={{ color: (r.delay.mean ?? 0) > 0 ? "var(--critical-fg)" : undefined }}>{(r.delay.mean ?? 0) > 0 ? "+" : ""}{r.delay.mean} j</b><span className="sub">p90 {r.delay.p90} j · σ {r.delay.std}</span></span> : <span className="subtle">–</span> },
+    { key: "n", label: "Jours", get: (r) => r.n, num: true, title: "Jours de livraison attendus sur la période" },
+    { key: "received", label: "Reçus", get: (r) => r.received, num: true },
+    { key: "nd", label: "Non livrés", get: (r) => r.not_delivered, num: true, render: (r) => r.not_delivered ? <b style={{ color: "var(--critical-fg)" }}>{r.not_delivered}</b> : <span className="subtle">0</span> },
+    { key: "delay", label: "Retard moyen", get: (r) => r.delay_mean, num: true, export: "number", title: "Jours ouvrés entre le jour attendu et la quantité complète (négatif = avance)", render: (r) => r.delay_mean === null ? <span className="subtle">–</span> : <b style={{ color: r.delay_mean > 0 ? "var(--critical-fg)" : undefined }}>{days(r.delay_mean)}</b> },
     { key: "on_time", label: "À l'heure", get: (r) => r.on_time_pct, num: true, export: "number", render: (r) => <Badge tone={tone(r.on_time_pct)}>{pct(r.on_time_pct)}</Badge> },
-    { key: "late", label: "En retard", get: (r) => r.late_pct, num: true, export: "number", render: (r) => <>{pct(r.late_pct)}{r.recurring_late && <Badge tone="critical" title="Au moins la moitié des livraisons en retard sur trois commandes ou plus">récurrent</Badge>}</> },
-    { key: "beyond", label: `> ${d?.band2_days ?? 4} j`, get: (r) => r.late_beyond_pct, num: true, export: "number", title: "Part des livraisons au-delà de la seconde tranche de ponctualité", render: (r) => pct(r.late_beyond_pct) },
-    { key: "promised", label: "Délai paramétré", get: (r) => String(r.lead_promised ?? ""), num: true, render: (r) => <span className="subtle">{r.lead_promised ?? "–"} j ouvrés</span> },
-    { key: "observed", label: "Délai observé", get: (r) => r.lead_observed.mean, num: true, export: "number", title: "Première apparition dans l'ERP → quantité complète, jours ouvrés (moyenne · p50 · p90)", render: (r) => r.lead_observed.n ? <span>{distText(r.lead_observed, "j ouvrés")}</span> : <span className="subtle" title="La date de création des commandes n'est pas connue">–</span> },
-    { key: "bias", label: "Biais", get: (r) => r.bias.mean, num: true, export: "number", title: "Observé − paramétré, jours ouvrés : positif = le délai du référentiel est optimiste", render: (r) => r.bias.n ? <b style={{ color: (r.bias.mean ?? 0) > 0 ? "var(--critical-fg)" : "var(--ok-fg)" }}>{(r.bias.mean ?? 0) > 0 ? "+" : ""}{r.bias.mean} j</b> : <span className="subtle">–</span> },
-    { key: "ship", label: "Expédition → réception", get: (r) => r.ship_to_receipt.mean, num: true, export: "number", title: "DESADV émis → réception, jours calendaires", render: (r) => r.ship_to_receipt.n ? distText(r.ship_to_receipt) : <span className="subtle">–</span> },
-    { key: "urgent", label: "Urgences", get: (r) => r.urgent_pct, num: true, export: "number", title: "Part des commandes créées à l'intérieur du délai", render: (r) => pct(r.urgent_pct) },
-    { key: "partial", label: "Livraisons partielles", get: (r) => r.partial_pct, num: true, export: "number", title: "Part des commandes servies en plusieurs réceptions", render: (r) => pct(r.partial_pct) },
-    { key: "qty", label: "Qté / réception", get: (r) => r.qty_per_receipt.p50, num: true, export: "number", title: "Médiane · p90 de la quantité par ligne de réception", render: (r) => r.qty_per_receipt.n ? <>{fmtQty(r.qty_per_receipt.p50)}<span className="sub">p90 {fmtQty(r.qty_per_receipt.p90)}</span></> : <span className="subtle">–</span> },
-    { key: "pe", label: "Profil prévu", get: () => "", filter: "none", sortable: false, export: false, title: "Répartition des livraisons prévues par jour de la semaine (Lun → Dim)", render: (r) => <Profile shares={r.profile_expected} title="Livraisons prévues" /> },
-    { key: "pr", label: "Profil reçu", get: () => "", filter: "none", sortable: false, export: false, title: "Répartition des réceptions par jour de la semaine (Lun → Dim)", render: (r) => <Profile shares={r.profile_receipts} title="Réceptions" /> },
+    { key: "late", label: "En retard", get: (r) => r.late_pct, num: true, export: "number", render: (r) => <>{pct(r.late_pct)}{r.recurring_late && <Badge tone="critical" title="Au moins la moitié des livraisons en retard">récurrent</Badge>}</> },
+    { key: "beyond", label: `> ${d?.band2_days ?? 4} j`, get: (r) => r.late_beyond_pct, num: true, export: "number", title: "Part des livraisons au-delà de la seconde tranche", render: (r) => pct(r.late_beyond_pct) },
+    { key: "promised", label: "Délai paramétré", get: (r) => String(r.lead_promised ?? ""), num: true, render: (r) => <span className="subtle">{r.lead_promised ?? "–"} j</span> },
+    { key: "observed", label: "Délai observé", get: (r) => r.lead_observed_mean, num: true, export: "number", title: "Création de la commande → quantité complète, jours ouvrés", render: (r) => r.lead_observed_mean === null ? <span className="subtle">–</span> : `${r.lead_observed_mean} j` },
+    { key: "bias", label: "Biais", get: (r) => r.bias_mean, num: true, export: "number", title: "Observé − paramétré : positif = délai du référentiel optimiste", render: (r) => r.bias_mean === null ? <span className="subtle">–</span> : <b style={{ color: r.bias_mean > 0 ? "var(--critical-fg)" : "var(--ok-fg)" }}>{days(r.bias_mean)}</b> },
+    { key: "ship", label: "Expédition → réception", get: (r) => r.ship_to_receipt_mean, num: true, export: "number", title: "DESADV émis → réception, jours calendaires", render: (r) => r.ship_to_receipt_mean === null ? <span className="subtle">–</span> : `${r.ship_to_receipt_mean} j` },
+    { key: "urgent", label: "Urgences", get: (r) => r.urgent_pct, num: true, export: "number", title: "Commandes créées à l'intérieur du délai", render: (r) => pct(r.urgent_pct) },
+    { key: "partial", label: "Partielles", get: (r) => r.partial_pct, num: true, export: "number", title: "Jours servis en plusieurs réceptions", render: (r) => pct(r.partial_pct) },
+    { key: "qty", label: "Qté / réception", get: (r) => r.qty_per_receipt_mean, num: true, export: "number", hidden: true, render: (r) => r.qty_per_receipt_mean === null ? <span className="subtle">–</span> : fmtQty(r.qty_per_receipt_mean) },
+    { key: "pe", label: "Profil prévu", get: () => "", filter: "none", sortable: false, export: false, title: "Livraisons prévues par jour de la semaine (Lun → Dim)", render: (r) => <Profile shares={r.profile_expected} title="Livraisons prévues" /> },
+    { key: "pr", label: "Profil reçu", get: () => "", filter: "none", sortable: false, export: false, title: "Réceptions par jour de la semaine (Lun → Dim)", render: (r) => <Profile shares={r.profile_receipts} title="Réceptions" /> },
   ];
-  const supCols = useMemo<Column<LeadSupplier>[]>(() => [{ key: "supplier", label: "Fournisseur", get: (s) => `${s.supplier_id ?? ""} ${s.name}`, render: (s) => <SupplierLink id={s.supplier_id} name={s.name} /> }, ...base<LeadSupplier>()], [d?.band2_days, d?.method]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const supCols = useMemo<Column<LeadSupplier>[]>(() => [{ key: "supplier", label: "Fournisseur", get: (s) => `${s.supplier_id ?? ""} ${s.name}`, render: (s) => <SupplierLink id={s.supplier_id} name={s.name} /> }, ...base<LeadSupplier>()], [d?.band2_days]);   // eslint-disable-line react-hooks/exhaustive-deps
   const artCols = useMemo<Column<LeadArticle>[]>(() => [
     { key: "article", label: "Article", get: (a) => `${a.article_id} ${a.designation}`, exportGet: (a) => a.article_id, render: (a) => <ArticleLink id={a.article_id} designation={a.designation} /> },
     { key: "supplier", label: "Fournisseur", get: (a) => `${a.supplier_id ?? ""} ${a.supplier_name}`, render: (a) => <SupplierLink id={a.supplier_id} name={a.supplier_name} inline /> },
-    ...base<LeadArticle>()], [d?.band2_days, d?.method]);   // eslint-disable-line react-hooks/exhaustive-deps
+    ...base<LeadArticle>()], [d?.band2_days]);   // eslint-disable-line react-hooks/exhaustive-deps
   if (q.isError) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   const t = d?.totals;
   return (
     <>
       <div className="grid kpis">
-        <Kpi label="Retard moyen" icon={<Timer size={14} />} value={t && t.delay.n ? `${(t.delay.mean ?? 0) > 0 ? "+" : ""}${t.delay.mean} j` : <Skeleton w={60} h={28} />} meta={t && t.delay.n ? `dispersion p50 ${t.delay.p50} · p90 ${t.delay.p90} · σ ${t.delay.std}` : "aucune réception"} tone={t && (t.delay.mean ?? 0) > 1 ? "warning" : undefined} />
+        <Kpi label="Retard moyen" icon={<Timer size={14} />} value={t ? days(t.delay_mean) : <Skeleton w={60} h={28} />} meta={t ? `${fmtInt(t.received)} jour(s) reçu(s)` : ""} tone={t && t.delay_mean !== null ? (t.delay_mean > 1 ? "critical" : t.delay_mean > 0 ? "warning" : "ok") : undefined} />
         <Kpi label="À l'heure" icon={<CheckCircle2 size={14} />} value={t ? pct(t.on_time_pct) : <Skeleton w={60} h={28} />} meta={t ? `${pct(t.early_pct)} en avance · ${pct(t.late_pct)} en retard` : ""} tone={ktone(t?.on_time_pct)} />
-        <Kpi label="Biais du délai paramétré" icon={<CalendarRange size={14} />} value={t && t.bias.n ? `${(t.bias.mean ?? 0) > 0 ? "+" : ""}${t.bias.mean} j` : "–"} meta={t && t.bias.n ? `délai observé ${distText(t.lead_observed, "j ouvrés")}` : "date de création des commandes inconnue"} tone={t && t.bias.n && (t.bias.mean ?? 0) > 0 ? "critical" : undefined} />
+        <Kpi label="Biais du délai paramétré" icon={<CalendarRange size={14} />} value={t && t.bias_mean !== null ? days(t.bias_mean) : "–"} meta={t && t.lead_observed_mean !== null ? `délai observé ${t.lead_observed_mean} j ouvrés` : "date de création des commandes à venir"} tone={t && t.bias_mean !== null ? (t.bias_mean > 1 ? "critical" : t.bias_mean > 0 ? "warning" : "ok") : undefined} />
         <Kpi label="Urgences" icon={<Gauge size={14} />} value={t ? pct(t.urgent_pct) : <Skeleton w={60} h={28} />} meta="commandes créées dans le délai" />
-        <Kpi label="Livraisons partielles" icon={<Layers size={14} />} value={t ? pct(t.partial_pct) : <Skeleton w={60} h={28} />} meta={t && t.qty_per_receipt.n ? `${fmtQty(t.qty_per_receipt.p50)} par réception (médiane)` : ""} />
+        <Kpi label="Partielles" icon={<Layers size={14} />} value={t ? pct(t.partial_pct) : <Skeleton w={60} h={28} />} meta="jours servis en plusieurs réceptions" />
       </div>
-      <Card flush title="Par fournisseur" hint="moyenne, dispersion et biais des délais ; un fournisseur ou un article choisi ouvre le détail par article en dessous">
-        {q.isLoading || !d ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <div className="scroll-x"><DataTable rows={d.suppliers} columns={supCols} rowKey={(s) => s.supplier_id ?? "none"} compact maxHeight="50vh" storageKey="perf.lead.suppliers" exportTitle="Délais observés par fournisseur" emptyTitle="Aucune commande sur la période" /></div>}
+      <Card flush title="Par fournisseur" hint="un fournisseur ou un article choisi ouvre le détail par article">
+        {q.isLoading || !d ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <div className="scroll-x"><DataTable rows={d.suppliers} columns={supCols} rowKey={(s) => s.supplier_id ?? "none"} compact maxHeight="50vh" storageKey="perf.lead.suppliers2" exportTitle="Délais observés par fournisseur" emptyTitle="Aucune livraison sur la période" /></div>}
       </Card>
       {d && d.articles.length > 0 && (
-        <Card flush title="Par article" hint="les couples fournisseur × article de la sélection">
-          <div className="scroll-x"><DataTable rows={d.articles} columns={artCols} rowKey={(a) => `${a.supplier_id}|${a.article_id}`} compact maxHeight="50vh" storageKey="perf.lead.articles" exportTitle="Délais observés par article" /></div>
+        <Card flush title="Par article">
+          <div className="scroll-x"><DataTable rows={d.articles} columns={artCols} rowKey={(a) => `${a.supplier_id}|${a.article_id}`} compact maxHeight="50vh" storageKey="perf.lead.articles2" exportTitle="Délais observés par article" /></div>
         </Card>
       )}
     </>

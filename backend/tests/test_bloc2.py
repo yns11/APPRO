@@ -15,8 +15,7 @@ from appro.config import Settings
 from appro.data import store
 from appro.data.store import AppMeta, init_store
 from appro.engine.calendar import WorkCalendar
-from appro.engine.models import DesadvLine, EngineParams, OrderLine, OrderType, Receipt, Supplier, SupplierLink
-from appro.services import performance
+from appro.engine.models import Supplier
 from appro.services.context import AppContext, get_context
 
 D = dt.timedelta
@@ -146,57 +145,7 @@ def test_calendars_table_feeds_the_plant_calendar_and_the_suppliers(client):  # 
     assert client.get("/api/cockpit", params={"planner": "QUENTIN"}).status_code == 200   # the engine runs with the closures
 
 
-# ============================================================================ 20. OTD and 13. observed lead times
-def _service_dataset():
-    """Four firm slots of S1 : on time with a processed DESADV, two days late without DESADV, never delivered, received per
-    the ERP but without any receipt line (not evaluable)."""
-    d1, d2, d3, d4 = MON - D(days=21), MON - D(days=14), MON - D(days=21), MON - D(days=28)
-    orders = [OrderLine("O1", "A1", "S1", d1, 100, 0, OrderType.FIRM, "CO-1", first_seen=d1 - D(days=10)),
-              OrderLine("O2", "A1", "S1", d2, 100, 0, OrderType.FIRM, "CO-2", first_seen=d2 - D(days=3)),
-              OrderLine("O3", "A1", "S1", d3, 100, 100, OrderType.FIRM, "CO-3"),
-              OrderLine("O4", "A1", "S1", d4, 100, 0, OrderType.FIRM, "CO-4"),
-              OrderLine("O5", "A1", "S1", MON + D(days=3), 100, 100, OrderType.FIRM, "CO-5")]        # to come : open
-    receipts = [Receipt("R1", "A1", d1, 100, "S1", "CO-1", "BL-1", "Comptabilisé"),
-                Receipt("R2a", "A1", d2 + D(days=1), 40, "S1", "CO-2", "BL-2", "Reçu"),
-                Receipt("R2b", "A1", d2 + D(days=2), 60, "S1", "CO-2", "BL-3", "Reçu")]
-    desadv = [DesadvLine("D1", "A1", "S1", "BL-1", d1 - D(days=2), 100, "CO-1", "Traité", "OK", "ITR")]
-    return make_dataset(orders=orders, receipts=receipts, desadv=desadv, links=[SupplierLink("A1", "S1", moq=100, pack_qty=50)])
-
-
-def test_otd_scores_per_slot_and_their_weights():
-    """The previous rule (« cumul », one firm slot = one evaluation), kept as the comparison method."""
-    ds = _service_dataset()
-    params = EngineParams(as_of=MON)
-    m = performance.match_slots(ds, MON, WorkCalendar(), params)
-    by = {s.order_id: s for s in m.slots}
-    on_time, late, never, erp_only, future = by["O1"], by["O2"], by["O3"], by["O4"], by["O5"]
-    assert (on_time.qty_score, on_time.punct_score, on_time.desadv_score, on_time.otd) == (100, 100, 100, 100) and on_time.status == "reçue"
-    assert on_time.lead_observed_wd == WorkCalendar().working_days_between(on_time.first_seen, on_time.completed_date) and on_time.bias_wd == on_time.lead_observed_wd - 5
-    assert on_time.order_to_ship_days == 8 and on_time.ship_to_receipt_days == 2.0 and not on_time.urgent_order
-    assert late.completed_date == late.expected_date + D(days=2) and late.delta_days == 2 and len(late.receipts) == 2
-    assert (late.qty_score, late.punct_score, late.desadv_score) == (100, 60, 0) and late.otd == 30 + 30 + 0 and late.desadv_missing == ["BL-2", "BL-3"]
-    assert late.urgent_order                                             # placed 3 days before the delivery, lead 5
-    assert never.status == "non livrée" and never.evaluable and never.otd == 0
-    assert erp_only.status == "non évaluable" and not erp_only.evaluable
-    assert future.status == "ouverte" and not future.evaluable
-    # the weights and the bands are rules : another setting, another score
-    alt = EngineParams(as_of=MON, otd_weight_qty=50, otd_weight_punctuality=50, otd_weight_desadv=0, otd_band1_days=3, otd_band1_score=80)
-    m2 = {s.order_id: s for s in performance.match_slots(ds, MON, WorkCalendar(), alt).slots}
-    assert m2["O2"].punct_score == 80 and m2["O2"].otd == 50 + 40
-    # the report : mean over the evaluable slots of the window, per bucket
-    rep = performance.otd_report(ds, params, MON, WorkCalendar(), "week", date_to=MON + D(days=7), names={"S1": "Supplier 1"}, method="cumul")
-    assert rep["totals"]["n"] == 3 and rep["totals"]["otd"] == round((100 + 60 + 0) / 3, 1) and rep["totals"]["desadv"] == round(100 / 3, 1)
-    assert rep["not_evaluable"] == 1 and rep["open"] == 1 and rep["first_seen_available"]
-    sup = rep["suppliers"][0]
-    assert sup["supplier_id"] == "S1" and sup["late"] == 1 and sup["on_time"] == 1 and sup["not_delivered"] == 1
-    assert [p["n"] for p in sup["series"]] == [2, 1] and rep["bucket"] == "week"      # O1 and O3 share a week, O2 the next
-    assert performance.bucket_label(dt.date(2026, 11, 3), "quarter") == "2026-Q4" and performance.bucket_label(dt.date(2026, 2, 3), "month") == "2026-02"
-    lt = performance.lead_time_report(ds, params, MON, WorkCalendar(), names={"S1": "Supplier 1"}, method="cumul")
-    t = lt["totals"]
-    assert t["received"] == 2 and t["delay"]["mean"] == 1.0 and t["delay"]["p90"] == 1.8 and t["late_pct"] == 50.0 and t["partial_pct"] == 50.0
-    assert t["lead_observed"]["n"] == 2 and t["urgent_pct"] == 25.0 and t["profile_receipts"][late.receipts[0][0].isoweekday() - 1] > 0
-
-
+# ============================================================================ 20. OTD (rule and scenarios : tests/test_otd.py) and 13. observed lead times
 def test_performance_endpoints_on_the_seed(client):  # noqa: F811
     r = client.get("/api/performance/otd", params={"bucket": "quarter", "planner": "QUENTIN"})
     assert r.status_code == 200, r.text
@@ -206,10 +155,11 @@ def test_performance_endpoints_on_the_seed(client):  # noqa: F811
     assert all(s["period"].count("-Q") == 1 for s in body["totals"]["series"])
     one = body["suppliers"][-1]["supplier_id"]
     r = client.get("/api/performance/otd", params={"bucket": "month", "supplier_id": one, "date_from": "2026-06-01", "date_to": "2026-09-24"})
-    assert r.status_code == 200 and all(o["supplier_id"] == one and "2026-06-01" <= o["expected_date"] <= "2026-09-24" for o in r.json()["orders"])
+    assert r.status_code == 200 and all(o["supplier_id"] == one and "2026-06-01" <= o["date"] <= "2026-09-27" for o in r.json()["lines"])   # whole weeks
     assert client.get("/api/performance/otd", params={"date_from": "2026-09-01", "date_to": "2026-08-01"}).status_code == 422
     lt = client.get("/api/performance/lead-times", params={"supplier_id": one}).json()
-    assert lt["suppliers"] and lt["articles"] and {"delay", "lead_observed", "bias", "profile_expected"} <= set(lt["suppliers"][0])
+    assert lt["suppliers"] and lt["articles"] and {"delay_mean", "lead_observed_mean", "bias_mean", "profile_expected"} <= set(lt["suppliers"][0])
+    assert not any(k.startswith("p50") or k.startswith("p90") for k in lt["suppliers"][0])
     # the weights are common rules, editable from the settings
     assert client.put("/api/params/overrides", json={"scope": "global", "field": "otd_weight_desadv", "value": 0}).status_code == 200
     assert client.get("/api/performance/otd").json()["params"]["weights"]["desadv"] == 0

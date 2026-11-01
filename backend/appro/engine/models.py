@@ -362,15 +362,13 @@ class EngineParams:
     stock_drift_persist: int = 3                  # … on the last n snapshots, same sign = « dérive » (data issue)
     cutoff_passed: tuple[str, ...] = ()           # suppliers whose order cut-off hour is already past today : their orders leave tomorrow
     # --- supplier service (OTD) : weights (%) and punctuality bands (days early or late → score)
-    otd_weight_qty: int = 30                      # QUANTITÉ : 100 when the ordered quantity was received, 0 otherwise
-    otd_weight_punctuality: int = 50              # PONCTUALITÉ : 100 on the day ; band 1 → score 1 ; band 2 → score 2 ; beyond → 0
-    otd_weight_desadv: int = 20                   # DESADV : 100 when every delivery note was announced by a processed DESADV
-    otd_band1_days: int = 2                       # early / late by 1 … n days → otd_band1_score
+    otd_weight_qty: int = 30                      # QUANTITÉ : the receipts of the day cover the expected quantity of the day (services/otd.py)
+    otd_weight_punctuality: int = 50              # PONCTUALITÉ : 100 inside the supplier's window ; band 1 → score 1 ; band 2 → score 2 ; beyond → 0
+    otd_weight_desadv: int = 20                   # DESADV : share of the delivery notes announced by a processed DESADV
+    otd_band1_days: int = 2                       # 1 … n working days beyond the window → otd_band1_score
     otd_band1_score: int = 60
-    otd_band2_days: int = 4                       # early / late by band1 + 1 … n days → otd_band2_score ; beyond → 0
+    otd_band2_days: int = 4                       # band1 + 1 … n working days beyond the window → otd_band2_score ; beyond → 0
     otd_band2_score: int = 20
-    otd_matching: str = "jour"                    # jour : one expected day per supplier × article, served by the day's receipts first ; cumul : per purchase order, first slot served first (previous rule)
-    otd_backlog_max_days: int = 30                # jour : a missing day may be completed by later surpluses up to n days after ; beyond, it stays « non livré »
     # --- stock policy segmentation (ABC by yearly value, XYZ by variability of the weekly consumption)
     abc_a_pct: int = 80                           # A : articles making the first n % of the cumulated yearly value
     abc_b_pct: int = 95                           # B : up to n % ; C : the rest

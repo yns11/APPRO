@@ -1,4 +1,4 @@
-"""Supplier performance (OTD, observed lead times), ABC / XYZ segmentation and the exception queue."""
+"""Supplier performance (OTD at the day grain, observed lead times), ABC / XYZ segmentation and the exception queue."""
 from __future__ import annotations
 
 import datetime as dt
@@ -9,10 +9,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ...data import reference
-from ...data.assembler import erp_dataset
+from ...data.assembler import calendar_sets, erp_dataset
 from ...engine.calendar import WorkCalendar
+from ...engine.models import EngineParams
 from ...engine.runner import resolve_as_of
-from ...services import actions, exceptions, mrp_service, performance
+from ...services import actions, exceptions, mrp_service, otd, performance
 from ...services.access import Access
 from ...services.context import AppContext
 from ..deps import access_dep, ctx_dep, current_user, session_dep
@@ -30,31 +31,41 @@ def _frame(ctx: AppContext, session: Session, planner: str | None, article_id: s
     return ds, params, as_of, calendar, names
 
 
+def _otd_data(ctx: AppContext, session: Session) -> tuple[otd.OtdData, EngineParams]:
+    """The evaluated lines of the whole data set, computed once per data version (and per day) and cached."""
+    params = mrp_service.build_params(ctx, session)
+    as_of = params.as_of or dt.date.today()
+    closed, opened, _by_sup = calendar_sets(ctx.table("ref_calendars").to_dict("records"), [])
+    holidays = set(ctx.settings.holiday_dates) | closed
+    key = otd.cache_key(ctx.sync_version(session), as_of, params, holidays, opened)
+    data = ctx.cache_get(key)
+    if data is None:
+        cal = WorkCalendar.from_spec(params.working_weekdays, holidays, opened)
+        data = otd.build(ctx.table("fct_purchase_orders"), ctx.table("fct_receipts"), ctx.table("fct_desadv"), ctx.table("ref_suppliers"),
+                         ctx.table("ref_article_suppliers"), ctx.table("ref_articles"), cal, as_of, params)
+        ctx.cache_set(key, data, size=data.size())
+    return data, params
+
+
 @router.get("/api/performance/otd")
-def otd(bucket: Literal["week", "month", "quarter", "year"] = "month", date_from: dt.date | None = None, date_to: dt.date | None = None,
-        supplier_id: list[str] | None = Query(None), article_id: str | None = None, planner: str | None = None,
-        method: Literal["jour", "cumul"] | None = None, compare: bool = True,
-        ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Service of the suppliers : OTD = 30 % quantity + 50 % punctuality + 20 % DESADV per expected day (``method``
-    jour, default rule ``otd_matching``) or per firm order slot (cumul), averaged per supplier and per period bucket
-    (week, month, quarter, year) ; the weights and bands are common rules ; ``compare`` adds the other method's scores."""
+def otd_endpoint(bucket: Literal["week", "month", "quarter", "year"] = "month", date_from: dt.date | None = None, date_to: dt.date | None = None,
+                 supplier_id: list[str] | None = Query(None), article_id: str | None = None, planner: str | None = None,
+                 ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Service of the suppliers per expected day (docs § 14) over whole weeks, per supplier and per period bucket."""
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "date_from doit précéder date_to")
-    ds, params, as_of, calendar, names = _frame(ctx, session, planner, article_id)
-    return json_response(performance.otd_report(ds, params, as_of, calendar, bucket, date_from, date_to, supplier_id or None,
-                                                [article_id] if article_id else None, names, method=method, compare=compare))
+    data, params = _otd_data(ctx, session)
+    return json_response(otd.otd_report(data, params, bucket, date_from, date_to, supplier_id or None, [article_id] if article_id else None, planner or None))
 
 
 @router.get("/api/performance/lead-times")
 def lead_times(date_from: dt.date | None = None, date_to: dt.date | None = None, supplier_id: list[str] | None = Query(None),
-               article_id: str | None = None, planner: str | None = None, method: Literal["jour", "cumul"] | None = None,
-               ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+               article_id: str | None = None, planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """Observed delays and delivery profiles per supplier (per article when one supplier or one article is chosen)."""
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "date_from doit précéder date_to")
-    ds, params, as_of, calendar, names = _frame(ctx, session, planner, article_id)
-    return json_response(performance.lead_time_report(ds, params, as_of, calendar, date_from, date_to, supplier_id or None,
-                                                      [article_id] if article_id else None, names, method=method))
+    data, params = _otd_data(ctx, session)
+    return json_response(otd.lead_time_report(data, params, date_from, date_to, supplier_id or None, [article_id] if article_id else None, planner or None))
 
 
 @router.get("/api/performance/segmentation")

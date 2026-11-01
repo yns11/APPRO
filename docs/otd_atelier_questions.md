@@ -1,6 +1,6 @@
 # OTD : questions à trancher avec les équipes approvisionnement
 
-*Grille d'atelier du 01/11/2026. Elle part d'une feuille blanche : rien de ce qui est implémenté n'est considéré
+*Grille d'atelier du 01/11/2026. Les décisions prises le jour même sont dans `docs/regles_metier.md` § 14 ; la grille reste utile pour les questions encore ouvertes (date de référence, exclusions, arrêté mensuel, gouvernance). Elle part d'une feuille blanche : rien de ce qui est implémenté n'est considéré
 comme acquis. Chaque ligne est une question à poser, avec les réponses possibles. Une procédure OTD est complète
 quand chaque question a une réponse écrite, un exemple chiffré et un propriétaire.*
 
