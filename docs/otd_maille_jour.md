@@ -212,6 +212,56 @@ par article contre 4 pour un hebdomadaire (d'où la moyenne par fournisseur pour
 avance ou un même retard en jours n'a pas la même gravité selon la fréquence (option ultérieure : bandes par
 fournisseur dans `ref_suppliers`, non proposée pour l'instant).
 
+## 3 bis. Variante retenue à l'étude : QUANTITÉ stricte au jour
+
+Proposition du 01/11 (approvisionneur) : **QUANTITÉ = 100 si la quantité du jour J est reçue le jour J, 0 sinon** ;
+les règles d'affectation (jour d'abord, reliquat, avance) ne servent plus qu'à la PONCTUALITÉ et au reliquat.
+
+**Ce que cela change.**
+
+* QUANTITÉ ne dépend plus d'aucun rapprochement : seulement de deux totaux par jour, Σ attendu le J et Σ reçu le J
+  pour le couple (fournisseur, article). Elle est donc **insensible aux choix d'affectation** (reliquat avant avance,
+  âge maximal…) et à l'ambiguïté S2 / S4 sur la lecture du reliquat ; c'est la mesure la plus lisible et la moins
+  discutable pour la hiérarchie : la **part de jours livrés complets le bon jour** (« jours parfaits »).
+* QUANTITÉ 100 entraîne PONCTUALITÉ 100 (le jour est complet le jour même) et réciproquement. Les deux indicateurs
+  ne se distinguent plus que dans l'échec : QUANTITÉ dit « pas complet le jour J », PONCTUALITÉ dit « complet
+  combien de jours après ». L'**échelle se durcit** : avec le DESADV acquis, un jour parfait vaut 100, un jour
+  complété à ±1–2 j vaut 50 (au lieu de 80), à ±3–4 j 30 (au lieu de 60), au-delà ou jamais livré 20 (au lieu de 50
+  ou 0). Un jour livré 5 jours plus tard et un jour jamais livré ont la **même note** ; la différence reste visible
+  dans le détail (statut « non livré ») et dans le reliquat. Les poids 30 / 50 / 20 avaient été fixés avec une
+  QUANTITÉ « reçue un jour ou l'autre » ; ils peuvent être gardés tels quels (c'est un choix de sévérité) ou
+  rééquilibrés, ils sont paramétrables.
+* « Quantité exacte » à lire comme **reçu le J ≥ attendu le J** : un excédent le J (rattrapage d'un reliquat,
+  S3 J6 : 1 024 reçues pour 512) ne doit pas mettre la QUANTITÉ à 0, sinon on pénalise le fournisseur qui
+  rattrape ; l'excédent est traité par le reliquat et l'avance. Si l'on veut aussi sanctionner les livraisons
+  excédentaires, c'est une règle à part (seuil `otd_over_delivery_pct`), pas la QUANTITÉ. La tolérance
+  `otd_qty_tolerance_pct` reste à 0 par défaut : 500 reçues pour 512 attendues = 0.
+* La règle rend la **date de réception** décisive : une livraison du vendredi dont le journal est validé le lundi
+  donne QUANTITÉ 0 ; un créneau ERP posé sur un jour fermé (samedi) donne 0 par construction. Deux garde-fous :
+  vérifier que `receipt_date` est la date d'arrivée physique (sinon prendre la date de création du journal), et
+  **déplacer au jour ouvré suivant** un jour attendu qui tombe sur une fermeture usine avant de noter (décision 7).
+* Le mode cumul actuel donnerait la même QUANTITÉ stricte (elle ne dépend pas du rapprochement) ; seule la
+  PONCTUALITÉ reste sensible au mode. On pourrait donc livrer la QUANTITÉ stricte en premier, mais le détail par jour
+  mélangerait alors une QUANTITÉ au jour et une PONCTUALITÉ en cascade : les deux changements sont à livrer ensemble.
+
+**Scénarios recalculés** (DESADV acquis) :
+
+| Scénario | Jour | Q / P | OTD proposition § 2 | OTD QUANTITÉ stricte |
+|---|---|---|---|---|
+| S0 nominal | tous | 100 / 100 | 100 | 100 |
+| S2 reliquat ancien | J1…J5 | 100 / 100 | 100 | 100 |
+| S3 jour manqué, rattrapé à +4 j ouvrés | J2 | 0 / 20 | 60 | 30 |
+| S5 400 le J1, solde le J2 | J1 | 0 / 60 | 80 | 50 |
+| S6 512 reçues la veille | J2 | 0 / 60 | 80 | 50 |
+| S7 rattrapage groupé | J1 … J4 | 0 / 20, 20, 60, 60 | 60, 60, 80, 80 | 30, 30, 50, 50 |
+| S4 retard systématique d'un jour | J2…Jn | 100 / 100 | 100 (angle mort inchangé) | 100 (angle mort inchangé) |
+| jour jamais livré | | 0 / 0 | 20 | 20 |
+| jour livré 6 jours après | | 0 / 0 | 50 | 20 |
+
+| # | Décision supplémentaire | Recommandation |
+|---|---|---|
+| 7 | QUANTITÉ stricte au jour (reçu le J ≥ attendu le J), jour attendu sur fermeture usine déplacé au jour ouvré suivant | Oui aux deux ; garder 30 / 50 / 20 dans un premier temps et relire l'échelle sur un mois réel. |
+
 ## 4. Effets de bord dans l'application
 
 * **API et écrans** : le détail « par commande » devient « par jour attendu » (`/api/performance/otd` : `orders` →
