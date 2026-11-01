@@ -751,9 +751,10 @@ jours de livraison par semaine, deux jours sinon (jour de besoin = attendu moyen
 
 **Les trois indicateurs d'une ligne** (règles communes, *Paramètres › Règles communes*) :
 
-* **QUANTITÉ** : 100 si l'attendu du jour est couvert au plus tard le jour même (par les réceptions du jour, ou par
-  une avance reçue juste avant) et si le jour ne crée pas d'avance au-delà de la tolérance ; 0 sinon. L'avance se
-  lit sur le solde reçu − attendu, remis à zéro au premier lundi de chaque mois ;
+* **QUANTITÉ** : 100 si l'attendu du jour est reçu **en entier dans le délai d'évaluation** (la fenêtre plus
+  `otd_band2_days` jours ouvrés) et si le jour ne crée pas d'avance au-delà de la tolérance ; 0 sinon (« non
+  livrée », ou excédent). La quantité dit « c'est arrivé », la ponctualité dit « avec quel écart ». L'avance se lit
+  sur le solde reçu − attendu, remis à zéro au premier lundi de chaque mois ;
 * **PONCTUALITÉ** : jours ouvrés, à partir du jour attendu, jusqu'à ce que tout ce qui était dû **depuis ce jour**
   soit livré (ce qui manquait avant ne compte pas) ; une réception avant le jour, un jour sans attendu, est une
   avance. Dans la fenêtre : 100 ; 1 à `otd_band1_days` [2] jours au-delà : `otd_band1_score` [60] ; jusqu'à
@@ -768,7 +769,8 @@ tout à 0). Une ligne que l'ERP montre reçue sans aucune réception dans l'extr
 part). Les périodes sont des **semaines entières** ; une semaine appartient au mois de son mercredi. Le chiffre du
 portefeuille est la **moyenne des fournisseurs** (chacun compte une fois). Un regroupement de livraisons au-delà de
 la tolérance pénalise le jour du regroupement (QUANTITÉ) et les jours regroupés (avance) : double effet accepté pour
-garder la règle en quatre lignes. Le calcul se fait une fois par version des données et reste en cache.
+garder la règle en quatre lignes. Échelle d'une ligne, DESADV acquis : complète dans la fenêtre 100 ; une livraison
+de retard 80 ; deux 60 ; trois ou plus, ou jamais, 20 ; excédent 70. Le calcul se fait une fois par version des données et reste en cache.
 
 **Délais observés** : par fournisseur (et par article dès qu'un fournisseur ou un article est choisi) : retard moyen
 en jours ouvrés entre le jour attendu et la quantité complète ; parts à l'heure, en avance, en retard, au-delà de la

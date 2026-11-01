@@ -4,9 +4,9 @@ One **line** = one supplier, one article, one expected working day.  *Expected* 
 (a slot on a plant closure counts on the next working day), *received* = the validated receipts of that day
 (same rule).  Purchase order numbers play no part.
 
-* **QUANTITÉ** : 100 when the expected quantity of the day is covered at the latest on the day (by the receipts of the
-  day, or by an advance received just before) and the day does not create an advance beyond the tolerance (one day of
-  need from two delivery days a week, two days of need otherwise) ; 0 otherwise.
+* **QUANTITÉ** : 100 when the expected quantity of the day is received in full within the evaluation horizon (the
+  window plus ``otd_band2_days`` working days) and the day does not create an advance beyond the tolerance (one day of
+  need from two delivery days a week, two days of need otherwise) ; 0 otherwise (« non livrée », or excess).
   The advance is read on the running balance received − expected, restarted on the first Monday of every month.
 * **PONCTUALITÉ** : working days from the expected day until everything due *since that day* has been received
   (what was missing before does not count) ; a receipt before the day, on a day with nothing expected, is an
@@ -409,7 +409,7 @@ def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, su
             else:
                 line.status = "ouverte"
             if line.evaluable:
-                line.qty_score = 100.0 if (j is not None and j <= k) and excess[k] <= tol + EPS else 0.0
+                line.qty_score = 100.0 if j is not None and excess[k] <= tol + EPS else 0.0     # in full within the evaluation horizon
                 line.punct_score = punctuality_score(line.delta, window, params) if line.delta is not None else 0.0
             lo_k = min(k, carry_first) if carry_first is not None else k
             hi_k = max(k, j) if j is not None else k

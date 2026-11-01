@@ -70,7 +70,7 @@ def test_daily_one_day_late_costs_the_day_only():
     r[4] = 0.0
     r[5] = 1024.0
     L = lines(DAILY, r)
-    assert (L[4].qty_score, L[4].punct_score, L[4].delta, score(L[4])) == (0, 60, 1, 50)
+    assert (L[4].qty_score, L[4].punct_score, L[4].delta, score(L[4])) == (100, 60, 1, 80)     # in full, one day late
     assert all(L[i].qty_score == 100 and L[i].punct_score == 100 for i in (3, 5, 6))      # the catch-up day is perfect, no cascade
 
 
@@ -79,7 +79,7 @@ def test_daily_three_days_late_and_never_delivered():
     r[4] = 0.0
     r[7] = 1024.0
     L = lines(DAILY, r)
-    assert (L[4].delta, L[4].punct_score, score(L[4])) == (3, 20, 30) and L[5].punct_score == 100 and L[6].punct_score == 100
+    assert (L[4].qty_score, L[4].delta, L[4].punct_score, score(L[4])) == (100, 3, 20, 60) and L[5].punct_score == 100 and L[6].punct_score == 100
     r = dict(DAILY)
     r[4] = 0.0
     L = lines(DAILY, r)
@@ -91,7 +91,7 @@ def test_daily_partial_then_balance():
     r = dict(DAILY)
     r[4], r[5] = 400.0, 624.0
     L = lines(DAILY, r)
-    assert (L[4].qty_score, L[4].punct_score, L[4].delta, score(L[4])) == (0, 60, 1, 50)
+    assert (L[4].qty_score, L[4].punct_score, L[4].delta, score(L[4])) == (100, 60, 1, 80)
     assert (L[5].qty_score, L[5].punct_score, L[5].excess) == (100, 100, 0)
 
 
@@ -114,6 +114,19 @@ def test_daily_grouped_deliveries_tolerance_and_advance():
     r[4], r[5], r[6] = 1024.0, 0.0, 0.0
     L = lines(DAILY, r)
     assert L[5].completed == wd(4) and L[6].status == "non livrée"
+
+
+def test_quantity_is_in_full_within_the_horizon_only():
+    r = dict(BIWEEKLY)
+    r.pop(9)
+    r[14] = 800.0                                  # Thursday delivered the next Thursday : +5 working days, inside window 1 + band 4
+    L = lines(BIWEEKLY, r, weekdays="1,4")
+    assert (L[9].qty_score, L[9].punct_score, L[9].delta) == (100, 20, 5) and score(L[9]) == 60
+    r = dict(BIWEEKLY)
+    r.pop(9)
+    r[16] = 1000.0                                 # the Monday after : +7, beyond the horizon → non livrée, frozen
+    L = lines(BIWEEKLY, r, weekdays="1,4")
+    assert L[9].status == "non livrée" and (L[9].qty_score, L[9].punct_score) == (0, 0) and score(L[9]) == 20
 
 
 def test_daily_over_delivery_penalised_once():
@@ -149,7 +162,7 @@ def test_biweekly_monday_delivered_tuesday_is_inside_the_window():
     r.pop(6)
     r[7] = 600.0
     L = lines(BIWEEKLY, r, weekdays="1,4")
-    assert (L[6].qty_score, L[6].punct_score, L[6].delta) == (0, 100, 1) and score(L[6]) == 70
+    assert (L[6].qty_score, L[6].punct_score, L[6].delta) == (100, 100, 1) and score(L[6]) == 100     # inside the ±1 window : perfect
 
 
 def test_biweekly_thursday_delivered_next_monday():
@@ -157,7 +170,7 @@ def test_biweekly_thursday_delivered_next_monday():
     r.pop(9)
     r[11] = 1000.0
     L = lines(BIWEEKLY, r, weekdays="1,4")
-    assert (L[9].qty_score, L[9].punct_score, L[9].delta, L[9].completed) == (0, 60, 2, wd(11)) and score(L[9]) == 50
+    assert (L[9].qty_score, L[9].punct_score, L[9].delta, L[9].completed) == (100, 60, 2, wd(11)) and score(L[9]) == 80
     assert (L[11].qty_score, L[11].punct_score, L[11].excess) == (100, 100, 0)        # the catch-up Monday is perfect
 
 

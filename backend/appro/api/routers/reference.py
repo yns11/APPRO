@@ -35,7 +35,7 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "stock_drift_pct": ("Seuil de dérive du stock ERP (%) : un écart ERP − projeté est significatif au-delà de n % du stock cible du jour", None),
     "stock_drift_min_packs": ("Écart minimal de dérive (UM) : un écart est significatif à partir de n unités de commande du fournisseur principal ; 0 = pas de minimum", None),
     "stock_drift_persist": ("Persistance de la dérive (snapshots) : un article dérive quand ses n derniers snapshots ERP dépassent le seuil avec le même signe ; 1 = dès la veille", None),
-    "otd_weight_qty": ("OTD : poids (%) de la QUANTITÉ (100 si le reçu du jour couvre l'attendu du jour sans excédent au-delà de la tolérance)", None),
+    "otd_weight_qty": ("OTD : poids (%) de la QUANTITÉ (100 si l'attendu du jour est reçu en entier dans le délai d'évaluation, sans excédent au-delà de la tolérance)", None),
     "otd_weight_punctuality": ("OTD : poids (%) de la PONCTUALITÉ (100 dans la fenêtre du fournisseur, puis deux tranches, 0 au-delà)", None),
     "otd_weight_desadv": ("OTD : poids (%) du DESADV (part des BL de la période annoncés par un DESADV traité)", None),
     "otd_band1_days": ("PONCTUALITÉ : 1 à n jours ouvrés au-delà de la fenêtre → score de la tranche 1", None),
