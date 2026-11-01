@@ -1,6 +1,6 @@
 # OTD à la maille jour : proposition
 
-*Note de conception du 01/11/2026, non implémentée. Elle répond au constat fait sur l'article P-00150525
+*Note de conception du 01/11/2026, **implémentée le même jour** (règle commune `otd_matching`, « jour » par défaut ; l'ancienne règle « cumul » reste disponible pour comparaison dans la page Performance fournisseurs ; scénarios rejoués par `backend/tests/test_otd_jour.py`). Elle répond au constat fait sur l'article P-00150525
 (EUROCAST DELLE) : des livraisons de 512 pièces reçues chaque jour prévu, notées « complétées en 2 réceptions,
 +5 / +6 jours », OTD 50 ou 80 au lieu de 100.*
 
@@ -22,6 +22,17 @@ Sur l'exemple des captures : onze jours à 100 au lieu de 50 ou 80, et le manque
 Limite connue : un fournisseur toujours en retard d'un jour ressemble à un fournisseur parfait avec un jour de
 reliquat ; c'est le reliquat qui le montre. La suite de la note détaille, scénario par scénario, pourquoi ces
 cinq lignes suffisent et ce qu'elles changent.
+
+### Ce qui a été implémenté
+
+Les cinq lignes ci-dessus, avec ces précisions : l'avance (ligne 3) est cherchée dans les `otd_band2_days` jours
+précédant J ; un jour incomplet peut être complété par les livraisons des `otd_backlog_max_days` [30] jours suivants,
+au-delà il reste « non livré » ; une réception datée d'un jour fermé compte au jour ouvré suivant, comme un créneau ;
+le solde d'une période ne compte les réceptions d'un couple fournisseur × article qu'à partir de son premier créneau
+connu. L'arrêté mensuel figé (ligne 5) n'est **pas** encore fait. Une conséquence de la règle 3 à connaître : dans le
+scénario S4 (toujours un jour de retard), le premier jour n'est pas « non livré » mais complété le jour où la dernière
+livraison de la série arrive (ponctualité 0, QUANTITÉ 0) ; le reliquat permanent d'un jour reste la seule trace du
+décalage.
 
 ## 1. Diagnostic : d'où vient la cascade
 

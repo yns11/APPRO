@@ -1,25 +1,27 @@
 """Supplier performance measured on the ERP facts : service (OTD), observed lead times and delivery profiles,
 and the ABC / XYZ segmentation of the articles (docs/regles_metier.md § 14).
 
-Everything starts from one **matching of the receipts to the firm order slots** (:func:`match_slots`) : a slot
-is ``supplier | article | expected date`` (docs § 3.1), a receipt carries the purchase order number, the article,
-the supplier, its date and its delivery note (BL).  The receipts of one (supplier, article, purchase order) are
-allocated to the slots of that purchase order in date order (first in, first out) ; a slot is **completed** on
-the day the ordered quantity is reached.
+Two matchings of the receipts with the firm orders exist (``EngineParams.otd_matching``) :
 
-OTD of one slot (the rule the planners chose) :
+* **jour** (default, docs/otd_maille_jour.md) : the grain is *one supplier, one article, one day*.  The expected
+  quantity of a day is the sum of the firm slots of that day, the received quantity the sum of the validated receipts
+  of that day (a day falling on a plant closure is moved to the next working day).  QUANTITÉ is 100 only when the
+  receipts of the day cover the expected quantity of the day.  PONCTUALITÉ counts the working days from J until the
+  supplier has delivered everything due *since J* (what was missing before J does not count) ; a receipt before J on
+  a day with nothing expected is an advance.  Purchase order numbers and sub-lines play no part.
+* **cumul** (previous rule, kept for comparison) : the receipts of one (supplier, article, purchase order) are
+  allocated to the slots of that purchase order in date order, first slot served first ; a slot is completed on the
+  day the ordered quantity is reached, QUANTITÉ is 100 when it is reached one day or another, the delta is in
+  calendar days.  Any missing quantity rolls over every later slot (the « 2 réceptions, +6 j » cascade).
 
-* **QUANTITÉ** : 100 when the ordered quantity was received, 0 otherwise ;
-* **PONCTUALITÉ** : 100 when the quantity was reached on the expected day ; early or late by 1 … ``otd_band1_days``
-  days → ``otd_band1_score`` ; up to ``otd_band2_days`` days → ``otd_band2_score`` ; beyond → 0 ;
-* **DESADV** : 100 when every delivery note received was announced by a processed DESADV without error, 0 otherwise ;
-* **OTD** = Σ weight × indicator (``otd_weight_qty`` 30 %, ``otd_weight_punctuality`` 50 %, ``otd_weight_desadv`` 20 %).
-
-A slot is **evaluable** once it is completed, or once ``otd_band2_days`` days have passed after its expected date
-without the quantity (every indicator is then 0 : the delivery did not come).  A slot the ERP shows as received
-(remaining quantity 0) without any receipt line in the extraction is **not evaluable** (data gap, counted apart) :
-the measure never improves nor worsens a supplier on missing data.  The OTD of a supplier over a period is the
-**mean of the OTD of its slots** expected in that period ; the three sub-indicators are averaged the same way.
+Common scoring : PONCTUALITÉ 100 on the day, early or late by 1 … ``otd_band1_days`` days → ``otd_band1_score``, up
+to ``otd_band2_days`` → ``otd_band2_score``, beyond 0 ; DESADV 100 when every delivery note received was announced by
+a processed DESADV without error ; OTD = Σ weight × indicator.  A day (or slot) is **evaluable** once completed, or
+``otd_band2_days`` days after its date without completion (« non livrée », every indicator 0).  A day the ERP shows
+received without any receipt line in the extraction is **not evaluable** (data gap, counted apart).  The OTD of a
+supplier over a period is the mean of its days (slots) expected in the period.  The **balance** of a period
+(Σ expected − Σ received, in pieces and in days of delivery) is reported beside the OTD : it is what the day grain
+does not score (an old backlog, a systematic one-day shift).
 """
 from __future__ import annotations
 
@@ -95,6 +97,11 @@ class SlotEval:
     urgent_order: bool = False              # placed inside the lead time
     bls: list[str] = field(default_factory=list)
     desadv_missing: list[str] = field(default_factory=list)
+    method: str = "cumul"                   # cumul (one firm slot) | jour (one expected day)
+    slot_count: int = 1                     # jour : firm slots merged in the day
+    order_ids: list[str] = field(default_factory=list)
+    received_on_day: float | None = None    # jour : quantity received on the expected day itself
+    shifted_from: dt.date | None = None     # jour : the ERP date when it fell on a plant closure
 
     @property
     def bias_wd(self) -> int | None:
@@ -112,7 +119,9 @@ class SlotEval:
                 "otd": None if self.otd is None else round(self.otd, 1), "delta_days": self.delta_days, "first_seen": self.first_seen.isoformat() if self.first_seen else None,
                 "lead_promised": self.lead_promised, "lead_observed_wd": self.lead_observed_wd, "bias_wd": self.bias_wd,
                 "order_to_ship_days": self.order_to_ship_days, "ship_to_receipt_days": self.ship_to_receipt_days, "urgent_order": self.urgent_order,
-                "bls": self.bls, "desadv_missing": self.desadv_missing}
+                "bls": self.bls, "desadv_missing": self.desadv_missing, "method": self.method, "slot_count": self.slot_count,
+                "order_ids": self.order_ids or [self.order_id], "received_on_day": None if self.received_on_day is None else round(self.received_on_day, 3),
+                "shifted_from": self.shifted_from.isoformat() if self.shifted_from else None}
 
 
 def punctuality_score(delta_days: int, params: EngineParams) -> float:
@@ -133,20 +142,138 @@ def otd_score(q: float, p: float, d: float, params: EngineParams) -> float:
 
 
 @dataclass
+class DayExpected:
+    """The firm slots of one (supplier, article) merged on one working day."""
+
+    qty: float = 0.0
+    qty_open: float = 0.0
+    order_ids: list[str] = field(default_factory=list)
+    purch: list[str] = field(default_factory=list)
+    first_seen: dt.date | None = None
+    lead_promised: int = 0
+    urgent: bool = False
+    shifted_from: dt.date | None = None
+
+
+@dataclass
+class DayReceived:
+    qty: float = 0.0
+    lines: list[tuple[dt.date, float, list[str]]] = field(default_factory=list)   # (date, qty, delivery notes)
+
+
+DayKey = tuple[str | None, str]
+
+
+@dataclass
 class Matching:
     slots: list[SlotEval]
-    unmatched_receipts: int = 0        # receipt lines whose purchase order has no firm slot in the extraction
+    unmatched_receipts: int = 0        # receipt lines without any firm slot to compare with (purchase order in cumul mode, article in jour mode)
+    method: str = "cumul"
+    expected: dict[DayKey, dict[dt.date, DayExpected]] = field(default_factory=dict)
+    received: dict[DayKey, dict[dt.date, DayReceived]] = field(default_factory=dict)
 
     @property
     def first_seen_available(self) -> bool:
         return any(s.first_seen is not None for s in self.slots)
 
 
+def _working_day(calendar: WorkCalendar, day: dt.date) -> dt.date:
+    """The day itself when the plant is open, else the next working day (a slot or a receipt on a closure)."""
+    if calendar.is_working_day(day):
+        return day
+    try:
+        return calendar.next_working_day(day)
+    except ValueError:
+        return day
+
+
+def aggregate_days(ds: Dataset, calendar: WorkCalendar, orders: Iterable[OrderLine] | None = None,
+                   receipts: Iterable[Receipt] | None = None) -> tuple[dict[DayKey, dict[dt.date, DayExpected]], dict[DayKey, dict[dt.date, DayReceived]], int]:
+    """Day grain per (supplier, article) : the firm slots merged per working day, the validated receipts merged per
+    working day (purchase order numbers ignored).  Receipts of an article the supplier has no firm slot for are
+    counted apart (third value)."""
+    suppliers = {s.supplier_id: s for s in ds.suppliers}
+    links = {(l.article_id, l.supplier_id): l for l in ds.links}
+    expected: dict[DayKey, dict[dt.date, DayExpected]] = defaultdict(dict)
+    for o in (orders if orders is not None else ds.orders):
+        if o.order_type.value != "FIRM":
+            continue
+        day = _working_day(calendar, o.expected_date)
+        e = expected[(o.supplier_id, o.article_id)].setdefault(day, DayExpected())
+        if day != o.expected_date:
+            e.shifted_from = o.expected_date
+        e.qty += float(o.qty_ordered)
+        e.qty_open += float(o.qty_open or 0.0)
+        e.order_ids.append(o.order_id)
+        for po in _po_keys(o.ref):
+            if po not in e.purch:
+                e.purch.append(po)
+        link = links.get((o.article_id, o.supplier_id or ""))
+        lead = int(link.lead_time(suppliers) if link else (suppliers[o.supplier_id].lead_time_days if o.supplier_id in suppliers else 5))
+        e.lead_promised = max(e.lead_promised, lead)
+        if o.first_seen is not None:
+            e.first_seen = o.first_seen if e.first_seen is None else min(e.first_seen, o.first_seen)
+            if calendar.working_days_between(o.first_seen, o.expected_date) < lead:
+                e.urgent = True
+    received: dict[DayKey, dict[dt.date, DayReceived]] = defaultdict(dict)
+    unmatched = 0
+    for r in (receipts if receipts is not None else ds.receipts):
+        if r.in_transit or not r.qty:
+            continue
+        key = (r.supplier_id, r.article_id)
+        if key not in expected:
+            unmatched += 1
+            continue
+        day = _working_day(calendar, r.receipt_date)
+        d = received[key].setdefault(day, DayReceived())
+        d.qty += float(r.qty)
+        d.lines.append((r.receipt_date, float(r.qty), r.packing_slips))
+    return dict(expected), dict(received), unmatched
+
+
+def _desadv_index(ds: Dataset) -> tuple[set[tuple[str | None, str]], dict[tuple[str | None, str], dt.date]]:
+    """(supplier, BL) processed without error, and the first issue date of each BL."""
+    ok = {(d.supplier_id, d.packing_slip.strip()) for d in ds.desadv if d.processed and d.packing_slip.strip()}
+    issue: dict[tuple[str | None, str], dt.date] = {}
+    for d in ds.desadv:
+        bl = d.packing_slip.strip()
+        if bl and d.state.strip().lower() != "annulé":
+            cur = issue.get((d.supplier_id, bl))
+            issue[(d.supplier_id, bl)] = d.issue_date if cur is None else min(cur, d.issue_date)
+    return ok, issue
+
+
+def _finish(se: SlotEval, calendar: WorkCalendar, desadv_ok: set, desadv_issue: dict, params: EngineParams) -> None:
+    """DESADV indicator, OTD, observed lead times and shipping delays of one evaluated slot / day."""
+    se.bls = sorted({bl for _d, _q, bls in se.receipts for bl in bls})
+    if se.evaluable:
+        if se.bls:
+            se.desadv_missing = [bl for bl in se.bls if (se.supplier_id, bl) not in desadv_ok]
+            se.desadv_score = 100.0 if not se.desadv_missing else 0.0
+        else:
+            se.desadv_score = 0.0
+        se.otd = otd_score(se.qty_score or 0.0, se.punct_score or 0.0, se.desadv_score, params)
+    if se.first_seen is not None and se.completed_date is not None:
+        se.lead_observed_wd = calendar.working_days_between(se.first_seen, se.completed_date)
+    issues = [desadv_issue[(se.supplier_id, bl)] for bl in se.bls if (se.supplier_id, bl) in desadv_issue]
+    if issues and se.first_seen is not None:
+        se.order_to_ship_days = (min(issues) - se.first_seen).days
+    if issues:
+        gaps = []
+        for day, _q, bls in se.receipts:
+            for bl in bls:
+                iss = desadv_issue.get((se.supplier_id, bl))
+                if iss is not None:
+                    gaps.append((day - iss).days)
+        if gaps:
+            se.ship_to_receipt_days = round(sum(gaps) / len(gaps), 1)
+
+
 def match_slots(ds: Dataset, as_of: dt.date, calendar: WorkCalendar, params: EngineParams,
                 orders: Iterable[OrderLine] | None = None, receipts: Iterable[Receipt] | None = None) -> Matching:
-    """Allocate the validated receipts to the firm order slots (per supplier, article and purchase order, first in
-    first out) and score every slot expected before today.  Receipts of a purchase order without any slot, or
-    slots the ERP shows received without a receipt line, are left aside (``status`` tells)."""
+    """**cumul** : allocate the validated receipts to the firm order slots (per supplier, article and purchase order,
+    first in first out) and score every slot expected before today.  Receipts of a purchase order without any slot,
+    or slots the ERP shows received without a receipt line, are left aside (``status`` tells)."""
     suppliers = {s.supplier_id: s for s in ds.suppliers}
     links = {(l.article_id, l.supplier_id): l for l in ds.links}
     firm = [o for o in (orders if orders is not None else ds.orders) if o.order_type.value == "FIRM"]
@@ -190,17 +317,9 @@ def match_slots(ds: Dataset, as_of: dt.date, calendar: WorkCalendar, params: Eng
             if left > EPS:   # over-delivery : the last slot carries it
                 cands[-1].receipts.append((r.receipt_date, left, r.packing_slips))
                 cands[-1].received_qty += left
-    # despatch advices : (supplier, BL) processed without error, and the issue date of each BL
-    desadv_ok = {(d.supplier_id, d.packing_slip.strip()) for d in ds.desadv if d.processed and d.packing_slip.strip()}
-    desadv_issue: dict[tuple[str | None, str], dt.date] = {}
-    for d in ds.desadv:
-        bl = d.packing_slip.strip()
-        if bl and d.state.strip().lower() != "annulé":
-            cur = desadv_issue.get((d.supplier_id, bl))
-            desadv_issue[(d.supplier_id, bl)] = d.issue_date if cur is None else min(cur, d.issue_date)
+    desadv_ok, desadv_issue = _desadv_index(ds)
     grace = dt.timedelta(days=max(int(params.otd_band2_days), 0))
     for se in slots.values():
-        se.bls = sorted({bl for _d, _q, bls in se.receipts for bl in bls})
         if se.completed_date is not None:
             se.status = "reçue"
             se.evaluable = True
@@ -219,30 +338,100 @@ def match_slots(ds: Dataset, as_of: dt.date, calendar: WorkCalendar, params: Eng
                 se.punct_score = punctuality_score(se.delta_days, params)
             else:
                 se.punct_score = 0.0
-            if se.bls:
-                se.desadv_missing = [bl for bl in se.bls if (se.supplier_id, bl) not in desadv_ok]
-                se.desadv_score = 100.0 if not se.desadv_missing else 0.0
-            else:
-                se.desadv_score = 0.0
-            se.otd = otd_score(se.qty_score, se.punct_score, se.desadv_score, params)
-        # observed lead times (when the ERP gives the day the slot appeared)
-        if se.first_seen is not None and se.completed_date is not None:
-            se.lead_observed_wd = calendar.working_days_between(se.first_seen, se.completed_date)
         if se.first_seen is not None:
             se.urgent_order = calendar.working_days_between(se.first_seen, se.expected_date) < se.lead_promised
-        issues = [desadv_issue[(se.supplier_id, bl)] for bl in se.bls if (se.supplier_id, bl) in desadv_issue]
-        if issues and se.first_seen is not None:
-            se.order_to_ship_days = (min(issues) - se.first_seen).days
-        if issues:
-            gaps = []
-            for day, _q, bls in se.receipts:
-                for bl in bls:
-                    iss = desadv_issue.get((se.supplier_id, bl))
-                    if iss is not None:
-                        gaps.append((day - iss).days)
-            if gaps:
-                se.ship_to_receipt_days = round(sum(gaps) / len(gaps), 1)
-    return Matching(sorted(slots.values(), key=lambda s: (s.expected_date, s.supplier_id or "", s.article_id)), unmatched_receipts)
+        _finish(se, calendar, desadv_ok, desadv_issue, params)
+    expected, received, _unmatched = aggregate_days(ds, calendar, orders, receipts)
+    return Matching(sorted(slots.values(), key=lambda s: (s.expected_date, s.supplier_id or "", s.article_id)), unmatched_receipts, "cumul", expected, received)
+
+
+def match_days(ds: Dataset, as_of: dt.date, calendar: WorkCalendar, params: EngineParams,
+               orders: Iterable[OrderLine] | None = None, receipts: Iterable[Receipt] | None = None) -> Matching:
+    """**jour** : one expected delivery per (supplier, article, working day).  QUANTITÉ = the receipts of the day cover
+    the expected quantity of the day.  Completion of a day J = the first day R ≥ J such that the receipts from J to R
+    (plus the surplus received in the ``otd_band2_days`` days before J : advance) cover everything expected from J to
+    R, searched up to ``otd_backlog_max_days`` after J ; the delta is in working days of the plant calendar."""
+    expected, received, unmatched = aggregate_days(ds, calendar, orders, receipts)
+    desadv_ok, desadv_issue = _desadv_index(ds)
+    grace = dt.timedelta(days=max(int(params.otd_band2_days), 0))
+    horizon = dt.timedelta(days=max(int(params.otd_backlog_max_days), int(params.otd_band2_days), 0))
+    out: list[SlotEval] = []
+    for key, days in expected.items():
+        sid, aid = key
+        rd = received.get(key, {})
+        rdates = sorted(rd)
+        timeline = sorted(set(rdates) | set(days))
+        for day, e in sorted(days.items()):
+            r_day = rd[day].qty if day in rd else 0.0
+            se = SlotEval(f"{sid or ''}|{aid}|{day.isoformat()}", sid, aid, " | ".join(e.purch), day, e.qty, e.qty_open,
+                          first_seen=e.first_seen, lead_promised=e.lead_promised, method="jour", slot_count=len(e.order_ids),
+                          order_ids=list(e.order_ids), received_on_day=r_day, shifted_from=e.shifted_from)
+            se.urgent_order = e.urgent
+            completed: dt.date | None = None
+            carry, carry_days = 0.0, []
+            if r_day >= e.qty - EPS:
+                completed = day
+            else:
+                # advance : surplus of the receipt days just before (nothing expected that day, or more than expected)
+                for rday in rdates:
+                    if rday >= day:
+                        break
+                    if rday < day - grace:
+                        continue
+                    surplus = rd[rday].qty - (days[rday].qty if rday in days else 0.0)
+                    if surplus > EPS:
+                        carry += surplus
+                        carry_days.append(rday)
+                        if carry >= e.qty - EPS:
+                            completed = rday
+                            break
+                if completed is None and r_day > EPS and carry + r_day >= e.qty - EPS:
+                    completed = day
+            if completed is None:
+                cum_r, cum_e = carry + r_day, e.qty
+                for rday in timeline:
+                    if rday <= day:
+                        continue
+                    if rday > day + horizon or rday > as_of:
+                        break
+                    cum_r += rd[rday].qty if rday in rd else 0.0
+                    cum_e += days[rday].qty if rday in days else 0.0
+                    if cum_r >= cum_e - EPS:
+                        completed = rday
+                        break
+            lo = min([day] + carry_days) if carry > EPS else day
+            hi = max(day, completed) if completed is not None else day
+            se.receipts = [line for rday in rdates if lo <= rday <= hi for line in rd[rday].lines]
+            se.completed_date = completed
+            se.received_qty = e.qty if completed is not None else min(e.qty, r_day + carry)
+            if completed is not None:
+                se.status = "reçue"
+                se.evaluable = True
+            elif day + grace < as_of:
+                lines_near = any(day - grace <= rday <= day + grace for rday in rdates)
+                if r_day <= EPS and not lines_near and e.qty_open < e.qty - EPS:
+                    se.status = "non évaluable"       # the ERP received it, the extraction has no receipt line
+                else:
+                    se.status = "non livrée"
+                    se.evaluable = True
+            else:
+                se.status = "ouverte" if day >= as_of or e.qty_open > EPS else "non évaluable"
+            if se.evaluable:
+                se.qty_score = 100.0 if r_day >= e.qty - EPS else 0.0
+                if completed is not None:
+                    se.delta_days = calendar.working_days_between(day, completed)
+                    se.punct_score = punctuality_score(se.delta_days, params)
+                else:
+                    se.punct_score = 0.0
+            _finish(se, calendar, desadv_ok, desadv_issue, params)
+            out.append(se)
+    return Matching(sorted(out, key=lambda s: (s.expected_date, s.supplier_id or "", s.article_id)), unmatched, "jour", expected, received)
+
+
+def matching(ds: Dataset, as_of: dt.date, calendar: WorkCalendar, params: EngineParams, method: str | None = None) -> Matching:
+    """The matching of the chosen method (``params.otd_matching`` when none is given)."""
+    m = (method or params.otd_matching or "jour").strip().lower()
+    return match_slots(ds, as_of, calendar, params) if m == "cumul" else match_days(ds, as_of, calendar, params)
 
 
 def _mean(xs: list[float]) -> float | None:
@@ -266,21 +455,54 @@ def _scores(rows: list[SlotEval]) -> dict[str, Any]:
             "late": sum(1 for s in rows if s.delta_days is not None and s.delta_days > 0), "not_delivered": sum(1 for s in rows if s.status == "non livrée")}
 
 
+def _window(slots: list[SlotEval], date_from: dt.date, date_to: dt.date, supplier_ids: list[str] | None, article_ids: list[str] | None) -> list[SlotEval]:
+    return [s for s in slots if date_from <= s.expected_date <= date_to
+            and (not supplier_ids or (s.supplier_id or "") in supplier_ids) and (not article_ids or s.article_id in article_ids)]
+
+
+class _Balance:
+    """Σ expected − Σ received per day, from the day aggregates (method independent) : the backlog (positive) or
+    advance (negative) built over a window, in pieces and in days of delivery (÷ mean quantity of a receipt day)."""
+
+    def __init__(self, m: Matching, supplier_ids: list[str] | None, article_ids: list[str] | None):
+        self.rows: list[tuple[str | None, dt.date, float, float]] = []    # supplier, day, expected, received
+        for key, days in m.expected.items():
+            sid, aid = key
+            if (supplier_ids and (sid or "") not in supplier_ids) or (article_ids and aid not in article_ids):
+                continue
+            rec = m.received.get(key, {})
+            first = min(days)          # receipts before the first firm slot known for the pair are outside the extraction's horizon
+            for day in set(days) | set(rec):
+                if day >= first:
+                    self.rows.append((sid, day, days[day].qty if day in days else 0.0, rec[day].qty if day in rec else 0.0))
+
+    def of(self, date_from: dt.date, date_to: dt.date, supplier_id: str | None = "*", bucket: str | None = None, label: str | None = None) -> dict[str, Any]:
+        rows = [r for r in self.rows if date_from <= r[1] <= date_to and (supplier_id == "*" or r[0] == supplier_id)
+                and (label is None or bucket_label(r[1], bucket or "month") == label)]
+        exp = sum(r[2] for r in rows)
+        rec = sum(r[3] for r in rows)
+        rec_days = len({(r[0], r[1]) for r in rows if r[3] > EPS})
+        per_day = rec / rec_days if rec_days else 0.0
+        return {"balance_qty": round(exp - rec, 1), "balance_days": round((exp - rec) / per_day, 1) if per_day > EPS else None,
+                "expected_qty": round(exp, 1), "received_qty": round(rec, 1)}
+
+
 def otd_report(ds: Dataset, params: EngineParams, as_of: dt.date, calendar: WorkCalendar, bucket: str = "month",
                date_from: dt.date | None = None, date_to: dt.date | None = None, supplier_ids: list[str] | None = None,
-               article_ids: list[str] | None = None, names: dict[str, str] | None = None, max_orders: int = 5000) -> dict[str, Any]:
-    """OTD and its three indicators per supplier and per period bucket, over the slots expected in the window."""
+               article_ids: list[str] | None = None, names: dict[str, str] | None = None, max_orders: int = 5000,
+               method: str | None = None, compare: bool = True) -> dict[str, Any]:
+    """OTD and its three indicators per supplier and per period bucket, over the days (slots) expected in the window ;
+    ``compare`` adds the scores of the other matching method, computed on the same window."""
     bucket = bucket if bucket in BUCKETS else "month"
     date_to = date_to or (as_of - dt.timedelta(days=1))
     date_from = date_from or (date_to - dt.timedelta(days=365))
     names = names or {s.supplier_id: s.name for s in ds.suppliers}
     arts = {a.article_id: a for a in ds.articles}
-    matching = match_slots(ds, as_of, calendar, params)
-    slots = matching.slots
-    win = [s for s in slots if date_from <= s.expected_date <= date_to
-           and (not supplier_ids or (s.supplier_id or "") in supplier_ids) and (not article_ids or s.article_id in article_ids)]
+    m = matching(ds, as_of, calendar, params, method)
+    win = _window(m.slots, date_from, date_to, supplier_ids, article_ids)
     rows = [s for s in win if s.evaluable]
     labels = sorted({bucket_label(s.expected_date, bucket) for s in rows}, key=bucket_start)
+    bal = _Balance(m, supplier_ids, article_ids)
     by_sup: dict[str | None, list[SlotEval]] = defaultdict(list)
     for s in rows:
         by_sup[s.supplier_id].append(s)
@@ -289,20 +511,32 @@ def otd_report(ds: Dataset, params: EngineParams, as_of: dt.date, calendar: Work
         series = []
         for lab in labels:
             part = [s for s in ss if bucket_label(s.expected_date, bucket) == lab]
-            series.append({"period": lab, "start": bucket_start(lab).isoformat(), **_scores(part)})
-        suppliers.append({"supplier_id": sid, "name": names.get(sid or "", ""), **_scores(ss), "series": series,
+            series.append({"period": lab, "start": bucket_start(lab).isoformat(), **_scores(part), **bal.of(date_from, date_to, sid, bucket, lab)})
+        suppliers.append({"supplier_id": sid, "name": names.get(sid or "", ""), **_scores(ss), **bal.of(date_from, date_to, sid), "series": series,
                           "articles": len({s.article_id for s in ss})})
     suppliers.sort(key=lambda r: ((r["otd"] if r["otd"] is not None else 101), -(r["n"])))
-    totals = {**_scores(rows), "series": [{"period": lab, "start": bucket_start(lab).isoformat(),
-                                           **_scores([s for s in rows if bucket_label(s.expected_date, bucket) == lab])} for lab in labels]}
+    totals = {**_scores(rows), **bal.of(date_from, date_to),
+              "series": [{"period": lab, "start": bucket_start(lab).isoformat(), **_scores([s for s in rows if bucket_label(s.expected_date, bucket) == lab]),
+                          **bal.of(date_from, date_to, "*", bucket, lab)} for lab in labels]}
+    other = None
+    if compare:
+        other_method = "cumul" if m.method == "jour" else "jour"
+        m2 = matching(ds, as_of, calendar, params, other_method)
+        rows2 = [s for s in _window(m2.slots, date_from, date_to, supplier_ids, article_ids) if s.evaluable]
+        by2: dict[str | None, list[SlotEval]] = defaultdict(list)
+        for s in rows2:
+            by2[s.supplier_id].append(s)
+        other = {"method": other_method, "totals": {**_scores(rows2), "series": [{"period": lab, **_scores([s for s in rows2 if bucket_label(s.expected_date, bucket) == lab])} for lab in labels]},
+                 "suppliers": {sid or "": _scores(ss) for sid, ss in by2.items()}}
     detail = sorted(win, key=lambda s: (s.expected_date, s.supplier_id or ""), reverse=True)
     return {"as_of": as_of.isoformat(), "from": date_from.isoformat(), "to": date_to.isoformat(), "bucket": bucket, "periods": labels,
+            "method": m.method, "default_method": (params.otd_matching or "jour"),
             "params": {"weights": {"qty": params.otd_weight_qty, "punctuality": params.otd_weight_punctuality, "desadv": params.otd_weight_desadv},
                        "band1_days": params.otd_band1_days, "band1_score": params.otd_band1_score, "band2_days": params.otd_band2_days,
-                       "band2_score": params.otd_band2_score},
-            "totals": totals, "suppliers": suppliers,
+                       "band2_score": params.otd_band2_score, "backlog_max_days": params.otd_backlog_max_days},
+            "totals": totals, "suppliers": suppliers, "compare": other,
             "not_evaluable": sum(1 for s in win if s.status == "non évaluable"), "open": sum(1 for s in win if s.status == "ouverte"),
-            "unmatched_receipts": matching.unmatched_receipts, "first_seen_available": matching.first_seen_available,
+            "unmatched_receipts": m.unmatched_receipts, "first_seen_available": m.first_seen_available,
             "orders": [s.to_dict(names, arts) for s in detail[:max_orders]], "truncated": len(detail) > max_orders}
 
 
@@ -351,15 +585,15 @@ def _lead_row(ss: list[SlotEval], params: EngineParams) -> dict[str, Any]:
 
 def lead_time_report(ds: Dataset, params: EngineParams, as_of: dt.date, calendar: WorkCalendar, date_from: dt.date | None = None,
                      date_to: dt.date | None = None, supplier_ids: list[str] | None = None, article_ids: list[str] | None = None,
-                     names: dict[str, str] | None = None) -> dict[str, Any]:
+                     names: dict[str, str] | None = None, method: str | None = None) -> dict[str, Any]:
     """Observed delays per supplier (and per article when one supplier is chosen) : mean, dispersion (p50 / p90 / std),
     bias against the parameterised lead time, share of urgent orders, recurrence of lateness, weekday profiles."""
     date_to = date_to or (as_of - dt.timedelta(days=1))
     date_from = date_from or (date_to - dt.timedelta(days=365))
     names = names or {s.supplier_id: s.name for s in ds.suppliers}
     arts = {a.article_id: a for a in ds.articles}
-    slots = [s for s in match_slots(ds, as_of, calendar, params).slots if date_from <= s.expected_date <= date_to
-             and (not supplier_ids or (s.supplier_id or "") in supplier_ids) and (not article_ids or s.article_id in article_ids)]
+    m = matching(ds, as_of, calendar, params, method)
+    slots = _window(m.slots, date_from, date_to, supplier_ids, article_ids)
     by_sup: dict[str | None, list[SlotEval]] = defaultdict(list)
     for s in slots:
         by_sup[s.supplier_id].append(s)
@@ -376,7 +610,7 @@ def lead_time_report(ds: Dataset, params: EngineParams, as_of: dt.date, calendar
                              "unit": a.unit if a else "", **_lead_row(ss, params)})
     return {"as_of": as_of.isoformat(), "from": date_from.isoformat(), "to": date_to.isoformat(), "totals": _lead_row(slots, params),
             "suppliers": suppliers, "articles": articles, "first_seen_available": any(s.first_seen is not None for s in slots),
-            "band2_days": params.otd_band2_days}
+            "band2_days": params.otd_band2_days, "method": m.method}
 
 
 # =============================================================================

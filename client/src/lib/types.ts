@@ -227,20 +227,26 @@ export interface PortalResponse { suppliers: SupplierRef[]; as_of: string; kpis:
 
 // ---------------------------------------------------------------- supplier performance (OTD, observed lead times), segmentation, exceptions
 export type OtdBucket = "week" | "month" | "quarter" | "year";
+export type OtdMethod = "jour" | "cumul";
 export interface OtdScores { n: number; otd: number | null; qty: number | null; punctuality: number | null; desadv: number | null; on_time: number; early: number; late: number; not_delivered: number; }
-export interface OtdPeriod extends OtdScores { period: string; start: string; }
-export interface OtdSupplier extends OtdScores { supplier_id: string | null; name: string; series: OtdPeriod[]; articles: number; }
+/** Σ expected − Σ received over the window (method independent) : positive = backlog, negative = advance ; in days of delivery when receipts exist */
+export interface OtdBalance { balance_qty: number; balance_days: number | null; expected_qty: number; received_qty: number; }
+export interface OtdPeriod extends OtdScores, OtdBalance { period: string; start: string; }
+export interface OtdSupplier extends OtdScores, OtdBalance { supplier_id: string | null; name: string; series: OtdPeriod[]; articles: number; }
+export interface OtdCompare { method: OtdMethod; totals: OtdScores & { series: (OtdScores & { period: string })[] }; suppliers: Record<string, OtdScores>; }
 export interface OtdOrder {
   order_id: string; supplier_id: string | null; supplier_name: string; article_id: string; designation: string; unit: string; planner: string; purch_id: string;
   expected_date: string; qty_ordered: number; qty_open: number; received_qty: number; receipt_count: number; first_receipt: string | null; completed_date: string | null;
   status: "ouverte" | "reçue" | "non livrée" | "non évaluable"; evaluable: boolean; qty_score: number | null; punct_score: number | null; desadv_score: number | null; otd: number | null;
   delta_days: number | null; first_seen: string | null; lead_promised: number; lead_observed_wd: number | null; bias_wd: number | null; order_to_ship_days: number | null; ship_to_receipt_days: number | null;
   urgent_order: boolean; bls: string[]; desadv_missing: string[];
+  method: OtdMethod; slot_count: number; order_ids: string[]; received_on_day: number | null; shifted_from: string | null;
 }
 export interface OtdResponse {
-  as_of: string; from: string; to: string; bucket: OtdBucket; periods: string[];
-  params: { weights: { qty: number; punctuality: number; desadv: number }; band1_days: number; band1_score: number; band2_days: number; band2_score: number };
-  totals: OtdScores & { series: OtdPeriod[] }; suppliers: OtdSupplier[]; not_evaluable: number; open: number; unmatched_receipts: number; first_seen_available: boolean; orders: OtdOrder[]; truncated: boolean;
+  as_of: string; from: string; to: string; bucket: OtdBucket; periods: string[]; method: OtdMethod; default_method: OtdMethod;
+  params: { weights: { qty: number; punctuality: number; desadv: number }; band1_days: number; band1_score: number; band2_days: number; band2_score: number; backlog_max_days: number };
+  totals: OtdScores & OtdBalance & { series: OtdPeriod[] }; suppliers: OtdSupplier[]; compare: OtdCompare | null;
+  not_evaluable: number; open: number; unmatched_receipts: number; first_seen_available: boolean; orders: OtdOrder[]; truncated: boolean;
 }
 export interface Dist { n: number; mean: number | null; p50: number | null; p90: number | null; std: number | null; min: number | null; max: number | null; }
 export interface LeadRow {
@@ -250,7 +256,7 @@ export interface LeadRow {
 }
 export interface LeadSupplier extends LeadRow { supplier_id: string | null; name: string; }
 export interface LeadArticle extends LeadRow { supplier_id: string | null; supplier_name: string; article_id: string; designation: string; unit: string; }
-export interface LeadTimeResponse { as_of: string; from: string; to: string; totals: LeadRow; suppliers: LeadSupplier[]; articles: LeadArticle[]; first_seen_available: boolean; band2_days: number; }
+export interface LeadTimeResponse { as_of: string; from: string; to: string; totals: LeadRow; suppliers: LeadSupplier[]; articles: LeadArticle[]; first_seen_available: boolean; band2_days: number; method: OtdMethod; }
 export interface SegmentRow {
   article_id: string; designation: string; unit: string; planner: string; family: string; price: number | null; qty_year: number; value_year: number | null; value_basis: string;
   cv: number | null; weeks_used: number; xyz: "X" | "Y" | "Z"; programs: number; suppliers: number; single_source: boolean; lead_time_days: number | null; coverage_target_days: number;

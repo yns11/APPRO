@@ -21,11 +21,12 @@ export function periodTick(p: string): string {
  * Evolution of the OTD and its three indicators over the period buckets ; ``compare`` adds one OTD line per supplier
  * (the portfolio stays the thick line).  Buckets without any evaluable order are gaps.
  */
-export function OtdChart({ series, compare = [], height = 260, target }: { series: OtdPeriod[]; compare?: { name: string; series: OtdPeriod[] }[]; height?: number; target?: number }) {
+export function OtdChart({ series, compare = [], extra, height = 260, target }: { series: OtdPeriod[]; compare?: { name: string; series: OtdPeriod[] }[]; extra?: { name: string; series: { period: string; otd: number | null }[] }; height?: number; target?: number }) {
   const periods = series.map((p) => p.period);
   const rows = periods.map((period, i) => {
     const row: Record<string, string | number | null> = { period, label: periodTick(period), n: series[i].n, otd: series[i].otd, qty: series[i].qty, punctuality: series[i].punctuality, desadv: series[i].desadv };
     compare.forEach((c) => { row[`c:${c.name}`] = c.series.find((x) => x.period === period)?.otd ?? null; });
+    if (extra) row.extra = extra.series.find((x) => x.period === period)?.otd ?? null;
     return row;
   });
   const palette = ["var(--s-proposal)", "var(--s-forecast)", "var(--s-stock-forecast)", "var(--s-demand)", "var(--info)", "var(--warning)", "var(--critical)"];
@@ -39,6 +40,7 @@ export function OtdChart({ series, compare = [], height = 260, target }: { serie
         <Legend wrapperStyle={{ fontSize: 11 }} iconSize={10} />
         {target !== undefined && <ReferenceLine y={target} stroke="var(--fg-muted)" strokeDasharray="2 4" label={{ value: `objectif ${target} %`, position: "insideTopRight", fontSize: 10, fill: "var(--fg-muted)" }} />}
         {SERIES.map((s) => <Line key={s.key} type="monotone" dataKey={s.key} name={compare.length ? `${s.name} (portefeuille)` : s.name} stroke={s.color} strokeWidth={s.width} strokeDasharray={s.dash} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls={false} isAnimationActive={false} />)}
+        {extra && <Line key="extra" type="monotone" dataKey="extra" name={extra.name} stroke="var(--fg-muted)" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2 }} connectNulls={false} isAnimationActive={false} />}
         {compare.map((c, i) => <Line key={c.name} type="monotone" dataKey={`c:${c.name}`} name={`OTD ${c.name}`} stroke={palette[i % palette.length]} strokeWidth={2} dot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />)}
       </LineChart>
     </ResponsiveContainer>

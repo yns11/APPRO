@@ -50,14 +50,16 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
     stock_drift_persist: { label: "Dérive du stock ERP : persistance", unit: "snapshots", max: 30, aria: "Persistance de la dérive (snapshots)", explain: (v) => (v <= 1 ? "Dès la veille : un seul snapshot au-delà du seuil signale une dérive." : `Un article dérive quand ses ${v} derniers snapshots dépassent le seuil avec le même signe ; un signe qui change est un décalage de déclaration, pas une dérive.`) },
   };
   /** Service fournisseur (OTD) and segmentation : the second card */
-  const PERF: Record<string, { label: string; unit: string; max: number; step?: number; text?: boolean; aria: string; explain: (v: number) => string }> = {
-    otd_weight_qty: { label: "OTD : poids de la quantité", unit: "%", max: 100, aria: "Poids de l'indicateur quantité", explain: () => "QUANTITÉ = 100 si la quantité commandée a été reçue, 0 sinon." },
+  const PERF: Record<string, { label: string; unit: string; max: number; step?: number; text?: boolean; choices?: [string, string][]; aria: string; explain: (v: number) => string }> = {
+    otd_weight_qty: { label: "OTD : poids de la quantité", unit: "%", max: 100, aria: "Poids de l'indicateur quantité", explain: () => "QUANTITÉ = 100 si le reçu du jour couvre l'attendu du jour (maille jour), 0 sinon." },
     otd_weight_punctuality: { label: "OTD : poids de la ponctualité", unit: "%", max: 100, aria: "Poids de l'indicateur ponctualité", explain: () => "PONCTUALITÉ = 100 le bon jour, puis les deux tranches ci-dessous, 0 au-delà." },
     otd_weight_desadv: { label: "OTD : poids du DESADV", unit: "%", max: 100, aria: "Poids de l'indicateur DESADV", explain: () => "DESADV = 100 si chaque BL reçu a été annoncé par un DESADV traité sans erreur, 0 sinon. Les trois poids sont ramenés à 100 s'ils ne font pas 100." },
-    otd_band1_days: { label: "Ponctualité : tranche 1 (jours)", unit: "j", max: 30, aria: "Tranche 1 de ponctualité (jours)", explain: (v) => `Avance ou retard de 1 à ${v} jour(s) calendaire(s).` },
+    otd_band1_days: { label: "Ponctualité : tranche 1 (jours)", unit: "j", max: 30, aria: "Tranche 1 de ponctualité (jours)", explain: (v) => `Avance ou retard de 1 à ${v} jour(s) (ouvrés à la maille jour, calendaires en cumul).` },
     otd_band1_score: { label: "Ponctualité : score tranche 1", unit: "/ 100", max: 100, aria: "Score de la tranche 1", explain: () => "Score attribué dans la tranche 1." },
     otd_band2_days: { label: "Ponctualité : tranche 2 (jours)", unit: "j", max: 60, aria: "Tranche 2 de ponctualité (jours)", explain: (v) => `Jusqu'à ${v} jour(s) d'avance ou de retard ; au-delà, 0. Une commande est évaluable ${v} jours après sa date prévue si elle n'est pas complète.` },
     otd_band2_score: { label: "Ponctualité : score tranche 2", unit: "/ 100", max: 100, aria: "Score de la tranche 2", explain: () => "Score attribué dans la tranche 2." },
+    otd_matching: { label: "OTD : maille du rapprochement", unit: "", max: 0, choices: [["jour", "jour (fournisseur × article × jour)"], ["cumul", "cumul par commande (ancienne règle)"]], aria: "Maille du rapprochement OTD", explain: () => "Jour : QUANTITÉ 100 seulement si le reçu du jour couvre l'attendu du jour ; PONCTUALITÉ en jours ouvrés jusqu'à ce que tout ce qui était dû depuis ce jour soit livré. Cumul : premier créneau servi d'abord, un manque décale tous les créneaux suivants." },
+    otd_backlog_max_days: { label: "OTD : rattrapage d'un jour manqué", unit: "j", max: 365, aria: "Horizon de rattrapage (jours)", explain: (v) => `Un jour incomplet peut être complété par les livraisons des ${v} jours suivants ; au-delà il reste « non livré ».` },
     abc_a_pct: { label: "Segmentation : classe A", unit: "% de la valeur", max: 100, aria: "Seuil de la classe A", explain: (v) => `Les articles qui font les premiers ${v} % de la valeur annuelle cumulée sont en A.` },
     abc_b_pct: { label: "Segmentation : classe B", unit: "% de la valeur", max: 100, aria: "Seuil de la classe B", explain: (v) => `Jusqu'à ${v} % : B ; au-delà : C.` },
     xyz_x_cv: { label: "Segmentation : classe X", unit: "CV <", max: 10, step: 0.1, aria: "Seuil de la classe X", explain: (v) => `Coefficient de variation (écart-type / moyenne) de la consommation hebdomadaire inférieur à ${v} : régulier.` },
@@ -67,14 +69,16 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
   };
   const editable = (schema.data ?? []).filter((p) => p.field in EDITABLE);
   const perf = (schema.data ?? []).filter((p) => p.field in PERF);
-  const ruleRow = (p: { field: string; default: unknown; description: string }, meta: { label: string; unit: string; max: number; step?: number; text?: boolean; aria: string; explain: (v: number) => string }) => {
+  const ruleRow = (p: { field: string; default: unknown; description: string }, meta: { label: string; unit: string; max: number; step?: number; text?: boolean; choices?: [string, string][]; aria: string; explain: (v: number) => string }) => {
     const cur = effective.data?.[p.field];
     const ov = globalOv.get(p.field);
     const val = Number(cur ?? p.default ?? 0);
     return (
       <div key={p.field} className="param editable">
         <span className="label">{meta.label}{ov && <Badge tone="brand">surchargée</Badge>}</span>
-        <span className="value">{meta.text
+        <span className="value">{meta.choices
+          ? <select className="input sm" disabled={!canEdit} value={String(cur ?? p.default ?? "")} aria-label={meta.aria} onChange={(e) => { if (e.target.value !== String(cur ?? "")) setParam.mutate({ scope: "global", field: p.field, value: e.target.value }); }}>{meta.choices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          : meta.text
           ? <input className="input sm" type="text" disabled={!canEdit} defaultValue={String(cur ?? "")} style={{ width: 320 }} aria-label={meta.aria} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== String(cur ?? "")) setParam.mutate({ scope: "global", field: p.field, value: v }); }} />
           : <input className="input sm" type="number" min={0} max={meta.max} step={meta.step ?? 1} disabled={!canEdit} defaultValue={String(cur ?? "")} style={{ width: 80 }} aria-label={meta.aria} onBlur={(e) => { if (e.target.value !== String(cur ?? "") && e.target.value !== "") setParam.mutate({ scope: "global", field: p.field, value: Number(e.target.value) }); }} />}<small>{meta.unit}</small>
           {ov && canEdit && <Button size="xs" variant="ghost" title={`Rétablir la valeur par défaut (${String(p.default)} ${meta.unit})`} onClick={() => del.mutate(ov.id)}><RotateCcw /></Button>}</span>
@@ -103,7 +107,7 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
       </Card>
       <Card title="Service fournisseur (OTD) et segmentation" hint={canEdit ? "poids et tranches de l'OTD, seuils ABC / XYZ et couvertures suggérées ; valent pour la page Performance fournisseurs et la file d'exceptions" : "lecture seule : modifiables par les managers et administrateurs"}>
         {schema.isError ? <ErrorBox error={schema.error} /> : schema.isLoading || effective.isLoading ? <SkeletonBlock rows={3} /> : perf.map((p) => ruleRow(p, PERF[p.field]))}
-        <p className="small subtle" style={{ marginTop: 8 }}>OTD d'une commande = Σ poids × indicateur ; OTD d'un fournisseur sur une période = moyenne de ses commandes attendues sur la période (<Link to="/performance">Performance fournisseurs</Link>).</p>
+        <p className="small subtle" style={{ marginTop: 8 }}>OTD d'un jour de livraison = Σ poids × indicateur ; OTD d'un fournisseur sur une période = moyenne de ses jours attendus sur la période ; le solde (attendu − reçu) de la période s'affiche à côté (<Link to="/performance">Performance fournisseurs</Link>).</p>
       </Card>
       <Card title="Règles figées dans l'application" hint="communes à tous les articles ; détaillées dans le guide du moteur (docs/guide_moteur.md)">
         {fixed.isLoading ? <SkeletonBlock rows={6} /> : (

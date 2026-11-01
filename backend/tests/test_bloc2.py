@@ -164,6 +164,7 @@ def _service_dataset():
 
 
 def test_otd_scores_per_slot_and_their_weights():
+    """The previous rule (« cumul », one firm slot = one evaluation), kept as the comparison method."""
     ds = _service_dataset()
     params = EngineParams(as_of=MON)
     m = performance.match_slots(ds, MON, WorkCalendar(), params)
@@ -183,14 +184,14 @@ def test_otd_scores_per_slot_and_their_weights():
     m2 = {s.order_id: s for s in performance.match_slots(ds, MON, WorkCalendar(), alt).slots}
     assert m2["O2"].punct_score == 80 and m2["O2"].otd == 50 + 40
     # the report : mean over the evaluable slots of the window, per bucket
-    rep = performance.otd_report(ds, params, MON, WorkCalendar(), "week", date_to=MON + D(days=7), names={"S1": "Supplier 1"})
+    rep = performance.otd_report(ds, params, MON, WorkCalendar(), "week", date_to=MON + D(days=7), names={"S1": "Supplier 1"}, method="cumul")
     assert rep["totals"]["n"] == 3 and rep["totals"]["otd"] == round((100 + 60 + 0) / 3, 1) and rep["totals"]["desadv"] == round(100 / 3, 1)
     assert rep["not_evaluable"] == 1 and rep["open"] == 1 and rep["first_seen_available"]
     sup = rep["suppliers"][0]
     assert sup["supplier_id"] == "S1" and sup["late"] == 1 and sup["on_time"] == 1 and sup["not_delivered"] == 1
     assert [p["n"] for p in sup["series"]] == [2, 1] and rep["bucket"] == "week"      # O1 and O3 share a week, O2 the next
     assert performance.bucket_label(dt.date(2026, 11, 3), "quarter") == "2026-Q4" and performance.bucket_label(dt.date(2026, 2, 3), "month") == "2026-02"
-    lt = performance.lead_time_report(ds, params, MON, WorkCalendar(), names={"S1": "Supplier 1"})
+    lt = performance.lead_time_report(ds, params, MON, WorkCalendar(), names={"S1": "Supplier 1"}, method="cumul")
     t = lt["totals"]
     assert t["received"] == 2 and t["delay"]["mean"] == 1.0 and t["delay"]["p90"] == 1.8 and t["late_pct"] == 50.0 and t["partial_pct"] == 50.0
     assert t["lead_observed"]["n"] == 2 and t["urgent_pct"] == 25.0 and t["profile_receipts"][late.receipts[0][0].isoweekday() - 1] > 0

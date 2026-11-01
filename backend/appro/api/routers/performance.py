@@ -33,25 +33,28 @@ def _frame(ctx: AppContext, session: Session, planner: str | None, article_id: s
 @router.get("/api/performance/otd")
 def otd(bucket: Literal["week", "month", "quarter", "year"] = "month", date_from: dt.date | None = None, date_to: dt.date | None = None,
         supplier_id: list[str] | None = Query(None), article_id: str | None = None, planner: str | None = None,
+        method: Literal["jour", "cumul"] | None = None, compare: bool = True,
         ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """Service of the suppliers : OTD = 30 % quantity + 50 % punctuality + 20 % DESADV per firm order slot, averaged per
-    supplier and per period bucket (week, month, quarter, year) ; the weights and bands are common rules."""
+    """Service of the suppliers : OTD = 30 % quantity + 50 % punctuality + 20 % DESADV per expected day (``method``
+    jour, default rule ``otd_matching``) or per firm order slot (cumul), averaged per supplier and per period bucket
+    (week, month, quarter, year) ; the weights and bands are common rules ; ``compare`` adds the other method's scores."""
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "date_from doit précéder date_to")
     ds, params, as_of, calendar, names = _frame(ctx, session, planner, article_id)
     return json_response(performance.otd_report(ds, params, as_of, calendar, bucket, date_from, date_to, supplier_id or None,
-                                                [article_id] if article_id else None, names))
+                                                [article_id] if article_id else None, names, method=method, compare=compare))
 
 
 @router.get("/api/performance/lead-times")
 def lead_times(date_from: dt.date | None = None, date_to: dt.date | None = None, supplier_id: list[str] | None = Query(None),
-               article_id: str | None = None, planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+               article_id: str | None = None, planner: str | None = None, method: Literal["jour", "cumul"] | None = None,
+               ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """Observed delays and delivery profiles per supplier (per article when one supplier or one article is chosen)."""
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "date_from doit précéder date_to")
     ds, params, as_of, calendar, names = _frame(ctx, session, planner, article_id)
     return json_response(performance.lead_time_report(ds, params, as_of, calendar, date_from, date_to, supplier_id or None,
-                                                      [article_id] if article_id else None, names))
+                                                      [article_id] if article_id else None, names, method=method))
 
 
 @router.get("/api/performance/segmentation")

@@ -369,6 +369,8 @@ class EngineParams:
     otd_band1_score: int = 60
     otd_band2_days: int = 4                       # early / late by band1 + 1 … n days → otd_band2_score ; beyond → 0
     otd_band2_score: int = 20
+    otd_matching: str = "jour"                    # jour : one expected day per supplier × article, served by the day's receipts first ; cumul : per purchase order, first slot served first (previous rule)
+    otd_backlog_max_days: int = 30                # jour : a missing day may be completed by later surpluses up to n days after ; beyond, it stays « non livré »
     # --- stock policy segmentation (ABC by yearly value, XYZ by variability of the weekly consumption)
     abc_a_pct: int = 80                           # A : articles making the first n % of the cumulated yearly value
     abc_b_pct: int = 95                           # B : up to n % ; C : the rest

@@ -40,7 +40,7 @@ GLOBAL_FIELDS = {f.name: f.type for f in dataclasses.fields(EngineParams)}
 #: the rules a user may change from the Paramètres screen (the others are display or technical)
 EDITABLE_GLOBAL_FIELDS = ("target_tolerance_pct", "lead_margin_days", "stock_drift_pct", "stock_drift_min_packs", "stock_drift_persist",
                           "otd_weight_qty", "otd_weight_punctuality", "otd_weight_desadv", "otd_band1_days", "otd_band1_score",
-                          "otd_band2_days", "otd_band2_score", "abc_a_pct", "abc_b_pct", "xyz_x_cv", "xyz_y_cv",
+                          "otd_band2_days", "otd_band2_score", "otd_matching", "otd_backlog_max_days", "abc_a_pct", "abc_b_pct", "xyz_x_cv", "xyz_y_cv",
                           "segment_coverage_days", "segment_service_pct")
 
 
@@ -82,6 +82,11 @@ def global_param_overrides(session: Session) -> dict[str, Any]:
 
 def _coerce_param(field: str, value: Any) -> Any:
     default = getattr(EngineParams(), field)
+    if field == "otd_matching":
+        v = str(value).strip().lower()
+        if v not in ("jour", "cumul"):
+            raise ValueError("otd_matching : « jour » ou « cumul »")
+        return v
     if isinstance(default, bool):
         return str(value).lower() in ("true", "1", "oui", "yes")
     if isinstance(default, int):

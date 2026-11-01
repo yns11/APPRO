@@ -736,29 +736,46 @@ fournisseurs est initialisé à 5 jours ouvrés.
 
 ## 14. Performance fournisseurs : service (OTD), délais observés, segmentation
 
-Page **Performance fournisseurs** (et onglet *Performance* de la fiche fournisseur). Tout part du **rapprochement
-des réceptions avec les créneaux fermes** : les réceptions validées d'un même (fournisseur, article, numéro de
-commande) sont affectées aux créneaux de cette commande dans l'ordre des dates (premier créneau servi d'abord) ;
-un créneau est **complet** le jour où la quantité commandée est atteinte.
+Page **Performance fournisseurs** (et onglet *Performance* de la fiche fournisseur). Deux rapprochements existent
+(règle commune `otd_matching`, défaut **jour** ; conception et scénarios dans `docs/otd_maille_jour.md`) :
 
-**OTD d'une commande** (règles communes, *Paramètres › Règles communes*) :
+* **Maille jour** (défaut) : la maille est **un fournisseur, un article, un jour**. *Attendu du jour* = somme des
+  ordres fermes du jour (un créneau ERP posé sur une fermeture usine est déplacé au jour ouvré suivant, une
+  réception datée d'un jour fermé aussi) ; *reçu du jour* = somme des réceptions validées du jour. Les numéros de
+  commande et d'ordre ne jouent pas. Une réception d'un article sans ordre ferme chez ce fournisseur est comptée à
+  part, jamais notée.
+* **Cumul par commande** (ancienne règle, gardée pour comparaison) : les réceptions validées d'un même (fournisseur,
+  article, numéro de commande) sont affectées aux créneaux de cette commande dans l'ordre des dates (premier créneau
+  servi d'abord) ; un créneau est complet le jour où la quantité commandée est atteinte, l'écart est en jours
+  calendaires. Un manque décale tous les créneaux suivants (« complétée en 2 réceptions, +6 j »).
 
-* **QUANTITÉ** : 100 si la quantité commandée a été reçue, 0 sinon ;
-* **PONCTUALITÉ** : 100 si la quantité est complète le jour prévu ; avance ou retard de 1 à `otd_band1_days` [2]
-  jours → `otd_band1_score` [60] ; jusqu'à `otd_band2_days` [4] jours → `otd_band2_score` [20] ; au-delà 0 ;
+**OTD d'un jour de livraison** (règles communes, *Paramètres › Règles communes*) :
+
+* **QUANTITÉ** : 100 si le **reçu du jour couvre l'attendu du jour** (un excédent ne pénalise pas), 0 sinon ; en
+  cumul, 100 si la quantité commandée a été reçue un jour ou l'autre ;
+* **PONCTUALITÉ** : à partir du jour J, on compte les **jours ouvrés usine** jusqu'à ce que le fournisseur ait livré
+  tout ce qui était dû **depuis J** (ce qui manquait avant J ne compte pas) : 0 jour → 100, 1 à `otd_band1_days` [2]
+  → `otd_band1_score` [60], jusqu'à `otd_band2_days` [4] → `otd_band2_score` [20], au-delà → 0. Une livraison reçue
+  avant J, un jour où rien n'était attendu (ou au-delà de l'attendu de ce jour-là), dans les `otd_band2_days` jours
+  précédents, est une **avance**, même barème. Un jour incomplet peut être complété par les livraisons des
+  `otd_backlog_max_days` [30] jours suivants ; au-delà il reste **non livré** ;
 * **DESADV** : 100 si chaque BL reçu a été annoncé par un DESADV traité sans erreur, 0 sinon ;
 * **OTD** = `otd_weight_qty` [30] % × QUANTITÉ + `otd_weight_punctuality` [50] % × PONCTUALITÉ +
   `otd_weight_desadv` [20] % × DESADV.
 
-Une commande est **évaluable** une fois complète, ou `otd_band2_days` jours après sa date prévue si elle ne l'est
-pas (tout à 0 : « non livrée »). Une commande que l'ERP montre reçue sans aucune ligne de réception dans
-l'extraction est **non évaluable** (écart de données, comptée à part, jamais notée). L'OTD d'un fournisseur sur une
-période est la **moyenne des OTD de ses commandes attendues sur la période** ; les trois indicateurs sont moyennés
-de même. La vue propose les périodes (3, 6, 12, 24 mois ou dates libres), le pas des courbes (semaine, mois,
-trimestre, année), les filtres fournisseur et article, le détail par commande et l'export.
+Un jour est **évaluable** une fois complet, ou `otd_band2_days` jours après sa date s'il ne l'est pas (tout à 0 :
+« non livré »). Un jour que l'ERP montre reçu sans aucune ligne de réception dans l'extraction est **non évaluable**
+(écart de données, compté à part, jamais noté). L'OTD d'un fournisseur sur une période est la **moyenne des OTD de
+ses jours attendus sur la période** ; les trois indicateurs sont moyennés de même. Le **solde** de la période
+(Σ attendu − Σ reçu, en pièces et en jours de livraison : positif = reliquat, négatif = avance) est affiché à côté de
+l'OTD, par fournisseur et par période : c'est ce que la maille jour ne note pas (un reliquat ancien, un décalage
+systématique d'une livraison, qui lui sont indiscernables). La vue propose les périodes (3, 6, 12, 24 mois ou dates
+libres), le pas des courbes (semaine, mois, trimestre, année), le **choix de la méthode** avec, pour comparaison,
+l'OTD de l'autre méthode sur la même période (colonne et courbe en pointillés), les filtres fournisseur et article,
+le détail par jour (créneaux et commandes regroupés, reçu le jour, date de complétude) et l'export.
 
 **Délais observés** : par fournisseur (et par article dès qu'un fournisseur ou un article est choisi) : retard
-moyen et dispersion (p50, p90, écart-type, min, max) entre la date prévue et la quantité complète ; part à l'heure,
+moyen et dispersion (p50, p90, écart-type, min, max) entre la date prévue et la quantité complète (jours ouvrés à la maille jour, calendaires en cumul) ; part à l'heure,
 en avance, en retard, au-delà de la seconde tranche ; **retard récurrent** (au moins la moitié des livraisons en
 retard sur trois commandes ou plus) ; **délai observé** première apparition dans l'ERP → quantité complète (jours
 ouvrés) et **biais** = observé − délai paramétré (dès que le job renseigne `first_seen`) ; délai expédition
