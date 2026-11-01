@@ -396,6 +396,15 @@ def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, su
                         if D[jj] >= target - EPS:
                             j = jj
                             break
+            if j is not None and j > k:
+                # the surplus days that completed this line late are spent : they are no advance for a later line
+                need = e_qty - r_day - carry
+                for kk in range(k + 1, j + 1):
+                    if need <= EPS:
+                        break
+                    take = min(float(avail[kk]), need)
+                    avail[kk] -= take
+                    need -= take
             if j is not None:
                 line.completed = grid[lo_i + j]
                 line.delta = j - k

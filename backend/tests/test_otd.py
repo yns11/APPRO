@@ -193,6 +193,22 @@ def test_biweekly_grouping_and_over_delivery():
     assert score(L[6]) == 70 and (L[9].qty_score, L[9].punct_score) == (100, 100)
 
 
+# ---------------------------------------------------------------------------------------------------- weekly supplier (a real case)
+def test_weekly_receipts_that_completed_a_late_line_are_not_an_advance_for_the_next_one():
+    """METALIS SLOVAKIA, 2 400 every Monday : 05/10 served on Tuesday (1 600) and Thursday (800), 12/10 served 1 600 then
+    caught up by the 3 200 of 19/10, 26/10 perfect.  The Tuesday and Thursday receipts belong to the 05/10 line ; the
+    12/10 line is complete on 19/10 (+5, band 2), not « two days early »."""
+    exp = {1: 2400.0, 6: 2400.0, 11: 2400.0, 16: 2400.0}
+    rec = {2: 1600.0, 4: 800.0, 6: 1600.0, 11: 3200.0, 16: 2400.0}
+    L = lines(exp, rec, weekdays="1")
+    assert [L[i].delta for i in (1, 6, 11, 16)] == [3, 5, 0, 0]
+    assert [L[i].punct_score for i in (1, 6, 11, 16)] == [60, 20, 100, 100] and all(L[i].qty_score == 100 for i in (1, 6, 11, 16))
+    assert L[11].excess == 0                                   # the 800 extra of 19/10 fill the balance, no advance
+    data = otd.build(*frames(exp, rec, weekdays="1"), CAL, MON, PARAMS)
+    rep = otd.otd_report(data, PARAMS, "month", date_from=wd(1), date_to=wd(16))
+    assert (rep["totals"]["qty"], rep["totals"]["punctuality"], rep["totals"]["desadv"], rep["totals"]["otd"]) == (100, 70, 100, 85)
+
+
 # ---------------------------------------------------------------------------------------------------- calendar, periods, statuses
 def test_slot_on_a_closure_moves_to_the_next_working_day():
     sat = wd(5) + D(days=1)
