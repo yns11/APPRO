@@ -756,41 +756,67 @@ fournisseurs est initialisé à 5 jours ouvrés.
 
 ## 14. Performance fournisseurs : service (OTD), délais observés, segmentation
 
-Page **Performance fournisseurs** (et onglet *Performance* de la fiche fournisseur). Règle arrêtée le 01/11/2026
-(genèse et scénarios chiffrés : `docs/otd_maille_jour.md`, `docs/otd_atelier_questions.md`) ; calcul dans
-`services/otd.py`, scénarios rejoués par `tests/test_otd.py`.
+Page **Performance fournisseurs** (et onglet *Performance* de la fiche fournisseur). Règle arrêtée le 01/11/2026,
+simplifiée le 02/11/2026 (fenêtre unique, le jour exact ; tranche 2 portée à cinq jours) (genèse et scénarios
+chiffrés : `docs/otd_maille_jour.md`, `docs/otd_atelier_questions.md`) ; calcul dans `services/otd.py`, scénarios
+rejoués par `tests/test_otd.py`.
 
 **La maille** : une ligne = un fournisseur, un article, un jour ouvré attendu. *Attendu du jour* = somme des ordres
 fermes du jour ; *reçu du jour* = somme des réceptions validées du jour. Un créneau ou une réception sur une
 fermeture usine compte au jour ouvré suivant. Les numéros de commande et d'ordre ne jouent pas. Une réception d'un
 article sans ordre ferme chez ce fournisseur est comptée à part, jamais notée.
 
-**Déduits du référentiel fournisseur** (jours de livraison) : la **fenêtre** de ponctualité, ±1 jour ouvré jusqu'à
-deux jours de livraison par semaine, 0 au-delà ; la **tolérance d'excédent**, un jour de besoin à partir de deux
-jours de livraison par semaine, deux jours sinon (jour de besoin = attendu moyen par jour ouvré du couple).
+**Déduite du référentiel fournisseur** (jours de livraison) : la **tolérance d'excédent**, un jour de besoin à
+partir de deux jours de livraison par semaine, deux jours sinon (jour de besoin = attendu moyen par jour ouvré du
+couple). La ponctualité, elle, se lit **au jour exact** pour tous les fournisseurs, quelle que soit leur fréquence
+de livraison : une seule règle à expliquer, et un pluri-hebdo n'est pas noté plus sévèrement qu'un hebdo.
 
 **Les trois indicateurs d'une ligne** (règles communes, *Paramètres › Règles communes*) :
 
-* **QUANTITÉ** : 100 si l'attendu du jour est reçu **en entier dans le délai d'évaluation** (la fenêtre plus
-  `otd_band2_days` jours ouvrés) et si le jour ne crée pas d'avance au-delà de la tolérance ; 0 sinon (« non
+* **QUANTITÉ** : 100 si l'attendu du jour est reçu **en entier dans le délai d'évaluation** (`otd_band2_days` [5]
+  jours ouvrés) et si le jour ne crée pas d'avance au-delà de la tolérance ; 0 sinon (« non
   livrée », ou excédent). La quantité dit « c'est arrivé », la ponctualité dit « avec quel écart ». L'avance se lit
   sur le solde reçu − attendu, remis à zéro au premier lundi de chaque mois ;
 * **PONCTUALITÉ** : jours ouvrés, à partir du jour attendu, jusqu'à ce que tout ce qui était dû **depuis ce jour**
   soit livré (ce qui manquait avant ne compte pas) ; une réception avant le jour, un jour sans attendu, est une
-  avance. Dans la fenêtre : 100 ; 1 à `otd_band1_days` [2] jours au-delà : `otd_band1_score` [60] ; jusqu'à
-  `otd_band2_days` [4] : `otd_band2_score` [20] ; au-delà, ou jamais livré : 0 ;
+  avance. Le jour exact : 100 ; 1 à `otd_band1_days` [2] jours d'écart : `otd_band1_score` [60] ; jusqu'à
+  `otd_band2_days` [5] : `otd_band2_score` [20] ; au-delà, ou jamais livré : 0. Les écarts se comptent en valeur
+  absolue : une avance est notée comme un retard ;
 * **DESADV** : part des BL reçus sur la période annoncés par un DESADV traité (lu par fournisseur et période, pas
   par ligne).
 
 **OTD** d'un fournisseur sur une période = `otd_weight_qty` [30] % × QUANTITÉ moyenne + `otd_weight_punctuality`
 [50] % × PONCTUALITÉ moyenne + `otd_weight_desadv` [20] % × DESADV, sur ses lignes de la période. Une ligne est
-évaluée une fois complète, ou `otd_band2_days` jours ouvrés après la fenêtre si elle ne l'est pas (« non livrée »,
+évaluée une fois complète, ou `otd_band2_days` jours ouvrés après le jour attendu si elle ne l'est pas (« non livrée »,
 tout à 0). Une ligne que l'ERP montre reçue sans aucune réception dans l'extraction est **non évaluable** (comptée à
 part). Les périodes sont des **semaines entières** ; une semaine appartient au mois de son mercredi. Le chiffre du
 portefeuille est la **moyenne des fournisseurs** (chacun compte une fois). Un regroupement de livraisons au-delà de
 la tolérance pénalise le jour du regroupement (QUANTITÉ) et les jours regroupés (avance) : double effet accepté pour
-garder la règle en quatre lignes. Échelle d'une ligne, DESADV acquis : complète dans la fenêtre 100 ; une livraison
-de retard 80 ; deux 60 ; trois ou plus, ou jamais, 20 ; excédent 70. Le calcul se fait une fois par version des données et reste en cache.
+garder la règle en quatre lignes. Échelle d'une ligne, DESADV acquis : complète le jour 100 ; un ou deux jours
+d'écart 80 ; trois à cinq jours 60 ; au-delà, ou jamais, 20 ; excédent 70. Exemple d'un hebdo livré le lundi,
+servi +3 j, +5 j, le jour, le jour : ponctualité (20 + 20 + 100 + 100) ÷ 4 = 60, quantité 100, DESADV 100, OTD du
+mois 30 + 30 + 20 = **80**. Le calcul se fait une fois par version des données et reste en cache ; chaque ligne porte
+sa lecture en une phrase (colonne *Pourquoi* : « +3 j de retard → tranche 3 à 5 j → 20 ; complet dans les 5 j,
+quantité acquise »).
+
+**Fiche OTD fournisseur × mois** (`/performance/otd/<fournisseur>/<AAAA-MM>`, `GET /api/performance/otd/sheet`) :
+un écran par fournisseur et par mois, du chiffre au jour : la formule avec ses chiffres et la barre des points
+(acquis par indicateur, perdus) ; les trois indicateurs décomposés (jours complets, répartition des écarts par
+tranche, liste des BL et de leur DESADV) ; les semaines entières du mois jour par jour (jours attendus colorés par
+tranche, réceptions) ; le tableau du calcul, un jour attendu par ligne avec sa colonne *Pourquoi* ; les cumuls
+attendu et reçu. On y entre depuis les **colonnes par mois** du tableau *Par fournisseur* (vue par mois, douze
+derniers mois, chaque score est un lien), depuis l'icône de fiche en bout de ligne (dernier mois clos) et depuis les
+barres mensuelles de l'onglet *Performance* de la fiche fournisseur. Le **dernier mois clos** (toutes ses semaines
+terminées avant aujourd'hui) est le mois par défaut.
+
+**Arrêté mensuel** (`POST /api/performance/otd/close`, managers et administrateurs ; refaire un arrêté est réservé
+aux administrateurs) : fige la fiche de chaque fournisseur évalué sur le mois dans `app_otd_closings` (chiffres,
+lignes, auteur, horodatage) ; une réception saisie après ne les modifie plus. Le **PDF d'arrêté**
+(`GET /api/performance/otd/arrete.pdf?month=`) lit les fiches figées quand le mois est arrêté, les chiffres du jour
+sinon (marqués *provisoire*) ; version **portefeuille** : un tableau récapitulatif de tous les fournisseurs (OTD,
+quantité, ponctualité, DESADV, non livrés) puis **une page par fournisseur**, du plus faible au meilleur ; version
+**fournisseur** : sa page seule. Carte *Arrêté mensuel* de la page Performance (choix du mois, état, PDF, bouton
+d'arrêt) ; bouton *Arrêté PDF* de la fiche. La fiche à l'écran reste vivante et rappelle l'arrêté quand il existe.
 
 **Délais observés** : par fournisseur (et par article dès qu'un fournisseur ou un article est choisi) : retard moyen
 en jours ouvrés entre le jour attendu et la quantité complète ; parts à l'heure, en avance, en retard, au-delà de la

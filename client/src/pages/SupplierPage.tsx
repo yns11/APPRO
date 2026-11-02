@@ -3,20 +3,39 @@ import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, CalendarCheck, CalendarClock, CheckSquare, Clock, Gauge, Package, Pencil, ShoppingCart, Truck } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { useOtd, usePlantCalendar, useSupplier } from "@/lib/queries";
-import { OtdChart } from "@/components/charts/OtdChart";
+import { useOtd, useOtdMonths, usePlantCalendar, useSupplier } from "@/lib/queries";
+import { OtdChart, periodTick } from "@/components/charts/OtdChart";
 import { useRemembered } from "@/lib/pageState";
 import { ArticleLink, Badge, Button, Card, Empty, ErrorBox, Kpi, SeverityBadge, Skeleton, SkeletonBlock, Tabs } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
 import { SupplierParamsTab } from "@/components/SupplierParamsTab";
 import { fmtDate, fmtInt, fmtQty, fmtWeekdays } from "@/lib/format";
-import type { BacklogRow, DesadvRow, OrderRow, PendingRow, ProposalOut, SupplierArticleRow, TransportOut } from "@/lib/types";
+import type { BacklogRow, DesadvRow, OrderRow, OtdPeriod, PendingRow, ProposalOut, SupplierArticleRow, TransportOut } from "@/lib/types";
 
 type Tab = "articles" | "late" | "upcoming" | "transports" | "in_transit" | "to_process" | "to_validate" | "to_order" | "performance" | "params";
 const H = "calc(100vh - 420px)";
 
 const art = <T extends { article_id: string; designation: string }>(): Column<T> => ({ key: "article", label: "Article", get: (r) => `${r.article_id} ${r.designation}`, exportGet: (r) => r.article_id, render: (r) => <ArticleLink id={r.article_id} designation={r.designation} /> });
 const planner = <T extends { planner: string }>(): Column<T> => ({ key: "planner", label: "Approvisionneur", get: (r) => r.planner, filter: "select" });
+
+/** Twelve monthly OTD bars, each a link to the supplier × month sheet ; the last closed month is highlighted. */
+function MonthBars({ series, supplierId, lastClosed }: { series: OtdPeriod[]; supplierId: string; lastClosed?: string }) {
+  const last = series.filter((p) => p.otd !== null).slice(-12);
+  if (!last.length) return null;
+  const focus = last.find((p) => p.period === lastClosed) ?? last[last.length - 1];
+  return (
+    <div>
+      <div className="month-bars" role="img" aria-label={`OTD mensuel : ${last.map((p) => `${periodTick(p.period)} ${p.otd?.toFixed(0)}`).join(", ")}`}>
+        {last.map((p) => <Link key={p.period} to={`/performance/otd/${encodeURIComponent(supplierId)}/${p.period}`} className={p.period === focus.period ? "last" : ""} style={{ height: `${Math.max(2, p.otd ?? 0)}%` }} title={`${periodTick(p.period)} · OTD ${p.otd?.toFixed(0)} · ${p.n} jour(s) · ouvrir la fiche`}>{p.period === focus.period && <span className="v">{p.otd?.toFixed(0)}</span>}</Link>)}
+      </div>
+      <div className="month-bars-labels">{last.map((p) => <span key={p.period} style={p.period === focus.period ? { color: "var(--brand-fg)", fontWeight: 600 } : undefined}>{periodTick(p.period)}</span>)}</div>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginTop: 10, padding: "8px 12px", background: "var(--bg)", borderRadius: "var(--r-md)", fontSize: "var(--fs--1)" }}>
+        <span>{periodTick(focus.period)} · <b>{focus.otd?.toFixed(0)}</b> · quantité {focus.qty ?? "–"} · ponctualité {focus.punctuality ?? "–"} · DESADV {focus.desadv ?? "–"} · {focus.n} jour(s)</span>
+        <Link to={`/performance/otd/${encodeURIComponent(supplierId)}/${focus.period}`} className="btn sm"><Gauge />Voir le calcul →</Link>
+      </div>
+    </div>
+  );
+}
 
 /** One supplier : record, linked articles and their rule, supply flows of the day restricted to the supplier, upcoming firm orders. */
 export default function SupplierPage() {
@@ -26,6 +45,7 @@ export default function SupplierPage() {
     queryFn: () => api.get<TransportOut[]>("/api/transports", { supplier_id: supplierId, include_cancelled: true }) });
   const [tab, setTab] = useRemembered<Tab>("supplier.tab", "articles");
   const otd = useOtd({ supplier_id: supplierId, bucket: "month" }, !!supplierId);
+  const months = useOtdMonths();
   const calendar = usePlantCalendar();
   const closures = calendar.data?.suppliers.find((x) => x.supplier_id === supplierId);
   const d = q.data;
@@ -150,8 +170,13 @@ export default function SupplierPage() {
           : tab === "upcoming" ? <DataTable rows={d.upcoming} columns={orderCols} rowKey={(o) => o.order_id} maxHeight={H} storageKey="supplier.upcoming" exportTitle={`${title} - commandes à venir`} emptyTitle="Aucune commande ferme à venir" />
           : tab === "params" ? <div style={{ padding: 16 }}><SupplierParamsTab supplierId={supplierId} articles={d.articles} /></div>
           : tab === "performance" ? <div style={{ padding: 16 }}>
-              <p className="small subtle" style={{ marginBottom: 8 }}>OTD par jour de livraison attendu, moyenne mensuelle sur douze mois ; détail dans <Link to={`/performance?supplier_id=${encodeURIComponent(supplierId)}`}>Performance fournisseurs</Link>.</p>
-              {otd.isLoading || !otd.data ? <Skeleton h={240} /> : otd.data.totals.series.length === 0 ? <Empty title="Aucune commande évaluable sur douze mois" /> : <OtdChart series={otd.data.totals.series} height={240} target={90} />}
+              <p className="small subtle" style={{ marginBottom: 8 }}>OTD par jour de livraison attendu, un mois = ses semaines entières ; un clic sur un mois ouvre la <b>fiche du mois</b> (formule, décomposition, calendrier, calcul jour par jour) ; vue d'ensemble dans <Link to={`/performance?supplier_id=${encodeURIComponent(supplierId)}`}>Performance fournisseurs</Link>.</p>
+              {otd.isLoading || !otd.data ? <Skeleton h={240} /> : otd.data.totals.series.length === 0 ? <Empty title="Aucune commande évaluable sur douze mois" /> : (
+                <>
+                  <MonthBars series={otd.data.totals.series} supplierId={supplierId} lastClosed={months.data?.last_closed} />
+                  <div style={{ marginTop: 16 }}><OtdChart series={otd.data.totals.series} height={220} target={90} /></div>
+                </>
+              )}
             </div>
           : tab === "transports" ? <DataTable rows={transports.data ?? []} columns={transportCols} rowKey={(t) => t.transport_id} rowClass={(t) => (t.status === "cancelled" ? "muted" : "")} maxHeight={H} storageKey="supplier.transports" exportTitle={`${title} - transports`} emptyTitle="Aucun transport" emptyHint={<>Les transports se créent depuis le <Link to="/livraisons">Planning de livraisons</Link>.</>} />
           : tab === "in_transit" ? <DataTable rows={d.in_transit} columns={desadvCols} rowKey={(x) => x.desadv_id} maxHeight={H} storageKey="supplier.transit" exportTitle={`${title} - en transit`} emptyTitle="Rien en transit" />

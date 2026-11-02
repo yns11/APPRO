@@ -230,19 +230,35 @@ export interface PortalResponse { suppliers: SupplierRef[]; as_of: string; kpis:
 export type OtdBucket = "week" | "month" | "quarter" | "year";
 export interface OtdScores { n: number; otd: number | null; qty: number | null; punctuality: number | null; desadv: number | null; not_delivered: number; bls: number; }
 export interface OtdPeriod extends OtdScores { period: string; start: string; suppliers?: number; }
-export interface OtdSupplier extends OtdScores { supplier_id: string; name: string; window: number; articles: number; series: OtdPeriod[]; }
+export interface OtdSupplier extends OtdScores { supplier_id: string; name: string; articles: number; series: OtdPeriod[]; }
 export interface OtdLine {
   id: string; date: string; shifted_from: string | null; supplier_id: string; supplier_name: string; article_id: string; designation: string; unit: string; planner: string;
-  purch: string; order_count: number; expected: number; received: number; excess: number; tolerance: number; completed: string | null; delta: number | null; window: number;
-  status: "ouverte" | "reçue" | "non livrée" | "non évaluable"; qty_score: number | null; punct_score: number | null; receipt_days: number; bls: string[];
+  purch: string; order_count: number; expected: number; received: number; excess: number; tolerance: number; completed: string | null; delta: number | null;
+  status: "ouverte" | "reçue" | "non livrée" | "non évaluable"; reason: string; qty_score: number | null; punct_score: number | null; receipt_days: number; bls: string[];
   first_seen: string | null; lead_promised: number; lead_observed: number | null; bias: number | null; urgent: boolean;
 }
 export interface OtdResponse {
   as_of: string; from: string; to: string; bucket: OtdBucket; periods: string[];
-  params: { weights: { qty: number; punctuality: number; desadv: number }; band1_days: number; band1_score: number; band2_days: number; band2_score: number };
+  params: OtdParams;
   totals: OtdScores & { suppliers: number; series: OtdPeriod[] }; suppliers: OtdSupplier[];
   not_evaluable: number; open: number; unmatched_receipts: number; first_seen_available: boolean; lines: OtdLine[]; truncated: boolean;
 }
+export interface OtdParams { weights: { qty: number; punctuality: number; desadv: number }; band1_days: number; band1_score: number; band2_days: number; band2_score: number; }
+export interface OtdPoints { qty: number | null; punctuality: number | null; desadv: number | null; lost: number | null; max: { qty: number; punctuality: number; desadv: number }; }
+export interface OtdDayCell { date: string; expected: number; lines: number; status: string; received: number; bls: string[]; qty_score: number | null; punct_score: number | null; delta: number | null; completed: string[]; }
+export interface OtdWeek { label: string; monday: string; sunday: string; days: OtdDayCell[]; }
+export interface OtdClosingInfo { closed_at: string; closed_by: string; otd: number | null; }
+/** The supplier × month sheet (``GET /api/performance/otd/sheet``). */
+export interface OtdSheet {
+  as_of: string; supplier_id: string; name: string; planners: string[]; delivery_weekdays: string; tolerance_factor: number;
+  month: string; label: string; from: string; to: string; weeks_count: number; articles: number; params: OtdParams;
+  scores: OtdScores & { points: OtdPoints };
+  quantity: { complete: number; total: number; not_delivered: number; excess: number };
+  punctuality: { bands: { label: string; score: number; count: number }[]; delay_mean: number | null; late: number; early: number };
+  desadv: { bl: string; date: string; ok: boolean }[];
+  weeks: OtdWeek[]; history: OtdPeriod[]; open: number; not_evaluable: number; lines: OtdLine[]; closing: OtdClosingInfo | null;
+}
+export interface OtdMonths { as_of: string; last_closed: string; months: string[]; closings: Record<string, { closed_at: string; closed_by: string; suppliers: number }>; }
 export interface LeadRow {
   n: number; evaluated: number; received: number; not_delivered: number; delay_mean: number | null; on_time_pct: number | null; early_pct: number | null; late_pct: number | null; late_beyond_pct: number | null;
   recurring_late: boolean; lead_promised: number | string | null; lead_observed_mean: number | null; bias_mean: number | null; order_to_ship_mean: number | null; ship_to_receipt_mean: number | null;

@@ -209,6 +209,19 @@ class ParamOverride(Base):
     __table_args__ = (Index("ix_param_scope_keys", "scope", "key1", "key2", "field", unique=True),)
 
 
+class OtdClosing(Base):
+    """**Monthly closing** of the supplier service : the OTD sheet of one supplier over one month, frozen the day the
+    month is closed (the figures of the hierarchy report never move afterwards, whatever is received later)."""
+
+    __tablename__ = "app_otd_closings"
+    month: Mapped[str] = mapped_column(String(7), primary_key=True)          # 2026-10
+    supplier_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    otd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    payload: Mapped[str] = mapped_column(Text, default="{}")                # the sheet (services/otd.py sheet()) as JSON
+    closed_by: Mapped[str] = mapped_column(String(120), default="")
+    closed_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class AuditLog(Base):
     __tablename__ = "app_audit_log"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -607,6 +620,19 @@ def apply_transport_mode_default(engine) -> int:
     return n
 
 
+def apply_otd_band2_five_days(engine) -> int:
+    """The second punctuality band grew from 4 to 5 working days (a whole week of delay stays evaluated) : a stored
+    override still at the former default follows the new one."""
+    n = 0
+    with engine.begin() as conn:
+        try:
+            res = conn.execute(text("UPDATE app_param_overrides SET value = '5' WHERE scope = 'global' AND field = 'otd_band2_days' AND value = '4'"))
+            n += res.rowcount or 0
+        except Exception as exc:  # pragma: no cover - table not there yet
+            log.debug("otd band2 migration skipped: %s", exc)
+    return n
+
+
 MIGRATION_LOCK_KEY = 7_419_301          # pg_advisory_lock key shared by every worker of the application
 #: one-shot data fixes, run once per database (journalised in ``app_migrations``) ; the schema steps
 #: (``ensure_columns``, ``retire_columns``, ``create_all``) stay idempotent and run at every start-up, under the lock
@@ -614,6 +640,7 @@ DATA_MIGRATIONS: tuple[tuple[str, Any], ...] = (
     ("nullable_numerics_zero_to_null", normalise_nullable_numerics),
     ("supplier_docks_default_b15", apply_text_defaults),
     ("supplier_transport_mode_default", apply_transport_mode_default),
+    ("otd_band2_five_days", apply_otd_band2_five_days),
 )
 
 

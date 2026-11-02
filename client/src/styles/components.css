@@ -626,3 +626,71 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .dt-pick { width: 28px; text-align: center; }
 .dt-pick input { margin: 0; cursor: pointer; }
 .tbl tr.picked td { background: var(--brand-bg, rgba(37, 99, 235, 0.07)); }
+
+/* ---------------------------------------------------------------- OTD supplier × month sheet */
+.month-nav { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-elev); height: 34px; overflow: hidden; }
+.month-nav a, .month-nav .current { display: inline-flex; align-items: center; height: 100%; padding: 0 10px; font-size: var(--fs--1); color: var(--fg-muted); border-left: 1px solid var(--border); text-decoration: none; }
+.month-nav a:first-child { border-left: 0; }
+.month-nav a:hover { background: var(--bg-hover); color: var(--fg); }
+.month-nav a.arrow { padding: 0 6px; }
+.month-nav .current { background: var(--brand-soft); color: var(--brand-fg); font-weight: var(--fw-semibold); }
+.otd-formula { display: flex; flex-wrap: wrap; gap: var(--sp-5); align-items: center; }
+.otd-formula .big { min-width: 150px; display: flex; flex-direction: column; gap: 2px; }
+.otd-formula .big .label { font-size: var(--fs--2); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--fg-subtle); font-weight: var(--fw-semibold); }
+.otd-formula .big .value { font-size: 42px; font-weight: 700; line-height: 1; }
+.otd-formula .big .value small { font-size: var(--fs-1); color: var(--fg-subtle); font-weight: var(--fw-regular); }
+.otd-formula .big .meta { font-size: var(--fs--2); color: var(--fg-muted); }
+.otd-formula .rest { flex: 1 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.otd-formula .eq { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: var(--fs-1); }
+.otd-formula .eq > b { font-weight: var(--fw-semibold); }
+.otd-formula .op { color: var(--fg-subtle); }
+.otd-formula .points { display: flex; height: 22px; border-radius: 6px; overflow: hidden; background: var(--bg-subtle); }
+.otd-formula .points > span { display: flex; align-items: center; justify-content: center; color: #fff; font-size: var(--fs--2); font-weight: var(--fw-semibold); overflow: hidden; white-space: nowrap; }
+.otd-formula .points .q, .sw.q { background: var(--ok); }
+.otd-formula .points .p, .sw.p { background: var(--warning); }
+.otd-formula .points .d, .sw.d { background: var(--info); }
+.otd-formula .points .lost { background: repeating-linear-gradient(135deg, var(--critical-soft) 0 4px, var(--bg-elev) 4px 8px); color: var(--critical-fg); }
+.otd-formula .legend, .card-header .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--fs--2); color: var(--fg-muted); align-items: center; }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.sw.cal-ok { background: var(--ok-soft); border: 1px solid var(--ok); }
+.sw.cal-warn { background: var(--warning-soft); border: 1px solid var(--warning); }
+.sw.cal-bad { background: var(--critical-soft); border: 1px solid var(--critical); }
+.sw.cal-rec { background: var(--bg-elev); border: 1px dashed var(--info); }
+.otd-score { font-size: 24px; font-weight: 700; line-height: 1; }
+.otd-list { display: flex; flex-direction: column; gap: 4px; max-height: 190px; overflow: auto; font-size: var(--fs--1); }
+.otd-list > div, .otd-list > button { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; background: var(--bg); border-radius: var(--r-sm); border: 1px solid transparent; text-align: left; color: var(--fg); font: inherit; font-size: var(--fs--1); }
+.otd-list > button { cursor: pointer; }
+.otd-list > button:hover { background: var(--bg-hover); }
+.otd-list > button.sel { border-color: var(--brand); background: var(--brand-soft); }
+.otd-bands { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs--1); }
+.otd-bands > div { display: grid; grid-template-columns: 130px minmax(0, 1fr) 36px; gap: 8px; align-items: center; }
+.otd-bands .track { height: 12px; background: var(--bg-subtle); border-radius: 4px; overflow: hidden; }
+.otd-bands .fill { height: 100%; }
+.otd-bands .fill.b0 { background: var(--ok); } .otd-bands .fill.b1 { background: var(--warning); } .otd-bands .fill.b2 { background: var(--critical); } .otd-bands .fill.b3 { background: var(--fg-subtle); }
+.otd-bands b { text-align: right; }
+.otd-cal { display: grid; gap: 6px; min-width: 760px; font-size: var(--fs--2); }
+.otd-cal .head { color: var(--fg-subtle); text-transform: uppercase; letter-spacing: var(--tracking-caps); font-size: 11px; font-weight: var(--fw-semibold); padding: 0 4px; }
+.otd-cal .wk { display: flex; flex-direction: column; justify-content: center; color: var(--fg-muted); }
+.otd-cal .cell { min-height: 68px; border: 1px solid var(--border); border-radius: var(--r-md); padding: 7px 8px; display: flex; flex-direction: column; gap: 2px; color: var(--fg-muted); background: var(--bg-elev); text-align: left; font: inherit; font-size: var(--fs--2); }
+.otd-cal .cell.off { border-style: dashed; opacity: .5; }
+.otd-cal .cell b { color: var(--fg); }
+.otd-cal .cell.ok { background: var(--ok-soft); border-color: var(--ok); }
+.otd-cal .cell.warn { background: var(--warning-soft); border-color: var(--warning); }
+.otd-cal .cell.bad { background: var(--critical-soft); border-color: var(--critical); }
+.otd-cal .cell.wait { background: var(--bg-subtle); border-color: var(--border-strong); }
+.otd-cal .cell.rec:not(.ok):not(.warn):not(.bad):not(.wait) { border-style: dashed; border-color: var(--info); }
+.otd-cal .cell .rec { color: var(--info-fg); }
+.otd-cal button.cell { cursor: pointer; }
+.otd-cal button.cell:hover { box-shadow: var(--shadow-sm); }
+.otd-cal button.cell.sel { outline: 2px solid var(--brand); outline-offset: 1px; }
+.otd-cal .top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.otd-cal .pill { border-radius: var(--r-pill); padding: 0 7px; color: #fff; font-weight: var(--fw-semibold); font-size: 11px; line-height: 18px; }
+.otd-cal .pill.ok { background: var(--ok); } .otd-cal .pill.warn { background: var(--warning); } .otd-cal .pill.bad { background: var(--critical); } .otd-cal .pill.wait { background: var(--fg-subtle); }
+.month-cell { display: inline-block; min-width: 34px; padding: 1px 7px; border-radius: var(--r-pill); font-weight: var(--fw-semibold); text-align: center; text-decoration: none; }
+.month-cell.ok { background: var(--ok-soft); color: var(--ok-fg); } .month-cell.warning { background: var(--warning-soft); color: var(--warning-fg); } .month-cell.critical { background: var(--critical-soft); color: var(--critical-fg); }
+.month-cell:hover { outline: 2px solid var(--brand); text-decoration: none; }
+.month-bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; align-items: end; height: 120px; }
+.month-bars a { display: block; background: color-mix(in srgb, var(--brand) 38%, transparent); border-radius: 4px 4px 0 0; position: relative; min-height: 2px; }
+.month-bars a:hover, .month-bars a.last { background: var(--brand); }
+.month-bars a .v { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: var(--fw-semibold); color: var(--brand-fg); }
+.month-bars-labels { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; font-size: 10px; color: var(--fg-subtle); text-align: center; margin-top: 4px; }

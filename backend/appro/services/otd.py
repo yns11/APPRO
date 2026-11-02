@@ -4,14 +4,14 @@ One **line** = one supplier, one article, one expected working day.  *Expected* 
 (a slot on a plant closure counts on the next working day), *received* = the validated receipts of that day
 (same rule).  Purchase order numbers play no part.
 
-* **QUANTITÉ** : 100 when the expected quantity of the day is received in full within the evaluation horizon (the
-  window plus ``otd_band2_days`` working days) and the day does not create an advance beyond the tolerance (one day of
-  need from two delivery days a week, two days of need otherwise) ; 0 otherwise (« non livrée », or excess).
+* **QUANTITÉ** : 100 when the expected quantity of the day is received in full within the evaluation horizon
+  (``otd_band2_days`` working days) and the day does not create an advance beyond the tolerance (one day of need from
+  two delivery days a week, two days of need otherwise) ; 0 otherwise (« non livrée », or excess).
   The advance is read on the running balance received − expected, restarted on the first Monday of every month.
 * **PONCTUALITÉ** : working days from the expected day until everything due *since that day* has been received
   (what was missing before does not count) ; a receipt before the day, on a day with nothing expected, is an
-  advance.  Inside the supplier's window (±1 working day up to two delivery days a week, 0 beyond) : 100 ; then
-  the common bands ``otd_band1_days`` / ``otd_band2_days`` and their scores ; beyond : 0 ; never received : 0.
+  advance.  The exact day : 100 ; 1 to ``otd_band1_days`` days away : ``otd_band1_score`` ; up to ``otd_band2_days`` :
+  ``otd_band2_score`` ; beyond, or never received : 0.  The same rule for every supplier, whatever its delivery days.
 * **DESADV** : share of the delivery notes received over the period announced by a processed DESADV.
 * **OTD** of a supplier over a period = ``otd_weight_qty`` × mean QUANTITÉ + ``otd_weight_punctuality`` × mean
   PONCTUALITÉ + ``otd_weight_desadv`` × DESADV, over its lines of the period.  Periods are whole ISO weeks ; a week
@@ -75,6 +75,54 @@ def bucket_start(label: str) -> dt.date:
     return dt.date(int(label), 1, 1)
 
 
+MONTHS_FR = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
+
+
+def month_label(month: str) -> str:
+    """``"2026-10"`` → ``"octobre 2026"``."""
+    y, m = month.split("-")
+    return f"{MONTHS_FR[int(m) - 1]} {y}"
+
+
+def month_weeks(month: str) -> list[dt.date]:
+    """Mondays of the ISO weeks of a month (a week belongs to the month of its Wednesday)."""
+    y, m = (int(x) for x in month.split("-"))
+    first = dt.date(y, m, 1)
+    monday = week_monday(first)
+    out: list[dt.date] = []
+    while True:
+        a = monday + dt.timedelta(days=2)
+        if (a.year, a.month) > (y, m):
+            break
+        if (a.year, a.month) == (y, m):
+            out.append(monday)
+        monday += dt.timedelta(days=7)
+    return out
+
+
+def month_bounds(month: str) -> tuple[dt.date, dt.date]:
+    """First Monday and last Sunday of the whole weeks of the month."""
+    weeks = month_weeks(month)
+    return weeks[0], weeks[-1] + dt.timedelta(days=6)
+
+
+def last_closed_month(as_of: dt.date) -> str:
+    """The latest month whose last week is over before ``as_of`` (the default month of the supplier sheet)."""
+    y, m = as_of.year, as_of.month
+    for _ in range(3):
+        label = f"{y}-{m:02d}"
+        if month_bounds(label)[1] < as_of:
+            return label
+        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+    return f"{y}-{m:02d}"
+
+
+def shift_month(month: str, n: int) -> str:
+    y, m = (int(x) for x in month.split("-"))
+    k = y * 12 + (m - 1) + n
+    return f"{k // 12}-{k % 12 + 1:02d}"
+
+
 def snap_window(date_from: dt.date, date_to: dt.date) -> tuple[dt.date, dt.date]:
     """Whole weeks : Monday of the first week, Sunday of the last."""
     return week_monday(date_from), week_monday(date_to) + dt.timedelta(days=6)
@@ -83,9 +131,9 @@ def snap_window(date_from: dt.date, date_to: dt.date) -> tuple[dt.date, dt.date]
 # =============================================================================
 # scoring helpers
 # =============================================================================
-def punctuality_score(delta_days: int, window: int, params: EngineParams) -> float:
-    """``delta_days`` in working days (negative = early), ``window`` = tolerated days either side."""
-    eff = max(0, abs(int(delta_days)) - max(int(window), 0))
+def punctuality_score(delta_days: int, params: EngineParams) -> float:
+    """``delta_days`` in working days (negative = early) : the exact day scores 100, then the two common bands."""
+    eff = abs(int(delta_days))
     if eff == 0:
         return 100.0
     if eff <= max(int(params.otd_band1_days), 0):
@@ -101,11 +149,6 @@ def otd_score(q: float | None, p: float | None, d: float | None, params: EngineP
     w = (float(params.otd_weight_qty), float(params.otd_weight_punctuality), float(params.otd_weight_desadv))
     total = sum(w) or 100.0
     return round((w[0] * q + w[1] * p + w[2] * (d or 0.0)) / total, 1)
-
-
-def supplier_window(delivery_weekdays: Iterable[int] | str | None) -> int:
-    """±1 working day up to two delivery days a week, 0 beyond."""
-    return 1 if _weekday_count(delivery_weekdays) <= 2 else 0
 
 
 def tolerance_factor(delivery_weekdays: Iterable[int] | str | None) -> int:
@@ -135,7 +178,6 @@ class OtdLine:
     order_count: int
     purch: str
     shifted_from: dt.date | None
-    window: int
     tolerance: float
     excess: float
     completed: dt.date | None = None
@@ -179,10 +221,12 @@ class OtdData:
     first_seen_available: bool
     articles: dict[str, tuple[str, str, str]] = field(default_factory=dict)     # article_id → (designation, unit, planner)
     names: dict[str, str] = field(default_factory=dict)
-    windows: dict[str, int] = field(default_factory=dict)
+    factors: dict[str, int] = field(default_factory=dict)                                 # supplier → tolerance factor (days of need)
+    weekdays: dict[str, str] = field(default_factory=dict)                                # supplier → delivery weekdays spec
+    receipts: dict[str, dict[dt.date, tuple[float, list[str]]]] = field(default_factory=dict)   # supplier → day → (qty matched, BLs)
 
     def size(self) -> int:
-        return 4096 + 400 * len(self.lines) + 80 * len(self.bls)
+        return 4096 + 400 * len(self.lines) + 80 * len(self.bls) + 120 * sum(len(v) for v in self.receipts.values())
 
 
 def cache_key(version: int, as_of: dt.date, params: EngineParams, holidays: Iterable[dt.date], open_days: Iterable[dt.date]) -> str:
@@ -218,15 +262,15 @@ def _date(v: Any) -> dt.date | None:
 def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, suppliers: pd.DataFrame, links: pd.DataFrame,
           articles: pd.DataFrame, calendar: WorkCalendar, as_of: dt.date, params: EngineParams) -> OtdData:
     """Evaluate every expected day of every (supplier, article) from the fact frames."""
-    # ---- reference : windows, tolerances, lead times, names
-    windows: dict[str, int] = {}
+    # ---- reference : tolerances, lead times, names
     factors: dict[str, int] = {}
+    weekdays: dict[str, str] = {}
     leads: dict[str, int] = {}
     names: dict[str, str] = {}
     for r in suppliers.itertuples(index=False):
         sid = _s(r.supplier_id)
-        windows[sid] = supplier_window(_s(getattr(r, "delivery_weekdays", "")))
-        factors[sid] = tolerance_factor(_s(getattr(r, "delivery_weekdays", "")))
+        weekdays[sid] = _s(getattr(r, "delivery_weekdays", ""))
+        factors[sid] = tolerance_factor(weekdays[sid])
         leads[sid] = int(getattr(r, "lead_time_days", 5) or 5)
         names[sid] = _s(getattr(r, "name", ""))
     link_lead: dict[tuple[str, str], int] = {}
@@ -242,7 +286,7 @@ def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, su
     o_dates = [d for d in (_date(x) for x in firm["expected_date"]) if d is not None] if len(firm) else []
     r_dates = [d for d in (_date(x) for x in receipts["receipt_date"]) if d is not None] if len(receipts) else []
     if not o_dates:
-        return OtdData(as_of, [], [], 0, False, arts, names, windows)
+        return OtdData(as_of, [], [], 0, False, arts, names, factors, weekdays)
     lo = min(o_dates + r_dates) - dt.timedelta(days=14)
     hi = max(o_dates + r_dates + [as_of]) + dt.timedelta(days=21)
     grid: list[dt.date] = []
@@ -252,7 +296,7 @@ def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, su
             grid.append(d)
         d += dt.timedelta(days=1)
     if not grid:
-        return OtdData(as_of, [], [], 0, False, arts, names, windows)
+        return OtdData(as_of, [], [], 0, False, arts, names, factors, weekdays)
 
     def idx(day: dt.date) -> int:
         return min(bisect_left(grid, day), len(grid) - 1)
@@ -301,6 +345,7 @@ def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, su
                 if d0 is not None:
                     issue[key] = d0 if key not in issue else min(issue[key], d0)
     rec: dict[tuple[str, str], dict[int, list]] = defaultdict(dict)       # [qty, bls list, n]
+    day_rec: dict[str, dict[dt.date, tuple[float, list[str]]]] = defaultdict(dict)
     bl_rows: list[BlRow] = []
     seen_bl: set[tuple[str, str]] = set()
     unmatched = 0
@@ -325,14 +370,15 @@ def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, su
             cell[0] += qty
             cell[1].extend(bls)
             cell[2] += 1
+            prev = day_rec[sid].get(grid[i], (0.0, []))
+            day_rec[sid][grid[i]] = (prev[0] + qty, sorted(set(prev[1]) | set(bls)))
 
     # ---- evaluation per pair
     lines: list[OtdLine] = []
     for (sid, aid), days in exp.items():
         rd = rec.get((sid, aid), {})
-        window = windows.get(sid, 1)
         factor = factors.get(sid, 2)
-        h = window + band2
+        h = band2
         lo_i = min(min(days), min(rd) if rd else min(days))
         hi_i = max(max(days), max(rd) if rd else max(days))
         n = hi_i - lo_i + 1
@@ -365,7 +411,7 @@ def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, su
             e = days[i]
             k = i - lo_i
             r_day, e_qty = float(R[k]), float(E[k])
-            line = OtdLine(sid, aid, grid[i], e_qty, r_day, float(e[1]), int(e[2]), " | ".join(sorted(e[3])), e[6], window, round(tol, 3), round(float(excess[k]), 3),
+            line = OtdLine(sid, aid, grid[i], e_qty, r_day, float(e[1]), int(e[2]), " | ".join(sorted(e[3])), e[6], round(tol, 3), round(float(excess[k]), 3),
                            first_seen=e[4], lead_promised=link_lead.get((aid, sid), leads.get(sid, 5)), urgent=bool(e[5]))
             j: int | None = None
             carry_first: int | None = None
@@ -419,7 +465,7 @@ def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, su
                 line.status = "ouverte"
             if line.evaluable:
                 line.qty_score = 100.0 if j is not None and excess[k] <= tol + EPS else 0.0     # in full within the evaluation horizon
-                line.punct_score = punctuality_score(line.delta, window, params) if line.delta is not None else 0.0
+                line.punct_score = punctuality_score(line.delta, params) if line.delta is not None else 0.0
             lo_k = min(k, carry_first) if carry_first is not None else k
             hi_k = max(k, j) if j is not None else k
             bls: list[str] = []
@@ -440,7 +486,7 @@ def build(orders: pd.DataFrame, receipts: pd.DataFrame, desadv: pd.DataFrame, su
                     line.ship_to_receipt = round(sum(gaps) / len(gaps), 1)
             lines.append(line)
     lines.sort(key=lambda x: (x.day, x.supplier_id, x.article_id))
-    return OtdData(as_of, lines, bl_rows, unmatched, first_seen_available, arts, names, windows)
+    return OtdData(as_of, lines, bl_rows, unmatched, first_seen_available, arts, names, factors, weekdays, dict(day_rec))
 
 
 def i_of(grid: list[dt.date], day: dt.date) -> int:
@@ -487,15 +533,145 @@ def _select(data: OtdData, date_from: dt.date, date_to: dt.date, supplier_ids: l
     return lines, bls
 
 
-def line_dict(x: OtdLine, data: OtdData) -> dict[str, Any]:
+def line_dict(x: OtdLine, data: OtdData, params: EngineParams) -> dict[str, Any]:
     a = data.articles.get(x.article_id, ("", "", ""))
     return {"id": x.key, "date": x.day.isoformat(), "shifted_from": x.shifted_from.isoformat() if x.shifted_from else None,
             "supplier_id": x.supplier_id, "supplier_name": data.names.get(x.supplier_id, ""), "article_id": x.article_id, "designation": a[0], "unit": a[1], "planner": a[2],
             "purch": x.purch, "order_count": x.order_count, "expected": x.expected, "received": round(x.received, 3), "excess": x.excess, "tolerance": x.tolerance,
-            "completed": x.completed.isoformat() if x.completed else None, "delta": x.delta, "window": x.window, "status": x.status,
+            "completed": x.completed.isoformat() if x.completed else None, "delta": x.delta, "status": x.status, "reason": reason(x, params),
             "qty_score": x.qty_score, "punct_score": x.punct_score, "receipt_days": x.receipt_days, "bls": x.bls,
             "first_seen": x.first_seen.isoformat() if x.first_seen else None, "lead_promised": x.lead_promised, "lead_observed": x.lead_observed,
             "bias": x.bias, "urgent": x.urgent}
+
+
+def band_labels(params: EngineParams) -> list[tuple[str, float]]:
+    """The four punctuality bands as (label, score) : the day, band 1, band 2, beyond."""
+    b1, b2 = max(int(params.otd_band1_days), 0), max(int(params.otd_band2_days), 0)
+    return [("le jour", 100.0), (f"1 à {b1} j" if b1 > 1 else "1 j", float(params.otd_band1_score)),
+            (f"{b1 + 1} à {b2} j" if b2 > b1 + 1 else f"{b2} j", float(params.otd_band2_score)), ("au-delà ou non livré", 0.0)]
+
+
+def band_index(delta: int | None, params: EngineParams) -> int:
+    if delta is None:
+        return 3
+    eff = abs(int(delta))
+    if eff == 0:
+        return 0
+    if eff <= max(int(params.otd_band1_days), 0):
+        return 1
+    if eff <= max(int(params.otd_band2_days), 0):
+        return 2
+    return 3
+
+
+def reason(x: OtdLine, params: EngineParams) -> str:
+    """One French sentence that reads the two scores of the line (the « Pourquoi » column)."""
+    b2 = max(int(params.otd_band2_days), 0)
+    if x.status == "ouverte":
+        return f"en attente : les {b2} jours ouvrés d'évaluation ne sont pas écoulés"
+    if x.status == "non évaluable":
+        return "reçue d'après l'ERP, aucune réception dans l'extraction : non notée"
+    if x.status == "non livrée":
+        return f"rien de complet dans les {b2} jours ouvrés → quantité 0, ponctualité 0"
+    bands = band_labels(params)
+    i = band_index(x.delta, params)
+    d = int(x.delta or 0)
+    if d == 0:
+        head = "reçu le jour → 100"
+    else:
+        sign = "+" if d > 0 else "−"
+        kind = "de retard" if d > 0 else "d'avance"
+        head = f"{sign}{abs(d)} j {kind} → tranche {bands[i][0]} → {bands[i][1]:.0f}"
+    if x.excess > x.tolerance + EPS:
+        return f"{head} ; excédent {x.excess:,.0f} au-delà de la tolérance {x.tolerance:,.0f} → quantité 0".replace(",", " ")
+    if d > 0:
+        return f"{head} ; complet dans les {b2} j, quantité acquise"
+    return head
+
+
+def _day_cell(day: dt.date, lines: list[OtdLine], rec: tuple[float, list[str]] | None) -> dict[str, Any]:
+    ev = [x for x in lines if x.evaluable]
+    status = ("non livrée" if any(x.status == "non livrée" for x in lines) else "reçue" if ev else
+              "ouverte" if any(x.status == "ouverte" for x in lines) else "non évaluable" if lines else "")
+    return {"date": day.isoformat(), "expected": round(sum(x.expected for x in lines), 3), "lines": len(lines), "status": status,
+            "received": round(rec[0], 3) if rec else 0.0, "bls": rec[1] if rec else [],
+            "qty_score": _mean([x.qty_score for x in ev]), "punct_score": _mean([x.punct_score for x in ev]),
+            "delta": _mean([float(x.delta) for x in ev if x.delta is not None]),
+            "completed": sorted({x.completed.isoformat() for x in lines if x.completed})}
+
+
+def sheet(data: OtdData, params: EngineParams, supplier_id: str, month: str, history: int = 12) -> dict[str, Any]:
+    """The **supplier × month sheet** : the formula with its figures, the three indicators decomposed, the weeks of the
+    month day by day, the evaluated lines with their reading, the monthly history."""
+    mon0, sun1 = month_bounds(month)
+    all_lines = [x for x in data.lines if x.supplier_id == supplier_id]
+    lines = [x for x in all_lines if mon0 <= x.day <= sun1]
+    rows = [x for x in lines if x.evaluable]
+    bls = sorted((b for b in data.bls if b.supplier_id == supplier_id and mon0 <= b.day <= sun1), key=lambda b: (b.day, b.bl))
+    g = _group(rows, bls, params)
+    w = (float(params.otd_weight_qty), float(params.otd_weight_punctuality), float(params.otd_weight_desadv))
+    total = sum(w) or 100.0
+    pts = {"qty": round(w[0] * (g["qty"] or 0.0) / total, 1) if g["qty"] is not None else None,
+           "punctuality": round(w[1] * (g["punctuality"] or 0.0) / total, 1) if g["punctuality"] is not None else None,
+           "desadv": round(w[2] * (g["desadv"] or 0.0) / total, 1) if g["desadv"] is not None else None,
+           "max": {"qty": round(100 * w[0] / total, 1), "punctuality": round(100 * w[1] / total, 1), "desadv": round(100 * w[2] / total, 1)}}
+    pts["lost"] = round(100.0 - g["otd"], 1) if g["otd"] is not None else None
+    bands = [{"label": lab, "score": sc, "count": 0} for lab, sc in band_labels(params)]
+    for x in rows:
+        bands[band_index(x.delta if x.status == "reçue" else None, params)]["count"] += 1
+    deltas = [x.delta for x in rows if x.delta is not None]
+    rec = data.receipts.get(supplier_id, {})
+    working = set(params.working_weekdays) or {1, 2, 3, 4, 5}
+    by_day: dict[dt.date, list[OtdLine]] = defaultdict(list)
+    for x in lines:
+        by_day[x.day].append(x)
+    weeks = []
+    for monday in month_weeks(month):
+        days = []
+        for k in range(7):
+            day = monday + dt.timedelta(days=k)
+            if day.isoweekday() in working or day in by_day or day in rec:
+                days.append(_day_cell(day, by_day.get(day, []), rec.get(day)))
+        weeks.append({"label": iso_week_label(monday), "monday": monday.isoformat(), "sunday": (monday + dt.timedelta(days=6)).isoformat(), "days": days})
+    hist = []
+    for n in range(history - 1, -1, -1):
+        lab = shift_month(month, -n)
+        a, b = month_bounds(lab)
+        hs = [x for x in all_lines if a <= x.day <= b and x.evaluable]
+        hb = [x for x in data.bls if x.supplier_id == supplier_id and a <= x.day <= b]
+        hist.append({"period": lab, "start": a.isoformat(), **_group(hs, hb, params)})
+    planners = sorted({data.articles.get(x.article_id, ("", "", ""))[2] for x in lines} - {""})
+    detail = sorted(lines, key=lambda x: (x.day, x.article_id))
+    return {"as_of": data.as_of.isoformat(), "supplier_id": supplier_id, "name": data.names.get(supplier_id, ""), "planners": planners,
+            "delivery_weekdays": data.weekdays.get(supplier_id, ""), "tolerance_factor": data.factors.get(supplier_id, 2),
+            "month": month, "label": month_label(month), "from": mon0.isoformat(), "to": sun1.isoformat(),
+            "weeks_count": len(weeks), "articles": len({x.article_id for x in lines}),
+            "params": {"weights": {"qty": params.otd_weight_qty, "punctuality": params.otd_weight_punctuality, "desadv": params.otd_weight_desadv},
+                       "band1_days": params.otd_band1_days, "band1_score": params.otd_band1_score, "band2_days": params.otd_band2_days, "band2_score": params.otd_band2_score},
+            "scores": {**g, "points": pts},
+            "quantity": {"complete": sum(1 for x in rows if x.qty_score == 100), "total": len(rows), "not_delivered": g["not_delivered"],
+                         "excess": sum(1 for x in rows if x.excess > x.tolerance + EPS)},
+            "punctuality": {"bands": bands, "delay_mean": _mean([float(d) for d in deltas]), "late": sum(1 for d in deltas if d > 0), "early": sum(1 for d in deltas if d < 0)},
+            "desadv": [{"bl": b.bl, "date": b.day.isoformat(), "ok": b.ok} for b in bls],
+            "weeks": weeks, "history": hist, "open": sum(1 for x in lines if x.status == "ouverte"), "not_evaluable": sum(1 for x in lines if x.status == "non évaluable"),
+            "lines": [line_dict(x, data, params) for x in detail]}
+
+
+def sheet_summary(data: OtdData, params: EngineParams, month: str, supplier_ids: Iterable[str] | None = None, planner: str | None = None) -> list[dict[str, Any]]:
+    """One row per supplier evaluated over the month (the summary table of the portfolio closing)."""
+    mon0, sun1 = month_bounds(month)
+    lines, bls = _select(data, mon0, sun1, list(supplier_ids) if supplier_ids else None, None, planner)
+    by_sup: dict[str, list[OtdLine]] = defaultdict(list)
+    for x in lines:
+        if x.evaluable:
+            by_sup[x.supplier_id].append(x)
+    bl_sup: dict[str, list[BlRow]] = defaultdict(list)
+    for b in bls:
+        bl_sup[b.supplier_id].append(b)
+    out = [{"supplier_id": sid, "name": data.names.get(sid, ""), **_group(ss, bl_sup.get(sid, []), params), "articles": len({x.article_id for x in ss})}
+           for sid, ss in by_sup.items()]
+    out.sort(key=lambda r: ((r["otd"] if r["otd"] is not None else 101), r["name"]))
+    return out
 
 
 def otd_report(data: OtdData, params: EngineParams, bucket: str = "month", date_from: dt.date | None = None, date_to: dt.date | None = None,
@@ -518,7 +694,7 @@ def otd_report(data: OtdData, params: EngineParams, bucket: str = "month", date_
         sb = bl_sup.get(sid, [])
         series = [{"period": lab, "start": bucket_start(lab).isoformat(),
                    **_group([x for x in ss if bucket_label(x.day, bucket) == lab], [b for b in sb if bucket_label(b.day, bucket) == lab], params)} for lab in labels]
-        suppliers.append({"supplier_id": sid, "name": data.names.get(sid, ""), **_group(ss, sb, params), "window": data.windows.get(sid, 1),
+        suppliers.append({"supplier_id": sid, "name": data.names.get(sid, ""), **_group(ss, sb, params),
                           "articles": len({x.article_id for x in ss}), "series": series})
     suppliers.sort(key=lambda r: ((r["otd"] if r["otd"] is not None else 101), -r["n"]))
     totals = {**_portfolio(suppliers),
@@ -530,7 +706,7 @@ def otd_report(data: OtdData, params: EngineParams, bucket: str = "month", date_
             "totals": totals, "suppliers": suppliers,
             "not_evaluable": sum(1 for x in win if x.status == "non évaluable"), "open": sum(1 for x in win if x.status == "ouverte"),
             "unmatched_receipts": data.unmatched_receipts, "first_seen_available": data.first_seen_available,
-            "lines": [line_dict(x, data) for x in detail[:max_lines]], "truncated": len(detail) > max_lines}
+            "lines": [line_dict(x, data, params) for x in detail[:max_lines]], "truncated": len(detail) > max_lines}
 
 
 def _weekday_profile(days: list[dt.date]) -> list[float]:
@@ -551,7 +727,7 @@ def _lead_row(ss: list[OtdLine], params: EngineParams) -> dict[str, Any]:
             "on_time_pct": round(100.0 * sum(1 for d in deltas if d == 0) / nd, 1) if nd else None,
             "early_pct": round(100.0 * sum(1 for d in deltas if d < 0) / nd, 1) if nd else None,
             "late_pct": round(100.0 * sum(1 for d in deltas if d > 0) / nd, 1) if nd else None,
-            "late_beyond_pct": round(100.0 * sum(1 for x in done if x.delta is not None and x.delta - x.window > params.otd_band2_days) / nd, 1) if nd else None,
+            "late_beyond_pct": round(100.0 * sum(1 for x in done if x.delta is not None and x.delta > params.otd_band2_days) / nd, 1) if nd else None,
             "recurring_late": nd >= 3 and sum(1 for d in deltas if d > 0) / nd >= 0.5,
             "lead_promised": promised[0] if len(promised) == 1 else (f"{promised[0]}–{promised[-1]}" if promised else None),
             "lead_observed_mean": _mean([x.lead_observed for x in done]),

@@ -22,6 +22,7 @@ const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const HelpPage = lazy(() => import("@/pages/HelpPage"));
 const SupplierPortalPage = lazy(() => import("@/pages/SupplierPortalPage"));
 const PerformancePage = lazy(() => import("@/pages/PerformancePage"));
+const OtdSheetPage = lazy(() => import("@/pages/OtdSheetPage"));
 
 /** The search page can be hidden again by turning this off (no menu entry, no route). */
 const SEARCH_ENABLED = true;
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="/imports" element={<ImportsPage />} />
         <Route path="/referentiel" element={<ReferencePage />} />
         <Route path="/performance" element={<PerformancePage />} />
+        <Route path="/performance/otd/:supplierId/:month" element={<OtdSheetPage />} />
         <Route path="/parametres" element={<SettingsPage />} />
         <Route path="/aide" element={<HelpPage />} />
         <Route path="/aide/:slug" element={<HelpPage />} />

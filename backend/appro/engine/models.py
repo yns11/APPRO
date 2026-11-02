@@ -364,11 +364,11 @@ class EngineParams:
     cutoff_passed: tuple[str, ...] = ()           # suppliers whose order cut-off hour is already past today : their orders leave tomorrow
     # --- supplier service (OTD) : weights (%) and punctuality bands (days early or late → score)
     otd_weight_qty: int = 30                      # QUANTITÉ : the expected quantity of the day is received in full within the horizon (services/otd.py)
-    otd_weight_punctuality: int = 50              # PONCTUALITÉ : 100 inside the supplier's window ; band 1 → score 1 ; band 2 → score 2 ; beyond → 0
+    otd_weight_punctuality: int = 50              # PONCTUALITÉ : 100 on the exact day ; band 1 → score 1 ; band 2 → score 2 ; beyond → 0
     otd_weight_desadv: int = 20                   # DESADV : share of the delivery notes announced by a processed DESADV
-    otd_band1_days: int = 2                       # 1 … n working days beyond the window → otd_band1_score
+    otd_band1_days: int = 2                       # 1 … n working days away from the expected day → otd_band1_score
     otd_band1_score: int = 60
-    otd_band2_days: int = 4                       # band1 + 1 … n working days beyond the window → otd_band2_score ; beyond → 0
+    otd_band2_days: int = 5                       # band1 + 1 … n working days away → otd_band2_score ; beyond → 0 (also the evaluation horizon)
     otd_band2_score: int = 20
     # --- stock policy segmentation (ABC by yearly value, XYZ by variability of the weekly consumption)
     abc_a_pct: int = 80                           # A : articles making the first n % of the cumulated yearly value

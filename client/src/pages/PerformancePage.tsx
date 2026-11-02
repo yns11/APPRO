@@ -1,16 +1,16 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { CalendarRange, CheckCircle2, Gauge, Layers, PackageCheck, Timer, Truck, Wand2 } from "lucide-react";
+import { CalendarRange, CheckCircle2, FileText, Gauge, Layers, Lock, PackageCheck, Timer, Truck, Wand2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useLeadTimes, useOtd, useSegmentation, useSupplierNames, useWrite } from "@/lib/queries";
+import { useLeadTimes, useOtd, useOtdMonths, useSegmentation, useSupplierNames, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useRemembered } from "@/lib/pageState";
 import { ArticleLink, Badge, Button, Card, Empty, ErrorBox, Kpi, Segmented, Skeleton, SkeletonBlock, SupplierLink, Tabs, useToast } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
 import { SearchSelect } from "@/components/SearchSelect";
-import { OtdChart } from "@/components/charts/OtdChart";
+import { OtdChart, periodTick } from "@/components/charts/OtdChart";
 import { fmtDate, fmtEur, fmtInt, fmtQty } from "@/lib/format";
-import type { LeadArticle, LeadSupplier, OtdBucket, OtdLine, OtdSupplier, SegmentRow } from "@/lib/types";
+import type { LeadArticle, LeadSupplier, OtdBucket, OtdLine, OtdMonths, OtdSupplier, SegmentRow } from "@/lib/types";
 
 type Tab = "otd" | "lead" | "segments";
 const TABS: { id: Tab; label: string }[] = [{ id: "otd", label: "Service fournisseur (OTD)" }, { id: "lead", label: "Délais observés" }, { id: "segments", label: "Segmentation ABC / XYZ" }];
@@ -79,7 +79,7 @@ export default function PerformancePage() {
           </div>
         </Card>
       )}
-      {tab === "otd" && <OtdTab params={{ ...common, bucket }} />}
+      {tab === "otd" && <OtdTab params={{ ...common, bucket }} planner={perimeter.planner ?? undefined} supplier={supplier || undefined} />}
       {tab === "lead" && <LeadTab params={common} />}
       {tab === "segments" && <SegmentsTab />}
     </div>
@@ -87,31 +87,43 @@ export default function PerformancePage() {
 }
 
 /* ---------------------------------------------------------------- OTD */
-function OtdTab({ params }: { params: Record<string, string | undefined> }) {
+const sheetUrl = (supplierId: string, month: string) => `/performance/otd/${encodeURIComponent(supplierId)}/${month}`;
+
+function OtdTab({ params, planner, supplier }: { params: Record<string, string | undefined>; planner?: string; supplier?: string }) {
   const q = useOtd(params);
   const d = q.data;
+  const months = useOtdMonths();
+  const lastClosed = months.data?.last_closed;
   const [showLines, setShowLines] = useRemembered("perf.otd.lines", false);
+  // one column per month of the period (month buckets only, the last twelve) : each score opens the supplier × month sheet
+  const monthCols = useMemo<Column<OtdSupplier>[]>(() => (d?.bucket !== "month" ? [] : d.periods.slice(-12).map((m, i, all) => ({
+    key: `m:${m}`, label: periodTick(m), num: true, export: "number", title: `OTD ${m} · un clic ouvre la fiche du mois`,
+    get: (s: OtdSupplier) => s.series[d.periods.length - all.length + i]?.otd ?? null,
+    render: (s: OtdSupplier) => { const v = s.series[d.periods.length - all.length + i]?.otd; return v === null || v === undefined ? <span className="subtle">–</span> : <Link className={`month-cell ${tone(v)}`} to={sheetUrl(s.supplier_id, m)}>{v.toFixed(0)}</Link>; },
+  }))), [d]);
   const supCols = useMemo<Column<OtdSupplier>[]>(() => [
     { key: "supplier", label: "Fournisseur", get: (s) => `${s.supplier_id ?? ""} ${s.name}`, render: (s) => <SupplierLink id={s.supplier_id} name={s.name} /> },
     { key: "n", label: "Jours", get: (s) => s.n, num: true, title: "Jours de livraison attendus et évalués sur la période" },
     { key: "otd", label: "OTD", get: (s) => s.otd, num: true, export: "number", render: (s) => <ScoreBar v={s.otd} /> },
+    ...monthCols,
     { key: "qty", label: "Quantité", get: (s) => s.qty, num: true, export: "number", render: (s) => <Badge tone={tone(s.qty)}>{pct(s.qty)}</Badge> },
     { key: "punct", label: "Ponctualité", get: (s) => s.punctuality, num: true, export: "number", render: (s) => <Badge tone={tone(s.punctuality)}>{pct(s.punctuality)}</Badge> },
     { key: "desadv", label: "DESADV", get: (s) => s.desadv, num: true, export: "number", title: "Part des BL de la période annoncés par un DESADV traité", render: (s) => <Badge tone={tone(s.desadv)}>{pct(s.desadv)}</Badge> },
     { key: "nd", label: "Non livrés", get: (s) => s.not_delivered, num: true, render: (s) => s.not_delivered ? <b style={{ color: "var(--critical-fg)" }}>{s.not_delivered}</b> : <span className="subtle">0</span> },
-    { key: "window", label: "Fenêtre", get: (s) => s.window, num: true, hidden: true, title: "Jours ouvrés tolérés de part et d'autre du jour attendu", render: (s) => `±${s.window} j` },
     { key: "articles", label: "Articles", get: (s) => s.articles, num: true, hidden: true },
-  ], []);
+    { key: "sheet", label: "", get: () => "", filter: "none", sortable: false, export: false, width: 36, render: (s) => <Link className="btn ghost sm" to={sheetUrl(s.supplier_id, lastClosed ?? (d?.periods.length ? d.periods[d.periods.length - 1] : ""))} title={`Fiche OTD du dernier mois clos${lastClosed ? ` (${periodTick(lastClosed)})` : ""}`} aria-label={`Fiche OTD de ${s.name}`}><FileText size={14} /></Link> },
+  ], [monthCols, lastClosed, d?.periods]);
   const lineCols = useMemo<Column<OtdLine>[]>(() => [
     { key: "date", label: "Jour", get: (o) => o.date, render: (o) => <>{fmtDate(o.date)}{o.shifted_from && <span className="sub" title="Créneau ERP sur un jour fermé, déplacé au jour ouvré suivant">ERP {fmtDate(o.shifted_from)}</span>}</> },
     { key: "supplier", label: "Fournisseur", get: (o) => `${o.supplier_id ?? ""} ${o.supplier_name}`, render: (o) => <SupplierLink id={o.supplier_id} name={o.supplier_name} inline /> },
     { key: "article", label: "Article", get: (o) => `${o.article_id} ${o.designation}`, exportGet: (o) => o.article_id, render: (o) => <ArticleLink id={o.article_id} designation={o.designation} /> },
     { key: "expected", label: "Attendu", get: (o) => o.expected, num: true, render: (o) => fmtQty(o.expected, o.unit) },
     { key: "received", label: "Reçu le jour", get: (o) => o.received, num: true, title: "Quantité reçue le jour attendu ; la quantité est acquise dès que la ligne est complète dans le délai d'évaluation", render: (o) => <>{fmtQty(o.received, o.unit)}{o.excess > o.tolerance && <span className="sub" style={{ color: "var(--critical-fg)" }}>excédent {fmtQty(o.excess)}</span>}</> },
-    { key: "delta", label: "Écart", get: (o) => o.delta, num: true, title: "Jours ouvrés entre le jour attendu et la quantité complète (négatif = avance)", render: (o) => o.delta === null ? <span className="subtle">–</span> : <span style={{ color: o.delta > o.window ? "var(--critical-fg)" : o.delta < -o.window ? "var(--info-fg)" : undefined }}>{o.delta === 0 ? "le jour" : days(o.delta)}</span> },
+    { key: "delta", label: "Écart", get: (o) => o.delta, num: true, title: "Jours ouvrés entre le jour attendu et la quantité complète (négatif = avance)", render: (o) => o.delta === null ? <span className="subtle">–</span> : <span style={{ color: o.delta > 0 ? "var(--critical-fg)" : o.delta < 0 ? "var(--info-fg)" : undefined }}>{o.delta === 0 ? "le jour" : days(o.delta)}</span> },
     { key: "qs", label: "Quantité", get: (o) => o.qty_score, num: true, export: "number", render: (o) => o.qty_score === null ? <span className="subtle">–</span> : <Badge tone={tone(o.qty_score)}>{o.qty_score}</Badge> },
     { key: "ps", label: "Ponctualité", get: (o) => o.punct_score, num: true, export: "number", render: (o) => o.punct_score === null ? <span className="subtle">–</span> : <Badge tone={tone(o.punct_score)}>{o.punct_score}</Badge> },
     { key: "status", label: "Statut", get: (o) => o.status, filter: "select", render: (o) => <Badge tone={o.status === "reçue" ? "ok" : o.status === "non livrée" ? "critical" : "neutral"}>{o.status}</Badge> },
+    { key: "reason", label: "Pourquoi", get: (o) => o.reason, filter: "none", render: (o) => <span className="small subtle" style={{ whiteSpace: "normal", display: "block", minWidth: 240 }}>{o.reason}</span> },
     { key: "purch", label: "Commandes", get: (o) => o.purch, hidden: true, render: (o) => <span className="mono small">{o.purch}{o.order_count > 1 ? ` (${o.order_count})` : ""}</span> },
     { key: "completed", label: "Complet le", get: (o) => o.completed ?? "", hidden: true, render: (o) => o.completed ? fmtDate(o.completed) : <span className="subtle">–</span> },
     { key: "bls", label: "BL", get: (o) => o.bls.join(", "), hidden: true },
@@ -133,7 +145,8 @@ function OtdTab({ params }: { params: Record<string, string | undefined> }) {
       <Card title="Évolution" hint={`par ${BUCKETS.find((b) => b.id === d?.bucket)?.label.toLowerCase() ?? "période"}`} collapsible storageKey="perf.otd.chart">
         {q.isLoading || !d ? <Skeleton h={240} /> : d.totals.series.length === 0 ? <Empty title="Aucun jour évalué sur la période" hint="Élargir la période ou retirer les filtres." /> : <OtdChart series={d.totals.series} target={90} height={240} />}
       </Card>
-      <Card flush title="Par fournisseur" actions={<Button size="sm" variant={showLines ? "primary" : "default"} onClick={() => setShowLines(!showLines)}>Détail par jour</Button>}>
+      <ClosingCard months={months.data} planner={planner} supplier={supplier} />
+      <Card flush title="Par fournisseur" hint={d?.bucket === "month" ? "un score mensuel ouvre la fiche du fournisseur pour ce mois" : undefined} actions={<Button size="sm" variant={showLines ? "primary" : "default"} onClick={() => setShowLines(!showLines)}>Détail par jour</Button>}>
         {q.isLoading || !d ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={d.suppliers} columns={supCols} rowKey={(s) => s.supplier_id ?? "none"} compact maxHeight="50vh" storageKey="perf.otd.suppliers2" exportTitle="OTD par fournisseur" emptyTitle="Aucun jour évalué" />}
       </Card>
       {showLines && d && (
@@ -142,6 +155,36 @@ function OtdTab({ params }: { params: Record<string, string | undefined> }) {
         </Card>
       )}
     </>
+  );
+}
+
+/** The monthly closing : choose a month, read its state, print the portfolio report, freeze the month (managers). */
+function ClosingCard({ months, planner, supplier }: { months: OtdMonths | undefined; planner?: string; supplier?: string }) {
+  const { rights } = usePerimeter();
+  const toast = useToast();
+  const [picked, setPicked] = useState<string>("");
+  const month = picked || months?.last_closed || "";
+  const options = useMemo(() => { const all = new Set(months?.months ?? []); if (months?.last_closed) all.add(months.last_closed); return Array.from(all).sort().reverse(); }, [months]);
+  const closing = months?.closings[month];
+  const closable = !!months && month <= months.last_closed;
+  const close = useWrite((force: boolean) => api.post<{ suppliers: number; closed_at: string }>("/api/performance/otd/close", { month, force }),
+    (r) => toast.push(`${periodTick(month)} arrêté : ${r.suppliers} fournisseur(s) figé(s)`, "success"));
+  const pdf = api.downloadUrl("/api/performance/otd/arrete.pdf", { month, planner, supplier_id: supplier });
+  return (
+    <Card tight>
+      <div className="row wrap" style={{ alignItems: "center" }}>
+        <b>Arrêté mensuel</b>
+        <select className="select sm" style={{ width: 140 }} value={month} onChange={(e) => setPicked(e.target.value)} aria-label="Mois de l'arrêté">
+          {options.map((m) => <option key={m} value={m}>{periodTick(m)}{months?.closings[m] ? " · arrêté" : ""}</option>)}
+        </select>
+        {!months ? <Skeleton w={160} /> : closing ? <Badge tone="brand" title={`par ${closing.closed_by}`}><Lock size={12} /> arrêté le {fmtDate(closing.closed_at, "dd/MM/yyyy HH:mm")} · {closing.suppliers} fournisseur(s)</Badge>
+          : closable ? <Badge tone="neutral">non arrêté · chiffres du jour</Badge> : <Badge tone="warning">mois en cours</Badge>}
+        <a className="btn sm" href={pdf} target="_blank" rel="noopener" title={supplier ? "Arrêté du fournisseur choisi" : "Tableau récapitulatif de tous les fournisseurs, puis une page par fournisseur"}><FileText />PDF {supplier ? "du fournisseur" : "portefeuille"}</a>
+        {rights.canManageParams && closable && !closing && <Button size="sm" variant="primary" disabled={close.isPending} onClick={() => { if (window.confirm(`Arrêter ${periodTick(month)} ? Les chiffres de chaque fournisseur sont figés pour le rapport mensuel.`)) close.mutate(false); }}><Lock />Arrêter le mois</Button>}
+        {rights.isAdmin && closing && <Button size="sm" disabled={close.isPending} onClick={() => { if (window.confirm(`Refaire l'arrêté de ${periodTick(month)} avec les chiffres du jour ? L'arrêté précédent est remplacé.`)) close.mutate(true); }}>Refaire l'arrêté</Button>}
+        <span className="subtle small" style={{ marginLeft: "auto" }}>dernier mois clos {months?.last_closed ? periodTick(months.last_closed) : "–"} · mois = semaines entières, rattachées au mois de leur mercredi</span>
+      </div>
+    </Card>
   );
 }
 

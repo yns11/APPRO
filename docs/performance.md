@@ -36,7 +36,9 @@ budget est servi sans être gardé). `/api/health` expose `cache.entries`, `cach
 Relevé du 01/11/2026 après la réécriture de l'OTD (`services/otd.py` : grille de jours ouvrés, lignes évaluées une
 fois par version des données et gardées en cache) : `GET /api/performance/otd` **17 ms** à chaud (166 ms avant) ;
 construction des lignes 850 ms pour 38 600 créneaux et 24 000 réceptions (jeu de démonstration répliqué 50 fois),
-rapport 170 ms sur 19 000 lignes.
+rapport 170 ms sur 19 000 lignes. La fiche fournisseur × mois (`/otd/sheet`) et le PDF d'arrêté relisent ces mêmes
+lignes en cache : quelques millisecondes pour la fiche, le PDF portefeuille dépend du nombre de fournisseurs (une
+page chacun).
 
 ## Ce que les chiffres disent
 

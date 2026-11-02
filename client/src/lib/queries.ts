@@ -4,7 +4,7 @@ import { api, type Params } from "./api";
 import type {
   ActionOut, AdherenceResponse, AdjustmentOut, ArticleRef, AuditOut, BacklogRow, CockpitResponse, ConsumptionSourceOption, DeliveryPlanResponse, FixedRule, FlagOut, GridResponse, HelpPage, HelpPageSummary, LinkRef, OrphanRow, ParamDoc, ParamOverrideOut,
   FlowsResponse, PdpSheetOut, PdpVersionOut, PerimeterOut, PlanCellOut, PlantCalendar, SearchResponse, ProgramImpactResponse, ProgramRef, ProjectionResponse, RefRow, RefTableInfo, SupplierDetail, SupplierRef, SyncStatus, WeeklyParamsResponse,
-  ExceptionQueue, LeadTimeResponse, OtdResponse, SegmentationResponse,
+  ExceptionQueue, LeadTimeResponse, OtdMonths, OtdResponse, OtdSheet, SegmentationResponse,
 } from "./types";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useToast } from "@/components/ui";
@@ -110,6 +110,9 @@ export const useAdherence = (params: Params, enabled = true) => useQuery({ query
 
 /** Supplier performance (OTD, observed lead times), segmentation and the exception queue. */
 export const useOtd = (params: Params, enabled = true) => useQuery({ queryKey: ["perf-otd", params], queryFn: () => api.get<OtdResponse>("/api/performance/otd", params), enabled, staleTime: 60_000, placeholderData: keepPreviousData });
+export const useOtdSheet = (supplierId: string | undefined, month: string | undefined) => useQuery({ queryKey: ["perf-otd-sheet", supplierId, month], enabled: !!supplierId && !!month, staleTime: 60_000, placeholderData: keepPreviousData,
+  queryFn: () => api.get<OtdSheet>("/api/performance/otd/sheet", { supplier_id: supplierId, month }) });
+export const useOtdMonths = () => useQuery({ queryKey: ["perf-otd-months"], queryFn: () => api.get<OtdMonths>("/api/performance/otd/months"), staleTime: 60_000 });
 export const useLeadTimes = (params: Params, enabled = true) => useQuery({ queryKey: ["perf-lead", params], queryFn: () => api.get<LeadTimeResponse>("/api/performance/lead-times", params), enabled, staleTime: 60_000, placeholderData: keepPreviousData });
 export const useSegmentation = (params: Params) => useQuery({ queryKey: ["perf-seg", params], queryFn: () => api.get<SegmentationResponse>("/api/performance/segmentation", params), staleTime: 60_000, placeholderData: keepPreviousData });
 export function useExceptions() {

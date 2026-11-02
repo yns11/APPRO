@@ -60,8 +60,8 @@ def test_daily_nominal_and_the_rule_derivation():
     L = lines(DAILY, dict(DAILY))
     assert all(x.qty_score == 100 and x.punct_score == 100 and x.delta == 0 and x.status == "reçue" for x in L.values())
     x = L[3]
-    assert x.window == 0 and x.tolerance == pytest.approx(512) and x.excess == 0 and x.order_count == 1 and x.purch == "CO-1"
-    assert otd.supplier_window("1,4") == 1 and otd.supplier_window("1,2,3") == 0 and otd.supplier_window("") == 1
+    assert x.tolerance == pytest.approx(512) and x.excess == 0 and x.order_count == 1 and x.purch == "CO-1"
+    assert otd.reason(x, PARAMS) == "reçu le jour → 100" and otd.band_labels(PARAMS) == [("le jour", 100.0), ("1 à 2 j", 60.0), ("3 à 5 j", 20.0), ("au-delà ou non livré", 0.0)]
     assert otd.tolerance_factor("1,4") == 1 and otd.tolerance_factor("2") == 2 and otd.tolerance_factor("") == 2
 
 
@@ -80,10 +80,12 @@ def test_daily_three_days_late_and_never_delivered():
     r[7] = 1024.0
     L = lines(DAILY, r)
     assert (L[4].qty_score, L[4].delta, L[4].punct_score, score(L[4])) == (100, 3, 20, 60) and L[5].punct_score == 100 and L[6].punct_score == 100
+    assert otd.reason(L[4], PARAMS) == "+3 j de retard → tranche 3 à 5 j → 20 ; complet dans les 5 j, quantité acquise"
     r = dict(DAILY)
     r[4] = 0.0
     L = lines(DAILY, r)
     assert L[4].status == "non livrée" and L[4].evaluable and (L[4].qty_score, L[4].punct_score) == (0, 0) and score(L[4]) == 20
+    assert otd.reason(L[4], PARAMS) == "rien de complet dans les 5 jours ouvrés → quantité 0, ponctualité 0"
     assert all(L[i].qty_score == 100 for i in range(5, 11))                                 # what was missing before does not count
 
 
@@ -107,7 +109,9 @@ def test_daily_grouped_deliveries_tolerance_and_advance():
     r[4], r[5], r[6] = 1536.0, 0.0, 0.0
     L = lines(DAILY, r)
     assert (L[4].qty_score, L[4].punct_score, L[4].excess) == (0, 100, 1024) and score(L[4]) == 70
+    assert otd.reason(L[4], PARAMS) == "reçu le jour → 100 ; excédent 1 024 au-delà de la tolérance 512 → quantité 0"
     assert (L[5].qty_score, L[5].punct_score, L[5].delta) == (100, 60, -1) and (L[6].qty_score, L[6].punct_score, L[6].delta) == (100, 60, -2)
+    assert otd.reason(L[5], PARAMS) == "−1 j d'avance → tranche 1 à 2 j → 60"
     assert L[7].qty_score == 100 and L[7].punct_score == 100
     # two days in one and a third day missing : the surplus serves one line only, the third day is not delivered
     r = dict(DAILY)
@@ -119,7 +123,7 @@ def test_daily_grouped_deliveries_tolerance_and_advance():
 def test_quantity_is_in_full_within_the_horizon_only():
     r = dict(BIWEEKLY)
     r.pop(9)
-    r[14] = 800.0                                  # Thursday delivered the next Thursday : +5 working days, inside window 1 + band 4
+    r[14] = 800.0                                  # Thursday delivered the next Thursday : +5 working days, the last day of band 2
     L = lines(BIWEEKLY, r, weekdays="1,4")
     assert (L[9].qty_score, L[9].punct_score, L[9].delta) == (100, 20, 5) and score(L[9]) == 60
     r = dict(BIWEEKLY)
@@ -144,25 +148,25 @@ def test_desadv_is_read_per_delivery_note_of_the_period():
     rep = otd.otd_report(data, PARAMS, "month", date_from=wd(1), date_to=wd(10))
     t = rep["totals"]
     assert t["n"] == 10 and t["qty"] == 100 and t["punctuality"] == 100 and t["desadv"] == 90 and t["otd"] == 98 and t["bls"] == 10
-    assert rep["suppliers"][0]["window"] == 0 and rep["lines"][0]["bls"] == ["BL-10"]
+    assert rep["lines"][0]["bls"] == ["BL-10"] and rep["lines"][0]["reason"] == "reçu le jour → 100"
 
 
 # ---------------------------------------------------------------------------------------------------- Monday / Thursday supplier
 BIWEEKLY = {1: 600.0, 4: 400.0, 6: 600.0, 9: 400.0, 11: 600.0, 14: 400.0, 16: 600.0, 19: 400.0}     # four weeks, 200 a day of need
 
 
-def test_biweekly_window_and_tolerance_are_derived():
+def test_biweekly_tolerance_is_derived_from_the_delivery_days():
     L = lines(BIWEEKLY, dict(BIWEEKLY), weekdays="1,4")
     x = L[6]
-    assert x.window == 1 and 200 <= x.tolerance <= 215 and all(y.qty_score == 100 and y.punct_score == 100 for y in L.values())
+    assert 200 <= x.tolerance <= 215 and all(y.qty_score == 100 and y.punct_score == 100 for y in L.values())
 
 
-def test_biweekly_monday_delivered_tuesday_is_inside_the_window():
+def test_biweekly_monday_delivered_tuesday_is_one_day_late_like_anyone():
     r = dict(BIWEEKLY)
     r.pop(6)
     r[7] = 600.0
     L = lines(BIWEEKLY, r, weekdays="1,4")
-    assert (L[6].qty_score, L[6].punct_score, L[6].delta) == (100, 100, 1) and score(L[6]) == 100     # inside the ±1 window : perfect
+    assert (L[6].qty_score, L[6].punct_score, L[6].delta) == (100, 60, 1) and score(L[6]) == 80     # the same rule whatever the delivery days
 
 
 def test_biweekly_thursday_delivered_next_monday():
@@ -180,7 +184,7 @@ def test_biweekly_grouping_and_over_delivery():
     r[6], r[9] = 1000.0, 0.0
     L = lines(BIWEEKLY, r, weekdays="1,4")
     assert (L[6].qty_score, L[6].punct_score) == (0, 100) and score(L[6]) == 70
-    assert (L[9].qty_score, L[9].punct_score, L[9].delta) == (100, 60, -3) and score(L[9]) == 80
+    assert (L[9].qty_score, L[9].punct_score, L[9].delta) == (100, 20, -3) and score(L[9]) == 60
     # 800 on Monday : the advance of one day of need is tolerated
     r = dict(BIWEEKLY)
     r[6] = 800.0
@@ -197,16 +201,26 @@ def test_biweekly_grouping_and_over_delivery():
 def test_weekly_receipts_that_completed_a_late_line_are_not_an_advance_for_the_next_one():
     """METALIS SLOVAKIA, 2 400 every Monday : 05/10 served on Tuesday (1 600) and Thursday (800), 12/10 served 1 600 then
     caught up by the 3 200 of 19/10, 26/10 perfect.  The Tuesday and Thursday receipts belong to the 05/10 line ; the
-    12/10 line is complete on 19/10 (+5, band 2), not « two days early »."""
+    12/10 line is complete on 19/10 (+5, the last day of band 2), not « two days early »."""
     exp = {1: 2400.0, 6: 2400.0, 11: 2400.0, 16: 2400.0}
     rec = {2: 1600.0, 4: 800.0, 6: 1600.0, 11: 3200.0, 16: 2400.0}
     L = lines(exp, rec, weekdays="1")
     assert [L[i].delta for i in (1, 6, 11, 16)] == [3, 5, 0, 0]
-    assert [L[i].punct_score for i in (1, 6, 11, 16)] == [60, 20, 100, 100] and all(L[i].qty_score == 100 for i in (1, 6, 11, 16))
+    assert [L[i].punct_score for i in (1, 6, 11, 16)] == [20, 20, 100, 100] and all(L[i].qty_score == 100 for i in (1, 6, 11, 16))
     assert L[11].excess == 0                                   # the 800 extra of 19/10 fill the balance, no advance
     data = otd.build(*frames(exp, rec, weekdays="1"), CAL, MON, PARAMS)
     rep = otd.otd_report(data, PARAMS, "month", date_from=wd(1), date_to=wd(16))
-    assert (rep["totals"]["qty"], rep["totals"]["punctuality"], rep["totals"]["desadv"], rep["totals"]["otd"]) == (100, 70, 100, 85)
+    assert (rep["totals"]["qty"], rep["totals"]["punctuality"], rep["totals"]["desadv"], rep["totals"]["otd"]) == (100, 60, 100, 80)
+    # the supplier × month sheet reads the same figures and decomposes them
+    month = otd.bucket_label(wd(1), "month")
+    sh = otd.sheet(data, PARAMS, "S1", month)
+    if otd.bucket_label(wd(16), "month") == month:
+        assert sh["scores"]["otd"] == 80 and sh["scores"]["points"] == {"qty": 30, "punctuality": 30, "desadv": 20, "max": {"qty": 30, "punctuality": 50, "desadv": 20}, "lost": 20}
+        assert [b["count"] for b in sh["punctuality"]["bands"]] == [2, 0, 2, 0] and sh["quantity"] == {"complete": 4, "total": 4, "not_delivered": 0, "excess": 0}
+        assert len(sh["desadv"]) == 5 and all(b["ok"] for b in sh["desadv"]) and sh["history"][-1]["otd"] == 80 and len(sh["history"]) == 12
+    cells = {c["date"]: c for w in sh["weeks"] for c in w["days"]}
+    assert cells[wd(2).isoformat()]["received"] == 1600 and cells[wd(2).isoformat()]["expected"] == 0 and cells[wd(1).isoformat()]["punct_score"] == 20
+    assert sh["lines"][0]["reason"].startswith("+3 j de retard") and otd.last_closed_month(MON) == otd.bucket_label(otd.month_bounds(otd.last_closed_month(MON))[0], "month")
 
 
 # ---------------------------------------------------------------------------------------------------- calendar, periods, statuses
@@ -256,8 +270,37 @@ def test_lead_times_without_dispersion():
 def test_otd_endpoint_shape_and_cache(client):  # noqa: F811
     body = client.get("/api/performance/otd", params={"planner": "QUENTIN", "bucket": "month"}).json()
     assert {"totals", "suppliers", "lines", "periods", "params"} <= set(body) and "compare" not in body and "balance_qty" not in body["totals"]
-    assert all({"qty_score", "punct_score", "status", "received", "expected", "window"} <= set(x) for x in body["lines"][:10])
+    assert all({"qty_score", "punct_score", "status", "received", "expected", "reason"} <= set(x) for x in body["lines"][:10])
     health = client.get("/api/health").json()
     assert health["cache"]["entries"] >= 1
     schema = {p["field"] for p in client.get("/api/params/schema").json()}
     assert "otd_matching" not in schema and "otd_backlog_max_days" not in schema and "otd_band1_days" in schema
+
+
+def test_sheet_months_closing_and_pdf_endpoints(client):  # noqa: F811
+    months = client.get("/api/performance/otd/months").json()
+    assert months["months"] and months["last_closed"] <= months["months"][-1] and months["closings"] == {}
+    month = months["months"][-2]
+    sup = client.get("/api/performance/otd", params={"bucket": "month", "date_from": f"{month}-01", "date_to": f"{month}-28"}).json()["suppliers"][0]
+    sh = client.get("/api/performance/otd/sheet", params={"supplier_id": sup["supplier_id"], "month": month}).json()
+    assert sh["month"] == month and sh["scores"]["otd"] == sup["otd"] and sh["closing"] is None and len(sh["history"]) == 12
+    assert {"weeks", "lines", "desadv", "punctuality", "quantity", "params"} <= set(sh) and all("reason" in x for x in sh["lines"])
+    assert sum(len(w["days"]) for w in sh["weeks"]) >= 5 * len(sh["weeks"]) and len(sh["punctuality"]["bands"]) == 4
+    assert client.get("/api/performance/otd/sheet", params={"supplier_id": "NOPE", "month": month}).status_code == 404
+    assert client.get("/api/performance/otd/sheet", params={"supplier_id": sup["supplier_id"], "month": "2026-13"}).status_code == 422
+    # the report : provisional, one supplier or the portfolio
+    r = client.get("/api/performance/otd/arrete.pdf", params={"month": month, "supplier_id": sup["supplier_id"]})
+    assert r.status_code == 200 and r.content[:4] == b"%PDF" and sup["supplier_id"] in r.headers["content-disposition"]
+    r = client.get("/api/performance/otd/arrete.pdf", params={"month": month})
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
+    # closing : the current month is refused, a closed month is frozen once ; twice needs force (admin)
+    assert client.post("/api/performance/otd/close", json={"month": otd.bucket_label(dt.date.fromisoformat(months["as_of"]), "month")}).status_code == 422
+    r = client.post("/api/performance/otd/close", json={"month": month})
+    assert r.status_code == 200 and r.json()["suppliers"] >= 1
+    assert client.post("/api/performance/otd/close", json={"month": month}).status_code == 409
+    assert client.post("/api/performance/otd/close", json={"month": month, "force": True}).status_code == 200
+    sh2 = client.get("/api/performance/otd/sheet", params={"supplier_id": sup["supplier_id"], "month": month}).json()
+    assert sh2["closing"] and sh2["closing"]["otd"] == sh["scores"]["otd"] and sh2["closing"]["closed_by"]
+    assert client.get("/api/performance/otd/months").json()["closings"][month]["suppliers"] == r.json()["suppliers"]
+    r = client.get("/api/performance/otd/arrete.pdf", params={"month": month})
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
