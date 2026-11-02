@@ -7,6 +7,16 @@ import { Button, Drawer, Field, useToast } from "@/components/ui";
 import { CONSUMPTION_SOURCE_LABELS, SOURCING_LABELS, WEEKDAY_SHORT, fmtWeekdays } from "@/lib/format";
 import type { RefColumn, RefRow, RefTableInfo } from "@/lib/types";
 
+/** The supplier's transport mode : three fixed modes, then the carriers known to the application. */
+export const FIXED_TRANSPORT_MODES: { value: string; label: string }[] = [
+  { value: "Fournisseur", label: "Fournisseur – livre lui-même (Planning de livraisons)" },
+  { value: "MAF Hambach", label: "MAF Hambach – pièces au magasin avancé (Planning MAF, navette)" },
+  { value: "Messagerie", label: "Messagerie – pas de transport camion" },
+];
+export function transportModeOptions(carriers: string[]): { value: string; label: string }[] {
+  return [...FIXED_TRANSPORT_MODES, ...carriers.map((c) => ({ value: c, label: `${c} – transporteur` }))];
+}
+
 /** Choice lists of the reference columns that are not free text. */
 const CHOICES: Record<string, Record<string, { value: string; label: string }[]>> = {
   ref_planners: { role: [{ value: "appro", label: "appro – écrit sur son carnet" }, { value: "manager", label: "manager – + paramètres pour tous, import PDP" }, { value: "admin", label: "admin – tous les droits" }] },
@@ -42,6 +52,8 @@ export function RefRowEditor({ table, row, onClose, fixed, onSaved }: { table: R
   const termArticle = table.name === "ref_consumption_terms" ? (values.article_id || fixed?.article_id || "") : "";
   const sources = useConsumptionSources(termArticle || undefined, !!termArticle);
   const suppliers = useRefRows(table.name === "ref_article_suppliers" || table.name === "ref_articles" ? "ref_suppliers" : null);
+  const carriers = useRefRows(table.name === "ref_suppliers" ? "ref_carriers" : null);
+  const modeOptions = useMemo(() => transportModeOptions((carriers.data ?? []).filter((c) => c.active !== false).map((c) => String(c.name))), [carriers.data]);
   const supplierLead = useMemo(() => { const s = (suppliers.data ?? []).find((r) => String(r.supplier_id) === values.supplier_id); return s ? Number(s.lead_time_days ?? 5) : null; }, [suppliers.data, values.supplier_id]);
   const choices = CHOICES[table.name] ?? {};
   const control = (c: RefColumn) => {
@@ -50,6 +62,7 @@ export function RefRowEditor({ table, row, onClose, fixed, onSaved }: { table: R
     if (c.type === "bool") return <select className="select" value={values[c.name] ?? "oui"} onChange={(e) => set(e.target.value)} disabled={disabled}><option value="oui">oui</option><option value="non">non</option></select>;
     if (table.name === "ref_suppliers" && c.name === "delivery_weekdays") return <span className="row" style={{ height: 34 }}><WeekdayPicker value={splitWeekdays(values[c.name])} onChange={(v) => set(v.join(","))} disabled={disabled} /><span className="small subtle">{fmtWeekdays(values[c.name] || "")}</span></span>;
     if (table.name === "ref_suppliers" && c.name === "docks") return <DockPicker all={DOCKS} value={splitDocks(values[c.name])} onChange={(v) => set(v.join(";"))} disabled={disabled} label="Quais par défaut" />;
+    if (table.name === "ref_suppliers" && c.name === "transport_mode") return <select className="select" value={values[c.name] || "Fournisseur"} onChange={(e) => set(e.target.value)} disabled={disabled}>{modeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
     if (choices[c.name]) return <select className="select" value={values[c.name] || choices[c.name][0].value} onChange={(e) => set(e.target.value)} disabled={disabled}>{choices[c.name].map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
     if (table.name === "ref_consumption_terms" && c.name === "source_article_id") {
       return (

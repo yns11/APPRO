@@ -21,6 +21,7 @@ from ...data.store import REF_MODELS, ParamOverride, audit
 from ...engine.models import DatasetError, EngineParams
 from ...engine.runner import resolve_as_of, resolve_init_date
 from ...services import actions, mrp_service, validation
+from ...services import transports as T
 from ...services.access import ROLES, Access
 from ...services.context import AppContext
 from .. import schemas as S
@@ -117,8 +118,25 @@ def _check_rows(session: Session, name: str, rows: list[dict], replace: bool) ->
                 if not (len(ref) == 6 and ref.isdigit()):
                     raise ValueError(f"{ref or '(vide)'} : un numéro de PO compte six chiffres (exemple 024596)")
                 r["purch_id"] = ref
-        elif name == "ref_suppliers":
+        elif name == "ref_carriers":
             for r in rows:
+                r["name"] = str(r.get("name") or "").strip()
+                bad = [e for e in T.split_emails(str(r.get("contacts") or "")) if "@" not in e]
+                if bad:
+                    raise ValueError(f"{r['name']} : contact(s) invalide(s) : {', '.join(bad)}")
+        elif name == "ref_suppliers":
+            carriers = {str(c.get("name") or "").strip().lower(): str(c.get("name") or "").strip() for c in reference.rows_out(session, "ref_carriers") if bool(c.get("active", True))}
+            fixed = {m.lower(): m for m in T.FIXED_MODES}
+            for r in rows:
+                mode = str(r.get("transport_mode") or "").strip()
+                if not mode:
+                    r["transport_mode"] = T.MODE_SUPPLIER
+                elif mode.lower() in fixed:
+                    r["transport_mode"] = fixed[mode.lower()]
+                elif mode.lower() in carriers:
+                    r["transport_mode"] = carriers[mode.lower()]
+                else:
+                    raise ValueError(f"{r.get('supplier_id')} : mode transport « {mode} » inconnu (Fournisseur, MAF Hambach, Messagerie ou un transporteur actif de la table Transporteurs)")
                 lead = r.get("lead_time_days")
                 if lead not in (None, "") and float(lead) < 1:
                     raise ValueError(f"{r.get('supplier_id')} : le délai doit être d'au moins 1 jour ouvré")

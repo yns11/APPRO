@@ -140,3 +140,95 @@ def test_legacy_dock_column_is_retired(tmp_path):
         session.add(AppTransport(transport_id="EM000002", supplier_id="S-1", date=dt.date(2026, 10, 30), time="09:00", docks="B15;B6 EST", created_by="y"))
         session.commit()
         assert session.get(AppTransport, "EM000002").docks == "B15;B6 EST"
+
+
+def _set_mode(c, sid: str, mode: str, contact: str | None = None):
+    rows = c.get("/api/reference/ref_suppliers/rows").json()
+    r = next(x for x in rows if x["supplier_id"] == sid)
+    keep = {k: v for k, v in r.items() if k not in ("updated_by", "updated_at", "articles", "article_count")}
+    if contact is not None:
+        keep["transport_contact"] = contact
+    return c.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, "transport_mode": mode}})
+
+
+def test_transport_modes_carrier_maf_parcel_and_batches(client):  # noqa: F811
+    """Carriers table ; supplier transport mode (Fournisseur by default, a carrier, MAF Hambach, Messagerie) ;
+    the main planning against the MAF planning ; shuttle transports across suppliers ; CSV and e-mail per mode ;
+    batch cancel, CSV and mail of a selection."""
+    # ---- carriers : seeded, validated
+    carriers = client.get("/api/reference/ref_carriers/rows").json()
+    assert {c["name"] for c in carriers} >= {"Geodis", "DB Schenker"}
+    assert client.put("/api/reference/ref_carriers/rows", json={"values": {"name": "Dachser", "contacts": "pas-un-mail", "active": True}}).status_code == 422
+    assert client.put("/api/reference/ref_carriers/rows", json={"values": {"name": "Dachser", "contacts": "Booking@dachser.example; Quai@dachser.example", "active": True}}).status_code in (200, 201)
+    # ---- every supplier delivers himself unless told otherwise ; an unknown mode is refused
+    sups = client.get("/api/reference/ref_suppliers/rows").json()
+    assert all(s["transport_mode"] == "Fournisseur" for s in sups)
+    assert _set_mode(client, "S-000378", "Inconnu").status_code == 422
+    assert _set_mode(client, "S-000378", "dachser").status_code in (200, 201)         # case-insensitive, canonical name kept
+    assert next(s for s in client.get("/api/reference/ref_suppliers/rows").json() if s["supplier_id"] == "S-000378")["transport_mode"] == "Dachser"
+
+    plan = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2}).json()
+    assert plan["scope"] == "main"
+    row = next(s for s in plan["suppliers"] if s["supplier_id"] == "S-000378")
+    assert row["mode"] == "Dachser" and row["carrier"] == "Dachser" and row["emails"] == ["booking@dachser.example", "quai@dachser.example"]
+    o = row["orders"][0]
+    # ---- a carrier transport : the carrier fills the CSV column, the mail goes to the carrier's contacts
+    r = client.post("/api/transports", json={"supplier_id": "S-000378", "order_ids": [o["order_id"]], "slots": [{"date": o["expected_date"], "time": "09:00", "docks": ["B15"]}]})
+    assert r.status_code == 201, r.text
+    pack = r.json()
+    t1 = pack["transports"][0]
+    assert t1["mode"] == "transporteur" and t1["carrier"] == "Dachser" and t1["orders"][0]["supplier_id"] == "S-000378"
+    assert pack["csv"].split("\r\n")[1].split(";")[2] == "Dachser" and pack["mail"]["to"] == ["booking@dachser.example", "quai@dachser.example"]
+
+    # ---- MAF Hambach : two suppliers with an order on the same day leave the main planning for the shuttle planning
+    others = [s for s in plan["suppliers"] if s["supplier_id"] != "S-000378"]
+    pair, day = None, None
+    for i, a in enumerate(others):
+        for b in others[i + 1:]:
+            common = {x["expected_date"] for x in a["orders"]} & {x["expected_date"] for x in b["orders"]}
+            if common:
+                pair, day = (a["supplier_id"], b["supplier_id"]), min(common)
+                break
+        if pair:
+            break
+    assert pair, "the seed should hold two suppliers with firm orders on one day"
+    for sid, mail in zip(pair, ("maf-a@example.com", "maf-b@example.com")):
+        assert _set_mode(client, sid, "MAF Hambach", mail).status_code in (200, 201)
+    main = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2}).json()
+    assert not any(s["supplier_id"] in pair for s in main["suppliers"])
+    maf = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2, "scope": "maf", "planner": "PERSONNE"}).json()   # the planner filter does not apply
+    assert maf["scope"] == "maf" and {s["supplier_id"] for s in maf["suppliers"]} == set(pair) and all(s["mode"] == "MAF Hambach" for s in maf["suppliers"])
+    ids = [x["order_id"] for s in maf["suppliers"] for x in s["orders"] if x["expected_date"] == day]
+    # a MAF supplier cannot get a transport through the main route
+    assert client.post("/api/transports", json={"supplier_id": pair[0], "order_ids": ids[:1], "slots": [{"date": day, "time": "10:00", "docks": ["B15"]}]}).status_code == 422
+    r = client.post("/api/transports", json={"maf": True, "order_ids": ids, "slots": [{"date": day, "time": "10:00", "docks": ["B6 EST"]}], "note": "Navette du matin"})
+    assert r.status_code == 201, r.text
+    pack = r.json()
+    t2 = pack["transports"][0]
+    assert t2["mode"] == "maf" and t2["supplier_name"] == "NAVETTE HAMBACH" and {x["supplier_id"] for x in t2["orders"]} == set(pair)
+    line = pack["csv"].split("\r\n")[1].split(";")
+    assert line[1] == "NAVETTE HAMBACH" and line[5] == "NAVETTE HAMBACH" and line[9] == "B6 EST"
+    assert sorted(pack["mail"]["to"]) == ["maf-a@example.com", "maf-b@example.com"] and "NAVETTE HAMBACH" in pack["mail"]["subject"]
+    maf = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2, "scope": "maf"}).json()
+    assert [t["transport_id"] for t in maf["transports"]] == [t2["transport_id"]]
+    assert all(t["mode"] != "maf" for t in client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2}).json()["transports"])
+
+    # ---- Messagerie : out of the planning, firm orders marked in the grid, no transport
+    parcel = next(s["supplier_id"] for s in main["suppliers"] if s["supplier_id"] not in pair and s["supplier_id"] != "S-000378")
+    aid = next(s for s in main["suppliers"] if s["supplier_id"] == parcel)["orders"][0]["article_id"]
+    assert _set_mode(client, parcel, "Messagerie").status_code in (200, 201)
+    assert not any(s["supplier_id"] == parcel for s in client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2}).json()["suppliers"])
+    lane = next(l for l in client.get(f"/api/articles/{aid}/projection").json()["lanes"] if l["supplier_id"] == parcel)
+    assert all(o["transports"] == ["Messagerie"] for o in lane["orders"] if o["order_type"] == "FIRM")
+    assert client.post("/api/transports", json={"supplier_id": parcel, "order_ids": [lane["orders"][0]["order_id"]], "slots": [{"date": day, "time": "10:00", "docks": ["B15"]}]}).status_code == 422
+
+    # ---- batches : CSV of a selection, one mail per recipient group, cancel several at once
+    sel = client.get("/api/transports/atr.csv", params={"transport_id": [t1["transport_id"], t2["transport_id"]]})
+    assert sel.status_code == 200 and [l.split(";")[0] for l in sel.text.lstrip("﻿").split("\r\n")[1:] if l] == [t1["transport_id"], t2["transport_id"]]
+    assert client.post("/api/transports/pack", json={"transport_ids": [t1["transport_id"], t2["transport_id"]]}).status_code == 422
+    assert client.post("/api/transports/pack", json={"transport_ids": [t2["transport_id"]]}).json()["mail"]["to"] == sorted(["maf-a@example.com", "maf-b@example.com"])
+    out = client.post("/api/transports/cancel", json={"transport_ids": [t1["transport_id"], t2["transport_id"]]}).json()
+    assert [t["status"] for t in out] == ["cancelled", "cancelled"]
+    assert client.post("/api/transports/cancel", json={"transport_ids": ["EM999999"]}).status_code == 404
+    labels = [a["label"] for a in client.get("/api/actions").json()]
+    assert any("annulé(s)" in x for x in labels)

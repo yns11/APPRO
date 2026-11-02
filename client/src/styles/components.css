@@ -621,3 +621,8 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .profile-bars span.we { background: var(--border-strong); }
 .exc-why { color: var(--fg-muted); font-size: var(--fs--2); }
 .kind-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* row selection of a DataTable */
+.dt-pick { width: 28px; text-align: center; }
+.dt-pick input { margin: 0; cursor: pointer; }
+.tbl tr.picked td { background: var(--brand-bg, rgba(37, 99, 235, 0.07)); }

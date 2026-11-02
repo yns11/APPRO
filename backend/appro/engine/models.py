@@ -70,6 +70,7 @@ class Supplier:
     docks: str = "B15"             # default delivery docks (« ; » separated), preselected when a transport is created
     cutoff_time: str = ""          # order cut-off hour « HH:MM » : an order placed later leaves the next working day ; "" = none
     closures: frozenset[dt.date] = frozenset()   # days the supplier cannot deliver (own closures, carrier / country, docks closed)
+    transport_mode: str = "Fournisseur"          # Fournisseur | MAF Hambach | Messagerie | a carrier name (services/transports.py)
 
     @property
     def cutoff(self) -> dt.time | None:

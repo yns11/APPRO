@@ -845,6 +845,8 @@ class ConfigOut(BaseModel):
 class TransportOrderOut(BaseModel):
     order_id: str
     article_id: str
+    supplier_id: str = ""
+    supplier_name: str = ""
     ref: str = ""
     expected_date: dt.date | None = None
     qty: float = 0.0
@@ -859,6 +861,7 @@ class TransportOut(BaseModel):
     docks: list[str] = Field(default_factory=list)
     carrier: str = ""
     note: str = ""
+    mode: str = "fournisseur"
     status: str = "planned"
     created_by: str = ""
     created_at: dt.datetime | None = None
@@ -884,6 +887,8 @@ class PlanningSupplier(BaseModel):
     transport_contact: str = ""
     emails: list[str] = Field(default_factory=list)
     docks: list[str] = Field(default_factory=list)
+    mode: str = "Fournisseur"
+    carrier: str = ""
     orders: list[PlanningOrder]
 
 
@@ -893,6 +898,7 @@ class PlanningResponse(BaseModel):
     end: dt.date
     days: list[dt.date]
     docks: list[str]
+    scope: str = "main"
     suppliers: list[PlanningSupplier]
     transports: list[TransportOut]
 
@@ -904,11 +910,16 @@ class TransportSlotIn(BaseModel):
 
 
 class TransportCreateIn(BaseModel):
-    supplier_id: str
+    supplier_id: str | None = None        # None with ``maf`` : a shuttle carrying orders of several MAF suppliers
     order_ids: list[str] = Field(..., min_length=1)
     slots: list[TransportSlotIn] = Field(..., min_length=1)
     carrier: str = ""
     note: str = ""
+    maf: bool = False
+
+
+class TransportIdsIn(BaseModel):
+    transport_ids: list[str] = Field(..., min_length=1, max_length=500)
 
 
 class PortalKpis(BaseModel):

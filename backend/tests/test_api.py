@@ -231,7 +231,7 @@ def test_params_overrides(client):
 def test_reference_crud_template_and_import(client):
     tables = client.get("/api/reference/tables").json()
     names = {t["name"]: t for t in tables}
-    assert set(names) == {"ref_articles", "ref_suppliers", "ref_calendars", "ref_article_suppliers", "ref_consumption_terms", "ref_closed_orders",
+    assert set(names) == {"ref_articles", "ref_suppliers", "ref_calendars", "ref_carriers", "ref_article_suppliers", "ref_consumption_terms", "ref_closed_orders",
                           "ref_programs", "ref_bom", "fct_stock", "ref_planners", "ref_delegations"}
     assert names["ref_articles"]["rows"] == 16 and names["ref_suppliers"]["rows"] == 11 and names["ref_programs"]["rows"] == 25
     assert names["ref_articles"]["key"] == ["article_id"] and any(c["label"] == "Couverture cible (j ouvrés)" for c in names["ref_articles"]["columns"])
@@ -260,7 +260,7 @@ def test_reference_crud_template_and_import(client):
     wb = load_workbook(io.BytesIO(t.content))
     assert wb.sheetnames == ["Fournisseurs", "NOTICE"]
     ws = wb["Fournisseurs"]
-    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Pays", "Contact", "Contact transport", "Quais", "Jours de livraison", "Jours stricts", "Délai (j ouvrés)", "Heure limite", "Actif"]
+    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Pays", "Contact", "Contact transport", "Quais", "Jours de livraison", "Jours stricts", "Délai (j ouvrés)", "Heure limite", "Actif", "Mode transport"]
     ws["A2"], ws["B2"], ws["F2"], ws["G2"], ws["H2"], ws["I2"], ws["J2"], ws["K2"] = "S-NEW", "New supplier", "B15;B6 EST", "1,3", "oui", 7, "11:30", "oui"
     buf = io.BytesIO()
     wb.save(buf)

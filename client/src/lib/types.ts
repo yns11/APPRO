@@ -212,11 +212,12 @@ export type ExportType = "text" | "number" | "date" | "bool" | "percent";
 export interface ExportColumn { key: string; label: string; type?: ExportType; }
 
 // ---------------------------------------------------------------- transports (planning de livraisons)
-export interface TransportOrderOut { order_id: string; article_id: string; ref: string; expected_date: string | null; qty: number; }
-export interface TransportOut { transport_id: string; supplier_id: string; supplier_name: string; date: string; time: string; docks: string[]; carrier: string; note: string; status: string; created_by: string; created_at: string | null; orders: TransportOrderOut[]; }
+export interface TransportOrderOut { order_id: string; article_id: string; supplier_id: string; supplier_name: string; ref: string; expected_date: string | null; qty: number; }
+export type TransportMode = "fournisseur" | "transporteur" | "maf";
+export interface TransportOut { transport_id: string; supplier_id: string; supplier_name: string; date: string; time: string; docks: string[]; carrier: string; note: string; mode: TransportMode; status: string; created_by: string; created_at: string | null; orders: TransportOrderOut[]; }
 export interface PlanningOrder { order_id: string; article_id: string; designation: string; unit: string; ref: string; expected_date: string; qty_ordered: number; qty_open: number; ignored: boolean; transports: string[]; }
-export interface PlanningSupplier { supplier_id: string; name: string; transport_contact: string; emails: string[]; docks: string[]; orders: PlanningOrder[]; }
-export interface PlanningResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; suppliers: PlanningSupplier[]; transports: TransportOut[]; }
+export interface PlanningSupplier { supplier_id: string; name: string; transport_contact: string; emails: string[]; docks: string[]; mode: string; carrier: string; orders: PlanningOrder[]; }
+export interface PlanningResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; scope: "main" | "maf"; suppliers: PlanningSupplier[]; transports: TransportOut[]; }
 export interface TransportSlotIn { date: string; time: string; docks: string[]; }
 export interface TransportPackOut { transports: TransportOut[]; csv: string; csv_filename: string; mail: { to: string[]; subject: string; body: string }; }
 export interface PortalKpis { open_orders: number; open_qty_lines: number; late_orders: number; today_orders: number; next_delivery: string | null; transports: number; next_transport: string | null; forecast_lines: number; forecast_weeks: number; desadv_open: number; desadv_ko: number; receipts_30d: number; }

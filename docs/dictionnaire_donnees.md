@@ -66,6 +66,17 @@ plus ; les anciennes colonnes sont ignorées à l'import.
 | cutoff_time | Heure limite | texte | non | `HH:MM` (heure de Paris, `APPRO_TIMEZONE`) : une commande passée après part le jour ouvré suivant, le délai compte à partir de là ; vide = aucune |
 | active | Actif | oui / non | oui | |
 
+### 1.2 ter `ref_carriers` : transporteurs
+
+| Colonne | Type | Contenu |
+|---|---|---|
+| `name` | str, clé | nom du transporteur, valeur possible du *Mode transport* d'un fournisseur |
+| `contacts` | str | adresses e-mail des avis de transport (séparées par `;` ou `,`) |
+| `active` | bool | |
+
+`ref_suppliers.transport_mode` (str, « Fournisseur » par défaut) : `Fournisseur`, `MAF Hambach`, `Messagerie` ou le
+nom d'un transporteur actif (docs/regles_metier.md § 9 ter).
+
 ### 1.2 bis `ref_calendars` — Calendriers
 
 Fermetures et jours exceptionnels au-delà des jours ouvrés de la configuration (`APPRO_WORKING_WEEKDAYS`, `APPRO_HOLIDAYS`),
@@ -387,7 +398,7 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `app_help_pages` | **pense-bête intégré** : texte enregistré par un administrateur pour une page (`slug`, titre, `body_html` nettoyé, auteur, horodatage) ; absent = texte livré (`backend/appro/help/pense_bete.json`) ; `DELETE` revient au texte livré | slug |
 | `app_param_overrides` | règles communes du moteur (`global`, champs `target_tolerance_pct`, `lead_margin_days`, `stock_drift_pct`, `stock_drift_min_packs`, `stock_drift_persist`, poids et tranches de l'OTD `otd_*`, seuils de segmentation `abc_*`, `xyz_*`, `segment_coverage_days`, `segment_service_pct`) et politique de stock d'article par semaine ISO (`article_week` : couverture cible, seuils, surstock) ; les surcharges des règles supprimées sont purgées au démarrage | (scope, key1, key2, field) |
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
-| `app_transports` | **transports** du Planning de livraisons : identifiant `EM` + 6 chiffres, fournisseur, date, heure, quais (`;`), transporteur, commentaire, statut `planned` / `cancelled`, auteur, horodatage | transport_id |
+| `app_transports` | **transports** du Planning de livraisons : identifiant `EM` + 6 chiffres, fournisseur (`MAF-HAMBACH` pour une navette), date, heure, quais (`;`), transporteur, commentaire, **mode** (`fournisseur`, `transporteur`, `maf`), statut `planned` / `cancelled`, auteur, horodatage ; chaque commande emportée (`app_transport_orders`) garde son fournisseur | transport_id |
 | `app_transport_orders` | commandes fermes portées par un transport (`order_id` du créneau ERP, article, numéros de commande, date prévue, quantité restante au moment de la création) | id |
 | `app_counters` | compteurs incrémentaux nommés (`transport` → dernier numéro EM attribué), lus avec `FOR UPDATE` | name |
 | `app_actions` | annuler / rétablir : un geste utilisateur (horodatage, utilisateur, type, libellé, article, groupe), les lignes touchées avec leur état avant / après (JSON), annulable ou non, état `applied` / `undone` / `discarded`, qui l'a annulée ou rétablie et quand ; purge après 7 jours | id |

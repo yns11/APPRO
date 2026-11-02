@@ -37,9 +37,9 @@ def _supplier_names(ctx: AppContext) -> dict[str, str]:
     return dict(zip(df["supplier_id"], df["name"]))
 
 
-def _suppliers(ctx: AppContext):
+def _suppliers(ds):
     """Supplier records (lead time, delivery days) for the effective lead time of the links."""
-    return {s.supplier_id: s for s in erp_dataset(ctx.table).suppliers}
+    return {s.supplier_id: s for s in ds.suppliers}
 
 
 def _programs_for(ctx: AppContext, article_id: str, result) -> list[dict]:
@@ -88,7 +88,7 @@ def projection(article_id: str, granularity: Literal["default", "day", "week"] =
     if ar is None:
         raise HTTPException(404, f"Article inconnu : {article_id}")
     return json_response(P.projection_out(ar, result, granularity, _supplier_names(ctx), _programs_for(ctx, article_id, result),
-                                          suppliers=_suppliers(ctx), transports=transports_by_order(session)))
+                                          suppliers=_suppliers(ds := erp_dataset(ctx.table)), transports=transports_by_order(session, ds)))
 
 
 @router.get("/articles/{article_id}/delivery-plan", response_model=S.DeliveryPlanResponse)
@@ -124,7 +124,7 @@ def grid(planner: str | None = None, article_ids: list[str] | None = Query(None)
     total = len(arts)
     page_arts = arts[(page - 1) * page_size: page * page_size]
     return json_response(P.grid_out(result, granularity, names, _programs_of(ctx), articles=page_arts,
-                                    total=total, page=page, page_size=page_size, suppliers=_suppliers(ctx), transports=transports_by_order(session)))
+                                    total=total, page=page, page_size=page_size, suppliers=_suppliers(ds := erp_dataset(ctx.table)), transports=transports_by_order(session, ds)))
 
 
 def _select_articles(ctx: AppContext, session: Session, planner: str | None, article_ids: list[str] | None, program_id: str | None,

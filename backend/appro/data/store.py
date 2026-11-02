@@ -293,6 +293,7 @@ class AppTransport(Base):
     docks: Mapped[str] = mapped_column(Text, default="")              # delivery docks, « ; » separated (one CSV line per dock)
     carrier: Mapped[str] = mapped_column(Text, default="")
     note: Mapped[str] = mapped_column(Text, default="")
+    mode: Mapped[str] = mapped_column(String(20), default="fournisseur")   # fournisseur | maf | transporteur (services/transports.py)
     status: Mapped[str] = mapped_column(String(12), default="planned")  # planned | cancelled
     created_by: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
@@ -307,6 +308,7 @@ class AppTransportOrder(Base):
     transport_id: Mapped[str] = mapped_column(String(20), ForeignKey("app_transports.transport_id", ondelete="CASCADE"), index=True)
     order_id: Mapped[str] = mapped_column(String(120), index=True)
     article_id: Mapped[str] = mapped_column(String(40), index=True)
+    supplier_id: Mapped[str] = mapped_column(String(40), default="")   # the order's supplier (a MAF shuttle carries several suppliers)
     ref: Mapped[str] = mapped_column(Text, default="")                 # purchase order numbers
     expected_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     qty: Mapped[float] = mapped_column(Float, default=0.0)
@@ -593,12 +595,25 @@ def apply_text_defaults(engine) -> int:
     return n
 
 
+def apply_transport_mode_default(engine) -> int:
+    """``ref_suppliers.transport_mode`` added later : every supplier without a mode delivers himself (« Fournisseur »)."""
+    n = 0
+    with engine.begin() as conn:
+        try:
+            res = conn.execute(text("UPDATE ref_suppliers SET transport_mode = 'Fournisseur' WHERE transport_mode IS NULL OR transport_mode = ''"))
+            n += res.rowcount or 0
+        except Exception as exc:  # pragma: no cover - table not there yet
+            log.debug("default transport mode skipped: %s", exc)
+    return n
+
+
 MIGRATION_LOCK_KEY = 7_419_301          # pg_advisory_lock key shared by every worker of the application
 #: one-shot data fixes, run once per database (journalised in ``app_migrations``) ; the schema steps
 #: (``ensure_columns``, ``retire_columns``, ``create_all``) stay idempotent and run at every start-up, under the lock
 DATA_MIGRATIONS: tuple[tuple[str, Any], ...] = (
     ("nullable_numerics_zero_to_null", normalise_nullable_numerics),
     ("supplier_docks_default_b15", apply_text_defaults),
+    ("supplier_transport_mode_default", apply_transport_mode_default),
 )
 
 

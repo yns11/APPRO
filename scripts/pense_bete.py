@@ -664,7 +664,17 @@ def sections() -> list[dict[str, str]]:
 <li>Le fichier contient l'en-tête attendu par ATR et <b>une ligne par transport et par quai</b> (identifiant répété), flux toujours <b>R</b>.</li>
 <li><b>E-mail</b> : le bouton de la liste ouvre Outlook avec les destinataires (colonne <i>Contact transport</i> du fournisseur), l'objet et le corps (identifiants, dates, heures, quais, commandes ; français puis anglais). Relisez, envoyez. Un fournisseur <b>sans contact transport</b> est signalé en orange : complétez le Référentiel.</li>
 <li><b>Annuler</b> un transport le garde avec le statut <i>annulé</i> (hors CSV global) ; prévenez le fournisseur et retirez-le de l'outil de transport. Création et annulation sont journalisées, pas de Ctrl+Z.</li>
+<li>La liste des transports se <b>filtre</b> par colonne et se <b>sélectionne</b> : CSV, e-mail (même destinataire) ou annulation de toute la sélection.</li>
 </ul>
+<h4>Modes de transport</h4>
+<p>Colonne <i>Mode transport</i> du fournisseur (Référentiel ou fiche fournisseur), « Fournisseur » au départ.</p>
+<ul>
+<li><b>Fournisseur</b> : il livre lui-même ; planning principal.</li>
+<li><b>MAF Hambach</b> : pièces au magasin avancé ; onglet <b>Planning MAF</b>, ouvert à tous les approvisionneurs ; une <b>navette</b> peut emporter les commandes d'un même jour de plusieurs fournisseurs ; le fichier ATR porte <i>NAVETTE HAMBACH</i>.</li>
+<li><b>Messagerie</b> : colis, pas de camion ; hors planning ; ses ordres fermes portent d'office l'icône camion.</li>
+<li><b>Un transporteur</b> (table <i>Transporteurs</i> : nom, contacts) : son nom dans le fichier ATR, l'e-mail à ses contacts.</li>
+</ul>
+<p>Les semaines affichées se choisissent avec le <b>sélecteur de semaines</b>, comme dans le tableau d'approvisionnement.</p>
 <p>Un <b>contact transport</b> qui se connecte à l'application n'accède qu'à son <b>espace fournisseur</b> : ses commandes fermes en cours et transports, son retard, le prévisionnel, ses DESADV, ses réceptions.</p>""")
 
     # ============================================================== Performance et exceptions

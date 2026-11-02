@@ -46,10 +46,17 @@ def rows_out(session: Session, name: str) -> list[dict[str, Any]]:
     return out
 
 
+#: text columns with a business default : an empty value (seed, import, older client) receives it
+TEXT_DEFAULTS: dict[tuple[str, str], str] = {("ref_suppliers", "docks"): "B15", ("ref_suppliers", "transport_mode"): "Fournisseur"}
+
+
 def _clean(schema: TableSchema, row: dict[str, Any]) -> dict[str, Any]:
     """Coerce one row to the canonical types ; missing keys raise."""
     df = coerce(pd.DataFrame([row]), schema, strict=True)
     out = df.iloc[0].to_dict()
+    for (table, col), default in TEXT_DEFAULTS.items():
+        if table == schema.name and col in out and out[col] in ("", None):
+            out[col] = default
     for k in schema.key:
         # a key column declared optional (the « clé » of a plant calendar row) may stay empty
         if out[k] in ("", None) and (schema.column(k).required or schema.column(k).type != "str"):

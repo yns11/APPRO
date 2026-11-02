@@ -549,6 +549,26 @@ bouton *Ajouter un transport pour ces commandes*), transporteur et commentaire f
 - **Droits** : créer ou annuler un transport demande d'être approvisionneur du carnet de l'article, manager ou
   administrateur ; le CSV global se télécharge par tout utilisateur connecté à l'application.
 
+**Modes de transport** (colonne *Mode transport* du fournisseur, liste déroulante, « Fournisseur » partout à
+l'initialisation) :
+
+* **Fournisseur** : le fournisseur livre ; ses ordres fermes sont dans le Planning de livraisons (règles ci-dessus) ;
+* **MAF Hambach** : les pièces sont au magasin avancé fournisseurs ; le fournisseur n'apparaît pas dans le planning
+  principal mais dans l'onglet **Planning MAF**, visible par tous les approvisionneurs et administrateurs quel que
+  soit le périmètre ; une **navette** peut emporter les commandes d'un même jour de plusieurs fournisseurs ; dans le
+  fichier ATR, les colonnes FOURNISSEUR et CODE FOURNISSEUR valent `NAVETTE HAMBACH` ; l'e-mail part aux contacts
+  transport de tous les fournisseurs emportés ;
+* **Messagerie** : flux colis, pas de camion ; le fournisseur sort du planning et ses ordres fermes portent
+  d'office la marque « transport créé » (icône camion, mention *Messagerie*) dans le tableau d'approvisionnement, pour
+  les distinguer des ordres fermes qui attendent un identifiant de transport ;
+* **un transporteur** (table **Transporteurs** du Référentiel : nom, contacts) : la colonne TRANSPORTEUR du fichier
+  ATR porte son nom et l'e-mail part à ses contacts.
+
+Le planning se parcourt avec le **sélecteur de semaines** des autres vues (dix semaines chargées, la semaine en
+cours et la suivante affichées par défaut). La liste des transports des semaines affichées a des **filtres par
+colonne**, une **multi-sélection** et des actions par lot : CSV de la sélection, un e-mail pour la sélection (même
+fournisseur, transporteur ou navette), annulation de la sélection.
+
 ## 9 quater. File d'exceptions
 
 L'onglet **File d'exceptions** du tableau de bord ne liste que des situations qui **appellent une décision** (une

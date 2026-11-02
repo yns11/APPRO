@@ -13,6 +13,17 @@ from a shared counter (never reused).  Creating transports produces :
   supplier, every planner) to limit the imports into the tool ;
 * the e-mail to the supplier's **transport contacts** (``ref_suppliers.transport_contact``) : recipients,
   subject and body, opened by the planner in Outlook (``mailto:``) and sent by hand.
+
+**Transport modes** (``ref_suppliers.transport_mode``) :
+
+* **Fournisseur** (default) : the supplier delivers ; his orders sit in the main planning ;
+* **MAF Hambach** : the parts wait at the advanced supplier warehouse ; the orders sit in the « Planning MAF »
+  tab, open to every planner whatever the perimeter, and one **shuttle** transport may carry the orders of several
+  suppliers ; the CSV shows ``NAVETTE HAMBACH`` as supplier name and code ;
+* **Messagerie** : parcel flow, no truck : the supplier is out of the planning and his firm orders are marked in
+  the supply table as if a transport existed ;
+* **a carrier name** (table ``ref_carriers``) : the carrier appears in the CSV column TRANSPORTEUR and the e-mail
+  goes to the carrier's contacts.
 """
 from __future__ import annotations
 
@@ -25,10 +36,15 @@ from sqlalchemy.orm import Session
 
 from ..data.store import AppCounter, AppTransport, AppTransportOrder, audit
 from ..engine.calendar import WorkCalendar
-from ..engine.models import Dataset, OrderLine, Supplier
+from ..engine.models import Dataset, Supplier
 
 COUNTER = "transport"
 DOCKS = ("B15", "B6 EST", "B2 NORD", "B6 NORD")
+MODE_SUPPLIER, MODE_MAF, MODE_PARCEL = "Fournisseur", "MAF Hambach", "Messagerie"
+FIXED_MODES = (MODE_SUPPLIER, MODE_MAF, MODE_PARCEL)
+MAF_ID = "MAF-HAMBACH"                 # supplier_id of a shuttle transport
+MAF_LABEL = "NAVETTE HAMBACH"          # CSV supplier name and code of a shuttle
+PARCEL_MARK = "Messagerie"             # what the grid shows instead of a transport identifier
 FLOW = "R"
 CSV_HEADER = ("ID TRANSPORT", "FOURNISSEUR", "TRANSPORTEUR", "DATE", "HEURE", "CODE FOURNISSEUR", "FLUX", "CHAMP1", "CHAMP2", "QUAIS")
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -36,6 +52,27 @@ TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 def split_docks(text: str | None) -> list[str]:
     return [x.strip() for x in re.split(r"[;,]+", text or "") if x.strip()]
+
+
+def split_emails(text: str | None) -> list[str]:
+    return [x.strip().lower() for x in re.split(r"[;,\s]+", text or "") if x.strip()]
+
+
+def mode_kind(mode: str | None) -> str:
+    """``fournisseur`` | ``maf`` | ``messagerie`` | ``transporteur`` (any other non-empty value is a carrier name)."""
+    m = (mode or "").strip()
+    if not m or m.lower() == MODE_SUPPLIER.lower():
+        return "fournisseur"
+    if m.lower() == MODE_MAF.lower():
+        return "maf"
+    if m.lower() == MODE_PARCEL.lower():
+        return "messagerie"
+    return "transporteur"
+
+
+def carriers_of(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """``carrier name → contact e-mails`` of the active carriers (``ref_carriers``)."""
+    return {str(r.get("name") or "").strip(): split_emails(str(r.get("contacts") or "")) for r in rows if str(r.get("name") or "").strip() and bool(r.get("active", True))}
 
 
 # ----------------------------------------------------------------------------- identifiers
@@ -72,36 +109,49 @@ def list_transports(session: Session, start: dt.date | None = None, end: dt.date
     return list(session.scalars(q.order_by(AppTransport.date, AppTransport.time, AppTransport.transport_id)).all())
 
 
-def transports_by_order(session: Session) -> dict[str, list[str]]:
-    """``order_id → [transport ids]`` of the planned transports (the grid marks the firm order cells)."""
+def transports_by_order(session: Session, ds: Dataset | None = None) -> dict[str, list[str]]:
+    """``order_id → [transport ids]`` of the planned transports (the grid marks the firm order cells) ; with the
+    dataset, the firm orders of the « Messagerie » suppliers carry the mark ``Messagerie`` (no truck to announce)."""
     out: dict[str, list[str]] = {}
     for t in list_transports(session):
         for o in t.orders:
             out.setdefault(o.order_id, []).append(t.transport_id)
+    if ds is not None:
+        parcel = {sp.supplier_id for sp in ds.suppliers if mode_kind(sp.transport_mode) == "messagerie"}
+        if parcel:
+            for o in ds.orders:
+                if o.order_type.value == "FIRM" and o.supplier_id in parcel:
+                    out.setdefault(o.order_id, []).append(PARCEL_MARK)
     return out
 
 
 def transport_out(t: AppTransport, names: dict[str, str]) -> dict[str, Any]:
-    return {"transport_id": t.transport_id, "supplier_id": t.supplier_id, "supplier_name": names.get(t.supplier_id, ""),
+    return {"transport_id": t.transport_id, "supplier_id": t.supplier_id, "supplier_name": MAF_LABEL if t.supplier_id == MAF_ID else names.get(t.supplier_id, ""),
             "date": t.date, "time": t.time, "docks": split_docks(t.docks), "carrier": t.carrier or "", "note": t.note or "", "status": t.status,
-            "created_by": t.created_by, "created_at": t.created_at,
-            "orders": [{"order_id": o.order_id, "article_id": o.article_id, "ref": o.ref or "", "expected_date": o.expected_date, "qty": o.qty}
+            "mode": t.mode or "fournisseur", "created_by": t.created_by, "created_at": t.created_at,
+            "orders": [{"order_id": o.order_id, "article_id": o.article_id, "supplier_id": o.supplier_id or t.supplier_id,
+                        "supplier_name": names.get(o.supplier_id or t.supplier_id, ""), "ref": o.ref or "", "expected_date": o.expected_date, "qty": o.qty}
                        for o in t.orders]}
 
 
-def planning(ds: Dataset, session: Session, start: dt.date, weeks: int, holidays: list[dt.date], as_of: dt.date) -> dict[str, Any]:
+def planning(ds: Dataset, session: Session, start: dt.date, weeks: int, holidays: list[dt.date], as_of: dt.date,
+             scope: str = "main", carriers: dict[str, list[str]] | None = None) -> dict[str, Any]:
     """Suppliers × working days : the firm ERP orders of the window (active articles of the dataset), with
-    the transports already created for them.  Only the suppliers with an order in the window appear."""
+    the transports already created for them.  Only the suppliers with an order in the window appear.
+    ``scope`` : ``main`` = the suppliers who deliver themselves or through a carrier ; ``maf`` = the suppliers
+    whose parts wait at the MAF Hambach (the shuttle planning).  « Messagerie » suppliers never appear."""
     days = working_days(start, weeks, sorted(set(holidays) | set(ds.holidays)), ds.open_days)
     end = days[-1] if days else start
     arts = {a.article_id: a for a in ds.articles if a.active}
     ignored = {(f.article_id, f.supplier_id or None, f.date) for f in ds.flags if f.kind == "order_ignored"}
-    transports = list_transports(session, start, end)
+    sups = {s.supplier_id: s for s in ds.suppliers}
+    wanted = {"maf"} if scope == "maf" else {"fournisseur", "transporteur"}
+    transports = [t for t in list_transports(session, start, end) if (t.mode == "maf") == (scope == "maf")]
     by_order: dict[str, list[str]] = {}
     for t in transports:
         for o in t.orders:
             by_order.setdefault(o.order_id, []).append(t.transport_id)
-    sups = {s.supplier_id: s for s in ds.suppliers}
+    carriers = carriers or {}
     rows: dict[str, dict[str, Any]] = {}
     for o in ds.orders:
         if o.order_type.value != "FIRM" or not o.supplier_id or o.expected_date < start or o.expected_date > end:
@@ -110,15 +160,20 @@ def planning(ds: Dataset, session: Session, start: dt.date, weeks: int, holidays
         if a is None:
             continue
         s = sups.get(o.supplier_id)
+        kind = mode_kind(s.transport_mode if s else "")
+        if kind not in wanted:
+            continue
+        carrier = (s.transport_mode.strip() if s and kind == "transporteur" else "")
         row = rows.setdefault(o.supplier_id, {"supplier_id": o.supplier_id, "name": s.name if s else "", "transport_contact": s.transport_contact if s else "",
-                                               "emails": s.transport_emails if s else [], "docks": s.dock_list if s else ["B15"], "orders": []})
+                                               "emails": carriers.get(carrier, []) if carrier else (s.transport_emails if s else []), "docks": s.dock_list if s else ["B15"],
+                                               "mode": s.transport_mode if s else MODE_SUPPLIER, "carrier": carrier, "orders": []})
         row["orders"].append({"order_id": o.order_id, "article_id": o.article_id, "designation": a.designation, "unit": a.unit, "ref": o.ref or "",
                               "expected_date": o.expected_date, "qty_ordered": float(o.qty_ordered), "qty_open": float(o.qty_open or 0.0),
                               "ignored": (o.article_id, o.supplier_id, o.expected_date) in ignored, "transports": by_order.get(o.order_id, [])})
     for r in rows.values():
         r["orders"].sort(key=lambda x: (x["expected_date"], x["article_id"], x["ref"]))
     names = {sid: s.name for sid, s in sups.items()}
-    return {"as_of": as_of, "start": start, "end": end, "days": days, "docks": list(DOCKS),
+    return {"as_of": as_of, "start": start, "end": end, "days": days, "docks": list(DOCKS), "scope": scope,
             "suppliers": sorted(rows.values(), key=lambda r: (r["name"].upper(), r["supplier_id"])),
             "transports": [transport_out(t, names) for t in transports]}
 
@@ -128,14 +183,34 @@ class TransportError(ValueError):
     pass
 
 
-def create_transports(session: Session, user: str, ds: Dataset, supplier_id: str, order_ids: list[str],
-                      slots: list[dict[str, Any]], carrier: str = "", note: str = "") -> list[AppTransport]:
-    """One transport per slot (date, time, docks), every slot carrying the same firm orders of ``supplier_id``.
-    Does not commit."""
-    orders: dict[str, OrderLine] = {o.order_id: o for o in ds.orders if o.order_type.value == "FIRM" and o.supplier_id == supplier_id}
-    missing = [oid for oid in order_ids if oid not in orders]
-    if missing:
-        raise TransportError(f"Commande(s) inconnue(s) pour le fournisseur {supplier_id} : {', '.join(missing)}")
+def create_transports(session: Session, user: str, ds: Dataset, supplier_id: str | None, order_ids: list[str],
+                      slots: list[dict[str, Any]], carrier: str = "", note: str = "", maf: bool = False) -> list[AppTransport]:
+    """One transport per slot (date, time, docks), every slot carrying the same firm orders : of ``supplier_id``
+    (a supplier who delivers himself or through a carrier : the carrier of his mode fills the CSV column), or,
+    with ``maf``, of any « MAF Hambach » suppliers (one shuttle).  Does not commit."""
+    sups = {s.supplier_id: s for s in ds.suppliers}
+    if maf:
+        orders = {o.order_id: o for o in ds.orders if o.order_type.value == "FIRM" and o.supplier_id in sups and mode_kind(sups[o.supplier_id].transport_mode) == "maf"}
+        missing = [oid for oid in order_ids if oid not in orders]
+        if missing:
+            raise TransportError(f"Commande(s) inconnue(s) ou hors MAF Hambach : {', '.join(missing)}")
+        supplier_id, mode = MAF_ID, "maf"
+    else:
+        if not supplier_id:
+            raise TransportError("Fournisseur manquant")
+        sp = sups.get(supplier_id)
+        kind = mode_kind(sp.transport_mode if sp else "")
+        if kind == "messagerie":
+            raise TransportError(f"{supplier_id} : flux messagerie, aucun transport à organiser")
+        if kind == "maf":
+            raise TransportError(f"{supplier_id} : pièces au MAF Hambach, le transport se crée dans l'onglet Planning MAF")
+        orders = {o.order_id: o for o in ds.orders if o.order_type.value == "FIRM" and o.supplier_id == supplier_id}
+        missing = [oid for oid in order_ids if oid not in orders]
+        if missing:
+            raise TransportError(f"Commande(s) inconnue(s) pour le fournisseur {supplier_id} : {', '.join(missing)}")
+        mode = "transporteur" if kind == "transporteur" else "fournisseur"
+        if kind == "transporteur" and not (carrier or "").strip():
+            carrier = sp.transport_mode.strip()
     if not slots:
         raise TransportError("Au moins un transport (date, heure, quai) est nécessaire")
     created: list[AppTransport] = []
@@ -149,15 +224,15 @@ def create_transports(session: Session, user: str, ds: Dataset, supplier_id: str
             raise TransportError(f"Quai(s) inconnu(s) : « {', '.join(bad) or 'aucun'} » (attendu {', '.join(DOCKS)})")
         day = sl["date"] if isinstance(sl["date"], dt.date) else dt.date.fromisoformat(str(sl["date"]))
         t = AppTransport(transport_id=next_transport_id(session), supplier_id=supplier_id, date=day, time=time, docks=";".join(docks),
-                         carrier=(carrier or "").strip()[:120], note=(note or "").strip()[:500], status="planned", created_by=user)
+                         carrier=(carrier or "").strip()[:120], note=(note or "").strip()[:500], mode=mode, status="planned", created_by=user)
         for oid in dict.fromkeys(order_ids):
             o = orders[oid]
-            t.orders.append(AppTransportOrder(order_id=oid, article_id=o.article_id, ref=o.ref or "", expected_date=o.expected_date,
+            t.orders.append(AppTransportOrder(order_id=oid, article_id=o.article_id, supplier_id=o.supplier_id or "", ref=o.ref or "", expected_date=o.expected_date,
                                               qty=float(o.qty_open if o.qty_open is not None else o.qty_ordered)))
         session.add(t)
         session.flush()
         audit(session, user, "create", "transport", t.transport_id, None,
-              {"supplier_id": supplier_id, "date": day.isoformat(), "time": time, "docks": docks, "carrier": t.carrier, "orders": list(dict.fromkeys(order_ids))})
+              {"supplier_id": supplier_id, "mode": mode, "date": day.isoformat(), "time": time, "docks": docks, "carrier": t.carrier, "orders": list(dict.fromkeys(order_ids))})
         created.append(t)
     return created
 
@@ -185,8 +260,9 @@ def atr_csv(transports: list[AppTransport], names: dict[str, str]) -> str:
     lines = [";".join(CSV_HEADER)]
     for t in transports:
         for dock in split_docks(t.docks) or [""]:
-            cells = [t.transport_id, names.get(t.supplier_id, t.supplier_id), t.carrier or "", f"{t.date:%d/%m/%Y}", f"{t.time}:00",
-                     t.supplier_id, FLOW, "", "", dock]
+            shuttle = t.mode == "maf" or t.supplier_id == MAF_ID
+            cells = [t.transport_id, MAF_LABEL if shuttle else names.get(t.supplier_id, t.supplier_id), t.carrier or "", f"{t.date:%d/%m/%Y}", f"{t.time}:00",
+                     MAF_LABEL if shuttle else t.supplier_id, FLOW, "", "", dock]
             lines.append(";".join(c.replace(";", " ") for c in cells))
     return "\r\n".join(lines) + "\r\n"
 
@@ -201,10 +277,30 @@ def _qty(v: float, unit: str) -> str:
     return f"{s} {unit}".strip()
 
 
-def mail_parts(transports: list[AppTransport], supplier: Supplier | None, articles: dict[str, Any], user: str) -> dict[str, Any]:
-    """Recipients (transport contacts of the supplier), subject and body of the notice, in French then
-    English : identifiers, dates, times and docks of the transports, then the orders they carry."""
-    name = supplier.name if supplier else (transports[0].supplier_id if transports else "")
+def recipients(transports: list[AppTransport], suppliers: dict[str, Supplier], carriers: dict[str, list[str]]) -> list[str]:
+    """Who receives the notice : the carrier's contacts when the transport goes through a carrier, the transport
+    contacts of every supplier carried by a shuttle, the supplier's transport contacts otherwise."""
+    out: list[str] = []
+    for t in transports:
+        if t.mode == "transporteur" and t.carrier:
+            emails = carriers.get(t.carrier.strip(), [])
+        elif t.mode == "maf" or t.supplier_id == MAF_ID:
+            emails = [e for o in t.orders for e in (suppliers[o.supplier_id].transport_emails if o.supplier_id in suppliers else [])]
+        else:
+            emails = suppliers[t.supplier_id].transport_emails if t.supplier_id in suppliers else []
+        for e in emails:
+            if e not in out:
+                out.append(e)
+    return out
+
+
+def mail_parts(transports: list[AppTransport], supplier: Supplier | None, articles: dict[str, Any], user: str,
+               suppliers: dict[str, Supplier] | None = None, carriers: dict[str, list[str]] | None = None) -> dict[str, Any]:
+    """Recipients (``recipients``), subject and body of the notice, in French then English : identifiers, dates,
+    times and docks of the transports, then the orders they carry (with their supplier on a shuttle)."""
+    suppliers = suppliers if suppliers is not None else ({supplier.supplier_id: supplier} if supplier else {})
+    shuttle = bool(transports) and (transports[0].mode == "maf" or transports[0].supplier_id == MAF_ID)
+    name = MAF_LABEL if shuttle else (supplier.name if supplier else (transports[0].supplier_id if transports else ""))
     ids = ", ".join(t.transport_id for t in transports)
     refs: list[str] = []
     for t in transports:
@@ -226,9 +322,10 @@ def mail_parts(transports: list[AppTransport], supplier: Supplier | None, articl
         a = articles.get(o.article_id)
         desig = f" {a.designation}" if a is not None and a.designation else ""
         unit = a.unit if a is not None else ""
-        lines.append(f"  • {o.ref or o.order_id} – {o.article_id}{desig} – {_qty(o.qty, unit)}" + (f" – prévue le {o.expected_date:%d/%m/%Y}" if o.expected_date else ""))
+        who = f" – {suppliers[o.supplier_id].name}" if shuttle and o.supplier_id in suppliers else ""
+        lines.append(f"  • {o.ref or o.order_id}{who} – {o.article_id}{desig} – {_qty(o.qty, unit)}" + (f" – prévue le {o.expected_date:%d/%m/%Y}" if o.expected_date else ""))
     if first.note:
         lines += ["", first.note]
     lines += ["", "Cordialement,", user, "", "---", "",
               f"Please deliver the orders below according to the transport{'s' if plural else ''} above ; the transport ID{'s' if plural else ''} must appear on the delivery documents and be known to the driver."]
-    return {"to": supplier.transport_emails if supplier else [], "subject": subject, "body": "\n".join(lines)}
+    return {"to": recipients(transports, suppliers, carriers or {}), "subject": subject, "body": "\n".join(lines)}

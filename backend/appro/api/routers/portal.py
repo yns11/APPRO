@@ -37,7 +37,7 @@ def overview(supplier_id: list[str] | None = Query(None), ctx: AppContext = Depe
     as_of = resolve_as_of(ds, mrp_service.build_params(ctx, session))
     sups = [s for s in ds.suppliers if s.supplier_id in sids]
     names = {s.supplier_id: s.name for s in ds.suppliers}
-    by_order = T.transports_by_order(session)
+    by_order = T.transports_by_order(session, ds)
     transports = [T.transport_out(t, names) for t in T.list_transports(session, supplier_ids=sids)]
     mine = lambda rows: [r for r in rows if (r.get("supplier_id") or "") in sids]  # noqa: E731
 

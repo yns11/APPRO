@@ -90,10 +90,12 @@ function loadSaved(key?: string): Saved {
  * * the footer (``footer`` = "auto", the default) shows the row count and the sums of the ``sum``
  *   columns ; ``footer={null}`` hides it, a node replaces it.
  */
-export function DataTable<T>({ rows, columns: allColumns, rowKey, onRowClick, rowClass, emptyTitle = "Aucune ligne", emptyHint, compact, maxHeight, footer = "auto", storageKey, exportTitle, toolbar }: {
+export function DataTable<T>({ rows, columns: allColumns, rowKey, onRowClick, rowClass, emptyTitle = "Aucune ligne", emptyHint, compact, maxHeight, footer = "auto", storageKey, exportTitle, toolbar, selection }: {
   rows: T[]; columns: Column<T>[]; rowKey: (row: T) => string; onRowClick?: (row: T) => void; rowClass?: (row: T) => string;
   emptyTitle?: string; emptyHint?: ReactNode; compact?: boolean; maxHeight?: number | string; footer?: ReactNode | "auto" | null;
   storageKey?: string; exportTitle?: string; toolbar?: ReactNode;
+  /** multi-selection : a checkbox per row and one in the header for every filtered row ; ``selected`` holds row keys */
+  selection?: { selected: Set<string>; onChange: (next: Set<string>) => void };
 }) {
   const [{ filters, sort, cols: colPrefs }, setSaved] = useState<Saved>(() => loadSaved(storageKey));
   const setFilters = (f: Record<string, string>) => setSaved((s) => ({ ...s, filters: f }));
@@ -148,6 +150,10 @@ export function DataTable<T>({ rows, columns: allColumns, rowKey, onRowClick, ro
     try { await exportTable(exportTitle ?? "Export", cols, body, foot); } catch (e) { toast.push((e as Error).message, "error"); }
   };
   const showTools = !!exportTitle || !!toolbar || anyFilter || hasHidden;
+  const span = columns.length + (selection ? 1 : 0);
+  const allPicked = !!selection && sorted.length > 0 && sorted.every((r) => selection.selected.has(rowKey(r)));
+  const toggleAll = () => { if (!selection) return; const next = new Set(selection.selected); if (allPicked) sorted.forEach((r) => next.delete(rowKey(r))); else sorted.forEach((r) => next.add(rowKey(r))); selection.onChange(next); };
+  const toggleOne = (k: string) => { if (!selection) return; const next = new Set(selection.selected); if (next.has(k)) next.delete(k); else next.add(k); selection.onChange(next); };
 
   return (
     <div className="dt-wrap">
@@ -179,6 +185,7 @@ export function DataTable<T>({ rows, columns: allColumns, rowKey, onRowClick, ro
         <table className={`tbl ${compact ? "compact" : ""}`}>
           <thead>
             <tr>
+              {selection && <th className="dt-pick"><input type="checkbox" checked={allPicked} onChange={toggleAll} aria-label="Tout sélectionner (lignes filtrées)" title="Sélectionner toutes les lignes filtrées" /></th>}
               {columns.map((c) => (
                 <th key={c.key} className={`${c.num ? "num" : ""} ${c.sortable !== false ? "sortable" : ""}`} style={c.width ? { width: c.width } : undefined} title={c.title}
                   onClick={c.sortable !== false ? () => toggleSort(c.key) : undefined}>
@@ -187,6 +194,7 @@ export function DataTable<T>({ rows, columns: allColumns, rowKey, onRowClick, ro
               ))}
             </tr>
             <tr className="dt-filters">
+              {selection && <th className="dt-pick">{selection.selected.size > 0 && <span className="small subtle">{selection.selected.size}</span>}</th>}
               {columns.map((c) => (
                 <th key={c.key} className={c.num ? "num" : ""}>
                   {c.filter === "none" ? null : c.filter === "select" ? (
@@ -204,18 +212,20 @@ export function DataTable<T>({ rows, columns: allColumns, rowKey, onRowClick, ro
           </thead>
           <tbody>
             {sorted.length === 0 ? (
-              <tr><td colSpan={columns.length}><Empty title={anyFilter ? "Aucune ligne ne correspond aux filtres" : emptyTitle} hint={anyFilter ? <button className="btn xs" onClick={() => setFilters({})}>Effacer les filtres</button> : emptyHint} /></td></tr>
+              <tr><td colSpan={span}><Empty title={anyFilter ? "Aucune ligne ne correspond aux filtres" : emptyTitle} hint={anyFilter ? <button className="btn xs" onClick={() => setFilters({})}>Effacer les filtres</button> : emptyHint} /></td></tr>
             ) : sorted.map((r) => (
-              <tr key={rowKey(r)} className={`${onRowClick ? "clickable" : ""} ${rowClass?.(r) ?? ""}`} onClick={onRowClick ? () => onRowClick(r) : undefined}>
+              <tr key={rowKey(r)} className={`${onRowClick ? "clickable" : ""} ${rowClass?.(r) ?? ""} ${selection?.selected.has(rowKey(r)) ? "picked" : ""}`} onClick={onRowClick ? () => onRowClick(r) : undefined}>
+                {selection && <td className="dt-pick" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selection.selected.has(rowKey(r))} onChange={() => toggleOne(rowKey(r))} aria-label={`Sélectionner ${rowKey(r)}`} /></td>}
                 {columns.map((c) => <td key={c.key} className={c.num ? "num" : ""}>{c.render ? c.render(r) : (c.get(r) ?? "")}</td>)}
               </tr>
             ))}
           </tbody>
           {footer === "auto" ? (hasSums && sorted.length > 0 && (
             <tfoot className="dt-sums"><tr>
+              {selection && <td className="dt-pick" />}
               {columns.map((c, i) => <td key={c.key} className={c.num ? "num" : ""}>{i === 0 ? <span className="subtle">{sorted.length} ligne(s)</span> : sums[c.key] ? (sums[c.key].unit === null ? <span className="subtle" title="Les lignes filtrées mélangent plusieurs unités : pas de total">unités mixtes</span> : <b title="Total des lignes filtrées">{fmtQty(sums[c.key].total, sums[c.key].unit ?? undefined)}{sums[c.key].unit ? <span className="subtle"> {sums[c.key].unit}</span> : null}</b>) : null}</td>)}
             </tr></tfoot>
-          )) : footer ? <tfoot><tr><td colSpan={columns.length}>{footer}</td></tr></tfoot> : null}
+          )) : footer ? <tfoot><tr><td colSpan={span}>{footer}</td></tr></tfoot> : null}
         </table>
       </div>
     </div>

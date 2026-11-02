@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useRefRows, useRefTables, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { ArticleLink, Badge, Button, Card, Skeleton, useToast } from "@/components/ui";
-import { RefRowEditor } from "@/components/RefRowEditor";
+import { RefRowEditor, transportModeOptions } from "@/components/RefRowEditor";
 import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
 import { WeekdayPicker, splitWeekdays } from "@/components/WeekdayPicker";
 import { fmtQty, fmtWeekdays } from "@/lib/format";
@@ -28,6 +28,8 @@ export function SupplierParamsTab({ supplierId, articles }: { supplierId: string
   const toast = useToast();
   const { rights } = usePerimeter();
   const tables = useRefTables();
+  const carriers = useRefRows("ref_carriers");
+  const modeOptions = useMemo(() => transportModeOptions((carriers.data ?? []).filter((c) => c.active !== false).map((c) => String(c.name))), [carriers.data]);
   const supTable = tables.data?.find((t) => t.name === "ref_suppliers");
   const linkTable = tables.data?.find((t) => t.name === "ref_article_suppliers");
   const rows = useRefRows("ref_suppliers");
@@ -71,6 +73,11 @@ export function SupplierParamsTab({ supplierId, articles }: { supplierId: string
           <div className={`param ${canEdit ? "editable" : ""}`} title="Quais présélectionnés à la création d'un transport">
             <span className="label">Quais par défaut</span>
             <span className="value"><DockPicker all={DOCKS} value={splitDocks(draft.docks)} disabled={!canEdit} onChange={(v) => set("docks", v.join(";"))} label="Quais par défaut" /></span>
+          </div>
+          <div className="param editable">
+            <span className="label">Mode transport</span>
+            <span className="value"><select className="select sm" value={String(draft.transport_mode || "Fournisseur")} disabled={!canEdit} aria-label="Mode transport" onChange={(e) => set("transport_mode", e.target.value)} style={{ width: "auto", maxWidth: 420 }}>{modeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></span>
+            <span className="small subtle">Fournisseur : Planning de livraisons ; MAF Hambach : onglet Planning MAF, navette commune ; Messagerie : hors planning, ordres fermes marqués ; un transporteur : son nom dans le fichier ATR, e-mail à ses contacts.</span>
             <span className="small subtle">Planning de livraisons</span>
           </div>
           <div className={`param ${canEdit ? "editable" : ""}`}>
