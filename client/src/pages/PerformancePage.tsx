@@ -5,17 +5,36 @@ import { api } from "@/lib/api";
 import { useLeadTimes, useOtd, useOtdMonths, useSegmentation, useSupplierNames, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useRemembered } from "@/lib/pageState";
-import { ArticleLink, Badge, Button, Card, Empty, ErrorBox, Kpi, Segmented, Skeleton, SkeletonBlock, SupplierLink, Tabs, useToast } from "@/components/ui";
+import { ArticleLink, Badge, Button, Card, Empty, ErrorBox, Kpi, Skeleton, SkeletonBlock, SupplierLink, Tabs, useToast } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
 import { SearchSelect } from "@/components/SearchSelect";
-import { OtdChart, periodTick } from "@/components/charts/OtdChart";
+import { WeekRangeBar, type WeekChip, type WeekRange } from "@/components/WeekRangeBar";
+import { periodTick } from "@/components/charts/OtdChart";
+import { OtdMiniChart } from "@/components/charts/OtdMiniChart";
 import { fmtDate, fmtEur, fmtInt, fmtQty } from "@/lib/format";
-import type { LeadArticle, LeadSupplier, OtdBucket, OtdLine, OtdMonths, OtdSupplier, SegmentRow } from "@/lib/types";
+import type { LeadArticle, LeadSupplier, OtdMonths, OtdSupplier, SegmentRow } from "@/lib/types";
 
 type Tab = "otd" | "lead" | "segments";
 const TABS: { id: Tab; label: string }[] = [{ id: "otd", label: "Service fournisseur (OTD)" }, { id: "lead", label: "Délais observés" }, { id: "segments", label: "Segmentation ABC / XYZ" }];
-const BUCKETS: { id: OtdBucket; label: string }[] = [{ id: "week", label: "Semaines" }, { id: "month", label: "Mois" }, { id: "quarter", label: "Trimestres" }, { id: "year", label: "Années" }];
-const PRESETS: { id: string; label: string; months: number }[] = [{ id: "3m", label: "3 mois", months: 3 }, { id: "6m", label: "6 mois", months: 6 }, { id: "12m", label: "12 mois", months: 12 }, { id: "24m", label: "24 mois", months: 24 }];
+const MONTH_WINDOW = 24;
+const MONTH_DEFAULT = 12;
+const MONTH_LABELS = { whole: "toute la fenêtre", weeks: "mois", all: "Tout", all_title: "Afficher toute la fenêtre", current: "mois en cours", past: "mois clos", pick: "cliquer ou glisser pour choisir les mois", range: "Période affichée (mois)" };
+
+const shiftMonth = (m: string, n: number) => { const k = Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1 + n; return `${Math.floor(k / 12)}-${String((k % 12) + 1).padStart(2, "0")}`; };
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** The whole ISO weeks of a month (a week belongs to the month of its Wednesday) : first Monday and last Sunday. */
+function monthBounds(m: string): { from: string; to: string } {
+  const y = Number(m.slice(0, 4)), mo = Number(m.slice(5, 7)) - 1;
+  const monday = (d: Date) => { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+  const inMonth = (mon: Date) => { const w = new Date(mon); w.setDate(w.getDate() + 2); return w.getFullYear() === y && w.getMonth() === mo; };
+  const first = monday(new Date(y, mo, 1, 12));
+  if (!inMonth(first)) first.setDate(first.getDate() + 7);
+  let last = monday(new Date(y, mo + 1, 0, 12));
+  if (!inMonth(last)) last.setDate(last.getDate() - 7);
+  if (last < first) last = first;
+  const sunday = new Date(last); sunday.setDate(sunday.getDate() + 6);
+  return { from: isoDay(first), to: isoDay(sunday) };
+}
 
 const pct = (v: number | null | undefined, digits = 0) => (v === null || v === undefined ? "–" : `${v.toFixed(digits)} %`);
 const tone = (v: number | null | undefined): "critical" | "warning" | "ok" | "neutral" => (v === null || v === undefined ? "neutral" : v < 60 ? "critical" : v < 85 ? "warning" : "ok");
@@ -43,43 +62,47 @@ export default function PerformancePage() {
   const { perimeter, config } = usePerimeter();
   const names = useSupplierNames();
   const supplierOptions = useMemo(() => Array.from(names.entries()).map(([id, name]) => ({ id, label: name || id, hint: id })).sort((a, b) => a.label.localeCompare(b.label, "fr")), [names]);
-  const [bucket, setBucket] = useRemembered<OtdBucket>("perf.bucket", "month");
-  const [preset, setPreset] = useRemembered<string>("perf.preset", "12m");
-  const [custom, setCustom] = useState<{ from: string; to: string }>({ from: "", to: "" });
-  const [supplier, setSupplier] = useState<string>(params.get("supplier_id") ?? "");
+  const monthsQ = useOtdMonths();
+  const [suppliers, setSuppliers] = useState<string[]>(() => params.getAll("supplier_id").filter(Boolean));
   const [article, setArticle] = useState("");
   const asOf = config?.as_of ?? "";
-  const range = useMemo(() => {
-    if (custom.from || custom.to) return { date_from: custom.from || undefined, date_to: custom.to || undefined };
-    const months = PRESETS.find((p) => p.id === preset)?.months ?? 12;
-    if (!asOf) return {};
-    const to = new Date(`${asOf}T12:00:00`); to.setDate(to.getDate() - 1);
-    const from = new Date(`${asOf}T12:00:00`); from.setMonth(from.getMonth() - months);
-    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    return { date_from: iso(from), date_to: iso(to) };
-  }, [custom, preset, asOf]);
-  const common = { ...range, planner: perimeter.planner ?? undefined, supplier_id: supplier || undefined, article_id: article.trim() || undefined };
+  // one chip per month : from the first evaluated month (at most 24 back) to the current month ; 12 last months by default
+  const chips = useMemo<WeekChip[]>(() => {
+    if (!asOf) return [];
+    const current = asOf.slice(0, 7);
+    const earliest = monthsQ.data?.months[0] ?? shiftMonth(current, -(MONTH_DEFAULT - 1));
+    const start = earliest > shiftMonth(current, -(MONTH_WINDOW - 1)) ? earliest : shiftMonth(current, -(MONTH_WINDOW - 1));
+    const out: WeekChip[] = [];
+    for (let m = start; m <= current; m = shiftMonth(m, 1)) out.push({ key: m, label: periodTick(m), start: fmtDate(monthBounds(m).from), current: m === current, past: m < current });
+    return out;
+  }, [asOf, monthsQ.data]);
+  const [picked, setPicked] = useRemembered<WeekRange>("perf.months", null);
+  const range = useMemo<WeekRange>(() => {
+    if (!chips.length) return null;
+    const keys = chips.map((c) => c.key);
+    if (picked && keys.includes(picked.from) && keys.includes(picked.to)) return picked;
+    return { from: keys[Math.max(0, keys.length - MONTH_DEFAULT)], to: keys[keys.length - 1] };
+  }, [chips, picked]);
+  const dates = range ? { date_from: monthBounds(range.from).from, date_to: monthBounds(range.to).to } : {};
+  const common = { ...dates, planner: perimeter.planner ?? undefined, supplier_id: suppliers.length ? suppliers : undefined, article_id: article.trim() || undefined };
   return (
     <div className="page">
       <div className="page-header">
-        <div className="title"><h1>Performance fournisseurs</h1><p>{tab === "otd" ? "Par fournisseur, article et jour de livraison attendu : quantité, ponctualité, DESADV. Semaines entières ; un fournisseur = la moyenne de ses jours." : tab === "lead" ? "Délais mesurés sur les réceptions : retard moyen, parts à l'heure et en retard, biais contre le délai paramétré, urgences, profils par jour de la semaine." : "ABC par valeur annuelle, XYZ par régularité de la consommation ; chaque segment suggère une couverture cible."}</p></div>
+        <div className="title"><h1>Performance fournisseurs</h1><p>{tab === "otd" ? "Par fournisseur, article et jour de livraison attendu : quantité, ponctualité, DESADV." : tab === "lead" ? "Délais mesurés sur les réceptions : retard moyen, parts à l'heure et en retard, biais contre le délai paramétré, urgences, profils par jour de la semaine." : "ABC par valeur annuelle, XYZ par régularité de la consommation ; chaque segment suggère une couverture cible."}</p></div>
         <div className="actions"><Link className="btn sm" to="/parametres" title="Poids de l'OTD, tranches de ponctualité, seuils ABC / XYZ">Règles</Link></div>
       </div>
       <Tabs<Tab> tabs={TABS} value={tab} onChange={setTab} />
       {tab !== "segments" && (
-        <Card tight>
-          <div className="row wrap">
-            <Segmented size="sm" value={preset} onChange={(p) => { setPreset(p); setCustom({ from: "", to: "" }); }} options={PRESETS.map((p) => ({ id: p.id, label: p.label }))} />
-            <label className="field"><span className="sr-only">Du</span><input className="input sm" type="date" value={custom.from} onChange={(e) => setCustom({ ...custom, from: e.target.value })} aria-label="Du" /></label>
-            <label className="field"><span className="sr-only">Au</span><input className="input sm" type="date" value={custom.to} onChange={(e) => setCustom({ ...custom, to: e.target.value })} aria-label="Au" /></label>
-            {tab === "otd" && <Segmented size="sm" value={bucket} onChange={setBucket} options={BUCKETS} />}
-            <SearchSelect value={supplier} onChange={setSupplier} options={supplierOptions} placeholder="Tous les fournisseurs" ariaLabel="Fournisseur" width={280} />
+        <Card flush>
+          {chips.length > 0 && <WeekRangeBar weeks={chips} range={range} onChange={(r) => setPicked(r)} labels={MONTH_LABELS} />}
+          <div className="row wrap" style={{ padding: "var(--sp-3) var(--sp-4)" }}>
+            <SearchSelect values={suppliers} onChangeMany={setSuppliers} options={supplierOptions} placeholder="Tous les fournisseurs (code ou nom)" ariaLabel="Fournisseurs" width={340} />
             <input className="input sm" placeholder="Article (code exact)" value={article} onChange={(e) => setArticle(e.target.value)} style={{ width: 170 }} aria-label="Article" />
-            <span className="subtle small" style={{ marginLeft: "auto" }}>{range.date_from ? `${fmtDate(range.date_from)} → ${fmtDate(range.date_to)}` : ""}{perimeter.planner ? ` · approvisionneur ${perimeter.planner}` : ""}</span>
+            <span className="subtle small" style={{ marginLeft: "auto" }}>{dates.date_from ? `semaines entières du ${fmtDate(dates.date_from)} au ${fmtDate(dates.date_to)}` : ""}{perimeter.planner ? ` · approvisionneur ${perimeter.planner}` : ""}</span>
           </div>
         </Card>
       )}
-      {tab === "otd" && <OtdTab params={{ ...common, bucket }} planner={perimeter.planner ?? undefined} supplier={supplier || undefined} />}
+      {tab === "otd" && <OtdTab params={{ ...common, bucket: "month" }} planner={perimeter.planner ?? undefined} suppliers={suppliers} />}
       {tab === "lead" && <LeadTab params={common} />}
       {tab === "segments" && <SegmentsTab />}
     </div>
@@ -89,12 +112,11 @@ export default function PerformancePage() {
 /* ---------------------------------------------------------------- OTD */
 const sheetUrl = (supplierId: string, month: string) => `/performance/otd/${encodeURIComponent(supplierId)}/${month}`;
 
-function OtdTab({ params, planner, supplier }: { params: Record<string, string | undefined>; planner?: string; supplier?: string }) {
+function OtdTab({ params, planner, suppliers }: { params: Record<string, string | string[] | undefined>; planner?: string; suppliers: string[] }) {
   const q = useOtd(params);
   const d = q.data;
   const months = useOtdMonths();
   const lastClosed = months.data?.last_closed;
-  const [showLines, setShowLines] = useRemembered("perf.otd.lines", false);
   // one column per month of the period (month buckets only, the last twelve) : each score opens the supplier × month sheet
   const monthCols = useMemo<Column<OtdSupplier>[]>(() => (d?.bucket !== "month" ? [] : d.periods.slice(-12).map((m, i, all) => ({
     key: `m:${m}`, label: periodTick(m), num: true, export: "number", title: `OTD ${m} · un clic ouvre la fiche du mois`,
@@ -113,53 +135,38 @@ function OtdTab({ params, planner, supplier }: { params: Record<string, string |
     { key: "articles", label: "Articles", get: (s) => s.articles, num: true, hidden: true },
     { key: "sheet", label: "", get: () => "", filter: "none", sortable: false, export: false, width: 36, render: (s) => <Link className="btn ghost sm" to={sheetUrl(s.supplier_id, lastClosed ?? (d?.periods.length ? d.periods[d.periods.length - 1] : ""))} title={`Fiche OTD du dernier mois clos${lastClosed ? ` (${periodTick(lastClosed)})` : ""}`} aria-label={`Fiche OTD de ${s.name}`}><FileText size={14} /></Link> },
   ], [monthCols, lastClosed, d?.periods]);
-  const lineCols = useMemo<Column<OtdLine>[]>(() => [
-    { key: "date", label: "Jour", get: (o) => o.date, render: (o) => <>{fmtDate(o.date)}{o.shifted_from && <span className="sub" title="Créneau ERP sur un jour fermé, déplacé au jour ouvré suivant">ERP {fmtDate(o.shifted_from)}</span>}</> },
-    { key: "supplier", label: "Fournisseur", get: (o) => `${o.supplier_id ?? ""} ${o.supplier_name}`, render: (o) => <SupplierLink id={o.supplier_id} name={o.supplier_name} inline /> },
-    { key: "article", label: "Article", get: (o) => `${o.article_id} ${o.designation}`, exportGet: (o) => o.article_id, render: (o) => <ArticleLink id={o.article_id} designation={o.designation} /> },
-    { key: "expected", label: "Attendu", get: (o) => o.expected, num: true, render: (o) => fmtQty(o.expected, o.unit) },
-    { key: "received", label: "Reçu le jour", get: (o) => o.received, num: true, title: "Quantité reçue le jour attendu ; la quantité est acquise dès que la ligne est complète dans le délai d'évaluation", render: (o) => <>{fmtQty(o.received, o.unit)}{o.excess > o.tolerance && <span className="sub" style={{ color: "var(--critical-fg)" }}>excédent {fmtQty(o.excess)}</span>}</> },
-    { key: "delta", label: "Écart", get: (o) => o.delta, num: true, title: "Jours ouvrés entre le jour attendu et la quantité complète (négatif = avance)", render: (o) => o.delta === null ? <span className="subtle">–</span> : <span style={{ color: o.delta > 0 ? "var(--critical-fg)" : o.delta < 0 ? "var(--info-fg)" : undefined }}>{o.delta === 0 ? "le jour" : days(o.delta)}</span> },
-    { key: "qs", label: "Quantité", get: (o) => o.qty_score, num: true, export: "number", render: (o) => o.qty_score === null ? <span className="subtle">–</span> : <Badge tone={tone(o.qty_score)}>{o.qty_score}</Badge> },
-    { key: "ps", label: "Ponctualité", get: (o) => o.punct_score, num: true, export: "number", render: (o) => o.punct_score === null ? <span className="subtle">–</span> : <Badge tone={tone(o.punct_score)}>{o.punct_score}</Badge> },
-    { key: "status", label: "Statut", get: (o) => o.status, filter: "select", render: (o) => <Badge tone={o.status === "reçue" ? "ok" : o.status === "non livrée" ? "critical" : "neutral"}>{o.status}</Badge> },
-    { key: "reason", label: "Pourquoi", get: (o) => o.reason, filter: "none", render: (o) => <span className="small subtle" style={{ whiteSpace: "normal", display: "block", minWidth: 240 }}>{o.reason}</span> },
-    { key: "purch", label: "Commandes", get: (o) => o.purch, hidden: true, render: (o) => <span className="mono small">{o.purch}{o.order_count > 1 ? ` (${o.order_count})` : ""}</span> },
-    { key: "completed", label: "Complet le", get: (o) => o.completed ?? "", hidden: true, render: (o) => o.completed ? fmtDate(o.completed) : <span className="subtle">–</span> },
-    { key: "bls", label: "BL", get: (o) => o.bls.join(", "), hidden: true },
-    { key: "planner", label: "Approvisionneur", get: (o) => o.planner, filter: "select", hidden: true },
-  ], []);
   if (q.isError) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   const t = d?.totals;
+  const series = d?.totals.series ?? [];
+  const tiles: { key: "otd" | "qty" | "punctuality" | "desadv"; label: string; icon: JSX.Element; color: string; target?: number; meta: string }[] = [
+    { key: "otd", label: "OTD", icon: <Gauge size={14} />, color: "var(--brand)", target: 90, meta: t ? `${fmtInt(t.suppliers)} fournisseur(s) · ${fmtInt(t.n)} jour(s)` : "" },
+    { key: "qty", label: "Quantité", icon: <PackageCheck size={14} />, color: "var(--s-firm)", meta: d ? `poids ${d.params.weights.qty} %` : "" },
+    { key: "punctuality", label: "Ponctualité", icon: <Timer size={14} />, color: "var(--s-stock-sim)", meta: d ? `poids ${d.params.weights.punctuality} %` : "" },
+    { key: "desadv", label: "DESADV", icon: <Truck size={14} />, color: "var(--s-receipt)", meta: d ? `poids ${d.params.weights.desadv} %` : "" },
+  ];
   return (
     <>
-      <div className="grid kpis">
-        <Kpi label="OTD" icon={<Gauge size={14} />} value={t ? pct(t.otd) : <Skeleton w={60} h={28} />} meta={t ? `${fmtInt(t.suppliers)} fournisseur(s) · ${fmtInt(t.n)} jour(s)` : ""} tone={ktone(t?.otd)} />
-        <Kpi label="Quantité" icon={<PackageCheck size={14} />} value={t ? pct(t.qty) : <Skeleton w={60} h={28} />} meta={d ? `poids ${d.params.weights.qty} %` : ""} tone={ktone(t?.qty)} />
-        <Kpi label="Ponctualité" icon={<Timer size={14} />} value={t ? pct(t.punctuality) : <Skeleton w={60} h={28} />} meta={d ? `poids ${d.params.weights.punctuality} %` : ""} tone={ktone(t?.punctuality)} />
-        <Kpi label="DESADV" icon={<Truck size={14} />} value={t ? pct(t.desadv) : <Skeleton w={60} h={28} />} meta={d ? `poids ${d.params.weights.desadv} %` : ""} tone={ktone(t?.desadv)} />
+      <div className="grid cols-4 otd-tiles">
+        {tiles.map((x) => (
+          <div key={x.key} className="otd-tile">
+            <Kpi label={x.label} icon={x.icon} value={t ? pct(t[x.key]) : <Skeleton w={60} h={28} />} meta={x.meta} tone={ktone(t?.[x.key])} />
+            <Card tight>
+              {q.isLoading || !d ? <Skeleton h={150} /> : series.length === 0 ? <Empty title="Aucun jour évalué" hint="Élargir les mois ou retirer les filtres." /> : <OtdMiniChart series={series} dataKey={x.key} name={x.label} color={x.color} target={x.target} />}
+            </Card>
+          </div>
+        ))}
       </div>
-      {d && (d.not_evaluable > 0 || !d.first_seen_available) && (
-        <p className="small subtle">{d.not_evaluable > 0 ? `${d.not_evaluable} jour(s) reçu(s) d'après l'ERP sans réception dans l'extraction : non notés. ` : ""}{!d.first_seen_available ? "La date de création des commandes viendra avec le job de synchronisation (délai observé, urgences)." : ""}</p>
-      )}
-      <Card title="Évolution" hint={`par ${BUCKETS.find((b) => b.id === d?.bucket)?.label.toLowerCase() ?? "période"}`} collapsible storageKey="perf.otd.chart">
-        {q.isLoading || !d ? <Skeleton h={240} /> : d.totals.series.length === 0 ? <Empty title="Aucun jour évalué sur la période" hint="Élargir la période ou retirer les filtres." /> : <OtdChart series={d.totals.series} target={90} height={240} />}
+      <ClosingCard months={months.data} planner={planner} suppliers={suppliers} />
+      <Card flush title="Par fournisseur" hint="un score mensuel ouvre la fiche du fournisseur pour ce mois">
+        {q.isLoading || !d ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={d.suppliers} columns={supCols} rowKey={(s) => s.supplier_id ?? "none"} compact maxHeight="55vh" storageKey="perf.otd.suppliers2" exportTitle="OTD par fournisseur" emptyTitle="Aucun jour évalué" />}
       </Card>
-      <ClosingCard months={months.data} planner={planner} supplier={supplier} />
-      <Card flush title="Par fournisseur" hint={d?.bucket === "month" ? "un score mensuel ouvre la fiche du fournisseur pour ce mois" : undefined} actions={<Button size="sm" variant={showLines ? "primary" : "default"} onClick={() => setShowLines(!showLines)}>Détail par jour</Button>}>
-        {q.isLoading || !d ? <div style={{ padding: 20 }}><SkeletonBlock /></div> : <DataTable rows={d.suppliers} columns={supCols} rowKey={(s) => s.supplier_id ?? "none"} compact maxHeight="50vh" storageKey="perf.otd.suppliers2" exportTitle="OTD par fournisseur" emptyTitle="Aucun jour évalué" />}
-      </Card>
-      {showLines && d && (
-        <Card flush title="Détail par jour" hint={`${fmtInt(d.lines.length)} ligne(s)${d.truncated ? ", liste tronquée à 5 000" : ""}`}>
-          <DataTable rows={d.lines} columns={lineCols} rowKey={(o) => o.id} compact maxHeight="60vh" storageKey="perf.otd.lines2" exportTitle="OTD par jour" emptyTitle="Aucune ligne" />
-        </Card>
-      )}
     </>
   );
 }
 
 /** The monthly closing : choose a month, read its state, print the portfolio report, freeze the month (managers). */
-function ClosingCard({ months, planner, supplier }: { months: OtdMonths | undefined; planner?: string; supplier?: string }) {
+function ClosingCard({ months, planner, suppliers }: { months: OtdMonths | undefined; planner?: string; suppliers: string[] }) {
+  const supplier = suppliers.length === 1 ? suppliers[0] : undefined;
   const { rights } = usePerimeter();
   const toast = useToast();
   const [picked, setPicked] = useState<string>("");
@@ -169,7 +176,7 @@ function ClosingCard({ months, planner, supplier }: { months: OtdMonths | undefi
   const closable = !!months && month <= months.last_closed;
   const close = useWrite((force: boolean) => api.post<{ suppliers: number; closed_at: string }>("/api/performance/otd/close", { month, force }),
     (r) => toast.push(`${periodTick(month)} arrêté : ${r.suppliers} fournisseur(s) figé(s)`, "success"));
-  const pdf = api.downloadUrl("/api/performance/otd/arrete.pdf", { month, planner, supplier_id: supplier });
+  const pdf = api.downloadUrl("/api/performance/otd/arrete.pdf", { month, planner, supplier_id: suppliers.length ? suppliers : undefined });
   return (
     <Card tight>
       <div className="row wrap" style={{ alignItems: "center" }}>
@@ -179,7 +186,7 @@ function ClosingCard({ months, planner, supplier }: { months: OtdMonths | undefi
         </select>
         {!months ? <Skeleton w={160} /> : closing ? <Badge tone="brand" title={`par ${closing.closed_by}`}><Lock size={12} /> arrêté le {fmtDate(closing.closed_at, "dd/MM/yyyy HH:mm")} · {closing.suppliers} fournisseur(s)</Badge>
           : closable ? <Badge tone="neutral">non arrêté · chiffres du jour</Badge> : <Badge tone="warning">mois en cours</Badge>}
-        <a className="btn sm" href={pdf} target="_blank" rel="noopener" title={supplier ? "Arrêté du fournisseur choisi" : "Tableau récapitulatif de tous les fournisseurs, puis une page par fournisseur"}><FileText />PDF {supplier ? "du fournisseur" : "portefeuille"}</a>
+        <a className="btn sm" href={pdf} target="_blank" rel="noopener" title={supplier ? "Arrêté du fournisseur choisi" : "Tableau récapitulatif de tous les fournisseurs, puis une page par fournisseur"}><FileText />PDF {supplier ? "du fournisseur" : suppliers.length ? "des fournisseurs choisis" : "portefeuille"}</a>
         {rights.canManageParams && closable && !closing && <Button size="sm" variant="primary" disabled={close.isPending} onClick={() => { if (window.confirm(`Arrêter ${periodTick(month)} ? Les chiffres de chaque fournisseur sont figés pour le rapport mensuel.`)) close.mutate(false); }}><Lock />Arrêter le mois</Button>}
         {rights.isAdmin && closing && <Button size="sm" disabled={close.isPending} onClick={() => { if (window.confirm(`Refaire l'arrêté de ${periodTick(month)} avec les chiffres du jour ? L'arrêté précédent est remplacé.`)) close.mutate(true); }}>Refaire l'arrêté</Button>}
         <span className="subtle small" style={{ marginLeft: "auto" }}>dernier mois clos {months?.last_closed ? periodTick(months.last_closed) : "–"} · mois = semaines entières, rattachées au mois de leur mercredi</span>
@@ -189,7 +196,7 @@ function ClosingCard({ months, planner, supplier }: { months: OtdMonths | undefi
 }
 
 /* ---------------------------------------------------------------- observed lead times */
-function LeadTab({ params }: { params: Record<string, string | undefined> }) {
+function LeadTab({ params }: { params: Record<string, string | string[] | undefined> }) {
   const q = useLeadTimes(params);
   const d = q.data;
   const base = <T extends LeadSupplier | LeadArticle>(): Column<T>[] => [

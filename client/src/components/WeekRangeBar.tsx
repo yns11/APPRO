@@ -10,11 +10,15 @@ export type WeekRange = { from: string; to: string } | null;
  * a week, or drag from a week to another, to show only that period (columns displayed, never the
  * engine dates) ; Shift+click extends ; the cross shows the whole window again.
  */
-export function WeekRangeBar({ weeks, range, onChange, lang = "fr" }: { weeks: WeekChip[]; range: WeekRange; onChange: (r: WeekRange) => void; lang?: Lang }) {
+export type WeekBarLabels = Partial<Record<"whole" | "weeks" | "all" | "all_title" | "from" | "current" | "past" | "pick" | "range", string>>;
+
+export function WeekRangeBar({ weeks, range, onChange, lang = "fr", labels }: { weeks: WeekChip[]; range: WeekRange; onChange: (r: WeekRange) => void; lang?: Lang;
+  /** wording overrides (the same bar serves months : « mois », « mois en cours »…) */
+  labels?: WeekBarLabels }) {
   const [anchor, setAnchor] = useState<string | null>(null);
   const [drag, setDrag] = useState<WeekRange>(null);
   const dragging = useRef(false);
-  const t = (k: Parameters<typeof tr>[1]) => tr(lang, k);
+  const t = (k: Parameters<typeof tr>[1]) => labels?.[k.replace("weeks.", "") as keyof WeekBarLabels] ?? tr(lang, k);
   const idx = (k: string) => weeks.findIndex((w) => w.key === k);
   const ordered = (a: string, b: string): WeekRange => (idx(a) <= idx(b) ? { from: a, to: b } : { from: b, to: a });
   useEffect(() => {

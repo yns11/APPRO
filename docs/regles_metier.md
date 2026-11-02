@@ -809,6 +809,12 @@ derniers mois, chaque score est un lien), depuis l'icône de fiche en bout de li
 barres mensuelles de l'onglet *Performance* de la fiche fournisseur. Le **dernier mois clos** (toutes ses semaines
 terminées avant aujourd'hui) est le mois par défaut.
 
+**Page Performance › OTD** : un **sélecteur de mois** (une pastille par mois, du premier mois évalué au mois en
+cours, 24 au plus ; clic ou glisser, les douze derniers mois par défaut ; la période est faite des semaines entières
+de ces mois), un filtre **fournisseurs multiple** et un filtre article ; quatre tuiles (OTD, quantité, ponctualité,
+DESADV) chacune avec **sa courbe mensuelle** ; la carte d'arrêté ; le tableau par fournisseur avec une colonne par
+mois. Le détail jour par jour n'y figure plus : il est dans la fiche du mois.
+
 **Arrêté mensuel** (`POST /api/performance/otd/close`, managers et administrateurs ; refaire un arrêté est réservé
 aux administrateurs) : fige la fiche de chaque fournisseur évalué sur le mois dans `app_otd_closings` (chiffres,
 lignes, auteur, horodatage) ; une réception saisie après ne les modifie plus. Le **PDF d'arrêté**

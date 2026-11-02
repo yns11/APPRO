@@ -694,3 +694,8 @@ table.dgrid { border-collapse: separate; border-spacing: 0; font-size: var(--fs-
 .month-bars a:hover, .month-bars a.last { background: var(--brand); }
 .month-bars a .v { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: var(--fw-semibold); color: var(--brand-fg); }
 .month-bars-labels { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; font-size: 10px; color: var(--fg-subtle); text-align: center; margin-top: 4px; }
+.otd-tiles { align-items: stretch; }
+.otd-tile { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.otd-tile .kpi { min-height: 88px; }
+@media (max-width: 1100px) { .otd-tiles.grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .otd-tiles.grid.cols-4 { grid-template-columns: 1fr; } }
