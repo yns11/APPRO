@@ -147,14 +147,19 @@ function OtdTab({ params, planner, suppliers }: { params: Record<string, string 
   return (
     <>
       <div className="grid cols-4 otd-tiles">
-        {tiles.map((x) => (
-          <div key={x.key} className="otd-tile">
-            <Kpi label={x.label} icon={x.icon} value={t ? pct(t[x.key]) : <Skeleton w={60} h={28} />} meta={x.meta} tone={ktone(t?.[x.key])} />
-            <Card tight>
-              {q.isLoading || !d ? <Skeleton h={150} /> : series.length === 0 ? <Empty title="Aucun jour évalué" hint="Élargir les mois ou retirer les filtres." /> : <OtdMiniChart series={series} dataKey={x.key} name={x.label} color={x.color} target={x.target} />}
-            </Card>
-          </div>
-        ))}
+        {tiles.map((x) => { const tone = ktone(t?.[x.key]); return (
+          <div key={x.key} className={`kpi otd-kpi${tone ? ` tone-${tone}` : ""}`}>
+            <div className="otd-kpi-head">
+              <div>
+                <div className="label">{x.icon}{x.label}</div>
+                <div className="value">{t ? pct(t[x.key]) : <Skeleton w={60} h={28} />}</div>
+              </div>
+              <div className="meta">{x.meta}</div>
+            </div>
+            <div className="otd-kpi-chart">
+              {q.isLoading || !d ? <Skeleton h={120} /> : series.length === 0 ? <Empty title="Aucun jour évalué" hint="Élargir les mois ou retirer les filtres." /> : <OtdMiniChart series={series} dataKey={x.key} name={x.label} color={x.color} target={x.target} height={120} />}
+            </div>
+          </div>); })}
       </div>
       <ClosingCard months={months.data} planner={planner} suppliers={suppliers} />
       <Card flush title="Par fournisseur" hint="un score mensuel ouvre la fiche du fournisseur pour ce mois">
