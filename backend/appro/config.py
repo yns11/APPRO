@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     as_of: dt.date | None = Field(None, description="Simulated « today » (demo, tests). Default: the real date of the day")
     default_planner: str | None = Field(None)
     admins: str = Field("", description="Comma separated e-mails that are always administrators, whatever the planners table (the bundle deployer by default): no lock-out possible")
+    transport_users: str = Field("younes.elhachi1@emotors.com", description="Comma separated e-mails of the only users who see the « Planning de livraisons » and the trucks (API /api/transports) while the automatic trucks are tried out ; empty = everybody")
     horizon_days: int = Field(364, description="Projection horizon after today : 52 weeks (fixed in the application)")
     history_weeks: int = Field(2, description="Weeks shown before the current week in the supply table")
     working_weekdays: str = Field("1,2,3,4,5")
@@ -98,6 +99,12 @@ class Settings(BaseSettings):
     @property
     def admin_emails(self) -> set[str]:
         return {x.strip().lower() for x in self.admins.split(",") if x.strip()}
+
+    @property
+    def transport_user_emails(self) -> set[str] | None:
+        """``None`` = no restriction (the variable is empty)."""
+        emails = {x.strip().lower() for x in self.transport_users.split(",") if x.strip()}
+        return emails or None
 
     @property
     def holiday_dates(self) -> list[dt.date]:

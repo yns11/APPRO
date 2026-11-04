@@ -97,11 +97,14 @@ class AppContext:
             v = bump_data_version(session)
         self._set_version(v)
 
-    def commit(self, session: Session) -> int:
+    def commit(self, session: Session, on_version: Any = None) -> int:
         """Validate the writes of a request **and** the version bump in the same transaction : a failure
         between the two can no longer leave new data with an old version (the other processes would keep
-        serving their stale cache).  Returns the new version."""
+        serving their stale cache).  ``on_version(v)`` may write the new number in the same transaction
+        (the transport reconciliation records the version it processed).  Returns the new version."""
         v = bump_data_version(session, commit=False)
+        if on_version is not None:
+            on_version(v)
         session.commit()
         self._set_version(v)
         return v

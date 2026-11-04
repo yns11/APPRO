@@ -9,7 +9,10 @@
 * while ``ref_planners`` is empty every user is an admin (first installation) ;
 * a **supplier** (an e-mail listed in ``ref_suppliers.transport_contact`` and nowhere in ``ref_planners``)
   only reaches the « espace fournisseur » (``/api/portal``) : his firm orders and transports, forecasts,
-  backlog, despatch advices and receipts ; every other route answers 403.
+  backlog, despatch advices and receipts ; every other route answers 403 ;
+* the **planning of deliveries and the trucks** (``/api/transports``, menu entry, supplier tab) are, while the
+  automatic trucks are tried out, reserved to the e-mails of ``APPRO_TRANSPORT_USERS`` (``can_transports``) ;
+  an empty variable opens them to every user.
 
 **For now** (``OPEN_REFERENCE``), every declared user edits and imports the reference tables of
 ``OPEN_TABLES`` as a whole, his portfolio or not ; the planners stay the admins' and the delegations
@@ -46,6 +49,7 @@ class Access:
     delegated_from: list[str] = field(default_factory=list)   # planner ids delegating to the user
     bootstrap: bool = False               # no planner declared yet: everybody is admin
     supplier_ids: list[str] = field(default_factory=list)   # supplier role : the suppliers whose transport contact the user is
+    transport_access: bool = True         # sees the « Planning de livraisons » and the trucks (``APPRO_TRANSPORT_USERS``)
     _article_planner: dict[str, str] = field(default_factory=dict, repr=False)
     _planner_name: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -65,6 +69,16 @@ class Access:
     @property
     def is_supplier(self) -> bool:
         return self.role == SUPPLIER
+
+    @property
+    def can_transports(self) -> bool:
+        """The planning of deliveries and the trucks : for now only the users of ``APPRO_TRANSPORT_USERS`` (the
+        automatic trucks are tried out by one person) ; a supplier never (he has his own space)."""
+        return self.transport_access and not self.is_supplier
+
+    def require_transports(self) -> None:
+        if not self.can_transports:
+            raise HTTPException(403, "Planning de livraisons : accès réservé pendant l'essai des camions automatiques")
 
     def can_edit_planner(self, planner_name: str | None) -> bool:
         return self.is_admin or (planner_name or "").upper() in self.portfolio
@@ -144,7 +158,8 @@ class Access:
                 "portfolio": sorted(self.portfolio), "delegated_from": list(self.delegated_from), "bootstrap": self.bootstrap,
                 "can_write": self.can_write, "can_edit_all": self.is_admin, "can_manage_params": self.is_manager,
                 "can_import_pdp": self.is_manager, "is_admin": self.is_admin,
-                "can_edit_reference": self.can_edit_table("ref_articles"), "supplier_ids": list(self.supplier_ids)}
+                "can_edit_reference": self.can_edit_table("ref_articles"), "supplier_ids": list(self.supplier_ids),
+                "can_transports": self.can_transports}
 
 
 def supplier_ids_of(user: str, suppliers: pd.DataFrame | None) -> list[str]:
@@ -167,7 +182,8 @@ def _s(v) -> str:
 
 
 def resolve_access(user: str, planners: pd.DataFrame, delegations: pd.DataFrame, articles: pd.DataFrame,
-                   today: dt.date | None = None, admins: set[str] | None = None, suppliers: pd.DataFrame | None = None) -> Access:
+                   today: dt.date | None = None, admins: set[str] | None = None, suppliers: pd.DataFrame | None = None,
+                   transport_users: set[str] | None = None) -> Access:
     """Rights of ``user`` (the e-mail forwarded by Databricks Apps) from the three reference frames.
 
     ``admins`` (``APPRO_ADMINS``, the bundle deployer by default) are administrators whatever the
@@ -177,7 +193,8 @@ def resolve_access(user: str, planners: pd.DataFrame, delegations: pd.DataFrame,
     today = today or dt.date.today()
     art_planner = {str(r["article_id"]): _s(r.get("planner")) for r in articles.to_dict("records")}
     names = {_s(r["planner_id"]): _s(r["name"]) for r in planners.to_dict("records")}
-    acc = Access(user=user, _article_planner=art_planner, _planner_name=names)
+    acc = Access(user=user, _article_planner=art_planner, _planner_name=names,
+                 transport_access=transport_users is None or (user or "").strip().lower() in transport_users)
     forced_admin = (user or "").strip().lower() in (admins or set())
     sids = [] if forced_admin else supplier_ids_of(user, suppliers)
     if planners.empty:

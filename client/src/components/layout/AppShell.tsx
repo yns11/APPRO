@@ -60,7 +60,7 @@ export default function AppShell() {
         <Button variant="ghost" icon size="sm" className="collapse no-print" title={mini ? "Déployer le panneau de navigation" : "Réduire le panneau de navigation (icônes seules)"} aria-label={mini ? "Déployer la navigation" : "Réduire la navigation"} onClick={() => set({ sidebarCollapsed: !mini })}>{mini ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
         <nav onClick={() => setOpen(false)}>
           {supplier ? SUPPLIER_NAV.map(link) : <>
-            {NAV.map(link)}
+            {NAV.filter((n) => n.to !== "/livraisons" || config?.access?.can_transports).map(link)}
             <div className="nav-group small subtle">Plus</div>
             {MORE.map(link)}
           </>}

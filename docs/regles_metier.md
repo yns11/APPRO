@@ -569,6 +569,79 @@ cours et la suivante affichées par défaut). La liste des transports des semain
 colonne**, une **multi-sélection** et des actions par lot : CSV de la sélection, un e-mail pour la sélection (même
 fournisseur, transporteur ou navette), annulation de la sélection.
 
+## 9 ter bis. Camions automatiques et plan de semaine
+
+Règle arrêtée le 04/11/2026 (genèse, maquettes et points tranchés : docs/transports_automatiques.md ; code :
+`backend/appro/services/transports_auto.py`). **Accès** : pendant l'essai, le Planning de livraisons, l'onglet
+*Transports* de la fiche fournisseur et l'API `/api/transports` ne sont visibles que des e-mails de
+`APPRO_TRANSPORT_USERS` (une personne par défaut ; vide = tout le monde) ; l'espace fournisseur et les marques du
+tableau d'approvisionnement ne changent pas.
+
+**Qui est automatique.** Colonne **Camions automatiques** du fournisseur (Référentiel, fiche fournisseur ›
+Paramétrage ; non par défaut), pour les modes *Fournisseur* et transporteur ; sans objet pour *MAF Hambach* et
+*Messagerie*. Rien d'autre à saisir : l'**heure habituelle** est celle du dernier camion du fournisseur. Règles
+communes (Paramètres › Camions automatiques) : créneaux de 07:00 à 15:30 toutes les 30 minutes
+(`dock_slot_start`, `dock_slot_end`, `dock_slot_minutes`), **2 camions par quai et par créneau**
+(`dock_slot_capacity`), jour d'envoi du plan (`transport_plan_weekday`, jeudi), renvoi sur quantité
+(`transport_resend_on_qty`, non).
+
+**Création : une réconciliation par version des données.** À chaque changement des données (synchronisation ERP,
+saisie, référentiel), à la première lecture du planning, l'application compare, pour chaque fournisseur automatique
+et chaque jour ouvré des **trois semaines du planning** (semaine en cours et les deux suivantes), les ordres fermes
+ERP attendus (articles actifs, restant > 0, hors commandes *ignorées* dans le tableau d'approvisionnement) et les
+camions existants :
+
+- un jour avec au moins un ordre ferme et sans camion reçoit **un camion** (`origin = auto`, créé par
+  `application`, identifiant EM suivant, quais par défaut du fournisseur, transporteur du mode) qui emporte tous
+  les ordres du jour ; un ordre qui apparaît sur un jour qui a déjà son camion **y monte** ;
+- un ordre qui quitte les ordres fermes (date changée, soldé, supprimé, ignoré) **sort** de son camion automatique ;
+  un camion vide est **annulé** (l'EM n'est jamais réutilisé) ; une quantité qui change est mise à jour ;
+- **aujourd'hui est figé pour les retraits** (le camion du jour est en route) : un ordre apparu pour aujourd'hui ou
+  demain monte dans un camion marqué **à vérifier** ; les jours passés ne bougent plus ;
+- un camion **déplacé à la main** garde ses commandes même si l'ERP change leur date ; les camions manuels ne sont
+  jamais touchés ; un camion automatique **annulé à la main** laisse un *jour supprimé* : un camion n'y renaît que
+  si une commande absente du camion annulé apparaît ;
+- la réconciliation tourne **une fois par version** (`app_meta.transports_reconciled_version`, verrou), est
+  journalisée (créés, complétés, retirés, annulés, déplacés) et n'est pas annulable par Ctrl+Z.
+
+**Ordonnanceur des créneaux.** Par jour et par quai, grille des créneaux ; un camion multi-quais prend une place sur
+chacun. Ordre : 1) les camions d'une **semaine déjà envoyée**, les camions **épinglés** (touchés à la main), les
+camions manuels et les navettes MAF gardent leur créneau ; 2) les autres sont placés par code fournisseur, à leur
+créneau actuel s'il est encore libre, sinon à l'**heure habituelle** du fournisseur si tous ses quais ont de la place,
+sinon au **créneau libre le plus proche** (avant ou après) ; aucune place → dernier créneau et **à vérifier** (« quai
+B15 complet toute la journée : déplacer le camion ») ; un quai fermé ce jour-là (table Calendriers, calendrier
+*quai*) → à vérifier aussi. La vue **Quais × créneaux** d'une journée (icône dans l'en-tête du jour) montre
+l'occupation, les créneaux pleins, les quais fermés, les camions à vérifier.
+
+**Actions de l'approvisionneur** (un clic sur le camion dans la cellule) : *Vu* (efface « à vérifier »), **Déplacer**
+(jour, heure, quais : le camion est épinglé, l'ordonnanceur ne le bouge plus), **Scinder** (des commandes partent
+dans un second camion du même jour, nouvel EM, créneau choisi ou le plus proche libre, les deux épinglés), **Note**
+pour le fournisseur (imprimée dans le plan, sans renvoi), CSV et e-mail du seul camion, **Annuler**. La création
+manuelle est refusée pour un fournisseur automatique (elle reste pour les autres et pour la navette MAF).
+
+**Plan de semaine : un e-mail = une semaine = un destinataire, toujours complet.** Le destinataire est le groupe de
+contacts transport du fournisseur (`sup:<code>`) ou les contacts du transporteur (`carrier:<nom>`, un bloc par
+fournisseur transporté). La **bande** au-dessus des semaines du planning a deux lignes :
+
+- *Plan de la semaine S+1* : à envoyer le jour configuré, une pastille par destinataire et **Envoyer le suivant** ;
+  chaque clic ouvre dans Outlook le brouillon complet (À, objet, corps : camion, jour, heure, quai, commandes ;
+  résumé anglais ; pied « envoi n° … ») et note la semaine **envoyée** (`app_transport_plans` : numéro, qui, quand,
+  état envoyé). L'application n'envoie rien elle-même ;
+- *Rectificatif* : dès qu'un ✱ touche une semaine déjà envoyée (semaine en cours ou suivante), elle passe **à
+  renvoyer** pour ce destinataire, avec le motif (« EM000231 : commande CO-1234 ajoutée (mar. 10/11) ») ; **Renvoyer**
+  ouvre le **même plan entier**, titré « mise à jour du … (remplace l'envoi du …) », lignes changées marquées ✱,
+  camions annulés barrés (ils disparaissent au renvoi suivant). Au-delà de la semaine suivante rien ne part : c'est ce
+  qui empêche l'accumulation.
+
+**Déclenche un ✱** : jour, heure, quai, commande ajoutée ou retirée, camion créé, scindé ou annulé. **Ne déclenche
+rien** : une quantité (sauf `transport_resend_on_qty`), une note, un changement au-delà de la semaine suivante. Un
+plan trop long pour un lien Outlook (≈ 1 800 caractères) part en **un e-mail par fournisseur** vers le même
+destinataire, puis l'approvisionneur marque la semaine envoyée. Le CSV ATR global ne change pas.
+
+**Lecture des cellules** : badge *auto* sur le fournisseur ; un camion bleu = annoncé ou à annoncer jeudi ; **rouge
+« à vérifier »** avec la raison ; **✱** = changé depuis l'envoi ; épingle = touché à la main ; barré = annulé, encore
+à renvoyer ; « sans camion » sur une commande = jour supprimé après une annulation.
+
 ## 9 quater. File d'exceptions
 
 L'onglet **File d'exceptions** du tableau de bord ne liste que des situations qui **appellent une décision** (une
@@ -732,6 +805,7 @@ verrouille ce qui n'est pas permis (cellules non éditables, cadenas sur l'artic
 | **appro** | les cellules Plan / Ajustement / Ferme / CBN et les paramètres hebdomadaires **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations ; **les données fournisseur et article de tout le référentiel**, depuis la page Référentiel, l'onglet *Paramétrage* de la fiche article (fiche, politique de stock, jours et source de consommation, fournisseurs et règles) et l'onglet *Paramétrage* de la fiche fournisseur (fiche, jours de livraison, quais, contacts, règles article ↔ fournisseur) ; techniquement, **toutes les tables du référentiel** (articles, fournisseurs, article ↔ fournisseur, termes de consommation, **commandes fermées (PO)** : déclaration depuis Recherche ou le Référentiel, programmes, nomenclatures, stock), ligne par ligne ou par import, carnet ou non (`OPEN_REFERENCE` dans `services/access.py` ; remettre à `False` pour revenir au carnet) |
 | **manager** | comme un appro, **plus** la règle commune du moteur (tolérance), les paramètres hebdomadaires de tout article, la saisie, l'import et l'activation des PDP |
 | **admin** | tout, y compris la table des approvisionneurs |
+| utilisateur de `APPRO_TRANSPORT_USERS` | seul à voir, pendant l'essai des camions automatiques, le **Planning de livraisons** (camions, plan de semaine, API `/api/transports`) ; ses droits d'écriture y restent ceux de son rôle |
 | **fournisseur** (e-mail présent dans la colonne *Contact transport* d'un fournisseur actif, et absent de la table des approvisionneurs et de `APPRO_ADMINS`) | rien ; **ne voit que l'espace fournisseur** (`/portail`) : ses commandes fermes en cours et leurs transports, son retard, les transports annoncés, le prévisionnel EDI (DELFOR) qui lui est attribué, ses DESADV, ses réceptions, avec leurs KPI et des filtres (article, dates, statut) ; toute autre route de l'API répond 403 (`supplier_gate`). Un manager ou un administrateur prévisualise cet espace avec `?supplier_id=` |
 
 L'identité est l'e-mail transmis par Databricks Apps (`x-forwarded-email`), comparé sans tenir compte de la

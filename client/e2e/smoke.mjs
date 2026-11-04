@@ -35,7 +35,7 @@ if (!existsSync(path.join(here, "..", "dist", "index.html"))) { console.error("c
 const work = mkdtempSync(path.join(tmpdir(), "appro-e2e-"));
 const server = spawn("python", ["-m", "uvicorn", "appro.api.main:create_app", "--factory", "--port", String(port)], {
   cwd: path.join(root, "backend"), stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env, APPRO_DB_URL: `sqlite:///${path.join(work, "e2e.db")}`, APPRO_AS_OF: AS_OF, APPRO_DATA_SOURCE: "local", APPRO_LOG_LEVEL: "WARNING" },
+  env: { ...process.env, APPRO_DB_URL: `sqlite:///${path.join(work, "e2e.db")}`, APPRO_AS_OF: AS_OF, APPRO_DATA_SOURCE: "local", APPRO_LOG_LEVEL: "WARNING", APPRO_TRANSPORT_USERS: "quentin@example.com" },
 });
 server.stderr.on("data", (d) => { if (process.env.APPRO_E2E_VERBOSE) process.stderr.write(d); });
 const stop = () => { try { server.kill("SIGTERM"); } catch { /* already gone */ } };

@@ -56,7 +56,7 @@ export default function App() {
         <Route path="/fournisseurs" element={<SuppliersPage />} />
         <Route path="/fournisseurs/:supplierId" element={<SupplierPage />} />
         <Route path="/tableau" element={<SupplyTablePage />} />
-        <Route path="/livraisons" element={<DeliveriesPage />} />
+        {(!config || config.access?.can_transports) && <Route path="/livraisons" element={<DeliveriesPage />} />}
         <Route path="/propositions" element={<Navigate to="/?tab=flux" replace />} />
         {SEARCH_ENABLED && <Route path="/recherche" element={<SearchPage />} />}
         <Route path="/programmes" element={<ProgramsPage />} />

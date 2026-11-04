@@ -71,6 +71,7 @@ class Supplier:
     cutoff_time: str = ""          # order cut-off hour « HH:MM » : an order placed later leaves the next working day ; "" = none
     closures: frozenset[dt.date] = frozenset()   # days the supplier cannot deliver (own closures, carrier / country, docks closed)
     transport_mode: str = "Fournisseur"          # Fournisseur | MAF Hambach | Messagerie | a carrier name (services/transports.py)
+    transport_auto: bool = False                 # « Camions automatiques » : one truck per day created, completed and cancelled by the application (services/transports_auto.py)
 
     @property
     def cutoff(self) -> dt.time | None:
@@ -377,6 +378,13 @@ class EngineParams:
     xyz_y_cv: float = 1.0                         # Y : below n ; Z : beyond (or no consumption)
     segment_coverage_days: str = "AX:3,AY:5,AZ:8,BX:5,BY:8,BZ:10,CX:8,CY:10,CZ:15"   # suggested coverage target (working days) per segment
     segment_service_pct: str = "A:98,B:95,C:90"   # service target per class (information)
+    # --- automatic trucks (services/transports_auto.py) : dock slots and weekly delivery plan
+    dock_slot_start: str = "07:00"                # first delivery slot of a day (HH:MM)
+    dock_slot_end: str = "15:30"                  # last delivery slot of a day (HH:MM, inclusive)
+    dock_slot_minutes: int = 30                   # length of a slot
+    dock_slot_capacity: int = 2                   # trucks a dock takes at the same time (per slot)
+    transport_plan_weekday: int = 4               # ISO weekday the plan of the next week is sent (4 = Thursday)
+    transport_resend_on_qty: bool = False         # a changed quantity on an announced order marks the week « à renvoyer »
 
     def copy_with(self, **changes: Any) -> "EngineParams":
         data = self.__dict__.copy()

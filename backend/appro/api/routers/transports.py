@@ -1,25 +1,38 @@
-"""« Planning de livraisons » : the firm orders of each supplier day by day, and the transports (trucks)
-announced for them (services/transports.py)."""
+"""« Planning de livraisons » : the firm orders of each supplier day by day, the transports (trucks) announced for
+them (services/transports.py) and the automatic trucks with their weekly plans (services/transports_auto.py).
+
+Every route is reserved, while the automatic trucks are tried out, to the users of ``APPRO_TRANSPORT_USERS``
+(``Access.can_transports``) ; the supplier portal and the grid marks go through the services directly.
+"""
 from __future__ import annotations
 
 import datetime as dt
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...data.assembler import erp_dataset
-from ...data.store import AppTransport
+from ...data.store import AppCellFlag, AppTransport
 from ...engine.calendar import iso_week_monday
+from ...engine.models import CellFlag
 from ...engine.runner import resolve_as_of
 from ...services import actions, mrp_service
 from ...services import transports as T
+from ...services import transports_auto as A
 from ...services.access import Access
 from ...services.context import AppContext
 from .. import schemas as S
 from ..deps import access_dep, ctx_dep, current_user, session_dep
 from ..fastjson import json_response
 
-router = APIRouter(prefix="/api/transports", tags=["transports"])
+
+def transports_access(access: Access = Depends(access_dep)) -> Access:
+    access.require_transports()
+    return access
+
+
+router = APIRouter(prefix="/api/transports", tags=["transports"], dependencies=[Depends(transports_access)])
 
 
 def _as_of(ctx: AppContext, session: Session, ds) -> dt.date:
@@ -33,6 +46,31 @@ def _names(ctx: AppContext) -> dict[str, str]:
 
 def _carriers(ctx: AppContext) -> dict[str, list[str]]:
     return T.carriers_of(ctx.table("ref_carriers").to_dict("records"))
+
+
+def _dock_closed(ctx: AppContext) -> dict[str, set[dt.date]]:
+    return A.dock_closures(ctx.table("ref_calendars").to_dict("records"))
+
+
+def _dataset(ctx: AppContext, session: Session, planner: str | None = None):
+    """The ERP dataset with the « commande ignorée » flags of the planners (an ignored order rides no truck)."""
+    ds = erp_dataset(ctx.table, planner=planner)
+    ids = {a.article_id for a in ds.articles}
+    for f in session.scalars(select(AppCellFlag).where(AppCellFlag.kind == "order_ignored")):
+        if f.article_id in ids:
+            ds.flags.append(CellFlag(f.article_id, f.supplier_id or None, f.date, f.kind, f.qty))
+    return ds
+
+
+def _sync(ctx: AppContext, session: Session):
+    """The whole dataset, the rules and today, after the reconciliation of the automatic trucks for the current data
+    version (a no-op when it already ran)."""
+    ds = _dataset(ctx, session)
+    params = mrp_service.build_params(ctx, session)
+    as_of = resolve_as_of(ds, params)
+    if A.ensure_reconciled(ctx, session, ds, params, as_of, _carriers(ctx), _dock_closed(ctx)):
+        ds = _dataset(ctx, session)
+    return ds, params, as_of
 
 
 def _pack(ctx: AppContext, ds, rows: list[AppTransport], user: str) -> dict:
@@ -52,23 +90,89 @@ def _rows(session: Session, ids: list[str]) -> list[AppTransport]:
     return [r for r in rows if r is not None]
 
 
+def _one(session: Session, transport_id: str) -> AppTransport:
+    t = session.get(AppTransport, transport_id)
+    if t is None:
+        raise HTTPException(404, f"Transport inconnu : {transport_id}")
+    return t
+
+
 def _csv_response(content: str, filename: str) -> Response:
     return Response(content.encode("utf-8-sig"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
+def _out(ctx: AppContext, t: AppTransport) -> dict:
+    return S.TransportOut(**T.transport_out(t, _names(ctx))).model_dump(mode="json")
+
+
+# ----------------------------------------------------------------------------- planning and plans
 @router.get("/planning", response_model=S.PlanningResponse)
 def planning(planner: str | None = None, start: dt.date | None = None, weeks: int = Query(2, ge=1, le=12), scope: str = Query("main", pattern="^(main|maf)$"),
              ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """Suppliers (rows) × working days (columns) of the window (default : from the Monday of the current
-    week, two weeks) : the firm ERP orders of the perimeter, with the transports already created.  ``scope=maf``
-    is the shuttle planning of the MAF Hambach suppliers : every planner sees every supplier there."""
-    ds = erp_dataset(ctx.table, planner=None if scope == "maf" else planner)
-    as_of = _as_of(ctx, session, ds)
+    week, two weeks) : the firm ERP orders of the perimeter, with the transports created (by hand or by the
+    application).  ``scope=maf`` is the shuttle planning of the MAF Hambach suppliers : every planner sees every
+    supplier there.  The automatic trucks are reconciled first when the data changed."""
+    full, params, as_of = _sync(ctx, session)
+    ds = full if scope == "maf" or not planner else _dataset(ctx, session, planner)
     first = start or iso_week_monday(as_of)
-    return json_response(S.PlanningResponse(**T.planning(ds, session, first, weeks, ctx.settings.holiday_dates, as_of, scope, _carriers(ctx))).model_dump(mode="json"))
+    out = T.planning(ds, session, first, weeks, ctx.settings.holiday_dates, as_of, scope, _carriers(ctx), int(params.transport_plan_weekday or 4), A.slot_grid(params))
+    return json_response(S.PlanningResponse(**out).model_dump(mode="json"))
 
 
+@router.get("/plans", response_model=S.PlansOut)
+def plans(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """The band of the planning : for the current week and the next, every recipient (supplier contacts or carrier)
+    with trucks, its state (à envoyer / envoyée / à renvoyer), the ✱ reasons, the trucks to check."""
+    ds, params, as_of = _sync(ctx, session)
+    scope = None
+    if planner:
+        scope = {o.supplier_id for o in erp_dataset(ctx.table, planner=planner).orders if o.supplier_id}
+    return json_response(S.PlansOut(**A.plans_overview(session, ds, params, as_of, _carriers(ctx), scope)).model_dump(mode="json"))
+
+
+@router.get("/plans/{week}/{recipient}/mail", response_model=S.PlanMailOut)
+def plan_mail(week: str, recipient: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep), user: str = Depends(current_user)):
+    """The complete weekly plan of one recipient as an e-mail (recipients, subject, body) ; ``parts`` when it is too
+    long for one ``mailto:`` (one message per supplier)."""
+    _check_week(week)
+    ds, _params, as_of = _sync(ctx, session)
+    out = A.plan_mail(session, ds, week, recipient, _carriers(ctx), user, as_of)
+    if not out["transports"]:
+        raise HTTPException(404, f"Aucun camion pour {recipient} en {week}")
+    return json_response(S.PlanMailOut(**out).model_dump(mode="json"))
+
+
+@router.post("/plans/{week}/{recipient}/sent", response_model=S.PlanOut)
+def plan_sent(week: str, recipient: str, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+              user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """The planner opened the draft in Outlook : the week is marked **sent** to this recipient (number of sending,
+    who, when, the state sent) ; the ✱ of its trucks are cleared.  Journalised, not undoable."""
+    access.require_write()
+    _check_week(week)
+    ds, _params, _as_of = _sync(ctx, session)
+    row = A.mark_sent(session, user, ds, week, recipient, _carriers(ctx))
+    actions.record_fixed(session, user, "transport", f"Plan {row['label']} envoyé à {row['name']} (envoi n° {row['sent_no']})", None, response)
+    ctx.commit(session)
+    return json_response(S.PlanOut(**row).model_dump(mode="json"))
+
+
+def _check_week(week: str) -> None:
+    try:
+        A.week_monday(week)
+    except (ValueError, IndexError):
+        raise HTTPException(422, f"Semaine invalide : « {week} » (attendu 2026-W46)")
+
+
+@router.get("/docks", response_model=S.DockDayOut)
+def docks(date: dt.date, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """Docks × slots of one day : the planned trucks (shuttles included), the closed docks, the trucks off the grid."""
+    ds, params, _as_of = _sync(ctx, session)
+    return json_response(S.DockDayOut(**A.dock_day(session, ds, params, date, _dock_closed(ctx))).model_dump(mode="json"))
+
+
+# ----------------------------------------------------------------------------- CSV and lists
 @router.get("/atr.csv")
 def atr_csv_upcoming(transport_id: list[str] | None = Query(None), ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """The **global CSV for the transport tool** : every planned transport dated today or later, every supplier
@@ -77,8 +181,7 @@ def atr_csv_upcoming(transport_id: list[str] | None = Query(None), ctx: AppConte
     if transport_id:
         rows = _rows(session, transport_id)
         return _csv_response(T.atr_csv(rows, _names(ctx)), T.csv_filename(rows))
-    ds = erp_dataset(ctx.table)
-    as_of = _as_of(ctx, session, ds)
+    _ds, _params, as_of = _sync(ctx, session)
     rows = T.list_transports(session, start=as_of)
     return _csv_response(T.atr_csv(rows, _names(ctx)), f"ATR_transports_{as_of:%Y%m%d}.csv")
 
@@ -98,10 +201,14 @@ def create(body: S.TransportCreateIn, response: Response, ctx: AppContext = Depe
     """Create one transport per slot (date, time, docks) for the selected firm orders of one supplier (or, with
     ``maf``, one shuttle for orders of several MAF Hambach suppliers, open to every planner) : the identifiers
     ``EM…`` are drawn from the shared counter ; the answer carries the CSV for the transport tool and the e-mail
-    to the transport contacts (supplier, carrier or MAF suppliers).  Journalised, not undoable."""
+    to the transport contacts (supplier, carrier or MAF suppliers).  Journalised, not undoable.  A supplier in
+    « Camions automatiques » gets his trucks from the application : the manual creation is refused."""
     access.require_write()
     ds = erp_dataset(ctx.table)
     if not body.maf:
+        sp = next((s for s in ds.suppliers if s.supplier_id == body.supplier_id), None)
+        if sp is not None and sp.transport_auto:
+            raise HTTPException(422, f"{sp.supplier_id} : camions automatiques, l'application crée les transports (scindez ou déplacez depuis la cellule)")
         for oid in body.order_ids:
             o = next((x for x in ds.orders if x.order_id == oid), None)
             if o is not None and not (access.is_manager or access.can_edit_article(o.article_id)):
@@ -110,6 +217,9 @@ def create(body: S.TransportCreateIn, response: Response, ctx: AppContext = Depe
         rows = T.create_transports(session, user, ds, body.supplier_id, body.order_ids, [s.model_dump() for s in body.slots], body.carrier, body.note, maf=body.maf)
     except T.TransportError as exc:
         raise HTTPException(422, str(exc))
+    for t in rows:
+        t.origin, t.pinned = A.MANUAL, True
+        A.flag_change(session, t, "camion créé")
     ids = ", ".join(t.transport_id for t in rows)
     who = T.MAF_LABEL if body.maf else _names(ctx).get(body.supplier_id or "", body.supplier_id or "")
     actions.record_fixed(session, user, "transport", f"Transport {ids} : {who}, {len(body.order_ids)} commande(s), {rows[0].date:%d/%m/%Y}", None, response)
@@ -131,12 +241,13 @@ def pack_many(body: S.TransportIdsIn, ctx: AppContext = Depends(ctx_dep), sessio
 @router.post("/cancel", response_model=list[S.TransportOut])
 def cancel_many(body: S.TransportIdsIn, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
                 user: str = Depends(current_user), access: Access = Depends(access_dep)):
-    """Cancel the selected transports in one go (kept, status « cancelled »)."""
+    """Cancel the selected transports in one go (kept, status « cancelled ») ; an automatic truck is not born again
+    on that day unless a new order appears."""
     access.require_write()
     rows = _rows(session, body.transport_ids)
     done = [t for t in rows if t.status != "cancelled"]
     for t in done:
-        T.cancel_transport(session, user, t)
+        A.cancel_transport(session, user, t)
     if done:
         actions.record_fixed(session, user, "transport", f"Transport(s) annulé(s) : {', '.join(t.transport_id for t in done)}", None, response)
         ctx.commit(session)
@@ -144,33 +255,82 @@ def cancel_many(body: S.TransportIdsIn, response: Response, ctx: AppContext = De
     return json_response([S.TransportOut(**T.transport_out(t, names)).model_dump(mode="json") for t in rows])
 
 
+# ----------------------------------------------------------------------------- one transport
 @router.get("/{transport_id}/pack", response_model=S.TransportPackOut)
 def pack(transport_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep), user: str = Depends(current_user)):
     """The CSV and the e-mail of one transport (downloaded or opened from the list, as often as needed)."""
-    t = session.get(AppTransport, transport_id)
-    if t is None:
-        raise HTTPException(404, f"Transport inconnu : {transport_id}")
+    t = _one(session, transport_id)
     return json_response(S.TransportPackOut(**_pack(ctx, erp_dataset(ctx.table), [t], user)).model_dump(mode="json"))
 
 
 @router.get("/{transport_id}/atr.csv")
 def transport_csv(transport_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    t = session.get(AppTransport, transport_id)
-    if t is None:
-        raise HTTPException(404, f"Transport inconnu : {transport_id}")
+    t = _one(session, transport_id)
     return _csv_response(T.atr_csv([t], _names(ctx)), T.csv_filename([t]))
 
 
 @router.delete("/{transport_id}", response_model=S.TransportOut)
 def cancel(transport_id: str, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
            user: str = Depends(current_user), access: Access = Depends(access_dep)):
-    """Cancel a transport (kept, status « cancelled ») : the planner tells the supplier and the transport tool himself."""
+    """Cancel a transport (kept, status « cancelled ») : the planner tells the supplier and the transport tool himself
+    (or re-sends the weekly plan, which strikes the truck)."""
     access.require_write()
-    t = session.get(AppTransport, transport_id)
-    if t is None:
-        raise HTTPException(404, f"Transport inconnu : {transport_id}")
+    t = _one(session, transport_id)
     if t.status != "cancelled":
-        T.cancel_transport(session, user, t)
+        A.cancel_transport(session, user, t)
         actions.record_fixed(session, user, "transport", f"Transport {transport_id} annulé", None, response)
         ctx.commit(session)
-    return json_response(S.TransportOut(**T.transport_out(t, _names(ctx))).model_dump(mode="json"))
+    return json_response(_out(ctx, t))
+
+
+def _action(fn, session: Session, ctx: AppContext, user: str, response: Response, label: str):
+    try:
+        out = fn()
+    except A.ActionError as exc:
+        raise HTTPException(422, str(exc))
+    actions.record_fixed(session, user, "transport", label, None, response)
+    ctx.commit(session)
+    return out
+
+
+@router.post("/{transport_id}/move", response_model=S.TransportOut)
+def move(transport_id: str, body: S.TransportMoveIn, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+         user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """Change the day, the hour or the docks of a truck : it is pinned (the scheduler never moves it again), its
+    « à vérifier » is cleared, and its week turns « à renvoyer » when it was sent."""
+    access.require_write()
+    t = _one(session, transport_id)
+    _action(lambda: A.move_transport(session, user, t, body.date, body.time, body.docks), session, ctx, user, response, f"Transport {transport_id} déplacé")
+    return json_response(_out(ctx, t))
+
+
+@router.post("/{transport_id}/split", response_model=list[S.TransportOut])
+def split(transport_id: str, body: S.TransportSplitIn, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+          user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """Some orders of the truck leave for a second truck of the same day (new EM ; slot given or the nearest free one)."""
+    access.require_write()
+    t = _one(session, transport_id)
+    params = mrp_service.build_params(ctx, session)
+    new = _action(lambda: A.split_transport(session, user, t, body.order_ids, params, body.time, body.docks, _dock_closed(ctx)), session, ctx, user, response,
+                  f"Transport {transport_id} scindé")
+    return json_response([_out(ctx, t), _out(ctx, new)])
+
+
+@router.post("/{transport_id}/note", response_model=S.TransportOut)
+def note(transport_id: str, body: S.TransportNoteIn, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+         user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """A note for the supplier, printed in the weekly plan (no ✱)."""
+    access.require_write()
+    t = _one(session, transport_id)
+    _action(lambda: A.set_note(session, user, t, body.note), session, ctx, user, response, f"Transport {transport_id} : note")
+    return json_response(_out(ctx, t))
+
+
+@router.post("/{transport_id}/seen", response_model=S.TransportOut)
+def seen(transport_id: str, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
+         user: str = Depends(current_user), access: Access = Depends(access_dep)):
+    """« Vu » : the planner checked the truck, the red mark goes."""
+    access.require_write()
+    t = _one(session, transport_id)
+    _action(lambda: A.clear_check(session, user, t), session, ctx, user, response, f"Transport {transport_id} vérifié")
+    return json_response(_out(ctx, t))

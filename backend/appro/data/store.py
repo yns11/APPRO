@@ -310,7 +310,17 @@ class AppTransport(Base):
     status: Mapped[str] = mapped_column(String(12), default="planned")  # planned | cancelled
     created_by: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    # --- automatic trucks (services/transports_auto.py)
+    origin: Mapped[str | None] = mapped_column(String(12), default="manuel", nullable=True)     # manuel | auto (created by the reconciliation)
+    pinned: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)         # touched by a planner : the scheduler never moves it again
+    check_reason: Mapped[str | None] = mapped_column(Text, default="", nullable=True)          # « à vérifier » : why (empty = nothing to check)
+    changed_since_sent: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)   # ✱ : changed after the plan of its week was sent
+    change_note: Mapped[str | None] = mapped_column(Text, default="", nullable=True)           # what changed (« commande ajoutée », « créé », « annulé »…)
     orders: Mapped[list["AppTransportOrder"]] = relationship(back_populates="transport", cascade="all, delete-orphan", lazy="selectin")
+
+    @property
+    def is_auto(self) -> bool:
+        return (self.origin or "manuel") == "auto"
 
 
 class AppTransportOrder(Base):
@@ -326,6 +336,32 @@ class AppTransportOrder(Base):
     expected_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     qty: Mapped[float] = mapped_column(Float, default=0.0)
     transport: Mapped["AppTransport"] = relationship(back_populates="orders")
+
+
+class AppTransportPlan(Base):
+    """The **weekly delivery plan** sent to one recipient (a supplier's transport contacts, or a carrier) for one ISO
+    week : how many times it was sent, by whom, when, and the state sent last (JSON) ; the state of a week for a
+    recipient derives from it and from the ✱ of its transports (à envoyer / envoyée / à renvoyer)."""
+
+    __tablename__ = "app_transport_plans"
+    recipient: Mapped[str] = mapped_column(String(160), primary_key=True)   # sup:<supplier_id> | carrier:<name>
+    week: Mapped[str] = mapped_column(String(8), primary_key=True)          # 2026-W46
+    sent_no: Mapped[int] = mapped_column(Integer, default=0)
+    sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    sent_by: Mapped[str] = mapped_column(String(120), default="")
+    snapshot_json: Mapped[str] = mapped_column(Text, default="[]")
+
+
+class AppTransportSuppressed(Base):
+    """A supplier-day whose automatic truck a planner **cancelled** : the reconciliation creates a truck there again
+    only when an order that was not in the cancelled truck appears."""
+
+    __tablename__ = "app_transport_days_suppressed"
+    supplier_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    date: Mapped[dt.date] = mapped_column(Date, primary_key=True)
+    orders_json: Mapped[str] = mapped_column(Text, default="[]")          # order ids the cancelled truck carried
+    cancelled_by: Mapped[str] = mapped_column(String(120), default="")
+    cancelled_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
 
 def audit(session: Session, user: str, action: str, entity_type: str, entity_id: str = "",
@@ -633,6 +669,22 @@ def apply_otd_band2_five_days(engine) -> int:
     return n
 
 
+def apply_transport_origin_manual(engine) -> int:
+    """Columns of the automatic trucks added later : every existing transport was created by hand."""
+    n = 0
+    with engine.begin() as conn:
+        try:
+            res = conn.execute(text("UPDATE app_transports SET origin = 'manuel' WHERE origin IS NULL OR origin = ''"))
+            n += res.rowcount or 0
+            conn.execute(text("UPDATE app_transports SET pinned = false WHERE pinned IS NULL"))
+            conn.execute(text("UPDATE app_transports SET changed_since_sent = false WHERE changed_since_sent IS NULL"))
+            conn.execute(text("UPDATE app_transports SET check_reason = '' WHERE check_reason IS NULL"))
+            conn.execute(text("UPDATE app_transports SET change_note = '' WHERE change_note IS NULL"))
+        except Exception as exc:  # pragma: no cover - table not there yet
+            log.debug("transport origin migration skipped: %s", exc)
+    return n
+
+
 MIGRATION_LOCK_KEY = 7_419_301          # pg_advisory_lock key shared by every worker of the application
 #: one-shot data fixes, run once per database (journalised in ``app_migrations``) ; the schema steps
 #: (``ensure_columns``, ``retire_columns``, ``create_all``) stay idempotent and run at every start-up, under the lock
@@ -641,6 +693,7 @@ DATA_MIGRATIONS: tuple[tuple[str, Any], ...] = (
     ("supplier_docks_default_b15", apply_text_defaults),
     ("supplier_transport_mode_default", apply_transport_mode_default),
     ("otd_band2_five_days", apply_otd_band2_five_days),
+    ("transport_origin_manual", apply_transport_origin_manual),
 )
 
 

@@ -65,8 +65,18 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
     segment_coverage_days: { label: "Couverture cible suggérée par segment", unit: "j ouvrés", max: 0, text: true, aria: "Couvertures suggérées par segment", explain: () => "Neuf valeurs « AX:3,AY:5,… », en jours ouvrés de besoin ; appliquées aux articles depuis Performance › Segmentation." },
     segment_service_pct: { label: "Objectif de service par classe", unit: "%", max: 0, text: true, aria: "Objectifs de service par classe", explain: () => "« A:98,B:95,C:90 » : information pour les revues de politique de stock." },
   };
+  /** Camions automatiques : dock slots and weekly plan (the third card) */
+  const TRANSPORT: Record<string, { label: string; unit: string; max: number; step?: number; text?: boolean; choices?: [string, string][]; aria: string; explain: (v: number) => string }> = {
+    dock_slot_start: { label: "Créneaux : premier de la journée", unit: "HH:MM", max: 0, text: true, aria: "Premier créneau", explain: () => "" },
+    dock_slot_end: { label: "Créneaux : dernier de la journée", unit: "HH:MM", max: 0, text: true, aria: "Dernier créneau", explain: () => "Un camion sans place est posé sur ce dernier créneau et marqué « à vérifier »." },
+    dock_slot_minutes: { label: "Créneaux : durée", unit: "min", max: 240, step: 5, aria: "Durée d'un créneau", explain: (v) => `Un créneau toutes les ${v} minutes.` },
+    dock_slot_capacity: { label: "Créneaux : camions par quai", unit: "camions", max: 20, aria: "Camions par quai et par créneau", explain: (v) => `${v} camion(s) au plus en même temps sur un quai.` },
+    transport_plan_weekday: { label: "Plan de semaine : jour d'envoi", unit: "", max: 7, choices: [["1", "lundi"], ["2", "mardi"], ["3", "mercredi"], ["4", "jeudi"], ["5", "vendredi"]], aria: "Jour d'envoi du plan", explain: () => "Le plan de la semaine suivante part ce jour-là ; les rectificatifs partent dès qu'une semaine envoyée change." },
+    transport_resend_on_qty: { label: "Plan de semaine : renvoi si quantité", unit: "", max: 1, choices: [["false", "non"], ["true", "oui"]], aria: "Renvoyer quand une quantité change", explain: () => "Non : seuls jour, heure, quai, commande ajoutée ou retirée, camion créé ou annulé marquent la semaine « à renvoyer »." },
+  };
   const editable = (schema.data ?? []).filter((p) => p.field in EDITABLE);
   const perf = (schema.data ?? []).filter((p) => p.field in PERF);
+  const transport = (schema.data ?? []).filter((p) => p.field in TRANSPORT);
   const ruleRow = (p: { field: string; default: unknown; description: string }, meta: { label: string; unit: string; max: number; step?: number; text?: boolean; choices?: [string, string][]; aria: string; explain: (v: number) => string }) => {
     const cur = effective.data?.[p.field];
     const ov = globalOv.get(p.field);
@@ -106,6 +116,10 @@ function RulesTab({ canEdit }: { canEdit: boolean }) {
       <Card title="Service fournisseur (OTD) et segmentation" hint={canEdit ? "poids et tranches de l'OTD, seuils ABC / XYZ et couvertures suggérées ; valent pour la page Performance fournisseurs et la file d'exceptions" : "lecture seule : modifiables par les managers et administrateurs"}>
         {schema.isError ? <ErrorBox error={schema.error} /> : schema.isLoading || effective.isLoading ? <SkeletonBlock rows={3} /> : perf.map((p) => ruleRow(p, PERF[p.field]))}
         <p className="small subtle" style={{ marginTop: 8 }}>OTD = Σ poids × indicateur, par fournisseur, article et jour de livraison attendu (<Link to="/performance">Performance fournisseurs</Link>).</p>
+      </Card>
+      <Card title="Camions automatiques" hint={canEdit ? "créneaux de quai et plan de semaine des fournisseurs en « Camions automatiques » (Référentiel › Fournisseurs)" : "lecture seule : modifiables par les managers et administrateurs"}>
+        {schema.isError ? <ErrorBox error={schema.error} /> : schema.isLoading || effective.isLoading ? <SkeletonBlock rows={3} /> : transport.map((p) => ruleRow(p, TRANSPORT[p.field]))}
+        <p className="small subtle" style={{ marginTop: 8 }}>Un camion par fournisseur et par jour dès qu'un ordre ferme est attendu ; heure habituelle si le quai a de la place, sinon le créneau libre le plus proche ; aucune place → dernier créneau et « à vérifier » (<Link to="/livraisons">Planning de livraisons</Link>).</p>
       </Card>
       <Card title="Règles figées dans l'application" hint="communes à tous les articles ; détaillées dans le guide du moteur (docs/guide_moteur.md)">
         {fixed.isLoading ? <SkeletonBlock rows={6} /> : (

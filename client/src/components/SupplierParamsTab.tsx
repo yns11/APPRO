@@ -80,6 +80,11 @@ export function SupplierParamsTab({ supplierId, articles }: { supplierId: string
             <span className="small subtle">Fournisseur : Planning de livraisons ; MAF Hambach : onglet Planning MAF, navette commune ; Messagerie : hors planning, ordres fermes marqués ; un transporteur : son nom dans le fichier ATR, e-mail à ses contacts.</span>
             <span className="small subtle">Planning de livraisons</span>
           </div>
+          <div className={`param ${canEdit ? "editable" : ""}`} title="L'application crée, complète et annule elle-même un camion par jour pour les ordres fermes de ce fournisseur, le pose sur un créneau de quai et prépare le plan de semaine">
+            <span className="label">Camions automatiques</span>
+            <span className="value"><select className="select sm" value={draft.transport_auto ? "oui" : "non"} disabled={!canEdit || ["MAF Hambach", "Messagerie"].includes(String(draft.transport_mode || ""))} aria-label="Camions automatiques" onChange={(e) => set("transport_auto", e.target.value === "oui")}><option value="non">non · transports créés à la main</option><option value="oui">oui · un camion par jour, créé par l'application</option></select></span>
+            <span className="small subtle">Modes Fournisseur et transporteur. Oui crée les camions à la prochaine synchronisation ; non laisse les camions existants et n'en crée plus. L'heure habituelle est celle du dernier camion ; le plan de semaine part depuis la bande du Planning de livraisons.</span>
+          </div>
           <div className={`param ${canEdit ? "editable" : ""}`}>
             <span className="label">Actif</span>
             <span className="value"><select className="select sm" value={draft.active === false ? "non" : "oui"} disabled={!canEdit} aria-label="Actif" onChange={(e) => set("active", e.target.value === "oui")}><option value="oui">oui</option><option value="non">non</option></select></span>

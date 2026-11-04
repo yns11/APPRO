@@ -41,7 +41,8 @@ GLOBAL_FIELDS = {f.name: f.type for f in dataclasses.fields(EngineParams)}
 EDITABLE_GLOBAL_FIELDS = ("target_tolerance_pct", "lead_margin_days", "stock_drift_pct", "stock_drift_min_packs", "stock_drift_persist",
                           "otd_weight_qty", "otd_weight_punctuality", "otd_weight_desadv", "otd_band1_days", "otd_band1_score",
                           "otd_band2_days", "otd_band2_score", "abc_a_pct", "abc_b_pct", "xyz_x_cv", "xyz_y_cv",
-                          "segment_coverage_days", "segment_service_pct")
+                          "segment_coverage_days", "segment_service_pct",
+                          "dock_slot_start", "dock_slot_end", "dock_slot_minutes", "dock_slot_capacity", "transport_plan_weekday", "transport_resend_on_qty")
 
 
 def cutoff_passed(suppliers: Iterable[Any], now: dt.datetime | None = None, tz: str = "Europe/Paris") -> tuple[str, ...]:

@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useOtd, useOtdMonths, usePlantCalendar, useSupplier } from "@/lib/queries";
 import { OtdChart, periodTick } from "@/components/charts/OtdChart";
 import { useRemembered } from "@/lib/pageState";
+import { usePerimeter } from "@/state/PerimeterContext";
 import { ArticleLink, Badge, Button, Card, Empty, ErrorBox, Kpi, SeverityBadge, Skeleton, SkeletonBlock, Tabs } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
 import { SupplierParamsTab } from "@/components/SupplierParamsTab";
@@ -41,7 +42,9 @@ function MonthBars({ series, supplierId, lastClosed }: { series: OtdPeriod[]; su
 export default function SupplierPage() {
   const { supplierId } = useParams();
   const q = useSupplier(supplierId);
-  const transports = useQuery({ queryKey: ["supplier-transports", supplierId], enabled: !!supplierId, staleTime: 30_000,
+  const { config } = usePerimeter();
+  const canTransports = !!config?.access?.can_transports;
+  const transports = useQuery({ queryKey: ["supplier-transports", supplierId], enabled: !!supplierId && canTransports, staleTime: 30_000,
     queryFn: () => api.get<TransportOut[]>("/api/transports", { supplier_id: supplierId, include_cancelled: true }) });
   const [tab, setTab] = useRemembered<Tab>("supplier.tab", "articles");
   const otd = useOtd({ supplier_id: supplierId, bucket: "month" }, !!supplierId);
@@ -130,7 +133,7 @@ export default function SupplierPage() {
     { id: "articles", label: "Articles & règles", count: d?.articles.length },
     { id: "late", label: "En retard", count: d?.late.length },
     { id: "upcoming", label: "Commandes à venir", count: d?.upcoming.length },
-    { id: "transports", label: "Transports", count: transports.data?.length },
+    ...(canTransports ? [{ id: "transports" as Tab, label: "Transports", count: transports.data?.length }] : []),
     { id: "in_transit", label: "En transit", count: d?.in_transit.length },
     { id: "to_process", label: "À traiter", count: d?.to_process.length },
     { id: "to_validate", label: "À valider", count: d?.to_validate.length },
@@ -154,7 +157,7 @@ export default function SupplierPage() {
         <Kpi label="Articles" icon={<Package size={14} />} value={k ? fmtInt(k.articles) : <Skeleton w={40} h={28} />} meta={k ? `${k.critical} critique(s)` : ""} tone={k && k.critical > 0 ? "critical" : undefined} onClick={() => setTab("articles")} active={tab === "articles"} />
         <Kpi label="En retard" icon={<Clock size={14} />} value={k ? fmtInt(k.late_orders) : <Skeleton w={40} h={28} />} meta={k ? `${fmtQty(k.late_qty)} restant sur commandes passées` : ""} tone={k && k.late_orders > 0 ? "warning" : "ok"} onClick={() => setTab("late")} active={tab === "late"} />
         <Kpi label="Commandes à venir" icon={<CalendarClock size={14} />} value={k ? fmtInt(k.upcoming_orders) : <Skeleton w={40} h={28} />} meta={k ? `${fmtQty(k.upcoming_qty)} restant à livrer` : ""} tone="brand" onClick={() => setTab("upcoming")} active={tab === "upcoming"} />
-        <Kpi label="Transports prévus" icon={<CalendarCheck size={14} />} value={transports.data ? fmtInt(plannedTransports.length) : <Skeleton w={40} h={28} />} meta={plannedTransports[0] ? `prochain ${plannedTransports[0].transport_id} le ${fmtDate(plannedTransports[0].date)} ${plannedTransports[0].time}` : "camions annoncés depuis le Planning de livraisons"} tone={plannedTransports.length ? "brand" : undefined} onClick={() => setTab("transports")} active={tab === "transports"} />
+        {canTransports && <Kpi label="Transports prévus" icon={<CalendarCheck size={14} />} value={transports.data ? fmtInt(plannedTransports.length) : <Skeleton w={40} h={28} />} meta={plannedTransports[0] ? `prochain ${plannedTransports[0].transport_id} le ${fmtDate(plannedTransports[0].date)} ${plannedTransports[0].time}` : "camions annoncés depuis le Planning de livraisons"} tone={plannedTransports.length ? "brand" : undefined} onClick={() => setTab("transports")} active={tab === "transports"} />}
         <Kpi label="En transit" icon={<Truck size={14} />} value={k ? fmtInt(k.in_transit) : <Skeleton w={40} h={28} />} meta="journaux non validés et DESADV annoncés" tone={k && k.in_transit > 0 ? "info" : undefined} onClick={() => setTab("in_transit")} active={tab === "in_transit"} />
         <Kpi label="À traiter" icon={<AlertTriangle size={14} />} value={k ? fmtInt(k.to_process) : <Skeleton w={40} h={28} />} meta="DESADV en erreur ou sans journal" tone={k && k.to_process > 0 ? "warning" : undefined} onClick={() => setTab("to_process")} active={tab === "to_process"} />
         <Kpi label="À valider" icon={<CheckSquare size={14} />} value={k ? fmtInt(k.to_validate) : <Skeleton w={40} h={28} />} meta="réceptions sans ACR depuis 7 j" tone={k && k.to_validate > 0 ? "warning" : undefined} onClick={() => setTab("to_validate")} active={tab === "to_validate"} />

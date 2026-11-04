@@ -1,8 +1,12 @@
 # Camions automatiques : création, créneaux, cycle de vie, plan de semaine
 
-Proposition du 04/11/2026, à valider avant implémentation. Maquettes : https://claude.ai/artifact/NEuPb22VKnjVASSv9GmLvH
+Proposition du 04/11/2026, **mise en œuvre le même jour** (règle de référence : docs/regles_metier.md § 9 ter bis ;
+code : `backend/appro/services/transports_auto.py`). Maquettes : https://claude.ai/artifact/NEuPb22VKnjVASSv9GmLvH
 (planning avec sa bande à deux lignes, référentiel, quais × créneaux, e-mail « plan de semaine », tableau du cycle de
-vie).
+vie). Écarts de mise en œuvre : le jour d'aujourd'hui est figé pour les retraits (un camion du jour est en route :
+une commande disparue n'en sort pas, une commande apparue y monte et le marque « à vérifier ») ; un camion déplacé par
+l'approvisionneur garde ses commandes même si l'ERP change leur date ; la bande n'affiche que la semaine en cours et
+la suivante ; **pendant l'essai, le Planning de livraisons n'est visible que des e-mails de `APPRO_TRANSPORT_USERS`**.
 
 Point de départ : un camion = un identifiant EM ; l'heure importe peu au fournisseur mais les quais ont une capacité
 (deux camions par quai et par créneau de 30 minutes, de 07:00 à 15:30). Aujourd'hui l'approvisionneur crée chaque

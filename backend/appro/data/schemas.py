@@ -94,6 +94,7 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
         Column("cutoff_time", "str", "Heure limite", "heure limite de commande (HH:MM, heure de Paris) : une commande passée après cette heure part le jour ouvré suivant, le délai compte à partir de là ; vide = aucune", False, ""),
         Column("active", "bool", "Actif", "", True, True),
         Column("transport_mode", "str", "Mode transport", "Fournisseur (défaut : le fournisseur livre, transports dans le Planning de livraisons) ; MAF Hambach (pièces au magasin avancé : onglet Planning MAF, navette commune à plusieurs fournisseurs) ; Messagerie (pas de transport camion : hors planning, ordres fermes marqués) ; ou le nom d'un transporteur de la table Transporteurs (transporteur dans le fichier ATR, e-mail à ses contacts)", False, "Fournisseur"),
+        Column("transport_auto", "bool", "Camions automatiques", "oui : l'application crée, complète et annule elle-même un camion par jour pour les ordres fermes de ce fournisseur (modes Fournisseur et transporteur), le pose sur un créneau de quai et prépare le plan de semaine ; non (défaut) : transports créés à la main", False, False),
     ]),
     _t("ref_carriers", "Transporteurs", "Transporteurs connus de l'application : un fournisseur dont le mode transport est le nom d'un transporteur voit ce nom dans le fichier ATR et l'avis de transport part à ses contacts.", ("name",), [
         Column("name", "str", "Nom", "nom du transporteur (clé ; valeur du mode transport des fournisseurs)", True, "Geodis"),

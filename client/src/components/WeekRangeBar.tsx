@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { tr, type Lang } from "@/lib/i18n";
 
-export interface WeekChip { key: string; label: string; start: string; current?: boolean; past?: boolean }
+export interface WeekChip { key: string; label: string; start: string; current?: boolean; past?: boolean;
+  /** optional state colour (the delivery planning : week sent, to send, to re-send) and its tooltip */
+  tone?: "sent" | "pending" | "resend"; hint?: string }
 export type WeekRange = { from: string; to: string } | null;
 
 /**
@@ -37,8 +39,8 @@ export function WeekRangeBar({ weeks, range, onChange, lang = "fr", labels }: { 
           const sel = inRange(w.key);
           const first = sel && shown?.from === w.key, last = sel && shown?.to === w.key;
           return (
-            <button key={w.key} type="button" className={["chip-week", sel ? "sel" : "", first ? "first" : "", last ? "last" : "", w.current ? "current" : "", w.past ? "past" : ""].filter(Boolean).join(" ")}
-              title={`${w.label} · ${t("weeks.from")} ${w.start}${w.current ? ` · ${t("weeks.current")}` : w.past ? ` · ${t("weeks.past")}` : ""} — ${t("weeks.pick")}`}
+            <button key={w.key} type="button" className={["chip-week", sel ? "sel" : "", first ? "first" : "", last ? "last" : "", w.current ? "current" : "", w.past ? "past" : "", w.tone ? `tone-${w.tone}` : ""].filter(Boolean).join(" ")}
+              title={`${w.label} · ${t("weeks.from")} ${w.start}${w.current ? ` · ${t("weeks.current")}` : w.past ? ` · ${t("weeks.past")}` : ""}${w.hint ? ` · ${w.hint}` : ""} — ${t("weeks.pick")}`}
               onMouseDown={(e) => { e.preventDefault(); if (e.shiftKey && anchor) { onChange(ordered(anchor, w.key)); return; } dragging.current = true; setAnchor(w.key); setDrag({ from: w.key, to: w.key }); }}
               onMouseEnter={() => { if (dragging.current && anchor) setDrag(ordered(anchor, w.key)); }}>
               {w.label}

@@ -14,6 +14,10 @@ from a shared counter (never reused).  Creating transports produces :
 * the e-mail to the supplier's **transport contacts** (``ref_suppliers.transport_contact``) : recipients,
   subject and body, opened by the planner in Outlook (``mailto:``) and sent by hand.
 
+**Automatic trucks** (``ref_suppliers.transport_auto``) : the application creates, completes, cancels and schedules
+the trucks itself and prepares the weekly plan e-mail (services/transports_auto.py) ; this module keeps the manual
+creation (MAF shuttle, suppliers in manual), the CSV and the per-truck e-mail.
+
 **Transport modes** (``ref_suppliers.transport_mode``) :
 
 * **Fournisseur** (default) : the supplier delivers ; his orders sit in the main planning ;
@@ -129,13 +133,15 @@ def transport_out(t: AppTransport, names: dict[str, str]) -> dict[str, Any]:
     return {"transport_id": t.transport_id, "supplier_id": t.supplier_id, "supplier_name": MAF_LABEL if t.supplier_id == MAF_ID else names.get(t.supplier_id, ""),
             "date": t.date, "time": t.time, "docks": split_docks(t.docks), "carrier": t.carrier or "", "note": t.note or "", "status": t.status,
             "mode": t.mode or "fournisseur", "created_by": t.created_by, "created_at": t.created_at,
+            "origin": t.origin or "manuel", "pinned": bool(t.pinned), "check_reason": t.check_reason or "",
+            "changed_since_sent": bool(t.changed_since_sent), "change_note": t.change_note or "",
             "orders": [{"order_id": o.order_id, "article_id": o.article_id, "supplier_id": o.supplier_id or t.supplier_id,
                         "supplier_name": names.get(o.supplier_id or t.supplier_id, ""), "ref": o.ref or "", "expected_date": o.expected_date, "qty": o.qty}
                        for o in t.orders]}
 
 
 def planning(ds: Dataset, session: Session, start: dt.date, weeks: int, holidays: list[dt.date], as_of: dt.date,
-             scope: str = "main", carriers: dict[str, list[str]] | None = None) -> dict[str, Any]:
+             scope: str = "main", carriers: dict[str, list[str]] | None = None, plan_weekday: int = 4, slots: list[str] | None = None) -> dict[str, Any]:
     """Suppliers × working days : the firm ERP orders of the window (active articles of the dataset), with
     the transports already created for them.  Only the suppliers with an order in the window appear.
     ``scope`` : ``main`` = the suppliers who deliver themselves or through a carrier ; ``maf`` = the suppliers
@@ -146,9 +152,12 @@ def planning(ds: Dataset, session: Session, start: dt.date, weeks: int, holidays
     ignored = {(f.article_id, f.supplier_id or None, f.date) for f in ds.flags if f.kind == "order_ignored"}
     sups = {s.supplier_id: s for s in ds.suppliers}
     wanted = {"maf"} if scope == "maf" else {"fournisseur", "transporteur"}
-    transports = [t for t in list_transports(session, start, end) if (t.mode == "maf") == (scope == "maf")]
+    transports = [t for t in list_transports(session, start, end, include_cancelled=True) if (t.mode == "maf") == (scope == "maf")
+                  and (t.status == "planned" or bool(t.changed_since_sent))]
     by_order: dict[str, list[str]] = {}
     for t in transports:
+        if t.status != "planned":
+            continue
         for o in t.orders:
             by_order.setdefault(o.order_id, []).append(t.transport_id)
     carriers = carriers or {}
@@ -166,14 +175,15 @@ def planning(ds: Dataset, session: Session, start: dt.date, weeks: int, holidays
         carrier = (s.transport_mode.strip() if s and kind == "transporteur" else "")
         row = rows.setdefault(o.supplier_id, {"supplier_id": o.supplier_id, "name": s.name if s else "", "transport_contact": s.transport_contact if s else "",
                                                "emails": carriers.get(carrier, []) if carrier else (s.transport_emails if s else []), "docks": s.dock_list if s else ["B15"],
-                                               "mode": s.transport_mode if s else MODE_SUPPLIER, "carrier": carrier, "orders": []})
+                                               "mode": s.transport_mode if s else MODE_SUPPLIER, "carrier": carrier, "auto": bool(s.transport_auto) if s else False,
+                                               "recipient": (f"carrier:{carrier}" if carrier else f"sup:{o.supplier_id}"), "orders": []})
         row["orders"].append({"order_id": o.order_id, "article_id": o.article_id, "designation": a.designation, "unit": a.unit, "ref": o.ref or "",
                               "expected_date": o.expected_date, "qty_ordered": float(o.qty_ordered), "qty_open": float(o.qty_open or 0.0),
                               "ignored": (o.article_id, o.supplier_id, o.expected_date) in ignored, "transports": by_order.get(o.order_id, [])})
     for r in rows.values():
         r["orders"].sort(key=lambda x: (x["expected_date"], x["article_id"], x["ref"]))
     names = {sid: s.name for sid, s in sups.items()}
-    return {"as_of": as_of, "start": start, "end": end, "days": days, "docks": list(DOCKS), "scope": scope,
+    return {"as_of": as_of, "start": start, "end": end, "days": days, "docks": list(DOCKS), "scope": scope, "plan_weekday": plan_weekday, "slots": slots or [],
             "suppliers": sorted(rows.values(), key=lambda r: (r["name"].upper(), r["supplier_id"])),
             "transports": [transport_out(t, names) for t in transports]}
 

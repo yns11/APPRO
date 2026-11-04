@@ -37,7 +37,7 @@ from appro.engine.models import (  # noqa: E402
 
 OUT_HTML = RACINE / "docs" / "pense_bete_approvisionneur.html"
 OUT_JSON = RACINE / "backend" / "appro" / "help" / "pense_bete.json"
-VERSION = "21 octobre 2026"
+VERSION = "4 novembre 2026"
 D = dt.timedelta
 
 # ----------------------------------------------------------------------------- charts
@@ -449,7 +449,7 @@ def sections() -> list[dict[str, str]]:
 <div class="callout"><b>Vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se recalcule.</b></div>
 <p><b>Partie A · Tableau d'approvisionnement</b> : une ligne <b>Consommation et besoin</b> (consommé réel dans le passé, besoin du PDP dans le futur) ; par fournisseur actif : <b>Ordre ferme</b>, <b>Prévisionnel EDI</b>, <b>Quantité reçue</b>, <b>Quantité à retenir</b>, <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Stock projeté</b>, seule projection de stock du tableau, comparée au <b>stock ERP de la veille</b> (5 bis). Deux lignes se saisissent (Quantité à retenir, Ajustement), trois se cliquent (Ordre ferme, Proposition CBN, Quantité reçue), le reste se lit.</p>
 <p><b>Partie B · Tableau de bord</b> : l'onglet <b>Couvertures et stocks</b> répond à « que dois-je faire aujourd'hui ? » article par article ; l'onglet <b>Flux d'approvisionnement</b> suit commandes, transports et réceptions du jour.</p>
-<p><b>Planning de livraisons</b> : les ordres fermes de chaque fournisseur jour par jour ; cochez les commandes d'un jour, créez un ou plusieurs <b>transports</b> (date, heure, quais, identifiant <b>EM</b>), prenez le <b>CSV ATR</b> et l'<b>e-mail</b> au fournisseur dans la liste (section 9).</p>
+<p><b>Planning de livraisons</b> : les ordres fermes de chaque fournisseur jour par jour ; pour un fournisseur en <b>camions automatiques</b>, l'application crée un camion par jour et vous envoyez le <b>plan de la semaine</b> depuis la bande ; sinon cochez les commandes d'un jour et créez le <b>transport</b> (date, heure, quais, identifiant <b>EM</b>) ; <b>CSV ATR</b> et <b>e-mail</b> dans la liste (section 9).</p>
 <p>Les boutons <b>FR | EN</b> du tableau d'approvisionnement et de la fiche article passent les intitulés en anglais, pour un partage d'écran ou une capture envoyée à un fournisseur.</p>
 <p class="cmt">Règles détaillées : <i>docs/regles_metier.md</i> ; calculs pas à pas : <i>docs/guide_moteur.md</i>.</p>""")
 
@@ -675,6 +675,20 @@ def sections() -> list[dict[str, str]]:
 <li><b>Un transporteur</b> (table <i>Transporteurs</i> : nom, contacts) : son nom dans le fichier ATR, l'e-mail à ses contacts.</li>
 </ul>
 <p>Les semaines affichées se choisissent avec le <b>sélecteur de semaines</b>, comme dans le tableau d'approvisionnement.</p>
+<h4>Camions automatiques</h4>
+<p>Colonne <b>Camions automatiques</b> du fournisseur (Référentiel ou fiche fournisseur › Paramétrage). Dès lors, vous ne créez plus rien pour lui : à chaque synchronisation l'application pose <b>un camion par jour</b> dès qu'un ordre ferme est attendu (trois semaines : en cours et les deux suivantes), y fait monter les commandes qui apparaissent, retire celles qui disparaissent, annule un camion vide, et place chaque camion sur un <b>créneau de quai</b> (07:00 → 15:30 toutes les 30 min, 2 camions par quai et par créneau) : heure habituelle du fournisseur si le quai a de la place, sinon le créneau libre le plus proche.</p>
+<ul>
+<li><b>Lire la cellule</b> : camion bleu = annoncé ou à annoncer ; <span class="chip" style="background:#fee4e2;color:#b42318">rouge « à vérifier »</span> avec la raison (quai complet, quai fermé, commande apparue pour aujourd'hui ou demain) ; <b>✱</b> = changé depuis l'envoi du plan ; épingle = touché à la main ; barré = annulé, encore à renvoyer.</li>
+<li><b>Un clic sur le camion</b> : <i>Vu</i>, <b>Déplacer</b> (jour, heure, quais ; le camion est épinglé, l'ordonnanceur ne le bouge plus), <b>Scinder</b> en deux camions, <b>Note</b> pour le fournisseur, CSV, e-mail, <b>Annuler</b> (le jour reste sans camion tant qu'aucune nouvelle commande n'apparaît).</li>
+<li>L'icône dans l'en-tête d'un jour ouvre <b>Quais × créneaux</b> : qui vient quand, créneaux pleins, quais fermés.</li>
+</ul>
+<h4>Plan de semaine (bande au-dessus des semaines)</h4>
+<ul>
+<li><b>Jeudi</b> (réglable) : « Plan de la semaine S+1 · à envoyer », une pastille par destinataire (fournisseur ou transporteur), bouton <b>Envoyer le suivant</b>. Chaque clic ouvre dans Outlook <b>le plan complet de la semaine</b> (camions, jours, heures, quais, commandes ; résumé anglais) et note l'envoi. Vous relisez, vous envoyez : l'application n'envoie rien elle-même.</li>
+<li><b>Rectificatif</b> : si un camion d'une semaine déjà envoyée change (jour, heure, quai, commande ajoutée ou retirée, camion créé ou annulé), la semaine passe <b>à renvoyer</b> pour ce destinataire, avec le motif. <b>Renvoyer</b> ouvre le même plan entier, « mise à jour du … (remplace l'envoi du …) », lignes changées marquées ✱, camions annulés barrés. Le dernier e-mail reçu est la vérité du fournisseur.</li>
+<li>Rien ne part au-delà de la semaine suivante : le changement attend le jeudi. Une quantité ou une note ne déclenche pas de renvoi. Un plan trop long pour Outlook part en un e-mail par fournisseur.</li>
+<li>Pendant l'essai, le Planning de livraisons n'est visible que des utilisateurs désignés.</li>
+</ul>
 <p>Un <b>contact transport</b> qui se connecte à l'application n'accède qu'à son <b>espace fournisseur</b> : ses commandes fermes en cours et transports, son retard, le prévisionnel, ses DESADV, ses réceptions.</p>""")
 
     # ============================================================== Performance et exceptions
@@ -705,6 +719,8 @@ def sections() -> list[dict[str, str]]:
              ["Ordre ferme", "orange / vert / rouge barré", "en cours / soldée / ignorée"],
              ["Ordre ferme", "petite icône camion en haut à gauche", "transport créé dans le Planning de livraisons (identifiants dans l'infobulle)"],
              ["Planning de livraisons", '<span class="chip brand">EM000123 09:30 B15</span>', "transport annoncé au fournisseur : date, heure, quais ; CSV ATR et e-mail depuis la liste"],
+             ["Planning de livraisons", '<span class="chip" style="background:#fee4e2;color:#b42318">EM000231 à vérifier</span> · ✱ · barré', "camion automatique à vérifier (raison dans la cellule) · changé depuis l'envoi du plan (semaine à renvoyer) · annulé, barré jusqu'au renvoi"],
+             ["Bande du plan de semaine", "pastille blanche / verte / orange ✱", "destinataire à envoyer jeudi / plan envoyé / rectificatif à renvoyer (le même plan complet)"],
              ["Quantité reçue", "italique orange 🚚 / blanc / vert", "en transit (jamais compté) / reçu / comptabilisé"],
              ["Quantité reçue", '<span class="dot ok"></span> / <span class="dot ko"></span>', "DESADV traité / aucun DESADV traité"],
              ["Quantité à retenir", "gris / bleu", "ERP (vide) / votre saisie (0 = rien attendu)"],
@@ -741,7 +757,7 @@ def page() -> str:
 <div class="eyebrow">Ma Routine Appro · règles, statuts, marqueurs, couleurs</div>
 <h1>Pense-bête de l'approvisionneur</h1>
 <p>Ce que l'application décide, affiche et colore, en une page. Une règle par ligne, les exemples dessous. Délais, couvertures et seuils se comptent en <b>jours ouvrés</b> du calendrier usine.</p>
-<div class="meta"><span>Version du {VERSION}</span><span>Marge de délai, hors jour standard ◇, plancher au jour du besoin, une seule projection de stock dans le tableau, colonne semaine sur le jour standard</span></div>
+<div class="meta"><span>Version du {VERSION}</span><span>Camions automatiques et plan de semaine, OTD au jour exact avec fiche du mois et arrêté, marge de délai, hors jour standard ◇, plancher au jour du besoin</span></div>
 </header>
 <nav class="toc" aria-label="Sommaire">
 <span class="part">Tableau d'appro</span><a href="#cbn">CBN</a><a href="#ferme">Ordre ferme</a><a href="#recu">Quantité reçue</a><a href="#appro">Quantité à retenir</a><a href="#stock">Stock projeté</a><a href="#multi">Multi-sourcing</a>
