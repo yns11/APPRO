@@ -656,7 +656,7 @@ def sections() -> list[dict[str, str]]:
 <ol>
 <li>Cochez les commandes <b>d'un même jour</b> d'un fournisseur, puis <b>Créer le transport</b>.</li>
 <li>Un camion = une date (préremplie, modifiable), une heure et <b>un ou plusieurs quais</b> (cases <b>B15</b>, <b>B6 EST</b>, <b>B2 NORD</b>, <b>B6 NORD</b> ; les quais par défaut du fournisseur, colonne <i>Quais</i> du Référentiel, sont précochés). <b>Ajouter un transport</b> pour un second camion sur les mêmes commandes. Transporteur et commentaire facultatifs.</li>
-<li>À la validation, chaque camion reçoit un identifiant <b>EM</b> + 6 chiffres (incrémental, jamais réutilisé). Les commandes portent un badge, le tableau d'approvisionnement une petite icône camion dans la cellule <i>Ordre ferme</i>.</li>
+<li>À la validation, chaque camion reçoit un identifiant <b>EM</b> + 5 chiffres + une lettre (<b>EM00123A</b>) : le numéro, incrémental et jamais réutilisé, désigne une famille ; la lettre classe le camion dans sa famille (<b>A</b> nouveau, <b>B</b> puis <b>C</b>… pour un camion scindé ou créé sur les mêmes commandes ; pour la navette MAF, A le premier camion du jour, B le deuxième…). Les commandes portent un badge, le tableau d'approvisionnement une petite icône camion dans la cellule <i>Ordre ferme</i>.</li>
 </ol>
 <h4>Fichier ATR et e-mail</h4>
 <ul>
@@ -719,7 +719,7 @@ def sections() -> list[dict[str, str]]:
              ["Proposition CBN", "barré", "refusée d'un clic, ce fournisseur ce jour-là"],
              ["Ordre ferme", "orange / vert / rouge barré", "en cours / soldée / ignorée"],
              ["Ordre ferme", "petite icône camion en haut à gauche", "transport créé dans le Planning de livraisons (identifiants dans l'infobulle)"],
-             ["Planning transport", '<span class="chip brand">EM000123 09:30</span> bleu · vert · <span class="chip" style="background:#fef0c7;color:#b54708">orange ✱</span> · <span class="chip" style="background:#fee4e2;color:#b42318">rouge</span> · gris barré', "camion à envoyer · envoyé · changé depuis l'envoi (semaine à renvoyer) · à vérifier (raison dans la case) · annulé jusqu'au renvoi ; mêmes couleurs dans les vues Semaine, Quais et Charge"],
+             ["Planning transport", '<span class="chip brand">EM00123A 09:30</span> bleu · vert · <span class="chip" style="background:#fef0c7;color:#b54708">orange ✱</span> · <span class="chip" style="background:#fee4e2;color:#b42318">rouge</span> · gris barré', "camion à envoyer · envoyé · changé depuis l'envoi (semaine à renvoyer) · à vérifier (raison dans la case) · annulé jusqu'au renvoi ; mêmes couleurs dans les vues Semaine, Quais et Charge"],
              ["Page Envois", "à envoyer / envoyée / ✱ à renvoyer", "état du plan de semaine d'un destinataire ; Envoyer, Renvoyer (le même plan complet) ou Rouvrir"],
              ["Quantité reçue", "italique orange 🚚 / blanc / vert", "en transit (jamais compté) / reçu / comptabilisé"],
              ["Quantité reçue", '<span class="dot ok"></span> / <span class="dot ko"></span>', "DESADV traité / aucun DESADV traité"],

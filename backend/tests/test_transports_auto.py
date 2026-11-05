@@ -141,7 +141,7 @@ def test_automatic_trucks_reconciliation_plans_and_actions(client):  # noqa: F81
     old, new = r.json()
     assert len(old["orders"]) == 2 and len(new["orders"]) == 1 and new["orders"][0]["order_id"] == first_order
     assert old["pinned"] and new["pinned"] and new["date"] == "2026-09-28" and new["time"] in plan["slots"] and new["time"] != old["time"]
-    assert new["transport_id"] > em3 and new["origin"] == "auto"
+    assert new["transport_id"] == em3[:7] + "B" and em3.endswith("A") and new["origin"] == "auto"   # same family, next letter
     assert client.post(f"/api/transports/{em3}/split", json={"order_ids": [o["order_id"] for o in old["orders"]]}).status_code == 422
     # every truck is splittable : the single-order one by quantity (the rest stays on the first truck, both pinned)
     single = new
@@ -151,6 +151,7 @@ def test_automatic_trucks_reconciliation_plans_and_actions(client):  # noqa: F81
     r = client.post(f"/api/transports/{single['transport_id']}/split", json={"items": [{"order_id": oid, "qty": round(qty / 3, 3)}], "time": "11:00"})
     assert r.status_code == 200, r.text
     a, b = r.json()
+    assert b["transport_id"] == em3[:7] + "C"      # a split of the B truck : C, still the family of EM…A
     assert a["orders"][0]["order_id"] == oid == b["orders"][0]["order_id"] and abs(a["orders"][0]["qty"] + b["orders"][0]["qty"] - qty) < 1e-6 and b["time"] == "11:00"
     # the reconciliation keeps the split quantities (the order rides two trucks)
     again = _planning(client)

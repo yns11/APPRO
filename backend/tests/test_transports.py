@@ -41,48 +41,48 @@ def test_transports_planning_create_pack_cancel(client):  # noqa: F811
     assert r.status_code == 201, r.text
     pack = r.json()
     ids = [t["transport_id"] for t in pack["transports"]]
-    assert ids == ["EM000001", "EM000002"] and pack["transports"][1]["docks"] == ["B2 NORD", "B6 NORD"] and pack["transports"][1]["carrier"] == "Geodis"
+    assert ids == ["EM00001A", "EM00001B"] and pack["transports"][1]["docks"] == ["B2 NORD", "B6 NORD"] and pack["transports"][1]["carrier"] == "Geodis"
     lines = pack["csv"].split("\r\n")
     d, m, y = day[8:10], day[5:7], day[0:4]
     assert lines[0] == HEADER and lines[-1] == "" and len(lines) == 5          # header + 1 + 2 docks
-    assert lines[1] == f"EM000001;{row['name']};Geodis;{d}/{m}/{y};08:30:00;S-000378;R;;;B15"
-    assert lines[2] == f"EM000002;{row['name']};Geodis;{d}/{m}/{y};14:00:00;S-000378;R;;;B2 NORD"
-    assert lines[3] == f"EM000002;{row['name']};Geodis;{d}/{m}/{y};14:00:00;S-000378;R;;;B6 NORD"
-    assert pack["csv_filename"] == "ATR_EM000001-EM000002.csv"
+    assert lines[1] == f"EM00001A;{row['name']};Geodis;{d}/{m}/{y};08:30:00;S-000378;R;;;B15"
+    assert lines[2] == f"EM00001B;{row['name']};Geodis;{d}/{m}/{y};14:00:00;S-000378;R;;;B2 NORD"
+    assert lines[3] == f"EM00001B;{row['name']};Geodis;{d}/{m}/{y};14:00:00;S-000378;R;;;B6 NORD"
+    assert pack["csv_filename"] == "ATR_EM00001A-EM00001B.csv"
     mail = pack["mail"]
     assert mail["to"] == ["transport@fournisseur.example", "quai@fournisseur.example"]
-    assert "EM000001, EM000002" in mail["subject"] and f"{d}/{m}/{y}" in mail["subject"] and "quai B15 / B2 NORD / B6 NORD" in mail["subject"]
-    assert "EM000002 – " in mail["body"] and "14:00" in mail["body"] and "Deux camions" in mail["body"] and "transporteur Geodis" in mail["body"]
+    assert "EM00001A, EM00001B" in mail["subject"] and f"{d}/{m}/{y}" in mail["subject"] and "quai B15 / B2 NORD / B6 NORD" in mail["subject"]
+    assert "EM00001B – " in mail["body"] and "14:00" in mail["body"] and "Deux camions" in mail["body"] and "transporteur Geodis" in mail["body"]
 
     # the planning shows the transports on the orders ; the grid marks the firm order slot ; the counter goes on
     plan = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2}).json()
     row = next(s for s in plan["suppliers"] if s["supplier_id"] == "S-000378")
-    assert next(o for o in row["orders"] if o["order_id"] == same_day[0]["order_id"])["transports"] == ["EM000001", "EM000002"]
+    assert next(o for o in row["orders"] if o["order_id"] == same_day[0]["order_id"])["transports"] == ["EM00001A", "EM00001B"]
     aid = same_day[0]["article_id"]
     lane = next(l for l in client.get(f"/api/articles/{aid}/projection").json()["lanes"] if l["supplier_id"] == "S-000378")
-    assert next(o for o in lane["orders"] if o["order_id"] == same_day[0]["order_id"])["transports"] == ["EM000001", "EM000002"]
+    assert next(o for o in lane["orders"] if o["order_id"] == same_day[0]["order_id"])["transports"] == ["EM00001A", "EM00001B"]
     r = client.post("/api/transports", json={**body, "slots": [{"date": day, "time": "16:00", "docks": ["B6 EST"]}]})
-    assert r.json()["transports"][0]["transport_id"] == "EM000003"
+    assert r.json()["transports"][0]["transport_id"] == "EM00002A"
 
     # pack again, per-transport CSV, global CSV (every planned transport from today on), list, cancel, journal
-    again = client.get("/api/transports/EM000002/pack").json()
-    assert again["csv"].split("\r\n")[1].startswith("EM000002;") and again["csv_filename"] == "ATR_EM000002.csv"
-    one = client.get("/api/transports/EM000002/atr.csv")
-    assert one.status_code == 200 and one.headers["content-disposition"].endswith('filename="ATR_EM000002.csv"') and one.text.lstrip("﻿").startswith(HEADER)
-    assert client.delete("/api/transports/EM000002").json()["status"] == "cancelled"
+    again = client.get("/api/transports/EM00001B/pack").json()
+    assert again["csv"].split("\r\n")[1].startswith("EM00001B;") and again["csv_filename"] == "ATR_EM00001B.csv"
+    one = client.get("/api/transports/EM00001B/atr.csv")
+    assert one.status_code == 200 and one.headers["content-disposition"].endswith('filename="ATR_EM00001B.csv"') and one.text.lstrip("﻿").startswith(HEADER)
+    assert client.delete("/api/transports/EM00001B").json()["status"] == "cancelled"
     glob = client.get("/api/transports/atr.csv")
     assert glob.status_code == 200 and glob.headers["content-disposition"].endswith('filename="ATR_transports_20260919.csv"')
     glines = glob.text.lstrip("﻿").split("\r\n")
-    assert glines[0] == HEADER and [l.split(";")[0] for l in glines[1:] if l] == ["EM000001", "EM000003"]
+    assert glines[0] == HEADER and [l.split(";")[0] for l in glines[1:] if l] == ["EM00001A", "EM00002A"]
     lst = client.get("/api/transports", params={"supplier_id": "S-000378"}).json()
-    assert [t["transport_id"] for t in lst] == ["EM000001", "EM000003"]
-    assert [t["transport_id"] for t in client.get("/api/transports", params={"supplier_id": "S-000378", "include_cancelled": True}).json()] == ["EM000001", "EM000002", "EM000003"]
+    assert [t["transport_id"] for t in lst] == ["EM00001A", "EM00002A"]
+    assert [t["transport_id"] for t in client.get("/api/transports", params={"supplier_id": "S-000378", "include_cancelled": True}).json()] == ["EM00001A", "EM00001B", "EM00002A"]
     plan = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2}).json()
-    assert [t["transport_id"] for t in plan["transports"]] == ["EM000001", "EM000003"]
+    assert [t["transport_id"] for t in plan["transports"]] == ["EM00001A", "EM00002A"]
     r = client.post("/api/transports", json={**body, "slots": [{"date": day, "time": "08:30", "docks": ["B99"]}]})
     assert r.status_code == 422
     labels = [a["label"] for a in client.get("/api/actions").json()]
-    assert any("EM000001, EM000002" in x for x in labels) and any("EM000002 annulé" in x for x in labels)
+    assert any("EM00001A, EM00001B" in x for x in labels) and any("EM00001B annulé" in x for x in labels)
 
 
 def test_supplier_portal_role_and_gate(client):  # noqa: F811
@@ -105,11 +105,11 @@ def test_supplier_portal_role_and_gate(client):  # noqa: F811
     assert p["orders"] and all(r["supplier_id"] == "S-000378" and r["order_type"] == "FIRM" and r["qty_open"] > 0 for r in p["orders"])
     assert all(r["status"] == "en retard" and r["date"] < p["as_of"] for r in p["backlog"])
     assert all(r["order_type"] != "FIRM" and r["date"] >= p["as_of"] for r in p["forecasts"])
-    assert [t["transport_id"] for t in p["transports"]] == ["EM000001"]
-    assert next(r for r in p["orders"] if r["order_id"] == o["order_id"])["transports"] == ["EM000001"]
+    assert [t["transport_id"] for t in p["transports"]] == ["EM00001A"]
+    assert next(r for r in p["orders"] if r["order_id"] == o["order_id"])["transports"] == ["EM00001A"]
     assert all(r["supplier_id"] == "S-000378" for r in p["desadv"] + p["receipts"])
     k = p["kpis"]
-    assert k["open_orders"] == len(p["orders"]) and k["late_orders"] == len(p["backlog"]) and k["transports"] == 1 and k["next_transport"].startswith("EM000001")
+    assert k["open_orders"] == len(p["orders"]) and k["late_orders"] == len(p["backlog"]) and k["transports"] == 1 and k["next_transport"].startswith("EM00001A")
     # a planner is never a supplier, even when listed as a contact ; a reader without a contact is not a supplier
     assert client.get("/api/config").json()["access"]["role"] in ("admin", "appro", "manager")
     assert client.get("/api/portal/overview", headers={"x-forwarded-email": "nobody@example.com"}).status_code == 403
@@ -211,6 +211,14 @@ def test_transport_modes_carrier_maf_parcel_and_batches(client):  # noqa: F811
     assert sorted(pack["mail"]["to"]) == ["maf-a@example.com", "maf-b@example.com"] and "NAVETTE HAMBACH" in pack["mail"]["subject"]
     maf = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2, "scope": "maf"}).json()
     assert [t["transport_id"] for t in maf["transports"]] == [t2["transport_id"]]
+    # a second shuttle the same day shares the number : A then B ; another day draws a new number
+    assert t2["transport_id"].endswith("A")
+    r2 = client.post("/api/transports", json={"maf": True, "order_ids": ids[:1], "slots": [{"date": day, "time": "15:00", "docks": ["B6 EST"]}]})
+    assert r2.status_code == 201 and r2.json()["transports"][0]["transport_id"] == t2["transport_id"][:7] + "B"
+    other = next(x["expected_date"] for s in maf["suppliers"] for x in s["orders"] if x["expected_date"] != day)
+    other_ids = [x["order_id"] for s in maf["suppliers"] for x in s["orders"] if x["expected_date"] == other]
+    r3 = client.post("/api/transports", json={"maf": True, "order_ids": other_ids, "slots": [{"date": other, "time": "10:00", "docks": ["B6 EST"]}]})
+    assert r3.status_code == 201 and r3.json()["transports"][0]["transport_id"].endswith("A") and r3.json()["transports"][0]["transport_id"][:7] != t2["transport_id"][:7]
     assert all(t["mode"] != "maf" for t in client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2}).json()["transports"])
 
     # ---- Messagerie : out of the planning, firm orders marked in the grid, no transport

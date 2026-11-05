@@ -526,8 +526,13 @@ l'infobulle). Cocher les commandes d'un jour › **Créer le transport** : un ou
 modifiable, heure, **quais** en cases à cocher parmi `B15`, `B6 EST`, `B2 NORD`, `B6 NORD`, plusieurs possibles ;
 bouton *Ajouter un transport pour ces commandes*), transporteur et commentaire facultatifs.
 
-- **Identifiant** : `EM` + 6 chiffres, **incrémental et jamais réutilisé**, tiré d'un compteur partagé
-  (`app_counters`, verrouillé en PostgreSQL : deux approvisionneurs n'obtiennent jamais le même numéro).
+- **Identifiant** : `EM` + **5 chiffres + une lettre** (`EM00123A`). Le numéro, **incrémental et jamais réutilisé**,
+  vient d'un compteur partagé (`app_counters`, verrouillé en PostgreSQL : deux approvisionneurs n'obtiennent jamais
+  le même numéro) et désigne une **famille** de camions ; la lettre classe le camion dans sa famille : `A` pour un
+  camion nouveau, `B` puis `C`… pour les camions issus d'une **scission** (même numéro, lettre suivante) et pour les
+  camions créés ensemble sur les mêmes commandes ; pour la **navette MAF**, le premier camion de la journée prend `A`,
+  le deuxième `B`, et ainsi de suite (même numéro pour la journée). Les transports créés avant cette règle gardent
+  leur identifiant à six chiffres.
 - **Quais par défaut du fournisseur** : colonne *Quais* du Référentiel (cases à cocher à un clic dans le tableau
   et dans la fiche de ligne ; **`B15` pour tous** à l'initialisation), présélectionnés à chaque création.
 - **Fichier pour l'outil de transport (ATR)** : CSV `;`, en-tête `ID TRANSPORT;FOURNISSEUR;TRANSPORTEUR;DATE;HEURE;
@@ -616,7 +621,7 @@ l'occupation, les créneaux pleins, les quais fermés, les camions à vérifier.
 **Actions de l'approvisionneur** (un clic sur le camion ouvre son **panneau de détail** à droite de la grille : jour,
 créneau, quai, plan, commandes à bord) : *Vu* (efface « à vérifier »), **Déplacer** (jour, créneau, quais : le camion
 est épinglé, l'ordonnanceur ne le bouge plus), **Scinder** (une partie du camion part dans un second camion du même
-jour, nouvel EM, créneau choisi ou le plus proche libre, les deux épinglés ; **tout camion est scindable** : des
+jour, même numéro et lettre suivante, créneau choisi ou le plus proche libre, les deux épinglés ; **tout camion est scindable** : des
 commandes entières, ou une **quantité** d'une commande, un camion à une seule commande se scinde par quantité et la
 commande roule alors sur deux camions, dont la réconciliation respecte les quantités), **Note** pour le fournisseur
 (imprimée dans le plan, sans renvoi), CSV et e-mail du seul camion, **Annuler**. La création manuelle est refusée
@@ -634,7 +639,7 @@ camions, état, dernier envoi, ce qui a changé, et le bouton **Envoyer** / **Re
   résumé anglais ; pied « envoi n° … ») et note la semaine **envoyée** (`app_transport_plans` : numéro, qui, quand,
   état envoyé). L'application n'envoie rien elle-même ;
 - dès qu'un ✱ touche une semaine déjà envoyée (semaine en cours ou suivante), elle passe **à renvoyer** pour ce
-  destinataire, avec le motif (« EM000231 : commande CO-1234 ajoutée (mar. 10/11) ») ; **Renvoyer** ouvre le **même
+  destinataire, avec le motif (« EM00231A : commande CO-1234 ajoutée (mar. 10/11) ») ; **Renvoyer** ouvre le **même
   plan entier**, titré « mise à jour du … (remplace l'envoi du …) », lignes changées marquées ✱, camions annulés
   barrés (ils disparaissent au renvoi suivant). Au-delà de la semaine suivante rien ne part : c'est ce qui empêche
   l'accumulation ;

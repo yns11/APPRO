@@ -276,7 +276,7 @@ class AppHelpPage(Base):
 
 
 class AppCounter(Base):
-    """Named incremental counters (transport identifiers « EM000001 »…) ; read with ``FOR UPDATE`` on
+    """Named incremental counters (transport families « EM00001 »…) ; read with ``FOR UPDATE`` on
     PostgreSQL so two planners never draw the same number."""
 
     __tablename__ = "app_counters"
@@ -295,7 +295,7 @@ class AppMigration(Base):
 
 class AppTransport(Base):
     """One **transport** (one truck) announced to a supplier for some of his firm orders of a day :
-    identifier ``EM`` + 6 digits, delivery date, time and dock ; exported as one CSV line for the external
+    identifier ``EM`` + 5 digits + letter (family number, rank in the family), delivery date, time and dock ; exported as one CSV line for the external
     transport tool (ATR) and announced by e-mail to the supplier's transport contacts."""
 
     __tablename__ = "app_transports"

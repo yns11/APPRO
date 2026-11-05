@@ -437,7 +437,8 @@ def move_transport(session: Session, user: str, t: AppTransport, date: dt.date |
 
 def split_transport(session: Session, user: str, t: AppTransport, items: list[dict[str, Any]], params: EngineParams, time: str | None = None,
                     docks: list[str] | None = None, dock_closed: dict[str, set[dt.date]] | None = None) -> AppTransport:
-    """Part of a truck leaves for a **second truck** of the same day (new EM, slot given or the nearest free one) ;
+    """Part of a truck leaves for a **second truck** of the same day (same number, next letter : ``EM00123A`` →
+    ``EM00123B`` ; slot given or the nearest free one) ;
     both are pinned.  ``items`` = ``[{order_id, qty?}]`` : an order without ``qty`` (or with its whole quantity)
     moves entirely ; a smaller ``qty`` splits the order, the rest stays on the first truck.  Every truck is
     splittable, a single-order one by quantity."""
@@ -471,7 +472,7 @@ def split_transport(session: Session, user: str, t: AppTransport, items: list[di
         time, _full = place(occ, grid, new_docks, t.time, None, max(int(params.dock_slot_capacity or 1), 1))
     elif not T.TIME_RE.match(time):
         raise ActionError(f"Heure invalide : « {time} »")
-    new = AppTransport(transport_id=T.next_transport_id(session), supplier_id=t.supplier_id, date=t.date, time=time, docks=";".join(new_docks),
+    new = AppTransport(transport_id=T.next_in_family(session, t.transport_id), supplier_id=t.supplier_id, date=t.date, time=time, docks=";".join(new_docks),
                        carrier=t.carrier or "", note="", mode=t.mode, status="planned", created_by=user, origin=t.origin or MANUAL, pinned=True,
                        check_reason="", changed_since_sent=False, change_note="")
     moved: list[dict[str, Any]] = []

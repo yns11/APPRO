@@ -1,8 +1,10 @@
 """Transports announced to the suppliers (« Planning de livraisons »).
 
 A **transport** is one truck expected from one supplier on one day, at one time, on one or several docks,
-carrying some of the supplier's **firm ERP orders** of that day.  Its identifier is ``EM`` + 6 digits, drawn
-from a shared counter (never reused).  Creating transports produces :
+carrying some of the supplier's **firm ERP orders** of that day.  Its identifier is ``EM`` + **5 digits + a letter**
+(``EM00123A``) : the number comes from a shared counter (never reused) and names a **family** of trucks ; the letter
+ranks the truck in its family : ``A`` for a new truck, ``B``, ``C``… for the trucks a split creates from it (the
+same number, the next letter) and, for the MAF shuttle, for the second, third… shuttle of the same day.  Creating transports produces :
 
 * the rows (``app_transports`` / ``app_transport_orders``), journalised (not undoable : the CSV and the
   e-mail may already have left the application) ;
@@ -80,8 +82,34 @@ def carriers_of(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
 
 
 # ----------------------------------------------------------------------------- identifiers
+ID_RE = re.compile(r"^(EM\d{5})([A-Z]+)$")
+
+
+def letters(n: int) -> str:
+    """1 → A, 26 → Z, 27 → AA (bijective base 26)."""
+    out = ""
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        out = chr(65 + r) + out
+    return out
+
+
+def letter_rank(s: str) -> int:
+    n = 0
+    for ch in s:
+        n = n * 26 + (ord(ch) - 64)
+    return n
+
+
+def family_of(transport_id: str) -> str | None:
+    """``EM00123`` of ``EM00123B`` ; ``None`` for an identifier of the former format (``EM000001``)."""
+    m = ID_RE.match(transport_id or "")
+    return m.group(1) if m else None
+
+
 def next_transport_id(session: Session) -> str:
-    """``EM000001``, ``EM000002``… : the counter row is locked (PostgreSQL ``FOR UPDATE``) until the commit."""
+    """A **new family** : ``EM00001A``, ``EM00002A``… ; the counter row is locked (PostgreSQL ``FOR UPDATE``) until
+    the commit."""
     row = session.execute(select(AppCounter).where(AppCounter.name == COUNTER).with_for_update()).scalar_one_or_none()
     if row is None:
         row = AppCounter(name=COUNTER, value=0)
@@ -89,7 +117,24 @@ def next_transport_id(session: Session) -> str:
         session.flush()
     row.value = int(row.value or 0) + 1
     session.flush()
-    return f"EM{row.value:06d}"
+    return f"EM{row.value:05d}A"
+
+
+def next_in_family(session: Session, transport_id: str) -> str:
+    """The next letter of the family of ``transport_id`` (``EM00123A`` → ``EM00123B``, then ``C``…) ; a truck of the
+    former format has no family : a new one is drawn."""
+    fam = family_of(transport_id)
+    if fam is None:
+        return next_transport_id(session)
+    taken = [letter_rank(ID_RE.match(x).group(2)) for x in session.scalars(select(AppTransport.transport_id).where(AppTransport.transport_id.like(f"{fam}%"))).all() if ID_RE.match(x)]
+    return f"{fam}{letters(max(taken, default=0) + 1)}"
+
+
+def shuttle_id(session: Session, day: dt.date) -> str:
+    """The MAF shuttles of one day share a number : the first takes ``A``, the second ``B``… (cancelled ones count)."""
+    first = next((t for t in session.scalars(select(AppTransport).where(AppTransport.date == day, AppTransport.supplier_id == MAF_ID).order_by(AppTransport.transport_id)).all()
+                  if family_of(t.transport_id)), None)
+    return next_in_family(session, first.transport_id) if first else next_transport_id(session)
 
 
 # ----------------------------------------------------------------------------- queries
@@ -225,6 +270,9 @@ def create_transports(session: Session, user: str, ds: Dataset, supplier_id: str
         raise TransportError("Au moins un transport (date, heure, quai) est nécessaire")
     created: list[AppTransport] = []
     for sl in slots:
+        # several trucks for the same orders share a number (A, B, C…) ; the MAF shuttles of a day as well
+        day = sl["date"] if isinstance(sl["date"], dt.date) else dt.date.fromisoformat(str(sl["date"]))
+        tid = shuttle_id(session, day) if maf else (next_transport_id(session) if not created else next_in_family(session, created[0].transport_id))
         time = str(sl.get("time") or "").strip()
         docks = [d for d in dict.fromkeys(str(x).strip() for x in (sl.get("docks") or [])) if d]
         if not TIME_RE.match(time):
@@ -232,8 +280,7 @@ def create_transports(session: Session, user: str, ds: Dataset, supplier_id: str
         bad = [d for d in docks if d not in DOCKS]
         if bad or not docks:
             raise TransportError(f"Quai(s) inconnu(s) : « {', '.join(bad) or 'aucun'} » (attendu {', '.join(DOCKS)})")
-        day = sl["date"] if isinstance(sl["date"], dt.date) else dt.date.fromisoformat(str(sl["date"]))
-        t = AppTransport(transport_id=next_transport_id(session), supplier_id=supplier_id, date=day, time=time, docks=";".join(docks),
+        t = AppTransport(transport_id=tid, supplier_id=supplier_id, date=day, time=time, docks=";".join(docks),
                          carrier=(carrier or "").strip()[:120], note=(note or "").strip()[:500], mode=mode, status="planned", created_by=user)
         for oid in dict.fromkeys(order_ids):
             o = orders[oid]
@@ -266,7 +313,7 @@ def _refs(t: AppTransport) -> list[str]:
 def atr_csv(transports: list[AppTransport], names: dict[str, str]) -> str:
     """Header then **one line per transport and per dock** (identifier and every other field repeated), ``;``
     separated, CRLF (the tool runs on Windows) :
-    ``EM000001;ENNOVI HUNGARY;;03/11/2026;14:00:00;S-000517;R;;;B15``."""
+    ``EM00001A;ENNOVI HUNGARY;;03/11/2026;14:00:00;S-000517;R;;;B15``."""
     lines = [";".join(CSV_HEADER)]
     for t in transports:
         for dock in split_docks(t.docks) or [""]:

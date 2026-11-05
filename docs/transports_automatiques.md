@@ -94,7 +94,7 @@ transporteur (mode *Transporteur* : un e-mail couvre alors ses fournisseurs, un 
   est toujours là.
 * **Rectificatif** : dès qu'un ✱ touche une semaine déjà envoyée (la semaine en cours ou la suivante), cette semaine
   passe **à renvoyer** pour le destinataire concerné, sur la seconde ligne de la bande, avec le motif en clair
-  (« EM000231 : commande ajoutée mar. 10/11 »). Le renvoi est **le même plan de semaine, entier**, titré « mise à
+  (« EM00231A : commande ajoutée mar. 10/11 »). Le renvoi est **le même plan de semaine, entier**, titré « mise à
   jour du 10/11 (remplace l'envoi du 05/11) », les lignes changées marquées ✱, les camions annulés barrés. Rien à
   comprendre pour le fournisseur : le dernier mail reçu est la vérité.
 * **Au-delà de la semaine suivante**, rien ne part : le changement sera dans le plan du jeudi suivant. C'est ce qui
