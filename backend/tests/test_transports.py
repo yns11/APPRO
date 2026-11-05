@@ -185,12 +185,13 @@ def test_start_up_migrations_of_the_transports(tmp_path):
     the next reconciliation starts from nothing and every supplier is automatic."""
     import datetime as dt
 
-    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy import create_engine, inspect, select, text
 
     from appro.data.store import (
         AppCounter,
         AppMeta,
         AppTransport,
+        AppTransportLine,
         apply_transports_all_automatic,
         apply_transports_fresh_start,
         init_store,
@@ -212,7 +213,7 @@ def test_start_up_migrations_of_the_transports(tmp_path):
     assert not inspect(engine).has_table("app_transport_plans") and inspect(engine).has_table("app_transport_lines")
     assert "transport_auto" not in {c["name"] for c in inspect(engine).get_columns("ref_suppliers")} and "transport_hours" in {c["name"] for c in inspect(engine).get_columns("ref_suppliers")}
     with engine.connect() as conn:
-        assert {"transports_fresh_start_2026_11", "transports_all_automatic_2026_11"} <= {r[0] for r in conn.execute(text("SELECT name FROM app_migrations")).all()}
+        assert {"transports_fresh_start_2026_11", "transports_all_automatic_2026_11", "transports_fresh_start_2026_11_b"} <= {r[0] for r in conn.execute(text("SELECT name FROM app_migrations")).all()}
     with factory() as session:
         assert session.get(AppTransport, "EM000001") is None          # purged by the fresh start
         session.add(AppTransport(transport_id="EM00002A", supplier_id="S-1", date=dt.date(2026, 10, 30), time="09:00", docks="B15;B6 EST", created_by="y"))
@@ -220,11 +221,14 @@ def test_start_up_migrations_of_the_transports(tmp_path):
         session.add(AppMeta(key="transports_reconciled_version", value="7"))
         session.commit()
         assert session.get(AppTransport, "EM00002A").docks == "B15;B6 EST"
-    # the fresh start itself : transports, counters and the reconciled version go ; the next start reconciles again
+    # the fresh start itself : transports, their lines, counters and the reconciled version go ; the next start reconciles again
+    with factory() as session:
+        session.add(AppTransportLine(transport_id="EM00002A", leg="aller", article="x", designation="", qty="1"))
+        session.commit()
     assert apply_transports_fresh_start(engine) == 1
     with factory() as session:
         assert session.get(AppTransport, "EM00002A") is None and session.get(AppCounter, "transport") is None
-        assert session.get(AppMeta, "transports_reconciled_version") is None
+        assert session.get(AppMeta, "transports_reconciled_version") is None and session.scalars(select(AppTransportLine)).first() is None
     assert apply_transports_all_automatic(engine) >= 3        # the UPDATEs apply, the DROPs are already done
 
 

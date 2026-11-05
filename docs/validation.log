@@ -102,3 +102,9 @@
 - OK   tsc + vite build (client)
 - OK   parcours Playwright (client/e2e/smoke.mjs)
 
+## 2026-11-05T17:12:09Z · commit f8e70ce · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+

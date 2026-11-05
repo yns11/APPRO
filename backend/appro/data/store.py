@@ -688,6 +688,7 @@ def apply_transports_fresh_start(engine) -> int:
     The table and columns of the former plan e-mails are dropped.  Returns the transports deleted."""
     n = 0
     statements = (
+        "DELETE FROM app_transport_lines",
         "DELETE FROM app_transport_orders",
         "DELETE FROM app_transports",
         "DELETE FROM app_transport_days_suppressed",
@@ -697,11 +698,11 @@ def apply_transports_fresh_start(engine) -> int:
         "ALTER TABLE app_transports DROP COLUMN changed_since_sent",
         "ALTER TABLE app_transports DROP COLUMN change_note",
     )
-    for i, stmt in enumerate(statements):
+    for stmt in statements:
         try:
             with engine.begin() as conn:
                 res = conn.execute(text(stmt))
-                if i == 1:
+                if stmt == "DELETE FROM app_transports":
                     n = res.rowcount or 0
         except Exception as exc:  # pragma: no cover - column or table already gone
             log.debug("transports fresh start, step skipped (%s): %s", stmt, exc)
@@ -737,6 +738,8 @@ DATA_MIGRATIONS: tuple[tuple[str, Any], ...] = (
     ("transport_origin_manual", apply_transport_origin_manual),
     ("transports_fresh_start_2026_11", apply_transports_fresh_start),
     ("transports_all_automatic_2026_11", apply_transports_all_automatic),
+    # second fresh start, once the habitual ranges were typed : the trucks are placed again from nothing (EM00001A…)
+    ("transports_fresh_start_2026_11_b", apply_transports_fresh_start),
 )
 
 

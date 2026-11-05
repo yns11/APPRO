@@ -669,7 +669,10 @@ et *CSV ATR* seulement.
 
 **Remises à zéro du 05/11/2026** : la migration `transports_fresh_start_2026_11` a supprimé tous les transports et
 remis les compteurs à zéro ; la migration `transports_all_automatic_2026_11` retire la colonne « Camions
-automatiques » des fournisseurs et l'origine `manuel` / `auto` des camions (ceux qui existent gardent leur créneau).
+automatiques » des fournisseurs et l'origine `manuel` / `auto` des camions ; la migration
+`transports_fresh_start_2026_11_b`, une fois les plages habituelles renseignées, purge de nouveau tous les transports
+(lignes de navette comprises), les jours supprimés et les compteurs : la réconciliation suivante repose chaque camion
+dans les plages de son fournisseur, à partir de `EM00001A`.
 
 ## 9 quater. File d'exceptions
 
