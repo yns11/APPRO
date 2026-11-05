@@ -162,7 +162,7 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
                           _lead(r.get("lead_time_days")), bool(r["active"]), strict_days=bool(r.get("strict_days") or False),
                           transport_contact=str(r.get("transport_contact") or ""), docks=str(r.get("docks") or "") or "B15",
                           cutoff_time=str(r.get("cutoff_time") or "").strip(), transport_mode=str(r.get("transport_mode") or "").strip() or "Fournisseur",
-                          transport_auto=bool(r.get("transport_auto") or False))
+                          transport_hours=str(r.get("transport_hours") or "").strip())
                  for r in _records(t("ref_suppliers"))]
     # business calendars : plant closures and exceptional open days, supplier / carrier / dock closures
     plant_closed, plant_open, sup_closed = calendar_sets(_records(t("ref_calendars")), suppliers)

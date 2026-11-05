@@ -6,6 +6,8 @@ import { usePerimeter } from "@/state/PerimeterContext";
 import { ArticleLink, Badge, Button, Card, Skeleton, useToast } from "@/components/ui";
 import { RefRowEditor, transportModeOptions } from "@/components/RefRowEditor";
 import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
+import { HoursPicker } from "@/components/HoursPicker";
+import { splitHours } from "@/lib/transports";
 import { WeekdayPicker, splitWeekdays } from "@/components/WeekdayPicker";
 import { fmtQty, fmtWeekdays } from "@/lib/format";
 import type { RefRow, RefValue, SupplierArticleRow } from "@/lib/types";
@@ -77,13 +79,12 @@ export function SupplierParamsTab({ supplierId, articles }: { supplierId: string
           <div className="param editable">
             <span className="label">Mode transport</span>
             <span className="value"><select className="select sm" value={String(draft.transport_mode || "Fournisseur")} disabled={!canEdit} aria-label="Mode transport" onChange={(e) => set("transport_mode", e.target.value)} style={{ width: "auto", maxWidth: 420 }}>{modeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></span>
-            <span className="small subtle">Fournisseur : Planning transport ; MAF Hambach : périmètre Planning MAF, navette commune ; Messagerie : hors planning, ordres fermes marqués ; un transporteur : son nom dans le fichier ATR.</span>
-            <span className="small subtle">Planning transport</span>
+            <span className="small subtle">Fournisseur : camions automatiques du Planning transport ; MAF Hambach : pièces au magasin avancé, navette commune ; Messagerie : hors planning, ordres fermes marqués ; un transporteur : camions automatiques, son nom dans le fichier ATR.</span>
           </div>
-          <div className={`param ${canEdit ? "editable" : ""}`} title="L'application crée, complète et annule elle-même un camion par jour pour les ordres fermes de ce fournisseur, le pose sur un créneau de quai et prépare le plan de semaine">
-            <span className="label">Camions automatiques</span>
-            <span className="value"><select className="select sm" value={draft.transport_auto ? "oui" : "non"} disabled={!canEdit || ["MAF Hambach", "Messagerie"].includes(String(draft.transport_mode || ""))} aria-label="Camions automatiques" onChange={(e) => set("transport_auto", e.target.value === "oui")}><option value="non">non · transports créés à la main</option><option value="oui">oui · un camion par jour, créé par l'application</option></select></span>
-            <span className="small subtle">Modes Fournisseur et transporteur. Oui crée les camions à la prochaine synchronisation ; non laisse les camions existants et n'en crée plus. L'heure habituelle est celle du dernier camion ; horizon : la semaine en cours et la suivante.</span>
+          <div className={`param ${canEdit ? "editable" : ""}`} title="Plages horaires habituelles de livraison : l'application pose les camions du fournisseur dedans">
+            <span className="label">Plages habituelles</span>
+            <span className="value"><HoursPicker value={splitHours(draft.transport_hours)} disabled={!canEdit || ["MAF Hambach", "Messagerie"].includes(String(draft.transport_mode || ""))} onChange={(v) => set("transport_hours", v.join(";"))} /></span>
+            <span className="small subtle">Deux plages au plus ; aucune = n'importe quand entre 07:00 et 15:30. Les camions sont créés par l'application pour tout fournisseur qui livre (lui-même ou par un transporteur), un par jour ouvré avec un ordre ferme, posés une fois pour toutes dans ces plages ; seul un approvisionneur les déplace ensuite.</span>
           </div>
           <div className={`param ${canEdit ? "editable" : ""}`}>
             <span className="label">Actif</span>

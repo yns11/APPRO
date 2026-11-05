@@ -71,7 +71,7 @@ class Supplier:
     cutoff_time: str = ""          # order cut-off hour « HH:MM » : an order placed later leaves the next working day ; "" = none
     closures: frozenset[dt.date] = frozenset()   # days the supplier cannot deliver (own closures, carrier / country, docks closed)
     transport_mode: str = "Fournisseur"          # Fournisseur | MAF Hambach | Messagerie | a carrier name (services/transports.py)
-    transport_auto: bool = False                 # « Camions automatiques » : one truck per day created, completed and cancelled by the application (services/transports_auto.py)
+    transport_hours: str = ""                    # habitual delivery ranges, « ; » separated (06-10, 08-12, 10-14, 12-16, 14-18, 16+ ; two at most) : the scheduler places the trucks inside (services/transports_auto.py)
 
     @property
     def cutoff(self) -> dt.time | None:
@@ -91,6 +91,11 @@ class Supplier:
     @property
     def dock_list(self) -> list[str]:
         return [x.strip() for x in re.split(r"[;,]+", self.docks or "") if x.strip()] or ["B15"]
+
+    @property
+    def hour_ranges(self) -> list[str]:
+        """The habitual ranges, canonical tokens (``06-10``…) in the order given ; empty = any time."""
+        return [x.strip() for x in re.split(r"[;,]+", self.transport_hours or "") if x.strip()]
 
 
 @dataclass

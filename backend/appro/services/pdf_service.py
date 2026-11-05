@@ -333,3 +333,247 @@ def otd_closing_pdf(month: str, sheets: list[dict], frozen: dict | None, as_of: 
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()
+
+
+# =============================================================================
+# Planning transport (docs § 9 ter) : the printable planning and the sheet of a MAF shuttle
+# =============================================================================
+_BLUE, _BLUE_BG, _GREY_BG = "#1d3fb5", "#e8eefc", "#f3f4f6"
+_WD = ("Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche")
+_WD_SHORT = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
+
+
+def _short_name(t: dict, maf_short: str = "HAMBACH") -> str:
+    if t["mode"] == "maf":
+        return maf_short + (" A/R" if t.get("return_trip") else "")
+    first = (t.get("supplier_name") or t["supplier_id"]).split()[0] if (t.get("supplier_name") or t["supplier_id"]).split() else t["supplier_id"]
+    suffix = {"ev": " · EV", "ponctuel": " · ponctuel"}.get(t["mode"], "")
+    return first[:12] + suffix
+
+
+def _slot_floor(time: str, slots: list[str]) -> str | None:
+    if not time or len(time) < 5:
+        return None
+    m = int(time[:2]) * 60 + int(time[3:5])
+    first = int(slots[0][:2]) * 60 + int(slots[0][3:5])
+    last = int(slots[-1][:2]) * 60 + int(slots[-1][3:5])
+    step = (int(slots[1][:2]) * 60 + int(slots[1][3:5]) - first) if len(slots) > 1 else 30
+    if m < first:
+        return "before"
+    if m >= last + step:
+        return "after"
+    return slots[min((m - first) // step, len(slots) - 1)]
+
+
+def planning_pdf(board: dict, user_label: str, people: dict[str, str] | None = None) -> bytes:
+    """A4 landscape : for each of the two weeks, one page docks × days (trucks per cell in big figures, « n à vous »,
+    the suppliers at their hour, totals per dock and per day) then one page per working day (the agenda of the docks :
+    one row per slot, « < 7h » and « ≥ 16h » rows, the identifier and the supplier of every truck).  The planner's
+    trucks and the shuttles are blue, a truck to check red, a cancelled truck struck ; no quantity, no order number."""
+    from reportlab.platypus import PageBreak, Table
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm, topMargin=10 * mm, bottomMargin=12 * mm,
+                            title=f"Planning transport {board['start']:%d/%m/%Y}", author="Ma Routine Appro")
+    W = landscape(A4)[0] - 20 * mm
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=styles["Title"], fontSize=14, leading=17, alignment=0, spaceAfter=1)
+    meta = ParagraphStyle("meta", parent=styles["Normal"], fontSize=8, leading=10, textColor=colors.HexColor("#475467"))
+    head = ParagraphStyle("head", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10)
+    head_c = ParagraphStyle("head_c", parent=head, alignment=1)
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=6.8, leading=8.4)
+    tot = ParagraphStyle("tot", parent=styles["Normal"], fontSize=11, leading=13, fontName="Helvetica-Bold", alignment=1)
+    blk = ParagraphStyle("blk", parent=styles["Normal"], fontSize=6.6, leading=8)
+    stamp = f"Ma Routine Appro · édité le {dt.datetime.now():%d/%m/%Y %H:%M} par {user_label}"
+    docks: list[str] = board["docks"]
+    slots: list[str] = board["slots"]
+    trucks = [t for t in board["transports"]]
+    planned = [t for t in trucks if t["status"] == "planned"]
+    weeks: list[list[dt.date]] = []
+    for d in board["days"]:
+        if not weeks or (d - weeks[-1][0]).days >= 7 or d.isocalendar()[1] != weeks[-1][0].isocalendar()[1]:
+            weeks.append([d])
+        else:
+            weeks[-1].append(d)
+    story: list = []
+
+    def colour(t: dict) -> str:
+        if t["status"] != "planned":
+            return "#9ca3af"
+        if t.get("mine"):
+            return "#b42318" if t.get("check_reason") else _BLUE
+        return "#374151"
+
+    def week_page(days: list[dt.date]) -> None:
+        wk = days[0].isocalendar()[1]
+        n_week = sum(1 for t in planned if t["date"] in days)
+        story.append(Paragraph(f"Planning transport · S{wk:02d} · {days[0]:%d/%m} → {days[-1]:%d/%m/%Y}", h1))
+        story.append(Paragraph(f"{n_week} camion(s) · {board['capacity']} par quai et par créneau · bleu = vos camions et les navettes · rouge = à vérifier", meta))
+        story.append(Spacer(1, 3 * mm))
+        rows = [[Paragraph("Quai", head)] + [Paragraph(f"{_WD_SHORT[d.weekday()]} {d:%d/%m}<br/><font size='7' color='#475467'>{sum(1 for t in planned if t['date'] == d)} camion(s)</font>", head_c) for d in days]
+                + [Paragraph("Semaine", head_c)]]
+        heights = [11 * mm]
+        avail = (landscape(A4)[1] - 22 * mm - 30 * mm) - 11 * mm - 9 * mm
+        for dock in docks:
+            line = [Paragraph(f"<b>{dock}</b>", head)]
+            for d in days:
+                closed = dock in board["closed_docks"].get(d.isoformat(), [])
+                here = sorted((t for t in planned if t["date"] == d and dock in t["docks"]), key=lambda t: (t["time"], t["transport_id"]))
+                mine_n = sum(1 for t in here if t.get("mine"))
+                if closed and not here:
+                    line.append(Paragraph("<font color='#475467'>fermé</font>", cell))
+                    continue
+                items = " · ".join(f"<font color='{colour(t)}'>{t['time']} {_short_name(t)}</font>" for t in here)
+                line.append(Paragraph(f"<font size='15'><b>{len(here)}</b></font> <font size='6.5' color='#475467'>camion(s)</font>"
+                                      + (f" <font size='7' color='{_BLUE}'><b>{mine_n} à vous</b></font>" if mine_n else "") + f"<br/>{items}", cell))
+            line.append(Paragraph(str(sum(1 for t in planned if t["date"] in days and dock in t["docks"])), tot))
+            rows.append(line)
+            heights.append(avail * (0.55 if dock == docks[0] else 0.45 / max(len(docks) - 1, 1)))
+        rows.append([Paragraph("Total", head)] + [Paragraph(str(sum(1 for t in planned if t["date"] == d)), tot) for d in days] + [Paragraph(str(n_week), tot)])
+        heights.append(9 * mm)
+        widths = [16 * mm] + [(W - 16 * mm - 18 * mm) / len(days)] * len(days) + [18 * mm]
+        tbl = Table(rows, colWidths=widths, rowHeights=heights)
+        style = [("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#c9d1de")), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f5fa")),
+                 ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#f3f5fa")), ("BACKGROUND", (-1, 1), (-1, -1), colors.HexColor("#f3f5fa")), ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#f3f5fa")),
+                 ("VALIGN", (-1, 1), (-1, -1), "MIDDLE"), ("VALIGN", (0, -1), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 3), ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3)]
+        for j, d in enumerate(days, start=1):
+            if d == board["as_of"]:
+                style.append(("BACKGROUND", (j, 0), (j, 0), colors.HexColor(_BLUE_BG)))
+            for i, dock in enumerate(docks, start=1):
+                if dock in board["closed_docks"].get(d.isoformat(), []):
+                    style.append(("BACKGROUND", (j, i), (j, i), colors.HexColor("#ececef")))
+        tbl.setStyle(TableStyle(style))
+        story.append(tbl)
+
+    def day_page(d: dt.date) -> None:
+        here = [t for t in trucks if t["date"] == d]
+        n_day = sum(1 for t in here if t["status"] == "planned")
+        story.append(Paragraph(f"{_WD[d.weekday()]} {d:%d/%m/%Y} · agenda des quais", h1))
+        story.append(Paragraph(f"{n_day} camion(s) · bleu = vos camions et les navettes · rouge = à vérifier · barré = annulé", meta))
+        story.append(Spacer(1, 2 * mm))
+        keys = ["before"] + slots + ["after"]
+        labels = {"before": f"< {int(slots[0][:2])}h", "after": f"≥ {int(slots[-1][:2]) + (1 if slots[-1][3:] != '00' else 0)}h" if slots[-1][3:] == "30" else f"≥ {int(slots[-1][:2]) + 1}h"}
+        rows = [[Paragraph("", head)] + [Paragraph(f"{dock}<br/><font size='7' color='#475467'>{sum(1 for t in here if t['status'] == 'planned' and dock in t['docks'])} camion(s)</font>", head_c) for dock in docks]]
+        for k in keys:
+            line = [Paragraph(labels.get(k, k), ParagraphStyle("t", parent=cell, textColor=colors.HexColor("#475467"), fontName="Helvetica-Bold" if k.endswith(":00") or k in labels else "Helvetica"))]
+            for dock in docks:
+                xs = sorted((t for t in here if dock in t["docks"] and _slot_floor(t["time"], slots) == k), key=lambda t: (t["time"], t["transport_id"]))
+                parts = []
+                for t in xs:
+                    txt = f"<b>{t['transport_id']}</b> {_short_name(t)}" + (f" {t['time']}" if k in labels else "")
+                    if t["status"] != "planned":
+                        txt = f"<strike>{txt}</strike> annulé"
+                    parts.append(f"<font color='{colour(t)}'>{txt}</font>")
+                line.append(Paragraph(" &nbsp;|&nbsp; ".join(parts), blk))
+            rows.append(line)
+        widths = [14 * mm] + [(W - 14 * mm) / len(docks)] * len(docks)
+        avail = landscape(A4)[1] - 22 * mm - 24 * mm
+        tbl = Table(rows, colWidths=widths, rowHeights=[9 * mm] + [(avail - 9 * mm) / len(keys)] * len(keys))
+        style = [("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d5dae3")), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f5fa")),
+                 ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#f8f9fb")), ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2), ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]
+        for j, dock in enumerate(docks, start=1):
+            if dock in board["closed_docks"].get(d.isoformat(), []):
+                style.append(("BACKGROUND", (j, 1), (j, -1), colors.HexColor("#ececef")))
+            for i, k in enumerate(keys, start=1):
+                n = len([t for t in here if t["status"] == "planned" and dock in t["docks"] and _slot_floor(t["time"], slots) == k])
+                if n > board["capacity"]:
+                    style.append(("BACKGROUND", (j, i), (j, i), colors.HexColor("#fff4e5")))
+        tbl.setStyle(TableStyle(style))
+        story.append(tbl)
+
+    pages = 0
+    for days in weeks:
+        if pages:
+            story.append(PageBreak())
+        week_page(days)
+        pages += 1
+        for d in days:
+            story.append(PageBreak())
+            day_page(d)
+            pages += 1
+
+    def footer(canvas, d):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7.5)
+        canvas.setFillColor(colors.HexColor("#667085"))
+        canvas.drawString(10 * mm, 6.5 * mm, stamp)
+        canvas.drawRightString(landscape(A4)[0] - 10 * mm, 6.5 * mm, f"page {d.page} / {pages}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return buf.getvalue()
+
+
+def shuttle_pdf(t: dict, people: dict[str, str] | None = None) -> bytes:
+    """A4 portrait, one page : the shuttle (identifier, day, hour, docks of both legs, carrier, note, author), the
+    outward lines (ERP orders with their supplier, typed lines) and the return lines, signature boxes."""
+    from reportlab.platypus import Table
+
+    people = people or {}
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm, topMargin=14 * mm, bottomMargin=16 * mm,
+                            title=f"Navette MAF {t['transport_id']}", author="Ma Routine Appro")
+    W = A4[0] - 32 * mm
+    styles = getSampleStyleSheet()
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8, leading=10, textColor=colors.HexColor("#475467"))
+    big = ParagraphStyle("big", parent=styles["Normal"], fontSize=24, leading=28, fontName="Courier-Bold")
+    body = ParagraphStyle("body", parent=styles["Normal"], fontSize=9.5, leading=12.5)
+    body_r = ParagraphStyle("body_r", parent=body, alignment=TA_RIGHT)
+    sec = ParagraphStyle("sec", parent=styles["Normal"], fontSize=10.5, leading=13, fontName="Helvetica-Bold", spaceBefore=6, spaceAfter=3)
+    head = ParagraphStyle("head", parent=styles["Normal"], fontSize=7.5, leading=9.5, fontName="Helvetica-Bold", textColor=colors.HexColor("#344054"))
+    head_r = ParagraphStyle("head_r", parent=head, alignment=TA_RIGHT)
+    day: dt.date = t["date"]
+    who = people.get((t.get("created_by") or "").lower(), (t.get("created_by") or "").split("@")[0])
+    created = t.get("created_at")
+    when = f" · {created:%d/%m/%Y %H:%M}" if isinstance(created, dt.datetime) else ""
+    out_docks, back_docks = " / ".join(t["docks"]), " / ".join(t.get("return_docks") or t["docks"])
+    header = Table([[Paragraph("NAVETTE MAF HAMBACH · FICHE DE TRANSPORT", small), Paragraph(f"<b>{_WD[day.weekday()]} {day:%d/%m/%Y} · {t['time']}</b>", body_r)],
+                    [Paragraph(t["transport_id"], big), Paragraph(f"Aller · quai {out_docks}" + (f"<br/>Retour · quai {back_docks}" if t.get("return_trip") else "<br/>Sans retour"), body_r)]],
+                   colWidths=[W * 0.6, W * 0.4])
+    header.setStyle(TableStyle([("LINEBELOW", (0, -1), (-1, -1), 1.2, colors.black), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("BOTTOMPADDING", (0, -1), (-1, -1), 6)]))
+    story = [header, Spacer(1, 3 * mm),
+             Paragraph(f"Transporteur : <b>{t.get('carrier') or 'navette interne'}</b>" + (f" · Note : {t['note']}" if t.get("note") else "") + f" · Créée par <b>{who}</b>{when}", body),
+             Spacer(1, 2 * mm)]
+    grid = TableStyle([("LINEBELOW", (0, 0), (-1, 0), 1, colors.black), ("LINEBELOW", (0, 1), (-1, -1), 0.3, colors.HexColor("#d0d5dd")), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                       ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4), ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4)])
+    story.append(Paragraph(f"→ ALLER · MAF Hambach → usine · {t['time']} · quai {out_docks}", sec))
+    rows = [[Paragraph("Fournisseur", head), Paragraph("Article", head), Paragraph("Désignation", head), Paragraph("Quantité", head_r)]]
+    for o in t["orders"]:
+        rows.append([Paragraph(o.get("supplier_name") or o.get("supplier_id") or "", body), Paragraph(f"<b>{o['article_id']}</b>", body), Paragraph(o.get("designation") or "", body),
+                     Paragraph(f"{_fmt_qty(float(o['qty']), o.get('unit') or '')} {o.get('unit') or ''}".strip(), body_r)])
+    for ln in t["lines"]:
+        if ln["leg"] == "aller":
+            rows.append([Paragraph("<font color='#667085'>saisi</font>", body), Paragraph(f"<b>{ln['article']}</b>", body), Paragraph(ln.get("designation") or "", body), Paragraph(ln.get("qty") or "", body_r)])
+    if len(rows) == 1:
+        rows.append([Paragraph("<font color='#667085'>aucune ligne</font>", body), "", "", ""])
+    tbl = Table(rows, colWidths=[W * 0.26, W * 0.22, W * 0.36, W * 0.16])
+    tbl.setStyle(grid)
+    story += [tbl, Paragraph(f"Lignes aller : <b>{len(rows) - 1 if rows[1][1] else 0}</b>", body_r)]
+    if t.get("return_trip"):
+        story.append(Paragraph(f"← RETOUR · usine → MAF Hambach · quai {back_docks} · après déchargement", sec))
+        rows = [[Paragraph("Article", head), Paragraph("Désignation", head), Paragraph("Quantité", head_r)]]
+        for ln in t["lines"]:
+            if ln["leg"] == "retour":
+                rows.append([Paragraph(f"<b>{ln['article']}</b>", body), Paragraph(ln.get("designation") or "", body), Paragraph(ln.get("qty") or "", body_r)])
+        if len(rows) == 1:
+            rows.append([Paragraph("<font color='#667085'>aucune ligne</font>", body), "", ""])
+        tbl = Table(rows, colWidths=[W * 0.3, W * 0.5, W * 0.2])
+        tbl.setStyle(grid)
+        story += [tbl, Paragraph(f"Lignes retour : <b>{len(rows) - 1 if rows[1][1] else 0}</b>", body_r)]
+    story.append(Spacer(1, 8 * mm))
+    boxes = Table([[Paragraph("Chauffeur · nom et signature", small), Paragraph("Quai usine · heure réelle, visa", small), Paragraph("MAF Hambach · visa", small)]],
+                  colWidths=[W / 3] * 3, rowHeights=[22 * mm])
+    boxes.setStyle(TableStyle([("BOX", (0, 0), (0, 0), 0.6, colors.HexColor("#98a2b3")), ("BOX", (1, 0), (1, 0), 0.6, colors.HexColor("#98a2b3")), ("BOX", (2, 0), (2, 0), 0.6, colors.HexColor("#98a2b3")),
+                               ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 5), ("TOPPADDING", (0, 0), (-1, -1), 4)]))
+    story.append(boxes)
+
+    def footer(canvas, d):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7.5)
+        canvas.setFillColor(colors.HexColor("#667085"))
+        canvas.drawString(16 * mm, 8 * mm, f"L'identifiant {t['transport_id']} est demandé à l'entrée · à présenter à l'aller" + (" et au retour" if t.get("return_trip") else ""))
+        canvas.drawRightString(A4[0] - 16 * mm, 8 * mm, f"Ma Routine Appro · généré le {dt.datetime.now():%d/%m/%Y} · page {d.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return buf.getvalue()

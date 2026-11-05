@@ -149,6 +149,10 @@ def _check_rows(session: Session, name: str, rows: list[dict], replace: bool) ->
                     raise ValueError(f"{r.get('supplier_id')} : heure limite « {cutoff} » attendue au format HH:MM")
                 if cutoff:
                     r["cutoff_time"] = f"{int(cutoff.split(':')[0]):02d}:{cutoff.split(':')[1]}"
+                try:
+                    r["transport_hours"] = ";".join(T.parse_hours(str(r.get("transport_hours") or "")))
+                except ValueError as exc:
+                    raise ValueError(f"{r.get('supplier_id')} : plages habituelles : {exc}")
         elif name == "ref_calendars":
             validation.check_calendars(rows, {r["supplier_id"] for r in reference.rows_out(session, "ref_suppliers")})
     except ValueError as exc:

@@ -1,13 +1,21 @@
 # Camions automatiques : création, créneaux, cycle de vie
 
-> **Mise à jour du 05/11/2026** (règle de référence : docs/regles_metier.md § 9 ter et 9 ter bis). Ce qui change par
-> rapport à la proposition ci-dessous : l'**horizon** est la semaine en cours et la suivante (plus trois semaines) ;
-> le **plan de semaine par e-mail (§ 5) est abandonné** : l'application crée, modifie et annule les transports, les
-> e-mails sont gérés par le système ATR à partir du CSV ; plus d'état « envoyé » ni de ✱ ; la page a **deux écrans**
-> (Fournisseurs, Quais), sept boutons de période, trois boutons d'ajout (navette MAF, **retour EV** `EM0001EV` avec
-> son propre compteur, **camion ponctuel**) ; le clic sur un camion ouvre un **menu** (première action : copier
-> l'identifiant) et non plus un panneau latéral ; **annuler un camion scindé rend ses commandes à l'autre camion** de la
-> famille ; tous les transports et les compteurs ont été **remis à zéro** (migration `transports_fresh_start_2026_11`).
+> **Mise à jour du 05/11/2026, second temps** (règle de référence : docs/regles_metier.md § 9 ter et 9 ter bis ;
+> maquettes : https://claude.ai/artifact/9A2CNdMtrFcaYrTMsdEvFZ). Ce qui change par rapport à la proposition
+> ci-dessous : **tout fournisseur qui livre est automatique** (la case « Camions automatiques » et l'origine
+> `manuel` / `auto` disparaissent ; seuls la navette MAF, le retour EV et le camion ponctuel se créent à la main) ; la
+> page n'a plus qu'**un écran, les quais** (douze boutons de période, nombre de camions en gros, totaux par jour et par
+> quai, agenda d'une journée avec les lignes « < 7h » et « ≥ 16h ») ; **quatre tons** : bleu = vos camions et les
+> navettes, rouge = vos camions à vérifier, gris = les autres approvisionneurs, gris barré = annulé ; un approvisionneur
+> ne modifie que ses camions et les navettes ; **aucun numéro de commande** n'est affiché (articles seulement) ; la
+> **navette MAF** a des lignes saisies, un **aller / retour** (quais retour, lignes retour, sans créneau ni ligne ATR)
+> et un **PDF** ; le camion est **posé une fois pour toutes** à sa création, le plus loin possible des camions déjà
+> posés, dans les **plages habituelles** du fournisseur (deux au plus parmi 06-10 … 16+), et ne bouge plus de lui-même ;
+> un créneau choisi à la main (demi-heures 06:00 → 21:00) qui est **occupé** est refusé avec le créneau libre le plus
+> proche, **forçable** jusqu'à deux fois la capacité ; **Rétablir** un camion annulé ; **PDF imprimable** du planning en
+> douze pages. Premier temps du même jour : horizon de deux semaines, plus d'e-mail (ATR prévient), retour EV
+> `EM0001EV`, camion ponctuel, menu au clic, annuler un camion scindé rend ses commandes, remise à zéro
+> (`transports_fresh_start_2026_11`).
 
 Proposition du 04/11/2026, **mise en œuvre le même jour** (règle de référence : docs/regles_metier.md § 9 ter bis ;
 code : `backend/appro/services/transports_auto.py`). Maquettes : https://claude.ai/artifact/NEuPb22VKnjVASSv9GmLvH

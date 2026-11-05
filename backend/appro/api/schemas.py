@@ -842,14 +842,35 @@ class ConfigOut(BaseModel):
 
 
 # ---------------------------------------------------------------- transports (planning de livraisons)
+TIME_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
 class TransportOrderOut(BaseModel):
     order_id: str
     article_id: str
+    designation: str = ""
+    unit: str = ""
     supplier_id: str = ""
     supplier_name: str = ""
     ref: str = ""
     expected_date: dt.date | None = None
     qty: float = 0.0
+
+
+class TransportLineOut(BaseModel):
+    """A typed line of a MAF shuttle (outside the ERP orders), on the outward or the return leg."""
+
+    id: int | None = None
+    leg: str = "aller"                     # aller | retour
+    article: str = ""
+    designation: str = ""
+    qty: str = ""                          # as typed : « 6 U », « 18 PAL »
+
+
+class TransportLineIn(BaseModel):
+    article: str = Field("", max_length=120)
+    designation: str = Field("", max_length=200)
+    qty: str = Field("", max_length=40)
 
 
 class TransportOut(BaseModel):
@@ -865,10 +886,15 @@ class TransportOut(BaseModel):
     status: str = "planned"
     created_by: str = ""
     created_at: dt.datetime | None = None
-    origin: str = "manuel"                 # manuel | auto
-    pinned: bool = False
+    pinned: bool = False                   # placed by a planner : keeps its orders when the ERP moves their date
     check_reason: str = ""                 # « à vérifier » : why
+    mine: bool = False                     # a truck of the planner's suppliers, or a shuttle : he may act on it
+    return_trip: bool = False              # shuttle : goes back loaded to the MAF (no slot of its own)
+    return_docks: list[str] = Field(default_factory=list)
+    cancelled_by: str = ""
+    cancelled_at: dt.datetime | None = None
     orders: list[TransportOrderOut] = Field(default_factory=list)
+    lines: list[TransportLineOut] = Field(default_factory=list)
 
 
 class PlanningOrder(BaseModel):
@@ -892,7 +918,7 @@ class PlanningSupplier(BaseModel):
     docks: list[str] = Field(default_factory=list)
     mode: str = "Fournisseur"
     carrier: str = ""
-    auto: bool = False                     # « Camions automatiques » : the application creates the trucks
+    hours: list[str] = Field(default_factory=list)   # habitual ranges (06-10 … 16+)
     orders: list[PlanningOrder]
 
 
@@ -903,17 +929,54 @@ class PlanningResponse(BaseModel):
     days: list[dt.date]
     docks: list[str]
     scope: str = "main"
-    slots: list[str] = Field(default_factory=list)   # the dock slots of a day (HH:MM)
+    slots: list[str] = Field(default_factory=list)   # the automatic grid of a day (HH:MM)
     capacity: int = 2                      # trucks per dock and slot
     closed_docks: dict[str, list[str]] = Field(default_factory=dict)   # date → docks closed that day (calendar « quai »)
     suppliers: list[PlanningSupplier]
     transports: list[TransportOut]
 
 
+class BoardResponse(BaseModel):
+    """The single screen of the planning : every truck of the window, every supplier, who it belongs to."""
+
+    as_of: dt.date
+    start: dt.date
+    end: dt.date
+    days: list[dt.date]
+    docks: list[str]
+    slots: list[str]                       # the automatic grid (07:00 → 15:30) : the rows of the agenda
+    day_slots: list[str]                   # every half hour a planner may pick (06:00 → 21:00)
+    capacity: int
+    hard_max: int                          # trucks per dock and slot when forcing
+    closed_docks: dict[str, list[str]] = Field(default_factory=dict)
+    maf_day: dt.date | None = None         # the next working day
+    maf_pending: int = 0                   # its MAF orders without a shuttle yet
+    user_label: str = ""
+    people: dict[str, str] = Field(default_factory=dict)   # e-mail → first name of the declared planners (authors)
+    transports: list[TransportOut]         # planned, plus the trucks a person cancelled (struck in the agenda)
+
+
+class SlotCheckOut(BaseModel):
+    """An occupied slot : what is there, the nearest free one, whether forcing is possible."""
+
+    date: dt.date
+    time: str
+    slot: str | None = None
+    docks: list[str]
+    count: int
+    capacity: int
+    hard_max: int
+    proposed: str | None = None
+    others: list[str] = Field(default_factory=list)
+    free: bool
+    forceable: bool
+
+
 class TransportMoveIn(BaseModel):
     date: dt.date | None = None
-    time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    time: str | None = Field(None, pattern=TIME_PATTERN)
     docks: list[str] | None = None
+    force: bool = False                    # take an occupied slot anyway (never beyond the hard maximum)
 
 
 class SplitItem(BaseModel):
@@ -926,8 +989,9 @@ class TransportSplitIn(BaseModel):
 
     items: list[SplitItem] = Field(default_factory=list)
     order_ids: list[str] = Field(default_factory=list)
-    time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    time: str | None = Field(None, pattern=TIME_PATTERN)
     docks: list[str] | None = None
+    force: bool = False
 
     def moves(self) -> list[dict]:
         out = [i.model_dump() for i in self.items]
@@ -939,39 +1003,55 @@ class TransportNoteIn(BaseModel):
     note: str = Field("", max_length=500)
 
 
+class ForceIn(BaseModel):
+    force: bool = False
+
+
 class DockSlotTruck(BaseModel):
     transport_id: str
     supplier_id: str
     supplier_name: str = ""
-    origin: str = "manuel"
     mode: str = "fournisseur"
+    time: str = ""
     check_reason: str = ""
     docks: list[str] = Field(default_factory=list)
 
 
 class DockDayOut(BaseModel):
-    """Docks × slots of one day : who comes when, the closed docks, the trucks to check."""
+    """Docks × half-hour slots of one day : who comes when, the closed docks, the trucks to check."""
 
     date: dt.date
     slots: list[str]
+    auto_slots: list[str] = Field(default_factory=list)
     capacity: int
+    hard_max: int = 4
     docks: list[dict[str, Any]]            # {dock, closed, slots: {time: [DockSlotTruck]}}
-    off_grid: list[DockSlotTruck] = Field(default_factory=list)   # trucks whose time is outside the grid
+    off_grid: list[DockSlotTruck] = Field(default_factory=list)   # trucks whose time is outside 06:00 → 21:00
 
 
-class TransportSlotIn(BaseModel):
+class ShuttleIn(BaseModel):
+    """A MAF shuttle : the MAF orders ticked and the typed lines of the outward leg, an optional return leg."""
+
     date: dt.date
-    time: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    time: str = Field(..., pattern=TIME_PATTERN)
     docks: list[str] = Field(..., min_length=1)
+    order_ids: list[str] = Field(default_factory=list)
+    lines: list[TransportLineIn] = Field(default_factory=list)
+    return_trip: bool = False
+    return_docks: list[str] = Field(default_factory=list)
+    return_lines: list[TransportLineIn] = Field(default_factory=list)
+    carrier: str = Field("", max_length=120)
+    note: str = Field("", max_length=500)
+    force: bool = False
 
 
-class TransportCreateIn(BaseModel):
-    supplier_id: str | None = None        # None with ``maf`` : a shuttle carrying orders of several MAF suppliers
-    order_ids: list[str] = Field(..., min_length=1)
-    slots: list[TransportSlotIn] = Field(..., min_length=1)
-    carrier: str = ""
-    note: str = ""
-    maf: bool = False
+class TransportLinesIn(BaseModel):
+    """The typed lines of a shuttle, replaced as a whole (both legs)."""
+
+    lines: list[TransportLineIn] = Field(default_factory=list)
+    return_trip: bool | None = None
+    return_docks: list[str] | None = None
+    return_lines: list[TransportLineIn] = Field(default_factory=list)
 
 
 class TransportSpecialIn(BaseModel):
@@ -981,10 +1061,11 @@ class TransportSpecialIn(BaseModel):
     kind: str = Field(..., pattern="^(ev|ponctuel)$")
     supplier_id: str
     date: dt.date
-    time: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    time: str = Field(..., pattern=TIME_PATTERN)
     docks: list[str] = Field(..., min_length=1)
     carrier: str = ""
     note: str = Field("", max_length=500)
+    force: bool = False
 
 
 class TransportIdsIn(BaseModel):

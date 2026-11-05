@@ -121,7 +121,7 @@ export default function SupplierPage() {
     { key: "time", label: "Heure", get: (t) => t.time },
     { key: "docks", label: "Quais", get: (t) => t.docks.join(" / "), filter: "select" },
     { key: "carrier", label: "Transporteur", get: (t) => t.carrier, filter: "select" },
-    { key: "orders", label: "Commandes", get: (t) => t.orders.map((o) => `${o.ref || o.order_id} · ${o.article_id}`).join(" ; "), render: (t) => <span className="small">{t.orders.map((o) => <span key={o.order_id} style={{ display: "block" }}><span className="mono">{o.ref || o.order_id}</span> · <ArticleLink id={o.article_id} /> · {fmtQty(o.qty)}</span>)}</span> },
+    { key: "orders", label: "Articles", get: (t) => t.orders.map((o) => `${o.article_id} ${fmtQty(o.qty, o.unit)}`).join(" ; "), render: (t) => <span className="small">{t.orders.map((o) => <span key={o.order_id} style={{ display: "block" }}><ArticleLink id={o.article_id} designation={o.designation} /> · {fmtQty(o.qty, o.unit)} {o.unit}</span>)}{t.mode === "ev" ? "retour EV" : t.mode === "ponctuel" ? "camion ponctuel" : ""}</span> },
     { key: "status", label: "Statut", get: (t) => (t.status === "cancelled" ? "annulé" : t.date < (d?.as_of ?? "") ? "passé" : "prévu"), filter: "select", render: (t) => <Badge tone={t.status === "cancelled" ? "neutral" : t.date < (d?.as_of ?? "") ? "ok" : "brand"}>{t.status === "cancelled" ? "annulé" : t.date < (d?.as_of ?? "") ? "passé" : "prévu"}</Badge> },
     { key: "by", label: "Créé par", get: (t) => t.created_by, filter: "select", render: (t) => <span className="small subtle">{t.created_by}</span> },
   ], [d?.as_of]);

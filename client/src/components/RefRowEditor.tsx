@@ -1,4 +1,6 @@
 import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
+import { HoursPicker } from "@/components/HoursPicker";
+import { splitHours } from "@/lib/transports";
 import { WeekdayPicker, splitWeekdays } from "@/components/WeekdayPicker";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
@@ -9,8 +11,8 @@ import type { RefColumn, RefRow, RefTableInfo } from "@/lib/types";
 
 /** The supplier's transport mode : three fixed modes, then the carriers known to the application. */
 export const FIXED_TRANSPORT_MODES: { value: string; label: string }[] = [
-  { value: "Fournisseur", label: "Fournisseur – livre lui-même (Planning transport)" },
-  { value: "MAF Hambach", label: "MAF Hambach – pièces au magasin avancé (Planning MAF, navette)" },
+  { value: "Fournisseur", label: "Fournisseur – livre lui-même (camions automatiques)" },
+  { value: "MAF Hambach", label: "MAF Hambach – pièces au magasin avancé (navette)" },
   { value: "Messagerie", label: "Messagerie – pas de transport camion" },
 ];
 export function transportModeOptions(carriers: string[]): { value: string; label: string }[] {
@@ -62,6 +64,7 @@ export function RefRowEditor({ table, row, onClose, fixed, onSaved }: { table: R
     if (c.type === "bool") return <select className="select" value={values[c.name] ?? "oui"} onChange={(e) => set(e.target.value)} disabled={disabled}><option value="oui">oui</option><option value="non">non</option></select>;
     if (table.name === "ref_suppliers" && c.name === "delivery_weekdays") return <span className="row" style={{ height: 34 }}><WeekdayPicker value={splitWeekdays(values[c.name])} onChange={(v) => set(v.join(","))} disabled={disabled} /><span className="small subtle">{fmtWeekdays(values[c.name] || "")}</span></span>;
     if (table.name === "ref_suppliers" && c.name === "docks") return <DockPicker all={DOCKS} value={splitDocks(values[c.name])} onChange={(v) => set(v.join(";"))} disabled={disabled} label="Quais par défaut" />;
+    if (table.name === "ref_suppliers" && c.name === "transport_hours") return <HoursPicker value={splitHours(values[c.name])} onChange={(v) => set(v.join(";"))} disabled={disabled} />;
     if (table.name === "ref_suppliers" && c.name === "transport_mode") return <select className="select" value={values[c.name] || "Fournisseur"} onChange={(e) => set(e.target.value)} disabled={disabled}>{modeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
     if (choices[c.name]) return <select className="select" value={values[c.name] || choices[c.name][0].value} onChange={(e) => set(e.target.value)} disabled={disabled}>{choices[c.name].map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
     if (table.name === "ref_consumption_terms" && c.name === "source_article_id") {

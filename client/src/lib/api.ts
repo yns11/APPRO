@@ -1,9 +1,12 @@
 /** Thin typed fetch wrapper around the FastAPI backend. */
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** the ``detail`` of the answer when it is an object (a 409 of the Planning transport carries the slot check) */
+  detail: unknown;
+  constructor(status: number, message: string, detail?: unknown) {
     super(message);
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -21,14 +24,15 @@ export function qs(params?: Params): string {
   return s ? `?${s}` : "";
 }
 
-async function parseError(res: Response): Promise<string> {
+async function parseError(res: Response): Promise<{ message: string; detail?: unknown }> {
   try {
     const body = await res.json();
-    if (typeof body?.detail === "string") return body.detail;
-    if (Array.isArray(body?.detail)) return body.detail.map((d: { msg: string; loc?: unknown[] }) => `${(d.loc ?? []).join(".")}: ${d.msg}`).join(" ; ");
-    return JSON.stringify(body);
+    if (typeof body?.detail === "string") return { message: body.detail };
+    if (Array.isArray(body?.detail)) return { message: body.detail.map((d: { msg: string; loc?: unknown[] }) => `${(d.loc ?? []).join(".")}: ${d.msg}`).join(" ; ") };
+    if (body?.detail && typeof body.detail === "object") return { message: body.detail.message ?? `HTTP ${res.status}`, detail: body.detail };
+    return { message: JSON.stringify(body) };
   } catch {
-    return res.statusText || `HTTP ${res.status}`;
+    return { message: res.statusText || `HTTP ${res.status}` };
   }
 }
 
@@ -55,7 +59,7 @@ async function request<T>(method: string, path: string, body?: unknown, params?:
   }
   if (opts?.group) headers["X-Action-Group"] = opts.group;
   const res = await fetch(`${path}${qs(params)}`, init);
-  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  if (!res.ok) { const err = await parseError(res); throw new ApiError(res.status, err.message, err.detail); }
   const actionId = res.headers.get("X-Action-Id");
   if (actionId) {
     let label = res.headers.get("X-Action-Label") ?? "";

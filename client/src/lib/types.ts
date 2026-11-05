@@ -214,21 +214,30 @@ export type ExportType = "text" | "number" | "date" | "bool" | "percent";
 export interface ExportColumn { key: string; label: string; type?: ExportType; }
 
 // ---------------------------------------------------------------- transports (planning de livraisons)
-export interface TransportOrderOut { order_id: string; article_id: string; supplier_id: string; supplier_name: string; ref: string; expected_date: string | null; qty: number; }
+export interface TransportOrderOut { order_id: string; article_id: string; designation: string; unit: string; supplier_id: string; supplier_name: string; ref: string; expected_date: string | null; qty: number; }
+export type TransportLeg = "aller" | "retour";
+export interface TransportLine { id?: number | null; leg: TransportLeg; article: string; designation: string; qty: string; }
+export interface TransportLineIn { article: string; designation: string; qty: string; }
 export type TransportMode = "fournisseur" | "transporteur" | "maf" | "ev" | "ponctuel";
 export interface TransportOut { transport_id: string; supplier_id: string; supplier_name: string; date: string; time: string; docks: string[]; carrier: string; note: string; mode: TransportMode; status: string; created_by: string; created_at: string | null;
-  /** manuel | auto (created by the reconciliation of the automatic trucks) */
-  origin: "manuel" | "auto"; pinned: boolean; check_reason: string; orders: TransportOrderOut[]; }
+  /** placed by a planner (moved, split) : keeps its orders when the ERP moves their date */
+  pinned: boolean; check_reason: string;
+  /** a truck of the planner's suppliers, or a shuttle : the planner may act on it */
+  mine: boolean; return_trip: boolean; return_docks: string[]; cancelled_by: string; cancelled_at: string | null; orders: TransportOrderOut[]; lines: TransportLine[]; }
 export interface PlanningOrder { order_id: string; article_id: string; designation: string; unit: string; ref: string; expected_date: string; qty_ordered: number; qty_open: number; ignored: boolean; transports: string[]; }
-export interface PlanningSupplier { supplier_id: string; name: string; transport_contact: string; emails: string[]; docks: string[]; mode: string; carrier: string; auto: boolean; orders: PlanningOrder[]; }
+export interface PlanningSupplier { supplier_id: string; name: string; transport_contact: string; emails: string[]; docks: string[]; mode: string; carrier: string; hours: string[]; orders: PlanningOrder[]; }
 export interface PlanningResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; scope: "main" | "maf"; slots: string[]; capacity: number; closed_docks: Record<string, string[]>; suppliers: PlanningSupplier[]; transports: TransportOut[]; }
-/** The weekly plan of one recipient (band of the planning). */
-export interface DockSlotTruck { transport_id: string; supplier_id: string; supplier_name: string; origin: string; check_reason: string; docks: string[]; }
-export interface DockDayOut { date: string; slots: string[]; capacity: number; docks: { dock: string; closed: boolean; slots: Record<string, DockSlotTruck[]> }[]; off_grid: DockSlotTruck[]; }
-export interface TransportSlotIn { date: string; time: string; docks: string[]; }
+/** The single screen : every truck of the two weeks, every supplier, flagged ``mine`` ; the cancelled trucks of a person stay (struck). */
+export interface BoardResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; slots: string[]; day_slots: string[]; capacity: number; hard_max: number; closed_docks: Record<string, string[]>; maf_day: string | null; maf_pending: number; user_label: string; people: Record<string, string>; transports: TransportOut[]; }
+/** An occupied slot : who is there, the nearest free slot, whether forcing is possible (also the body of a 409). */
+export interface SlotCheck { date: string; time: string; slot: string | null; docks: string[]; count: number; capacity: number; hard_max: number; proposed: string | null; others: string[]; free: boolean; forceable: boolean; }
+export interface DockSlotTruck { transport_id: string; supplier_id: string; supplier_name: string; mode: string; time: string; check_reason: string; docks: string[]; }
+export interface DockDayOut { date: string; slots: string[]; auto_slots: string[]; capacity: number; hard_max: number; docks: { dock: string; closed: boolean; slots: Record<string, DockSlotTruck[]> }[]; off_grid: DockSlotTruck[]; }
+export interface ShuttleIn { date: string; time: string; docks: string[]; order_ids: string[]; lines: TransportLineIn[]; return_trip: boolean; return_docks: string[]; return_lines: TransportLineIn[]; carrier: string; note: string; force?: boolean; }
+export interface TransportLinesIn { lines: TransportLineIn[]; return_trip: boolean; return_docks: string[]; return_lines: TransportLineIn[]; }
 export interface TransportPackOut { transports: TransportOut[]; csv: string; csv_filename: string; }
 export type SpecialKind = "ev" | "ponctuel";
-export interface TransportSpecialIn { kind: SpecialKind; supplier_id: string; date: string; time: string; docks: string[]; carrier: string; note: string; }
+export interface TransportSpecialIn { kind: SpecialKind; supplier_id: string; date: string; time: string; docks: string[]; carrier: string; note: string; force?: boolean; }
 export interface PortalKpis { open_orders: number; open_qty_lines: number; late_orders: number; today_orders: number; next_delivery: string | null; transports: number; next_transport: string | null; forecast_lines: number; forecast_weeks: number; desadv_open: number; desadv_ko: number; receipts_30d: number; }
 export interface PortalOrderRow { order_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; linked: boolean; date: string; order_type: string; qty_ordered: number; qty_open: number; purch_id: string; first_seen: string | null; transports: string[]; status: string; }
 export interface PortalDesadvRow { desadv_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string; date: string; qty: number; purch_id: string; packing_slip: string; state: string; final_processing: string; received: boolean; journal: boolean; status: string; }

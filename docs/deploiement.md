@@ -225,8 +225,10 @@ redéployer (`scripts/deploy.sh dev PROD --var=...`) ; l'App rejoue le `GRANT` �
    (`admin_emails`, `APPRO_ADMINS`). Pendant l'essai des camions automatiques, le **Planning transport** et
    l'API `/api/transports` ne sont visibles que des e-mails de `APPRO_TRANSPORT_USERS` (une seule personne par
    défaut ; vide = tout le monde). Au premier démarrage de la version du 05/11/2026, la migration
-   `transports_fresh_start_2026_11` supprime tous les transports et remet les compteurs EM à zéro ; la première
-   lecture du planning recrée les camions automatiques de la semaine en cours et de la suivante. Enfermé malgré tout ? Dans l'éditeur SQL Lakebase, sur le schéma de la cible :
+   `transports_fresh_start_2026_11` supprime tous les transports et remet les compteurs EM à zéro, puis
+   `transports_all_automatic_2026_11` retire la colonne « Camions automatiques » des fournisseurs (tout fournisseur
+   qui livre est automatique) ; la première lecture du planning crée les camions de la semaine en cours et de la
+   suivante. Enfermé malgré tout ? Dans l'éditeur SQL Lakebase, sur le schéma de la cible :
    `UPDATE appro.ref_planners SET role = 'admin' WHERE lower(email) = '<votre e-mail>';` (ou un `INSERT` de votre
    ligne), puis recharger l'application. Les **Délégations** (délégant, destinataire, dates) se saisissent ensuite.
 6. **Stock de référence** — article, date du stock (veille au soir), stock physique, stock bloqué.
