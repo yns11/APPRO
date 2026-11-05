@@ -613,34 +613,52 @@ B15 complet toute la journée : déplacer le camion ») ; un quai fermé ce jour
 *quai*) → à vérifier aussi. La vue **Quais × créneaux** d'une journée (icône dans l'en-tête du jour) montre
 l'occupation, les créneaux pleins, les quais fermés, les camions à vérifier.
 
-**Actions de l'approvisionneur** (un clic sur le camion dans la cellule) : *Vu* (efface « à vérifier »), **Déplacer**
-(jour, heure, quais : le camion est épinglé, l'ordonnanceur ne le bouge plus), **Scinder** (des commandes partent
-dans un second camion du même jour, nouvel EM, créneau choisi ou le plus proche libre, les deux épinglés), **Note**
-pour le fournisseur (imprimée dans le plan, sans renvoi), CSV et e-mail du seul camion, **Annuler**. La création
-manuelle est refusée pour un fournisseur automatique (elle reste pour les autres et pour la navette MAF).
+**Actions de l'approvisionneur** (un clic sur le camion ouvre son **panneau de détail** à droite de la grille : jour,
+créneau, quai, plan, commandes à bord) : *Vu* (efface « à vérifier »), **Déplacer** (jour, créneau, quais : le camion
+est épinglé, l'ordonnanceur ne le bouge plus), **Scinder** (une partie du camion part dans un second camion du même
+jour, nouvel EM, créneau choisi ou le plus proche libre, les deux épinglés ; **tout camion est scindable** : des
+commandes entières, ou une **quantité** d'une commande, un camion à une seule commande se scinde par quantité et la
+commande roule alors sur deux camions, dont la réconciliation respecte les quantités), **Note** pour le fournisseur
+(imprimée dans le plan, sans renvoi), CSV et e-mail du seul camion, **Annuler**. La création manuelle est refusée
+pour un fournisseur automatique (elle reste pour les autres et pour la navette MAF : case « + camion » de la
+cellule, commandes du jour à cocher).
 
 **Plan de semaine : un e-mail = une semaine = un destinataire, toujours complet.** Le destinataire est le groupe de
 contacts transport du fournisseur (`sup:<code>`) ou les contacts du transporteur (`carrier:<nom>`, un bloc par
-fournisseur transporté). La **bande** au-dessus des semaines du planning a deux lignes :
+fournisseur transporté). Une **ligne** au-dessus du planning résume le plan de la semaine suivante (envoyés, à
+envoyer le jour configuré, à renvoyer) avec un seul bouton, le prochain envoi ; la page **Envois**
+(`/livraisons/envois`) liste les destinataires de la semaine en cours (rectificatifs seulement) et de la suivante :
+camions, état, dernier envoi, ce qui a changé, et le bouton **Envoyer** / **Renvoyer** / **Rouvrir** :
 
-- *Plan de la semaine S+1* : à envoyer le jour configuré, une pastille par destinataire et **Envoyer le suivant** ;
-  chaque clic ouvre dans Outlook le brouillon complet (À, objet, corps : camion, jour, heure, quai, commandes ;
+- **Envoyer** ouvre dans Outlook le brouillon complet (À, objet, corps : camion, jour, heure, quai, commandes ;
   résumé anglais ; pied « envoi n° … ») et note la semaine **envoyée** (`app_transport_plans` : numéro, qui, quand,
   état envoyé). L'application n'envoie rien elle-même ;
-- *Rectificatif* : dès qu'un ✱ touche une semaine déjà envoyée (semaine en cours ou suivante), elle passe **à
-  renvoyer** pour ce destinataire, avec le motif (« EM000231 : commande CO-1234 ajoutée (mar. 10/11) ») ; **Renvoyer**
-  ouvre le **même plan entier**, titré « mise à jour du … (remplace l'envoi du …) », lignes changées marquées ✱,
-  camions annulés barrés (ils disparaissent au renvoi suivant). Au-delà de la semaine suivante rien ne part : c'est ce
-  qui empêche l'accumulation.
+- dès qu'un ✱ touche une semaine déjà envoyée (semaine en cours ou suivante), elle passe **à renvoyer** pour ce
+  destinataire, avec le motif (« EM000231 : commande CO-1234 ajoutée (mar. 10/11) ») ; **Renvoyer** ouvre le **même
+  plan entier**, titré « mise à jour du … (remplace l'envoi du …) », lignes changées marquées ✱, camions annulés
+  barrés (ils disparaissent au renvoi suivant). Au-delà de la semaine suivante rien ne part : c'est ce qui empêche
+  l'accumulation ;
+- **Rouvrir** montre le plan dans Outlook sans noter d'envoi.
 
 **Déclenche un ✱** : jour, heure, quai, commande ajoutée ou retirée, camion créé, scindé ou annulé. **Ne déclenche
 rien** : une quantité (sauf `transport_resend_on_qty`), une note, un changement au-delà de la semaine suivante. Un
 plan trop long pour un lien Outlook (≈ 1 800 caractères) part en **un e-mail par fournisseur** vers le même
 destinataire, puis l'approvisionneur marque la semaine envoyée. Le CSV ATR global ne change pas.
 
-**Lecture des cellules** : badge *auto* sur le fournisseur ; un camion bleu = annoncé ou à annoncer jeudi ; **rouge
-« à vérifier »** avec la raison ; **✱** = changé depuis l'envoi ; épingle = touché à la main ; barré = annulé, encore
-à renvoyer ; « sans camion » sur une commande = jour supprimé après une annulation.
+**Écrans (page « Planning transport », refondue le 05/11/2026)** : un en-tête commun (vue, période, périmètre :
+carnet, tous les fournisseurs ou Planning MAF, CSV ATR) et trois vues qui partagent **cinq couleurs** : bleu =
+planifié, à envoyer ; vert = envoyé (dans le dernier plan reçu) ; orange ✱ = changé depuis l'envoi ; rouge = à
+vérifier (la raison en trois mots) ; gris barré = annulé, encore à renvoyer.
+
+- **Semaine** : fournisseurs (badge *auto* ou *manuel*) × jours ouvrés, **une case par camion** de même taille
+  (identifiant et heure, quai et nombre de commandes) ; les commandes ne sont plus dans la cellule mais dans le
+  panneau de détail ; « + camion · n cmd » en pointillé pour un fournisseur en manuel, « sans camion » pour un jour
+  supprimé d'un fournisseur automatique ;
+- **Quais** : l'agenda d'une journée, une ligne par créneau, un quai = autant de voies que sa capacité, un bloc = un
+  camion ; quai fermé hachuré, trait rouge « maintenant » ; navigation jour par jour ;
+- **Charge** : camions par quai et demi-journée sur la semaine, cinq paliers de bleu jusqu'à la capacité (camions par
+  créneau × créneaux de la demi-journée), point rouge = un camion à vérifier, totaux par jour et par quai ; un clic
+  ouvre la vue Quais du jour.
 
 ## 9 quater. File d'exceptions
 

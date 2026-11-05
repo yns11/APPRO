@@ -17,7 +17,7 @@ const NAV = [
   { to: "/tableau", label: "Tableau d'approvisionnement", icon: Table },
   { to: "/articles", label: "Fiches articles", icon: Activity },
   { to: "/fournisseurs", label: "Fournisseurs", icon: Truck },
-  { to: "/livraisons", label: "Planning de livraisons", icon: CalendarCheck },
+  { to: "/livraisons", label: "Planning transport", icon: CalendarCheck },
   { to: "/performance", label: "Performance fournisseurs", icon: Gauge },
   { to: "/recherche", label: "Recherche", icon: Search },
   { to: "/saisies", label: "Saisies & journal", icon: PenLine },

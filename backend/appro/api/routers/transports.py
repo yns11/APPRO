@@ -118,6 +118,9 @@ def planning(planner: str | None = None, start: dt.date | None = None, weeks: in
     ds = full if scope == "maf" or not planner else _dataset(ctx, session, planner)
     first = start or iso_week_monday(as_of)
     out = T.planning(ds, session, first, weeks, ctx.settings.holiday_dates, as_of, scope, _carriers(ctx), int(params.transport_plan_weekday or 4), A.slot_grid(params))
+    closed = _dock_closed(ctx)
+    out["capacity"] = max(int(params.dock_slot_capacity or 1), 1)
+    out["closed_docks"] = {d.isoformat(): [dock for dock in T.DOCKS if d in closed.get(dock.upper(), set())] for d in out["days"] if any(d in closed.get(dock.upper(), set()) for dock in T.DOCKS)}
     return json_response(S.PlanningResponse(**out).model_dump(mode="json"))
 
 
@@ -311,7 +314,9 @@ def split(transport_id: str, body: S.TransportSplitIn, response: Response, ctx: 
     access.require_write()
     t = _one(session, transport_id)
     params = mrp_service.build_params(ctx, session)
-    new = _action(lambda: A.split_transport(session, user, t, body.order_ids, params, body.time, body.docks, _dock_closed(ctx)), session, ctx, user, response,
+    if not body.items and not body.order_ids:
+        raise HTTPException(422, "Indiquez les commandes (et quantités) du second camion")
+    new = _action(lambda: A.split_transport(session, user, t, body.moves(), params, body.time, body.docks, _dock_closed(ctx)), session, ctx, user, response,
                   f"Transport {transport_id} scindé")
     return json_response([_out(ctx, t), _out(ctx, new)])
 

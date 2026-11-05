@@ -908,6 +908,8 @@ class PlanningResponse(BaseModel):
     scope: str = "main"
     plan_weekday: int = 4                  # the day the plan of the next week is sent (ISO)
     slots: list[str] = Field(default_factory=list)   # the dock slots of a day (HH:MM)
+    capacity: int = 2                      # trucks per dock and slot
+    closed_docks: dict[str, list[str]] = Field(default_factory=dict)   # date → docks closed that day (calendar « quai »)
     suppliers: list[PlanningSupplier]
     transports: list[TransportOut]
 
@@ -964,10 +966,23 @@ class TransportMoveIn(BaseModel):
     docks: list[str] | None = None
 
 
+class SplitItem(BaseModel):
+    order_id: str
+    qty: float | None = None               # None = the whole order moves ; a smaller quantity splits it
+
+
 class TransportSplitIn(BaseModel):
-    order_ids: list[str] = Field(..., min_length=1)
+    """What leaves for the second truck : ``items`` (order and quantity), or ``order_ids`` (whole orders)."""
+
+    items: list[SplitItem] = Field(default_factory=list)
+    order_ids: list[str] = Field(default_factory=list)
     time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     docks: list[str] | None = None
+
+    def moves(self) -> list[dict]:
+        out = [i.model_dump() for i in self.items]
+        out += [{"order_id": oid, "qty": None} for oid in self.order_ids if oid not in {i.order_id for i in self.items}]
+        return out
 
 
 class TransportNoteIn(BaseModel):

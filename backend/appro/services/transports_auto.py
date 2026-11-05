@@ -268,6 +268,10 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
         sp = auto[sid]
         wanted = {oid: o for (s_id, _d), orders in expected.items() if s_id == sid for oid, o in orders.items()}
         mine = [t for (s_id, d), ts in by_day.items() if s_id == sid for t in ts if t.status == "planned"]
+        rides: dict[str, int] = {}
+        for t in mine:
+            for o in t.orders:
+                rides[o.order_id] = rides.get(o.order_id, 0) + 1
         # an order that left the firm orders leaves its automatic truck ; an order whose ERP date moved leaves a truck
         # the planner did not pin (it rides its new day's truck below) ; today's trucks are on the road : untouched
         for t in mine:
@@ -279,8 +283,8 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
                     t.orders.remove(o)
                     counts["removed"] += 1
                     flag(t, f"commande {o.ref or o.order_id} retirée")
-                elif abs(_qty_of(want) - float(o.qty or 0.0)) > 1e-9:
-                    o.qty = _qty_of(want)
+                elif rides.get(o.order_id, 1) == 1 and abs(_qty_of(want) - float(o.qty or 0.0)) > 1e-9:
+                    o.qty = _qty_of(want)      # an order split over several trucks keeps the planner's quantities
                     if params.transport_resend_on_qty:
                         flag(t, f"quantité de {o.ref or o.order_id} modifiée")
             if not t.orders:
@@ -431,17 +435,30 @@ def move_transport(session: Session, user: str, t: AppTransport, date: dt.date |
     session.flush()
 
 
-def split_transport(session: Session, user: str, t: AppTransport, order_ids: list[str], params: EngineParams, time: str | None = None,
+def split_transport(session: Session, user: str, t: AppTransport, items: list[dict[str, Any]], params: EngineParams, time: str | None = None,
                     docks: list[str] | None = None, dock_closed: dict[str, set[dt.date]] | None = None) -> AppTransport:
-    """Some orders of a truck leave for a **second truck** of the same day (new EM, slot given or the nearest free
-    one) ; both are pinned."""
+    """Part of a truck leaves for a **second truck** of the same day (new EM, slot given or the nearest free one) ;
+    both are pinned.  ``items`` = ``[{order_id, qty?}]`` : an order without ``qty`` (or with its whole quantity)
+    moves entirely ; a smaller ``qty`` splits the order, the rest stays on the first truck.  Every truck is
+    splittable, a single-order one by quantity."""
     if t.status != "planned":
         raise ActionError(f"{t.transport_id} est annulé")
-    wanted = [o for o in t.orders if o.order_id in set(order_ids)]
-    if not wanted:
-        raise ActionError("Aucune commande de ce camion dans la sélection")
-    if len(wanted) == len(t.orders):
-        raise ActionError("Toutes les commandes : il resterait un camion vide, déplacez-le plutôt")
+    by_id = {o.order_id: o for o in t.orders}
+    moves: list[tuple[AppTransportOrder, float]] = []
+    for it in items:
+        o = by_id.get(str(it.get("order_id") or ""))
+        if o is None:
+            raise ActionError(f"Commande absente de ce camion : {it.get('order_id')}")
+        total = float(o.qty or 0.0)
+        qty = it.get("qty")
+        qty = total if qty is None else float(qty)
+        if qty <= 0 or qty > total + 1e-9:
+            raise ActionError(f"Quantité invalide pour {o.ref or o.order_id} : {qty:g} (à bord : {total:g})")
+        moves.append((o, min(qty, total)))
+    if not moves:
+        raise ActionError("Aucune commande à scinder")
+    if len(moves) == len(t.orders) and all(abs(q - float(o.qty or 0.0)) < 1e-9 for o, q in moves):
+        raise ActionError("Tout partirait dans le second camion : il resterait un camion vide, déplacez-le plutôt")
     new_docks = [d for d in dict.fromkeys(str(x).strip() for x in (docks or T.split_docks(t.docks))) if d] or ["B15"]
     bad = [d for d in new_docks if d not in T.DOCKS]
     if bad:
@@ -457,16 +474,22 @@ def split_transport(session: Session, user: str, t: AppTransport, order_ids: lis
     new = AppTransport(transport_id=T.next_transport_id(session), supplier_id=t.supplier_id, date=t.date, time=time, docks=";".join(new_docks),
                        carrier=t.carrier or "", note="", mode=t.mode, status="planned", created_by=user, origin=t.origin or MANUAL, pinned=True,
                        check_reason="", changed_since_sent=False, change_note="")
-    for o in wanted:
-        t.orders.remove(o)
+    moved: list[dict[str, Any]] = []
+    for o, qty in moves:
+        whole = abs(qty - float(o.qty or 0.0)) < 1e-9
+        if whole:
+            t.orders.remove(o)
+        else:
+            o.qty = float(o.qty or 0.0) - qty
         new.orders.append(AppTransportOrder(order_id=o.order_id, article_id=o.article_id, supplier_id=o.supplier_id or "", ref=o.ref or "",
-                                            expected_date=o.expected_date, qty=o.qty))
+                                            expected_date=o.expected_date, qty=qty))
+        moved.append({"order_id": o.order_id, "qty": qty, "whole": whole})
     t.pinned = True
     session.add(new)
     session.flush()
-    flag_change(session, t, f"scindé : {len(wanted)} commande(s) vers {new.transport_id}")
+    flag_change(session, t, f"scindé : {len(moved)} commande(s) vers {new.transport_id}")
     flag_change(session, new, f"camion créé (scission de {t.transport_id})")
-    audit(session, user, "split", "transport", t.transport_id, None, {"new": new.transport_id, "orders": [o.order_id for o in wanted], "time": time, "docks": new_docks})
+    audit(session, user, "split", "transport", t.transport_id, None, {"new": new.transport_id, "orders": moved, "time": time, "docks": new_docks})
     return new
 
 

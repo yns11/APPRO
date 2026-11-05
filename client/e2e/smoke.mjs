@@ -61,7 +61,7 @@ try {
   // ---- F20 : the delivery planning opens on the Monday of the current week, in a far time zone
   await page.goto(`${base}/livraisons`, { waitUntil: "networkidle" });
   const planningStart = await page.evaluate(async () => (await (await fetch("/api/transports/planning")).json()).start);
-  const firstHead = await page.locator("table thead th").nth(1).innerText().catch(() => "");
+  const firstHead = await page.locator(".tp-grid .tp-hd").nth(1).innerText().catch(() => "");
   check("F20 planning : lundi de la semaine en cours côté serveur", planningStart === "2026-09-21", planningStart);
   check("F20 planning : première colonne = lundi 21/09 dans le fuseau " + tz, /21\/09/.test(firstHead), firstHead);
 

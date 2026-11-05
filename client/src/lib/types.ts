@@ -221,7 +221,7 @@ export interface TransportOut { transport_id: string; supplier_id: string; suppl
   origin: "manuel" | "auto"; pinned: boolean; check_reason: string; changed_since_sent: boolean; change_note: string; orders: TransportOrderOut[]; }
 export interface PlanningOrder { order_id: string; article_id: string; designation: string; unit: string; ref: string; expected_date: string; qty_ordered: number; qty_open: number; ignored: boolean; transports: string[]; }
 export interface PlanningSupplier { supplier_id: string; name: string; transport_contact: string; emails: string[]; docks: string[]; mode: string; carrier: string; auto: boolean; recipient: string; orders: PlanningOrder[]; }
-export interface PlanningResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; scope: "main" | "maf"; plan_weekday: number; slots: string[]; suppliers: PlanningSupplier[]; transports: TransportOut[]; }
+export interface PlanningResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; scope: "main" | "maf"; plan_weekday: number; slots: string[]; capacity: number; closed_docks: Record<string, string[]>; suppliers: PlanningSupplier[]; transports: TransportOut[]; }
 /** The weekly plan of one recipient (band of the planning). */
 export type PlanState = "a_envoyer" | "envoyee" | "a_renvoyer";
 export interface PlanOut { week: string; label: string; monday: string; friday: string; recipient: string; name: string; emails: string[]; supplier_ids: string[]; trucks: number; changed: number; reasons: string[]; checks: number; sent_no: number; sent_at: string | null; sent_by: string; state: PlanState; }

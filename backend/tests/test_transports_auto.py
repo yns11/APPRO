@@ -143,6 +143,20 @@ def test_automatic_trucks_reconciliation_plans_and_actions(client):  # noqa: F81
     assert old["pinned"] and new["pinned"] and new["date"] == "2026-09-28" and new["time"] in plan["slots"] and new["time"] != old["time"]
     assert new["transport_id"] > em3 and new["origin"] == "auto"
     assert client.post(f"/api/transports/{em3}/split", json={"order_ids": [o["order_id"] for o in old["orders"]]}).status_code == 422
+    # every truck is splittable : the single-order one by quantity (the rest stays on the first truck, both pinned)
+    single = new
+    oid, qty = single["orders"][0]["order_id"], single["orders"][0]["qty"]
+    assert client.post(f"/api/transports/{single['transport_id']}/split", json={"items": [{"order_id": oid, "qty": qty + 1}]}).status_code == 422
+    assert client.post(f"/api/transports/{single['transport_id']}/split", json={"items": [{"order_id": oid}]}).status_code == 422
+    r = client.post(f"/api/transports/{single['transport_id']}/split", json={"items": [{"order_id": oid, "qty": round(qty / 3, 3)}], "time": "11:00"})
+    assert r.status_code == 200, r.text
+    a, b = r.json()
+    assert a["orders"][0]["order_id"] == oid == b["orders"][0]["order_id"] and abs(a["orders"][0]["qty"] + b["orders"][0]["qty"] - qty) < 1e-6 and b["time"] == "11:00"
+    # the reconciliation keeps the split quantities (the order rides two trucks)
+    again = _planning(client)
+    kept = {t["transport_id"]: t for t in again["transports"]}
+    assert abs(kept[a["transport_id"]]["orders"][0]["qty"] - a["orders"][0]["qty"]) < 1e-6 and abs(kept[b["transport_id"]]["orders"][0]["qty"] - b["orders"][0]["qty"]) < 1e-6
+    assert again["capacity"] == 1 and isinstance(again["closed_docks"], dict)
     # note and « vu »
     assert client.post(f"/api/transports/{em3}/note", json={"note": "prévenir le quai"}).json()["note"] == "prévenir le quai"
     assert client.post(f"/api/transports/{em}/seen").json()["check_reason"] == ""
