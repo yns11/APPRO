@@ -1,4 +1,13 @@
-# Camions automatiques : création, créneaux, cycle de vie, plan de semaine
+# Camions automatiques : création, créneaux, cycle de vie
+
+> **Mise à jour du 05/11/2026** (règle de référence : docs/regles_metier.md § 9 ter et 9 ter bis). Ce qui change par
+> rapport à la proposition ci-dessous : l'**horizon** est la semaine en cours et la suivante (plus trois semaines) ;
+> le **plan de semaine par e-mail (§ 5) est abandonné** : l'application crée, modifie et annule les transports, les
+> e-mails sont gérés par le système ATR à partir du CSV ; plus d'état « envoyé » ni de ✱ ; la page a **deux écrans**
+> (Fournisseurs, Quais), sept boutons de période, trois boutons d'ajout (navette MAF, **retour EV** `EM0001EV` avec
+> son propre compteur, **camion ponctuel**) ; le clic sur un camion ouvre un **menu** (première action : copier
+> l'identifiant) et non plus un panneau latéral ; **annuler un camion scindé rend ses commandes à l'autre camion** de la
+> famille ; tous les transports et les compteurs ont été **remis à zéro** (migration `transports_fresh_start_2026_11`).
 
 Proposition du 04/11/2026, **mise en œuvre le même jour** (règle de référence : docs/regles_metier.md § 9 ter bis ;
 code : `backend/appro/services/transports_auto.py`). Maquettes : https://claude.ai/artifact/NEuPb22VKnjVASSv9GmLvH
@@ -80,7 +89,7 @@ camions (choisir les commandes du second, nouvel EM, nouveau créneau), changer 
 pour le fournisseur, annuler. Plus de dialogue de création pour un fournisseur automatique ; « + Camion » ne reste
 que pour les fournisseurs en manuel et la navette MAF (dialogue actuel, créneau proposé et modifiable).
 
-## 5. Le plan de semaine : envoi et renvoi par e-mail (Outlook, sans serveur de mail)
+## 5. Le plan de semaine : envoi et renvoi par e-mail (abandonné le 05/11/2026 : les e-mails sont gérés par ATR)
 
 **Principe** : un e-mail = **une semaine** = **un destinataire**, toujours **complet**. Jamais de delta à recouper.
 Le destinataire est le groupe de contacts transport du fournisseur (mode *Fournisseur*) ou les contacts du

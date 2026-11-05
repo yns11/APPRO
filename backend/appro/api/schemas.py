@@ -868,8 +868,6 @@ class TransportOut(BaseModel):
     origin: str = "manuel"                 # manuel | auto
     pinned: bool = False
     check_reason: str = ""                 # « à vérifier » : why
-    changed_since_sent: bool = False       # ✱
-    change_note: str = ""
     orders: list[TransportOrderOut] = Field(default_factory=list)
 
 
@@ -895,7 +893,6 @@ class PlanningSupplier(BaseModel):
     mode: str = "Fournisseur"
     carrier: str = ""
     auto: bool = False                     # « Camions automatiques » : the application creates the trucks
-    recipient: str = ""                    # key of the weekly plan recipient (sup:<id> | carrier:<name>)
     orders: list[PlanningOrder]
 
 
@@ -906,57 +903,10 @@ class PlanningResponse(BaseModel):
     days: list[dt.date]
     docks: list[str]
     scope: str = "main"
-    plan_weekday: int = 4                  # the day the plan of the next week is sent (ISO)
     slots: list[str] = Field(default_factory=list)   # the dock slots of a day (HH:MM)
     capacity: int = 2                      # trucks per dock and slot
     closed_docks: dict[str, list[str]] = Field(default_factory=dict)   # date → docks closed that day (calendar « quai »)
     suppliers: list[PlanningSupplier]
-    transports: list[TransportOut]
-
-
-class PlanOut(BaseModel):
-    """The weekly plan of one recipient (the band of the planning) : its state and why."""
-
-    week: str                              # 2026-W46
-    label: str                             # S46
-    monday: dt.date
-    friday: dt.date
-    recipient: str
-    name: str
-    emails: list[str] = Field(default_factory=list)
-    supplier_ids: list[str] = Field(default_factory=list)
-    trucks: int = 0
-    changed: int = 0
-    reasons: list[str] = Field(default_factory=list)
-    checks: int = 0                        # trucks « à vérifier »
-    sent_no: int = 0
-    sent_at: dt.datetime | None = None
-    sent_by: str = ""
-    state: str = "a_envoyer"               # a_envoyer | envoyee | a_renvoyer
-
-
-class PlansOut(BaseModel):
-    as_of: dt.date
-    plan_weekday: int
-    current_week: str
-    next_week: str
-    plans: list[PlanOut]
-
-
-class PlanMailPart(BaseModel):
-    to: list[str]
-    subject: str
-    body: str
-    chars: int
-
-
-class PlanMailOut(BaseModel):
-    """The e-mail of a weekly plan : one message, or several when it is too long for a ``mailto:``."""
-
-    plan: PlanOut
-    mail: PlanMailPart
-    parts: list[PlanMailPart] = Field(default_factory=list)
-    split: bool = False
     transports: list[TransportOut]
 
 
@@ -994,6 +944,7 @@ class DockSlotTruck(BaseModel):
     supplier_id: str
     supplier_name: str = ""
     origin: str = "manuel"
+    mode: str = "fournisseur"
     check_reason: str = ""
     docks: list[str] = Field(default_factory=list)
 
@@ -1021,6 +972,19 @@ class TransportCreateIn(BaseModel):
     carrier: str = ""
     note: str = ""
     maf: bool = False
+
+
+class TransportSpecialIn(BaseModel):
+    """A truck without order : ``ev`` (EV return : the supplier takes his empty packaging back, ``EM0001EV``) or
+    ``ponctuel`` (one-off truck : anything else, a new ``EM…A``)."""
+
+    kind: str = Field(..., pattern="^(ev|ponctuel)$")
+    supplier_id: str
+    date: dt.date
+    time: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    docks: list[str] = Field(..., min_length=1)
+    carrier: str = ""
+    note: str = Field("", max_length=500)
 
 
 class TransportIdsIn(BaseModel):
@@ -1056,16 +1020,9 @@ class PortalResponse(BaseModel):
     receipts: list[dict[str, Any]]
 
 
-class MailOut(BaseModel):
-    to: list[str]
-    subject: str
-    body: str
-
-
 class TransportPackOut(BaseModel):
-    """What the planner gets after creating transports : the rows, the CSV for the transport tool, the e-mail."""
+    """What the planner gets after creating transports : the rows and the CSV for the transport tool."""
 
     transports: list[TransportOut]
     csv: str
     csv_filename: str
-    mail: MailOut

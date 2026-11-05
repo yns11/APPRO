@@ -383,8 +383,6 @@ class EngineParams:
     dock_slot_end: str = "15:30"                  # last delivery slot of a day (HH:MM, inclusive)
     dock_slot_minutes: int = 30                   # length of a slot
     dock_slot_capacity: int = 2                   # trucks a dock takes at the same time (per slot)
-    transport_plan_weekday: int = 4               # ISO weekday the plan of the next week is sent (4 = Thursday)
-    transport_resend_on_qty: bool = False         # a changed quantity on an announced order marks the week « à renvoyer »
 
     def copy_with(self, **changes: Any) -> "EngineParams":
         data = self.__dict__.copy()

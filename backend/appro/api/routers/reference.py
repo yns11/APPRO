@@ -53,8 +53,6 @@ PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
     "dock_slot_end": ("Camions : dernier créneau de livraison de la journée (HH:MM, inclus) ; un camion sans place y est posé et marqué « à vérifier »", None),
     "dock_slot_minutes": ("Camions : durée d'un créneau (minutes)", None),
     "dock_slot_capacity": ("Camions : nombre de camions qu'un quai reçoit en même temps sur un créneau", None),
-    "transport_plan_weekday": ("Plan de semaine : jour d'envoi du plan de la semaine suivante (1 = lundi … 5 = vendredi)", None),
-    "transport_resend_on_qty": ("Plan de semaine : une quantité qui change sur une commande annoncée marque la semaine « à renvoyer » (non : seuls jour, heure, quai, commande ajoutée ou retirée, camion créé ou annulé)", None),
     "horizon_days": ("Horizon de calcul après la date de référence (jours) : 52 semaines, fixé dans l'application", None),
     "history_weeks": ("Affichage : semaines montrées avant la semaine en cours (réglage par utilisateur)", None),
     "focus_weeks": ("Affichage : semaines détaillées jour par jour après la semaine en cours (réglage par utilisateur)", None),

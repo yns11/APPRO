@@ -517,67 +517,72 @@ rangée de semaines ISO ; cliquer une semaine, ou glisser d'une semaine à une a
 (Maj+clic étend, « Tout » rétablit la fenêtre entière). Le choix est commun aux deux tableaux et mémorisé ; il ne
 change **ni la fenêtre ni les dates du calcul**, seulement les colonnes montrées.
 
-## 9 ter. Planning de livraisons et transports (identifiants EM)
+## 9 ter. Planning transport et transports (identifiants EM)
 
-**Page « Planning de livraisons »** : les fournisseurs du périmètre **qui ont un ordre ferme** sur la période en
-lignes, les jours ouvrés en colonnes (semaine en cours + 1 par défaut, 1 à 4 semaines, navigation), les ordres
-fermes ERP dans les cellules (article et restant à livrer ; numéro de commande, désignation et transports dans
-l'infobulle). Cocher les commandes d'un jour › **Créer le transport** : un ou plusieurs **camions** (date préremplie
-modifiable, heure, **quais** en cases à cocher parmi `B15`, `B6 EST`, `B2 NORD`, `B6 NORD`, plusieurs possibles ;
-bouton *Ajouter un transport pour ces commandes*), transporteur et commentaire facultatifs.
+**Page « Planning transport »** (règle du 05/11/2026) : **deux écrans** choisis en haut à gauche, **Fournisseurs**
+(les fournisseurs du périmètre qui ont un ordre ferme ou un camion sur la semaine en lignes, les jours ouvrés en
+colonnes, **une case par camion**) et **Quais** (la charge des quais sur la semaine, ou l'agenda d'une journée) ;
+**sept boutons de période** au milieu : *Cette semaine*, *Semaine prochaine* et les cinq jours de la semaine choisie
+(grisés dans l'écran Fournisseurs ; dans Quais, un jour ouvre l'agenda de la journée, une semaine la charge) ;
+**trois boutons** à droite pour ajouter un camion sans commande : **Navette MAF**, **Retour EV**, **Camion
+ponctuel**. L'**horizon est la semaine en cours et la suivante**, rien au-delà. Le périmètre (carnet, tous les
+fournisseurs, Planning MAF) et le **CSV ATR** sont dans la barre de titre du tableau.
+
+L'application **crée, modifie et annule** les transports ; elle n'envoie **aucun e-mail** : les fournisseurs et les
+transporteurs sont prévenus par le système de transport (ATR) à partir du fichier CSV.
 
 - **Identifiant** : `EM` + **5 chiffres + une lettre** (`EM00123A`). Le numéro, **incrémental et jamais réutilisé**,
   vient d'un compteur partagé (`app_counters`, verrouillé en PostgreSQL : deux approvisionneurs n'obtiennent jamais
   le même numéro) et désigne une **famille** de camions ; la lettre classe le camion dans sa famille : `A` pour un
   camion nouveau, `B` puis `C`… pour les camions issus d'une **scission** (même numéro, lettre suivante) et pour les
   camions créés ensemble sur les mêmes commandes ; pour la **navette MAF**, le premier camion de la journée prend `A`,
-  le deuxième `B`, et ainsi de suite (même numéro pour la journée). Les transports créés avant cette règle gardent
-  leur identifiant à six chiffres.
-- **Quais par défaut du fournisseur** : colonne *Quais* du Référentiel (cases à cocher à un clic dans le tableau
-  et dans la fiche de ligne ; **`B15` pour tous** à l'initialisation), présélectionnés à chaque création.
+  le deuxième `B`, et ainsi de suite (même numéro pour la journée). Un **retour EV** porte `EM` + **4 chiffres +
+  `EV`** (`EM0001EV`), d'un compteur à part. **Copier l'identifiant** est la première action du menu d'un camion
+  (pour le coller dans un e-mail, par exemple).
+- **Camion d'un fournisseur en manuel** : case « + camion · n cmd » de la cellule › les commandes du jour à cocher,
+  un ou plusieurs camions (date, heure, **quais** parmi `B15`, `B6 EST`, `B2 NORD`, `B6 NORD`, plusieurs possibles),
+  transporteur et note facultatifs. **Quais par défaut du fournisseur** : colonne *Quais* du Référentiel (`B15`
+  pour tous à l'initialisation), précochés.
+- **Camions sans commande** (boutons de droite, pour n'importe quel fournisseur du référentiel, jour, créneau,
+  quais, transporteur et note) : le **retour EV** quand le fournisseur prévient qu'il vient enlever ses emballages
+  vides ; le **camion ponctuel** pour tout autre camion hors ordres fermes (échantillons, retour de pièces,
+  dépannage…). Tous deux sont épinglés, comptés dans la charge des quais et dans le CSV ATR, jamais touchés par la
+  réconciliation. La **navette MAF** depuis le bouton choisit d'abord le jour, puis les commandes MAF de ce jour.
 - **Fichier pour l'outil de transport (ATR)** : CSV `;`, en-tête `ID TRANSPORT;FOURNISSEUR;TRANSPORTEUR;DATE;HEURE;
   CODE FOURNISSEUR;FLUX;CHAMP1;CHAMP2;QUAIS`, **une ligne par transport et par quai** (tous les autres champs
   répétés, identifiant compris), date `jj/mm/aaaa`, heure `hh:mm:ss`, flux toujours `R`. Rien ne se télécharge
-  automatiquement : bouton *CSV* de chaque transport dans la liste de la période, et **CSV global** *CSV ATR des
-  transports à venir* (tous les transports prévus datés d'aujourd'hui ou plus tard, **tous fournisseurs et tous
-  approvisionneurs**) pour n'importer qu'une fois dans l'outil.
-- **E-mail au fournisseur** : bouton *E-mail* de la liste ouvre Outlook avec destinataires (colonne *Contact
-  transport* du fournisseur, plusieurs adresses séparées par `;` ou `,`), objet et corps préremplis
-  (identifiants, dates, heures, quais, transporteur, commandes ; français puis anglais) ; l'approvisionneur
-  relit et envoie. Sans contact transport, le planning le signale en orange et l'e-mail part sans destinataire.
+  automatiquement : *CSV ATR de ce camion* dans le menu du camion, et **CSV ATR** global (tous les transports prévus
+  datés d'aujourd'hui ou plus tard, **tous fournisseurs et tous approvisionneurs**) pour n'importer qu'une fois.
 - **Marques** : badge du transport sur les commandes du planning, petite icône camion en haut à gauche de la
   cellule *Ordre ferme* du tableau d'approvisionnement (infobulle : identifiants), onglet **Transports** de la
   fiche fournisseur (prévu / passé / annulé).
-- **Annulation** : bouton de la liste ; le transport reste avec le statut *annulé* (hors CSV global et hors badges),
-  le fournisseur et l'outil de transport sont à prévenir par l'approvisionneur. Création et annulation sont
-  journalisées ; elles ne sont **pas annulables par Ctrl+Z** (le fichier et l'e-mail ont pu quitter l'application).
+- **Annulation** (menu du camion) : le transport reste avec le statut *annulé* (hors planning, hors CSV global et hors
+  badges), l'approvisionneur le retire de l'outil de transport. **Un camion d'une famille scindée** (`EM00123B`
+  pendant que `EM00123A` roule le même jour) **rend ses commandes à l'autre camion** de la famille (la lettre juste
+  avant, sinon la suivante) : une quantité scindée se recompose (70 + 30), jamais au-delà du restant ERP quand les
+  deux camions portaient la commande entière ; le camion qui reprend est épinglé. Création et annulation sont
+  journalisées ; elles ne sont **pas annulables par Ctrl+Z** (le fichier a pu quitter l'application).
 - **Droits** : créer ou annuler un transport demande d'être approvisionneur du carnet de l'article, manager ou
-  administrateur ; le CSV global se télécharge par tout utilisateur connecté à l'application.
+  administrateur ; le CSV global se télécharge par tout utilisateur qui voit le planning.
 
 **Modes de transport** (colonne *Mode transport* du fournisseur, liste déroulante, « Fournisseur » partout à
 l'initialisation) :
 
-* **Fournisseur** : le fournisseur livre ; ses ordres fermes sont dans le Planning de livraisons (règles ci-dessus) ;
+* **Fournisseur** : le fournisseur livre ; ses ordres fermes sont dans le planning principal (règles ci-dessus) ;
 * **MAF Hambach** : les pièces sont au magasin avancé fournisseurs ; le fournisseur n'apparaît pas dans le planning
-  principal mais dans l'onglet **Planning MAF**, visible par tous les approvisionneurs et administrateurs quel que
-  soit le périmètre ; une **navette** peut emporter les commandes d'un même jour de plusieurs fournisseurs ; dans le
-  fichier ATR, les colonnes FOURNISSEUR et CODE FOURNISSEUR valent `NAVETTE HAMBACH` ; l'e-mail part aux contacts
-  transport de tous les fournisseurs emportés ;
+  principal mais dans le périmètre **Planning MAF**, visible par tous les approvisionneurs et administrateurs quel que
+  soit le carnet ; une **navette** peut emporter les commandes d'un même jour de plusieurs fournisseurs ; dans le
+  fichier ATR, les colonnes FOURNISSEUR et CODE FOURNISSEUR valent `NAVETTE HAMBACH` ;
 * **Messagerie** : flux colis, pas de camion ; le fournisseur sort du planning et ses ordres fermes portent
   d'office la marque « transport créé » (icône camion, mention *Messagerie*) dans le tableau d'approvisionnement, pour
   les distinguer des ordres fermes qui attendent un identifiant de transport ;
 * **un transporteur** (table **Transporteurs** du Référentiel : nom, contacts) : la colonne TRANSPORTEUR du fichier
-  ATR porte son nom et l'e-mail part à ses contacts.
+  ATR porte son nom.
 
-Le planning se parcourt avec le **sélecteur de semaines** des autres vues (dix semaines chargées, la semaine en
-cours et la suivante affichées par défaut). La liste des transports des semaines affichées a des **filtres par
-colonne**, une **multi-sélection** et des actions par lot : CSV de la sélection, un e-mail pour la sélection (même
-fournisseur, transporteur ou navette), annulation de la sélection.
+## 9 ter bis. Camions automatiques
 
-## 9 ter bis. Camions automatiques et plan de semaine
-
-Règle arrêtée le 04/11/2026 (genèse, maquettes et points tranchés : docs/transports_automatiques.md ; code :
-`backend/appro/services/transports_auto.py`). **Accès** : pendant l'essai, le Planning de livraisons, l'onglet
+Règle arrêtée le 04/11/2026, resserrée le 05/11/2026 (genèse et points tranchés : docs/transports_automatiques.md ;
+code : `backend/appro/services/transports_auto.py`). **Accès** : pendant l'essai, le Planning transport, l'onglet
 *Transports* de la fiche fournisseur et l'API `/api/transports` ne sont visibles que des e-mails de
 `APPRO_TRANSPORT_USERS` (une personne par défaut ; vide = tout le monde) ; l'espace fournisseur et les marques du
 tableau d'approvisionnement ne changent pas.
@@ -587,12 +592,11 @@ Paramétrage ; non par défaut), pour les modes *Fournisseur* et transporteur ; 
 *Messagerie*. Rien d'autre à saisir : l'**heure habituelle** est celle du dernier camion du fournisseur. Règles
 communes (Paramètres › Camions automatiques) : créneaux de 07:00 à 15:30 toutes les 30 minutes
 (`dock_slot_start`, `dock_slot_end`, `dock_slot_minutes`), **2 camions par quai et par créneau**
-(`dock_slot_capacity`), jour d'envoi du plan (`transport_plan_weekday`, jeudi), renvoi sur quantité
-(`transport_resend_on_qty`, non).
+(`dock_slot_capacity`).
 
 **Création : une réconciliation par version des données.** À chaque changement des données (synchronisation ERP,
 saisie, référentiel), à la première lecture du planning, l'application compare, pour chaque fournisseur automatique
-et chaque jour ouvré des **trois semaines du planning** (semaine en cours et les deux suivantes), les ordres fermes
+et chaque jour ouvré de l'**horizon** (semaine en cours et semaine suivante, rien au-delà), les ordres fermes
 ERP attendus (articles actifs, restant > 0, hors commandes *ignorées* dans le tableau d'approvisionnement) et les
 camions existants :
 
@@ -600,70 +604,52 @@ camions existants :
   `application`, identifiant EM suivant, quais par défaut du fournisseur, transporteur du mode) qui emporte tous
   les ordres du jour ; un ordre qui apparaît sur un jour qui a déjà son camion **y monte** ;
 - un ordre qui quitte les ordres fermes (date changée, soldé, supprimé, ignoré) **sort** de son camion automatique ;
-  un camion vide est **annulé** (l'EM n'est jamais réutilisé) ; une quantité qui change est mise à jour ;
+  un camion vide est **annulé** (l'EM n'est jamais réutilisé) ; une quantité qui change est mise à jour (sauf si la
+  commande roule sur deux camions scindés : les quantités de l'approvisionneur sont respectées) ;
 - **aujourd'hui est figé pour les retraits** (le camion du jour est en route) : un ordre apparu pour aujourd'hui ou
   demain monte dans un camion marqué **à vérifier** ; les jours passés ne bougent plus ;
-- un camion **déplacé à la main** garde ses commandes même si l'ERP change leur date ; les camions manuels ne sont
-  jamais touchés ; un camion automatique **annulé à la main** laisse un *jour supprimé* : un camion n'y renaît que
-  si une commande absente du camion annulé apparaît ;
+- un camion **déplacé à la main** garde ses commandes même si l'ERP change leur date ; les camions manuels, les
+  navettes, les retours EV et les camions ponctuels ne sont jamais touchés ; un camion automatique **annulé à la
+  main** sans camion frère laisse un *jour supprimé* : un camion n'y renaît que si une commande absente du camion
+  annulé apparaît ;
 - la réconciliation tourne **une fois par version** (`app_meta.transports_reconciled_version`, verrou), est
   journalisée (créés, complétés, retirés, annulés, déplacés) et n'est pas annulable par Ctrl+Z.
 
 **Ordonnanceur des créneaux.** Par jour et par quai, grille des créneaux ; un camion multi-quais prend une place sur
-chacun. Ordre : 1) les camions d'une **semaine déjà envoyée**, les camions **épinglés** (touchés à la main), les
-camions manuels et les navettes MAF gardent leur créneau ; 2) les autres sont placés par code fournisseur, à leur
-créneau actuel s'il est encore libre, sinon à l'**heure habituelle** du fournisseur si tous ses quais ont de la place,
-sinon au **créneau libre le plus proche** (avant ou après) ; aucune place → dernier créneau et **à vérifier** (« quai
-B15 complet toute la journée : déplacer le camion ») ; un quai fermé ce jour-là (table Calendriers, calendrier
-*quai*) → à vérifier aussi. La vue **Quais × créneaux** d'une journée (icône dans l'en-tête du jour) montre
-l'occupation, les créneaux pleins, les quais fermés, les camions à vérifier.
+chacun. Ordre : 1) les camions **épinglés** (touchés à la main), les camions manuels, les navettes MAF, les retours EV
+et les camions ponctuels gardent leur créneau ; 2) les autres sont placés par code fournisseur, à leur créneau
+actuel s'il est encore libre, sinon à l'**heure habituelle** du fournisseur si tous ses quais ont de la place, sinon
+au **créneau libre le plus proche** (avant ou après) ; aucune place → dernier créneau et **à vérifier** (« quai B15
+complet toute la journée : déplacer le camion ») ; un quai fermé ce jour-là (table Calendriers, calendrier *quai*) →
+à vérifier aussi.
 
-**Actions de l'approvisionneur** (un clic sur le camion ouvre son **panneau de détail** à droite de la grille : jour,
-créneau, quai, plan, commandes à bord) : *Vu* (efface « à vérifier »), **Déplacer** (jour, créneau, quais : le camion
-est épinglé, l'ordonnanceur ne le bouge plus), **Scinder** (une partie du camion part dans un second camion du même
-jour, même numéro et lettre suivante, créneau choisi ou le plus proche libre, les deux épinglés ; **tout camion est scindable** : des
-commandes entières, ou une **quantité** d'une commande, un camion à une seule commande se scinde par quantité et la
-commande roule alors sur deux camions, dont la réconciliation respecte les quantités), **Note** pour le fournisseur
-(imprimée dans le plan, sans renvoi), CSV et e-mail du seul camion, **Annuler**. La création manuelle est refusée
-pour un fournisseur automatique (elle reste pour les autres et pour la navette MAF : case « + camion » de la
-cellule, commandes du jour à cocher).
+**Actions de l'approvisionneur** : un clic sur un camion (dans les deux écrans) ouvre son **menu** à l'endroit du
+clic, avec le camion en deux lignes (jour, créneau, quai, commandes, raison du « à vérifier », note) puis : **Copier
+l'identifiant**, *Vu* (efface « à vérifier »), **Déplacer** (jour, créneau, quais : le camion est épinglé,
+l'ordonnanceur ne le bouge plus), **Scinder** (une partie du camion part dans un second camion du même jour, même
+numéro et lettre suivante, créneau choisi ou le plus proche libre, les deux épinglés ; **tout camion est scindable** :
+des commandes entières, ou une **quantité** d'une commande, un camion à une seule commande se scinde par quantité et
+la commande roule alors sur deux camions), **Note**, *CSV ATR de ce camion*, **Annuler** (un camion scindé rend ses
+commandes à l'autre camion de la famille, § 9 ter). La création manuelle est refusée pour un fournisseur
+automatique (elle reste pour les autres, pour la navette MAF et pour les camions sans commande).
 
-**Plan de semaine : un e-mail = une semaine = un destinataire, toujours complet.** Le destinataire est le groupe de
-contacts transport du fournisseur (`sup:<code>`) ou les contacts du transporteur (`carrier:<nom>`, un bloc par
-fournisseur transporté). Une **ligne** au-dessus du planning résume le plan de la semaine suivante (envoyés, à
-envoyer le jour configuré, à renvoyer) avec un seul bouton, le prochain envoi ; la page **Envois**
-(`/livraisons/envois`) liste les destinataires de la semaine en cours (rectificatifs seulement) et de la suivante :
-camions, état, dernier envoi, ce qui a changé, et le bouton **Envoyer** / **Renvoyer** / **Rouvrir** :
+**Écrans (page « Planning transport », 05/11/2026)**, **trois couleurs** partout : bleu = prévu ; rouge = à vérifier
+(la raison dans la case) ; pointillé = à créer (fournisseur en manuel).
 
-- **Envoyer** ouvre dans Outlook le brouillon complet (À, objet, corps : camion, jour, heure, quai, commandes ;
-  résumé anglais ; pied « envoi n° … ») et note la semaine **envoyée** (`app_transport_plans` : numéro, qui, quand,
-  état envoyé). L'application n'envoie rien elle-même ;
-- dès qu'un ✱ touche une semaine déjà envoyée (semaine en cours ou suivante), elle passe **à renvoyer** pour ce
-  destinataire, avec le motif (« EM00231A : commande CO-1234 ajoutée (mar. 10/11) ») ; **Renvoyer** ouvre le **même
-  plan entier**, titré « mise à jour du … (remplace l'envoi du …) », lignes changées marquées ✱, camions annulés
-  barrés (ils disparaissent au renvoi suivant). Au-delà de la semaine suivante rien ne part : c'est ce qui empêche
-  l'accumulation ;
-- **Rouvrir** montre le plan dans Outlook sans noter d'envoi.
+- **Fournisseurs** : fournisseurs (badge *auto* ou *manuel*) × jours ouvrés de la semaine choisie, **une case par
+  camion** de même taille (identifiant et heure, quai et nombre de commandes, ou *retour EV* / *ponctuel*) ;
+  « + camion · n cmd » en pointillé pour un fournisseur en manuel, « sans camion · n cmd » pour un jour supprimé d'un
+  fournisseur automatique ; les boutons des jours sont grisés ;
+- **Quais**, bouton *Cette semaine* ou *Semaine prochaine* : camions par quai et demi-journée, cinq paliers de bleu
+  jusqu'à la capacité (camions par créneau × créneaux de la demi-journée), point rouge = un camion à vérifier, totaux
+  par jour et par quai ; un clic sur une case ouvre la journée ;
+- **Quais**, bouton d'un jour : l'agenda de la journée, une ligne par créneau, un quai = autant de voies que sa
+  capacité, un bloc = un camion ; quai fermé hachuré, trait rouge « maintenant ».
 
-**Déclenche un ✱** : jour, heure, quai, commande ajoutée ou retirée, camion créé, scindé ou annulé. **Ne déclenche
-rien** : une quantité (sauf `transport_resend_on_qty`), une note, un changement au-delà de la semaine suivante. Un
-plan trop long pour un lien Outlook (≈ 1 800 caractères) part en **un e-mail par fournisseur** vers le même
-destinataire, puis l'approvisionneur marque la semaine envoyée. Le CSV ATR global ne change pas.
-
-**Écrans (page « Planning transport », refondue le 05/11/2026)** : un en-tête commun (vue, période, périmètre :
-carnet, tous les fournisseurs ou Planning MAF, CSV ATR) et trois vues qui partagent **cinq couleurs** : bleu =
-planifié, à envoyer ; vert = envoyé (dans le dernier plan reçu) ; orange ✱ = changé depuis l'envoi ; rouge = à
-vérifier (la raison en trois mots) ; gris barré = annulé, encore à renvoyer.
-
-- **Semaine** : fournisseurs (badge *auto* ou *manuel*) × jours ouvrés, **une case par camion** de même taille
-  (identifiant et heure, quai et nombre de commandes) ; les commandes ne sont plus dans la cellule mais dans le
-  panneau de détail ; « + camion · n cmd » en pointillé pour un fournisseur en manuel, « sans camion » pour un jour
-  supprimé d'un fournisseur automatique ;
-- **Quais** : l'agenda d'une journée, une ligne par créneau, un quai = autant de voies que sa capacité, un bloc = un
-  camion ; quai fermé hachuré, trait rouge « maintenant » ; navigation jour par jour ;
-- **Charge** : camions par quai et demi-journée sur la semaine, cinq paliers de bleu jusqu'à la capacité (camions par
-  créneau × créneaux de la demi-journée), point rouge = un camion à vérifier, totaux par jour et par quai ; un clic
-  ouvre la vue Quais du jour.
+**Remise à zéro du 05/11/2026** : au premier démarrage de cette version, la migration `transports_fresh_start_2026_11`
+supprime tous les transports, leurs commandes, les jours supprimés et les anciens plans de semaine, et remet les
+compteurs à zéro ; la réconciliation suivante recrée les camions automatiques de la semaine en cours et de la
+suivante (`EM00001A`…).
 
 ## 9 quater. File d'exceptions
 

@@ -294,9 +294,9 @@ class AppMigration(Base):
 
 
 class AppTransport(Base):
-    """One **transport** (one truck) announced to a supplier for some of his firm orders of a day :
-    identifier ``EM`` + 5 digits + letter (family number, rank in the family), delivery date, time and dock ; exported as one CSV line for the external
-    transport tool (ATR) and announced by e-mail to the supplier's transport contacts."""
+    """One **transport** (one truck) expected from a supplier : identifier ``EM`` + 5 digits + letter (family
+    number, rank in the family ; ``EM`` + 4 digits + ``EV`` for an EV return), delivery date, time and docks ;
+    exported as one CSV line per dock for the external transport tool (ATR), which notifies the supplier."""
 
     __tablename__ = "app_transports"
     transport_id: Mapped[str] = mapped_column(String(20), primary_key=True)
@@ -306,7 +306,7 @@ class AppTransport(Base):
     docks: Mapped[str] = mapped_column(Text, default="")              # delivery docks, « ; » separated (one CSV line per dock)
     carrier: Mapped[str] = mapped_column(Text, default="")
     note: Mapped[str] = mapped_column(Text, default="")
-    mode: Mapped[str] = mapped_column(String(20), default="fournisseur")   # fournisseur | maf | transporteur (services/transports.py)
+    mode: Mapped[str] = mapped_column(String(20), default="fournisseur")   # fournisseur | maf | transporteur | ev | ponctuel (services/transports.py)
     status: Mapped[str] = mapped_column(String(12), default="planned")  # planned | cancelled
     created_by: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
@@ -314,8 +314,6 @@ class AppTransport(Base):
     origin: Mapped[str | None] = mapped_column(String(12), default="manuel", nullable=True)     # manuel | auto (created by the reconciliation)
     pinned: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)         # touched by a planner : the scheduler never moves it again
     check_reason: Mapped[str | None] = mapped_column(Text, default="", nullable=True)          # « à vérifier » : why (empty = nothing to check)
-    changed_since_sent: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)   # ✱ : changed after the plan of its week was sent
-    change_note: Mapped[str | None] = mapped_column(Text, default="", nullable=True)           # what changed (« commande ajoutée », « créé », « annulé »…)
     orders: Mapped[list["AppTransportOrder"]] = relationship(back_populates="transport", cascade="all, delete-orphan", lazy="selectin")
 
     @property
@@ -336,20 +334,6 @@ class AppTransportOrder(Base):
     expected_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     qty: Mapped[float] = mapped_column(Float, default=0.0)
     transport: Mapped["AppTransport"] = relationship(back_populates="orders")
-
-
-class AppTransportPlan(Base):
-    """The **weekly delivery plan** sent to one recipient (a supplier's transport contacts, or a carrier) for one ISO
-    week : how many times it was sent, by whom, when, and the state sent last (JSON) ; the state of a week for a
-    recipient derives from it and from the ✱ of its transports (à envoyer / envoyée / à renvoyer)."""
-
-    __tablename__ = "app_transport_plans"
-    recipient: Mapped[str] = mapped_column(String(160), primary_key=True)   # sup:<supplier_id> | carrier:<name>
-    week: Mapped[str] = mapped_column(String(8), primary_key=True)          # 2026-W46
-    sent_no: Mapped[int] = mapped_column(Integer, default=0)
-    sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
-    sent_by: Mapped[str] = mapped_column(String(120), default="")
-    snapshot_json: Mapped[str] = mapped_column(Text, default="[]")
 
 
 class AppTransportSuppressed(Base):
@@ -677,11 +661,36 @@ def apply_transport_origin_manual(engine) -> int:
             res = conn.execute(text("UPDATE app_transports SET origin = 'manuel' WHERE origin IS NULL OR origin = ''"))
             n += res.rowcount or 0
             conn.execute(text("UPDATE app_transports SET pinned = false WHERE pinned IS NULL"))
-            conn.execute(text("UPDATE app_transports SET changed_since_sent = false WHERE changed_since_sent IS NULL"))
             conn.execute(text("UPDATE app_transports SET check_reason = '' WHERE check_reason IS NULL"))
-            conn.execute(text("UPDATE app_transports SET change_note = '' WHERE change_note IS NULL"))
         except Exception as exc:  # pragma: no cover - table not there yet
             log.debug("transport origin migration skipped: %s", exc)
+    return n
+
+
+def apply_transports_fresh_start(engine) -> int:
+    """Fresh start of the transports (November 2026, with the two-week horizon and the identifiers ``EM`` + 5 digits +
+    letter) : every transport, every order on board, the suppressed days and the former weekly plans are deleted,
+    the counters go back to zero and the next reconciliation creates the trucks of the current and next weeks again.
+    The table and columns of the former plan e-mails are dropped.  Returns the transports deleted."""
+    n = 0
+    statements = (
+        "DELETE FROM app_transport_orders",
+        "DELETE FROM app_transports",
+        "DELETE FROM app_transport_days_suppressed",
+        "DELETE FROM app_counters",
+        "DELETE FROM app_meta WHERE key = 'transports_reconciled_version'",
+        "DROP TABLE IF EXISTS app_transport_plans",
+        "ALTER TABLE app_transports DROP COLUMN changed_since_sent",
+        "ALTER TABLE app_transports DROP COLUMN change_note",
+    )
+    for i, stmt in enumerate(statements):
+        try:
+            with engine.begin() as conn:
+                res = conn.execute(text(stmt))
+                if i == 1:
+                    n = res.rowcount or 0
+        except Exception as exc:  # pragma: no cover - column or table already gone
+            log.debug("transports fresh start, step skipped (%s): %s", stmt, exc)
     return n
 
 
@@ -694,6 +703,7 @@ DATA_MIGRATIONS: tuple[tuple[str, Any], ...] = (
     ("supplier_transport_mode_default", apply_transport_mode_default),
     ("otd_band2_five_days", apply_otd_band2_five_days),
     ("transport_origin_manual", apply_transport_origin_manual),
+    ("transports_fresh_start_2026_11", apply_transports_fresh_start),
 )
 
 

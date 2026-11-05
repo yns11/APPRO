@@ -9,7 +9,7 @@ import type { RefColumn, RefRow, RefTableInfo } from "@/lib/types";
 
 /** The supplier's transport mode : three fixed modes, then the carriers known to the application. */
 export const FIXED_TRANSPORT_MODES: { value: string; label: string }[] = [
-  { value: "Fournisseur", label: "Fournisseur – livre lui-même (Planning de livraisons)" },
+  { value: "Fournisseur", label: "Fournisseur – livre lui-même (Planning transport)" },
   { value: "MAF Hambach", label: "MAF Hambach – pièces au magasin avancé (Planning MAF, navette)" },
   { value: "Messagerie", label: "Messagerie – pas de transport camion" },
 ];

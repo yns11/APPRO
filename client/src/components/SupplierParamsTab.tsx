@@ -14,7 +14,7 @@ const FIELDS: { key: string; label: string; help: string; width?: number }[] = [
   { key: "name", label: "Nom", help: "raison sociale", width: 320 },
   { key: "country", label: "Pays", help: "code pays", width: 80 },
   { key: "contact", label: "Contact", help: "contact commercial ou logistique (texte libre)", width: 320 },
-  { key: "transport_contact", label: "Contact transport", help: "adresses e-mail des avis de transport, séparées par ; ou , ; elles donnent accès à l'espace fournisseur", width: 420 },
+  { key: "transport_contact", label: "Contact transport", help: "adresses e-mail du contact transport, séparées par ; ou , ; elles donnent accès à l'espace fournisseur", width: 420 },
   { key: "lead_time_days", label: "Délai (j ouvrés)", help: "délai commande → livraison, inclusif (lundi + 5 = lundi suivant) ; valeur par défaut des liens", width: 80 },
   { key: "cutoff_time", label: "Heure limite", help: "HH:MM (heure de Paris) : une commande passée après part le jour ouvré suivant ; vide = aucune", width: 90 },
 ];
@@ -77,13 +77,13 @@ export function SupplierParamsTab({ supplierId, articles }: { supplierId: string
           <div className="param editable">
             <span className="label">Mode transport</span>
             <span className="value"><select className="select sm" value={String(draft.transport_mode || "Fournisseur")} disabled={!canEdit} aria-label="Mode transport" onChange={(e) => set("transport_mode", e.target.value)} style={{ width: "auto", maxWidth: 420 }}>{modeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></span>
-            <span className="small subtle">Fournisseur : Planning de livraisons ; MAF Hambach : onglet Planning MAF, navette commune ; Messagerie : hors planning, ordres fermes marqués ; un transporteur : son nom dans le fichier ATR, e-mail à ses contacts.</span>
-            <span className="small subtle">Planning de livraisons</span>
+            <span className="small subtle">Fournisseur : Planning transport ; MAF Hambach : périmètre Planning MAF, navette commune ; Messagerie : hors planning, ordres fermes marqués ; un transporteur : son nom dans le fichier ATR.</span>
+            <span className="small subtle">Planning transport</span>
           </div>
           <div className={`param ${canEdit ? "editable" : ""}`} title="L'application crée, complète et annule elle-même un camion par jour pour les ordres fermes de ce fournisseur, le pose sur un créneau de quai et prépare le plan de semaine">
             <span className="label">Camions automatiques</span>
             <span className="value"><select className="select sm" value={draft.transport_auto ? "oui" : "non"} disabled={!canEdit || ["MAF Hambach", "Messagerie"].includes(String(draft.transport_mode || ""))} aria-label="Camions automatiques" onChange={(e) => set("transport_auto", e.target.value === "oui")}><option value="non">non · transports créés à la main</option><option value="oui">oui · un camion par jour, créé par l'application</option></select></span>
-            <span className="small subtle">Modes Fournisseur et transporteur. Oui crée les camions à la prochaine synchronisation ; non laisse les camions existants et n'en crée plus. L'heure habituelle est celle du dernier camion ; le plan de semaine part depuis la bande du Planning de livraisons.</span>
+            <span className="small subtle">Modes Fournisseur et transporteur. Oui crée les camions à la prochaine synchronisation ; non laisse les camions existants et n'en crée plus. L'heure habituelle est celle du dernier camion ; horizon : la semaine en cours et la suivante.</span>
           </div>
           <div className={`param ${canEdit ? "editable" : ""}`}>
             <span className="label">Actif</span>

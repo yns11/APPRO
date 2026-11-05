@@ -2,30 +2,28 @@
 
 For the suppliers whose reference row says **Camions automatiques** (``ref_suppliers.transport_auto``, modes
 *Fournisseur* and *carrier*), the planner creates nothing any more : at every change of the data version the
-**reconciliation** (:func:`reconcile`) compares, for every working day of the three planning weeks (the current one
-and the two next), the firm ERP orders expected from the supplier with the trucks that exist :
+**reconciliation** (:func:`reconcile`) compares, for every working day of the two planning weeks (the current one
+and the next), the firm ERP orders expected from the supplier with the trucks that exist :
 
 * a day with at least one firm order and no truck gets **one truck** (``origin = auto``) carrying every order of
   the day ; a new order of a day that already has its truck **rides it** ; an order that leaves a day (date changed
   in the ERP, closed, deleted) leaves the truck, and an empty truck is **cancelled** (the EM number is never reused) ;
 * the **scheduler** gives each truck a dock slot (every ``dock_slot_minutes`` from ``dock_slot_start`` to
-  ``dock_slot_end``, ``dock_slot_capacity`` trucks per dock and slot) : the trucks of a week **already sent**, the
-  trucks **touched by a planner** (``pinned``) and the manual trucks keep their slot ; the others are placed by
-  supplier code, at the supplier's **habitual hour** (the time of his latest truck) when every dock of the truck has
-  room, else on the nearest free slot ; no room at all → last slot and **à vérifier** ; a closed dock, an order
-  appearing for today or tomorrow → **à vérifier** too ;
-* the **weekly plan** : one e-mail = one week = one recipient (the supplier's transport contacts, or the carrier's
-  contacts covering several suppliers), always **complete**.  Sent the configured weekday for the next week ; when a
-  change (✱ : day, hour, dock, order added or removed, truck created or cancelled ; a quantity only when
-  ``transport_resend_on_qty``) touches a week already sent, the week turns **à renvoyer** and the same complete
-  plan is sent again, titled « mise à jour du … (remplace l'envoi du …) », changed lines marked ✱, cancelled trucks
-  struck.  A change beyond the next week triggers nothing : it waits for the next sending day.
+  ``dock_slot_end``, ``dock_slot_capacity`` trucks per dock and slot) : the trucks **touched by a planner**
+  (``pinned``) and the manual trucks (MAF shuttles, EV returns, one-off trucks) keep their slot ; the others are
+  placed by supplier code, at the supplier's **habitual hour** (the time of his latest truck) when every dock of the
+  truck has room, else on the nearest free slot ; no room at all → last slot and **à vérifier** ; a closed dock, an
+  order appearing for today or tomorrow → **à vérifier** too.
+
+The application only creates, changes and cancels the trucks : the notices to the suppliers and carriers are sent
+by the transport tool (ATR) from the CSV, never by the application.
 
 Today's trucks are on the road : the reconciliation adds a truck or an order for today (à vérifier) but never removes
-anything from today ; past days are frozen.  The planner keeps a one-click menu on each truck : split, move (day,
-hour, docks), note, cancel, « vu » ; a cancelled automatic truck leaves a **suppressed day**
+anything from today ; past days are frozen.  The planner keeps a one-click menu on each truck : copy the identifier,
+split, move (day, hour, docks), note, cancel, « vu » ; a cancelled automatic truck leaves a **suppressed day**
 (``app_transport_days_suppressed``) : a truck is born there again only when an order that was not in the cancelled
-truck appears.
+truck appears.  Cancelling one truck of a **split family** (``EM00123B`` while ``EM00123A`` runs the same day) gives
+its orders back to the other truck.
 """
 from __future__ import annotations
 
@@ -42,26 +40,23 @@ from ..data.store import (
     AppMeta,
     AppTransport,
     AppTransportOrder,
-    AppTransportPlan,
     AppTransportSuppressed,
     audit,
     read_data_version,
     utcnow,
 )
-from ..engine.calendar import WorkCalendar, iso_week_label, iso_week_monday
-from ..engine.models import Dataset, EngineParams, Supplier
+from ..engine.calendar import WorkCalendar, iso_week_monday
+from ..engine.models import Dataset, EngineParams
 from . import transports as T
 
 log = logging.getLogger(__name__)
 
-PLANNING_WEEKS = 3                      # current week + two
+PLANNING_WEEKS = 2                      # the current week and the next : nothing is planned beyond
 RECONCILED_KEY = "transports_reconciled_version"   # app_meta : the data version the last reconciliation processed
 RECONCILE_LOCK_KEY = 7_419_302          # pg_advisory_xact_lock : one reconciliation at a time across the workers
 AUTO, MANUAL = "auto", "manuel"
 APP_USER = "application"
-MAILTO_MAX = 1800                       # characters a ``mailto:`` link carries reliably (Outlook, Edge)
 WEEKDAYS_FR = ("lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim.")
-WEEKDAY_NAMES = {1: "lundi", 2: "mardi", 3: "mercredi", 4: "jeudi", 5: "vendredi", 6: "samedi", 7: "dimanche"}
 _RECONCILE_LOCK = threading.Lock()
 
 
@@ -159,58 +154,14 @@ def dock_closures(rows: list[dict[str, Any]]) -> dict[str, set[dt.date]]:
     return out
 
 
-# ----------------------------------------------------------------------------- recipients and weeks
-def recipient_key(t: AppTransport) -> str:
-    """``carrier:<name>`` when the truck goes through a carrier, ``sup:<supplier_id>`` otherwise."""
-    if (t.mode or "") == "transporteur" and (t.carrier or "").strip():
-        return f"carrier:{t.carrier.strip()}"
-    return f"sup:{t.supplier_id}"
-
-
-def recipient_of_supplier(sp: Supplier) -> str:
-    if T.mode_kind(sp.transport_mode) == "transporteur":
-        return f"carrier:{sp.transport_mode.strip()}"
-    return f"sup:{sp.supplier_id}"
-
-
-def recipient_info(key: str, sups: dict[str, Supplier], carriers: dict[str, list[str]]) -> tuple[str, list[str]]:
-    """Display name and e-mails of a recipient key."""
-    if key.startswith("carrier:"):
-        name = key[len("carrier:"):]
-        return name, list(carriers.get(name, []))
-    sid = key[len("sup:"):]
-    sp = sups.get(sid)
-    return (f"{sid} · {sp.name}" if sp and sp.name else sid), (sp.transport_emails if sp else [])
-
-
-def week_monday(week: str) -> dt.date:
-    """``2026-W46`` → its Monday."""
-    y, w = week.split("-W")
-    return dt.date.fromisocalendar(int(y), int(w), 1)
-
-
-def week_short(week: str) -> str:
-    return f"S{int(week.split('-W')[1]):02d}"
-
-
-def _sent_plans(session: Session) -> dict[tuple[str, str], AppTransportPlan]:
-    return {(p.recipient, p.week): p for p in session.scalars(select(AppTransportPlan).where(AppTransportPlan.sent_no > 0)).all()}
-
-
-def _is_sent(session: Session, t: AppTransport) -> bool:
-    p = session.get(AppTransportPlan, (recipient_key(t), iso_week_label(t.date)))
-    return p is not None and int(p.sent_no or 0) > 0
-
-
-def flag_change(session: Session, t: AppTransport, note: str) -> None:
-    """✱ : the truck changed after the plan of its week was sent to its recipient (nothing otherwise)."""
-    if _is_sent(session, t):
-        t.changed_since_sent = True
-        t.change_note = note[:255]
-
-
+# ----------------------------------------------------------------------------- helpers
 def _not_shuttle(t: AppTransport) -> bool:
     return (t.mode or "") != "maf" and t.supplier_id != T.MAF_ID
+
+
+def _carries_orders(t: AppTransport) -> bool:
+    """A truck the reconciliation reasons about : a supplier truck (not an EV return nor a one-off truck)."""
+    return _not_shuttle(t) and (t.mode or "") not in T.NO_ORDER_MODES
 
 
 def _qty_of(o: Any) -> float:
@@ -220,7 +171,7 @@ def _qty_of(o: Any) -> float:
 # ----------------------------------------------------------------------------- reconciliation
 def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.date, carriers: dict[str, list[str]] | None = None,
               dock_closed: dict[str, set[dt.date]] | None = None, user: str = APP_USER) -> dict[str, Any]:
-    """Expected state ↔ existing trucks of the automatic suppliers over the three planning weeks, then the dock
+    """Expected state ↔ existing trucks of the automatic suppliers over the two planning weeks, then the dock
     slots of every movable truck (module docstring).  Does not commit.  Returns the counts (``created``,
     ``completed``, ``removed``, ``cancelled``, ``moved``) and ``changed``."""
     dock_closed = dock_closed or {}
@@ -244,9 +195,8 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
             continue
         expected.setdefault((o.supplier_id, o.expected_date), {})[o.order_id] = o
     rows = T.list_transports(session, start - dt.timedelta(days=56), end)       # planned, every supplier
-    trucks_all = [t for t in rows if _not_shuttle(t)]
-    shuttles = [t for t in rows if not _not_shuttle(t)]
-    sent = _sent_plans(session)
+    trucks_all = [t for t in rows if _carries_orders(t)]
+    others = [t for t in rows if not _carries_orders(t)]                        # shuttles, EV returns, one-off trucks : fixed
     suppressed = {(s.supplier_id, s.date): s for s in session.scalars(select(AppTransportSuppressed).where(AppTransportSuppressed.date >= start)).all()}
     by_day: dict[tuple[str, dt.date], list[AppTransport]] = {}
     for t in trucks_all:
@@ -258,11 +208,6 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
             habit[t.supplier_id] = t.time
     counts = {"created": 0, "completed": 0, "removed": 0, "cancelled": 0, "moved": 0}
     tomorrow = cal.next_working_day(as_of, inclusive=False)
-
-    def flag(t: AppTransport, note: str) -> None:
-        if (recipient_key(t), iso_week_label(t.date)) in sent:
-            t.changed_since_sent = True
-            t.change_note = note[:255]
 
     for sid in sorted(auto):
         sp = auto[sid]
@@ -282,15 +227,11 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
                 if want is None or (not t.pinned and want.expected_date != t.date):
                     t.orders.remove(o)
                     counts["removed"] += 1
-                    flag(t, f"commande {o.ref or o.order_id} retirée")
                 elif rides.get(o.order_id, 1) == 1 and abs(_qty_of(want) - float(o.qty or 0.0)) > 1e-9:
                     o.qty = _qty_of(want)      # an order split over several trucks keeps the planner's quantities
-                    if params.transport_resend_on_qty:
-                        flag(t, f"quantité de {o.ref or o.order_id} modifiée")
             if not t.orders:
                 t.status = "cancelled"
                 counts["cancelled"] += 1
-                flag(t, "camion annulé : plus aucune commande ce jour-là")
                 audit(session, user, "cancel", "transport", t.transport_id, None, {"supplier_id": sid, "date": t.date.isoformat(), "reason": "plus aucune commande"})
         carried = {o.order_id for t in mine if t.status == "planned" for o in t.orders}
         for day in days:
@@ -314,13 +255,12 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
                 carrier = sp.transport_mode.strip() if T.mode_kind(sp.transport_mode) == "transporteur" else ""
                 target = AppTransport(transport_id=T.next_transport_id(session), supplier_id=sid, date=day, time="", docks=";".join(sp.dock_list),
                                       carrier=carrier[:120], note="", mode="transporteur" if carrier else "fournisseur", status="planned", created_by=user,
-                                      origin=AUTO, pinned=False, check_reason="", changed_since_sent=False, change_note="")
+                                      origin=AUTO, pinned=False, check_reason="")
                 session.add(target)
                 by_day.setdefault((sid, day), []).append(target)
                 counts["created"] += 1
                 if day <= tomorrow:
                     target.check_reason = f"commande apparue pour {'aujourd’hui' if day == as_of else 'demain'}"
-                flag(target, "camion créé")
             for oid in missing:
                 o = exp[oid]
                 target.orders.append(AppTransportOrder(order_id=oid, article_id=o.article_id, supplier_id=o.supplier_id or "", ref=o.ref or "",
@@ -328,22 +268,21 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
                 carried.add(oid)
                 if not new:
                     counts["completed"] += 1
-                    flag(target, f"commande {o.ref or oid} ajoutée")
             session.flush()
             audit(session, user, "create" if new else "complete", "transport", target.transport_id, None,
                   {"supplier_id": sid, "date": day.isoformat(), "orders": list(missing), "auto": True})
 
-    # ---- dock slots : fixed trucks first (manual, pinned, sent weeks, shuttles), then the movable ones by supplier code
+    # ---- dock slots : fixed trucks first (manual, pinned, shuttles, EV returns, one-off trucks), then the movable ones by supplier code
     for day in days:
         if day < as_of:
             continue
         day_trucks = [t for (sid, d), ts in by_day.items() if d == day for t in ts if t.status == "planned"]
-        movable = [t for t in day_trucks if t.is_auto and not t.pinned and (recipient_key(t), iso_week_label(day)) not in sent]
+        movable = [t for t in day_trucks if t.is_auto and not t.pinned]
         occ = Occupancy()
         for t in day_trucks:
             if t not in movable:
                 occ.add(T.split_docks(t.docks), t.time, grid)
-        for t in shuttles:
+        for t in others:
             if t.date == day:
                 occ.add(T.split_docks(t.docks), t.time, grid)
         for t in sorted(movable, key=lambda x: (x.supplier_id, x.transport_id)):
@@ -404,8 +343,8 @@ class ActionError(ValueError):
 
 
 def move_transport(session: Session, user: str, t: AppTransport, date: dt.date | None = None, time: str | None = None, docks: list[str] | None = None) -> None:
-    """Day, hour or docks changed by the planner : the truck is **pinned** (the scheduler never moves it again), its
-    « à vérifier » is cleared, and the week turns « à renvoyer » when it was sent."""
+    """Day, hour or docks changed by the planner : the truck is **pinned** (the scheduler never moves it again) and
+    its « à vérifier » is cleared."""
     if t.status != "planned":
         raise ActionError(f"{t.transport_id} est annulé")
     before = {"date": t.date.isoformat(), "time": t.time, "docks": T.split_docks(t.docks)}
@@ -430,8 +369,7 @@ def move_transport(session: Session, user: str, t: AppTransport, date: dt.date |
         return
     t.pinned = True
     t.check_reason = ""
-    flag_change(session, t, ", ".join(notes))
-    audit(session, user, "move", "transport", t.transport_id, None, {"before": before, "after": {"date": t.date.isoformat(), "time": t.time, "docks": T.split_docks(t.docks)}})
+    audit(session, user, "move", "transport", t.transport_id, None, {"before": before, "after": {"date": t.date.isoformat(), "time": t.time, "docks": T.split_docks(t.docks)}, "notes": notes})
     session.flush()
 
 
@@ -473,8 +411,7 @@ def split_transport(session: Session, user: str, t: AppTransport, items: list[di
     elif not T.TIME_RE.match(time):
         raise ActionError(f"Heure invalide : « {time} »")
     new = AppTransport(transport_id=T.next_in_family(session, t.transport_id), supplier_id=t.supplier_id, date=t.date, time=time, docks=";".join(new_docks),
-                       carrier=t.carrier or "", note="", mode=t.mode, status="planned", created_by=user, origin=t.origin or MANUAL, pinned=True,
-                       check_reason="", changed_since_sent=False, change_note="")
+                       carrier=t.carrier or "", note="", mode=t.mode, status="planned", created_by=user, origin=t.origin or MANUAL, pinned=True, check_reason="")
     moved: list[dict[str, Any]] = []
     for o, qty in moves:
         whole = abs(qty - float(o.qty or 0.0)) < 1e-9
@@ -488,18 +425,61 @@ def split_transport(session: Session, user: str, t: AppTransport, items: list[di
     t.pinned = True
     session.add(new)
     session.flush()
-    flag_change(session, t, f"scindé : {len(moved)} commande(s) vers {new.transport_id}")
-    flag_change(session, new, f"camion créé (scission de {t.transport_id})")
     audit(session, user, "split", "transport", t.transport_id, None, {"new": new.transport_id, "orders": moved, "time": time, "docks": new_docks})
     return new
 
 
-def cancel_transport(session: Session, user: str, t: AppTransport) -> None:
-    """Cancel by the planner : an automatic truck leaves a suppressed day (no rebirth without a new order) ; the
-    week turns « à renvoyer » when it was sent."""
+def sibling_of(session: Session, t: AppTransport) -> AppTransport | None:
+    """The other planned truck of the same family (same number) **the same day** : the letter just before, else the
+    letter just after.  ``None`` for a truck alone, of the former identifier format, or whose family rides other
+    days."""
+    fam = T.family_of(t.transport_id)
+    if fam is None:
+        return None
+    rows = [x for x in session.scalars(select(AppTransport).where(AppTransport.transport_id.like(f"{fam}%"), AppTransport.date == t.date,
+                                                                   AppTransport.status == "planned")).all()
+            if x.transport_id != t.transport_id and T.family_of(x.transport_id) == fam and x.supplier_id == t.supplier_id]
+    if not rows:
+        return None
+    me = T.letter_rank(T.ID_RE.match(t.transport_id).group(2))
+    rank = {x.transport_id: T.letter_rank(T.ID_RE.match(x.transport_id).group(2)) for x in rows}
+    before = [x for x in rows if rank[x.transport_id] < me]
+    after = [x for x in rows if rank[x.transport_id] > me]
+    return max(before, key=lambda x: rank[x.transport_id]) if before else min(after, key=lambda x: rank[x.transport_id])
+
+
+def _take_back(session: Session, user: str, t: AppTransport, into: AppTransport, cap: dict[str, float] | None) -> list[dict[str, Any]]:
+    """The orders of ``t`` ride ``into`` : a quantity split joins back (``70 + 30``), never beyond the ERP open
+    quantity (``cap``) when the same order already rides the other truck entirely."""
+    mine = {o.order_id: o for o in into.orders}
+    moved: list[dict[str, Any]] = []
+    for o in list(t.orders):
+        qty = float(o.qty or 0.0)
+        have = mine.get(o.order_id)
+        if have is None:
+            into.orders.append(AppTransportOrder(order_id=o.order_id, article_id=o.article_id, supplier_id=o.supplier_id or "", ref=o.ref or "",
+                                                 expected_date=o.expected_date, qty=qty))
+        else:
+            total = float(have.qty or 0.0) + qty
+            limit = (cap or {}).get(o.order_id)
+            have.qty = min(total, limit) if limit is not None and limit > 0 else total
+        moved.append({"order_id": o.order_id, "qty": qty})
+    into.pinned = True
+    session.flush()
+    audit(session, user, "take_back", "transport", into.transport_id, None, {"from": t.transport_id, "orders": moved})
+    return moved
+
+
+def cancel_transport(session: Session, user: str, t: AppTransport, cap: dict[str, float] | None = None) -> AppTransport | None:
+    """Cancel by the planner.  A truck of a split family whose sibling runs the same day **gives its orders back**
+    to the sibling (returned) ; otherwise an automatic truck leaves a suppressed day (no rebirth without a new
+    order).  ``cap`` = ERP open quantity per order (a quantity never grows beyond it when joining back)."""
     if t.status == "cancelled":
-        return
-    if t.is_auto:
+        return None
+    into = sibling_of(session, t) if t.orders else None
+    if into is not None:
+        _take_back(session, user, t, into, cap)
+    elif t.is_auto:
         row = session.get(AppTransportSuppressed, (t.supplier_id, t.date))
         ids = sorted({o.order_id for o in t.orders} | set(json.loads(row.orders_json or "[]") if row else []))
         if row is None:
@@ -507,7 +487,7 @@ def cancel_transport(session: Session, user: str, t: AppTransport) -> None:
             session.add(row)
         row.orders_json, row.cancelled_by, row.cancelled_at = json.dumps(ids), user, utcnow()
     T.cancel_transport(session, user, t)
-    flag_change(session, t, "camion annulé")
+    return into
 
 
 def set_note(session: Session, user: str, t: AppTransport, note: str) -> None:
@@ -524,139 +504,6 @@ def clear_check(session: Session, user: str, t: AppTransport) -> None:
     session.flush()
 
 
-# ----------------------------------------------------------------------------- weekly plans
-def _week_rows(session: Session, monday: dt.date, weeks: int = 1) -> list[AppTransport]:
-    """Planned trucks of the week(s), plus the cancelled ones still ✱ (struck in the next sending)."""
-    rows = T.list_transports(session, monday, monday + dt.timedelta(days=7 * weeks - 1), include_cancelled=True)
-    return [t for t in rows if _not_shuttle(t) and (t.status == "planned" or bool(t.changed_since_sent))]
-
-
-def _plan_row(key: str, week: str, ts: list[AppTransport], plan: AppTransportPlan | None, sups: dict[str, Supplier], carriers: dict[str, list[str]]) -> dict[str, Any]:
-    name, emails = recipient_info(key, sups, carriers)
-    monday = week_monday(week)
-    planned = [t for t in ts if t.status == "planned"]
-    changed = [t for t in ts if t.changed_since_sent]
-    sent_no = int(plan.sent_no or 0) if plan else 0
-    return {"week": week, "label": week_short(week), "monday": monday, "friday": monday + dt.timedelta(days=4), "recipient": key, "name": name, "emails": emails,
-            "supplier_ids": sorted({t.supplier_id for t in ts}), "trucks": len(planned), "changed": len(changed),
-            "reasons": [f"{t.transport_id} : {t.change_note or 'modifié'} ({WEEKDAYS_FR[t.date.weekday()]} {t.date:%d/%m})" for t in sorted(changed, key=lambda x: (x.date, x.transport_id))],
-            "checks": sum(1 for t in planned if (t.check_reason or "").strip()),
-            "sent_no": sent_no, "sent_at": plan.sent_at if plan else None, "sent_by": (plan.sent_by if plan else "") or "",
-            "state": "a_envoyer" if not sent_no else ("a_renvoyer" if changed else "envoyee")}
-
-
-def plans_overview(session: Session, ds: Dataset, params: EngineParams, as_of: dt.date, carriers: dict[str, list[str]],
-                   supplier_filter: set[str] | None = None) -> dict[str, Any]:
-    """The band of the planning : for the current week and the next, every recipient with a truck (or a ✱ left by a
-    cancelled one), its state (à envoyer / envoyée / à renvoyer) and why.  ``supplier_filter`` keeps the recipients
-    carrying at least one supplier of the planner's perimeter."""
-    sups = {s.supplier_id: s for s in ds.suppliers}
-    cur = iso_week_monday(as_of)
-    weeks = [iso_week_label(cur), iso_week_label(cur + dt.timedelta(days=7))]
-    rows = _week_rows(session, cur, 2)
-    plans = {(p.recipient, p.week): p for p in session.scalars(select(AppTransportPlan).where(AppTransportPlan.week.in_(weeks))).all()}
-    groups: dict[tuple[str, str], list[AppTransport]] = {}
-    for t in rows:
-        groups.setdefault((recipient_key(t), iso_week_label(t.date)), []).append(t)
-    out = []
-    for (key, week), ts in groups.items():
-        if supplier_filter is not None and not any(t.supplier_id in supplier_filter for t in ts):
-            continue
-        out.append(_plan_row(key, week, ts, plans.get((key, week)), sups, carriers))
-    out.sort(key=lambda r: (r["week"], r["name"].upper()))
-    return {"as_of": as_of, "plan_weekday": int(params.transport_plan_weekday or 4), "current_week": weeks[0], "next_week": weeks[1], "plans": out}
-
-
-def _recipient_rows(session: Session, week: str, recipient: str) -> list[AppTransport]:
-    return [t for t in _week_rows(session, week_monday(week)) if recipient_key(t) == recipient]
-
-
-def plan_mail(session: Session, ds: Dataset, week: str, recipient: str, carriers: dict[str, list[str]], user: str, as_of: dt.date) -> dict[str, Any]:
-    """The e-mail of a weekly plan : recipients, subject, body (French, English summary, footer) ; one block per
-    supplier (a carrier covers several) ; a re-sending says what it replaces and marks the changed lines ✱ ; too long
-    for a ``mailto:`` with several suppliers → one message per supplier block (``parts``)."""
-    sups = {s.supplier_id: s for s in ds.suppliers}
-    arts = {a.article_id: a for a in ds.articles}
-    names = {sid: s.name for sid, s in sups.items()}
-    ts = _recipient_rows(session, week, recipient)
-    plan = session.get(AppTransportPlan, (recipient, week))
-    name, emails = recipient_info(recipient, sups, carriers)
-    monday = week_monday(week)
-    friday = monday + dt.timedelta(days=4)
-    update = plan is not None and int(plan.sent_no or 0) > 0
-    n = (int(plan.sent_no or 0) if plan else 0) + 1
-    label = week_short(week)
-    carrier = recipient.startswith("carrier:")
-    subject = f"Plan de livraison semaine {label[1:]} ({monday:%d/%m} → {friday:%d/%m}) – {name}"
-    if update and plan is not None and plan.sent_at:
-        subject += f" – mise à jour du {as_of:%d/%m} (remplace l'envoi du {plan.sent_at:%d/%m})"
-
-    def block(sid: str, lst: list[AppTransport]) -> list[str]:
-        sp = sups.get(sid)
-        lines = [f"{(sp.name if sp else sid).upper()} · {sid}", ""]
-        for t in sorted(lst, key=lambda x: (x.date, x.time, x.transport_id)):
-            mark = "✱ " if update and t.changed_since_sent else ""
-            day = f"{WEEKDAYS_FR[t.date.weekday()]} {t.date:%d/%m}"
-            if t.status != "planned":
-                lines.append(f"  {mark}{t.transport_id} – {day} – ANNULÉ ({t.change_note or 'plus aucune commande ce jour-là'})")
-                continue
-            lines.append(f"  {mark}{t.transport_id} – {day} à {t.time or '–'} – quai {' / '.join(T.split_docks(t.docks))}" + (f" – {t.carrier}" if t.carrier and not carrier else ""))
-            for o in t.orders:
-                a = arts.get(o.article_id)
-                desig = f" {a.designation}" if a is not None and a.designation else ""
-                unit = a.unit if a is not None else ""
-                lines.append(f"      {o.ref or o.order_id} – {o.article_id}{desig} – {T._qty(o.qty, unit)}")
-            if t.note:
-                lines.append(f"      Note : {t.note}")
-        lines.append("")
-        return lines
-
-    groups: dict[str, list[AppTransport]] = {}
-    for t in ts:
-        groups.setdefault(t.supplier_id, []).append(t)
-    order = sorted(groups, key=lambda sid: ((names.get(sid) or sid).upper(), sid))
-    intro = ["Bonjour,", "",
-             f"Voici le plan de livraison de la semaine {label[1:]} (du {monday:%d/%m} au {friday:%d/%m})" + (" pour les fournisseurs que vous transportez" if carrier else "") + "."]
-    if update and plan is not None and plan.sent_at:
-        intro.append(f"Il remplace entièrement le plan envoyé le {plan.sent_at:%d/%m} : les lignes marquées ✱ ont changé.")
-    intro += ["Merci de communiquer l'identifiant du camion (EM…) à vos chauffeurs : il est demandé à l'entrée.", ""]
-    outro = ["Cordialement,", user, "", "---", "",
-             f"Delivery plan for week {label[1:]} ({monday:%d/%m} – {friday:%d/%m})" + (f", replacing the plan sent on {plan.sent_at:%d/%m} ; lines marked ✱ changed" if update and plan is not None and plan.sent_at else "")
-             + ". Please give the truck ID (EM…) to your drivers, it is required at the gate.", "",
-             f"Plan {label} · {name} · envoi n° {n} · généré le {as_of:%d/%m/%Y} par Ma Routine Appro"]
-    body = "\n".join(intro + [ln for sid in order for ln in block(sid, groups[sid])] + outro)
-    mail = {"to": emails, "subject": subject, "body": body, "chars": len(subject) + len(body)}
-    parts: list[dict[str, Any]] = []
-    if mail["chars"] > MAILTO_MAX and len(order) > 1:
-        for sid in order:
-            b = "\n".join(intro + block(sid, groups[sid]) + outro)
-            parts.append({"to": emails, "subject": f"{subject} – {names.get(sid) or sid}", "body": b, "chars": len(subject) + len(b)})
-    return {"plan": _plan_row(recipient, week, ts, plan, sups, carriers), "mail": mail, "parts": parts, "split": bool(parts),
-            "transports": [T.transport_out(t, names) for t in sorted(ts, key=lambda x: (x.date, x.time, x.transport_id))]}
-
-
-def mark_sent(session: Session, user: str, ds: Dataset, week: str, recipient: str, carriers: dict[str, list[str]]) -> dict[str, Any]:
-    """The planner opened the draft in Outlook : the week is **sent** to this recipient (number, who, when, the state
-    sent) and the ✱ of its trucks are cleared (a cancelled truck leaves the plan)."""
-    sups = {s.supplier_id: s for s in ds.suppliers}
-    ts = _recipient_rows(session, week, recipient)
-    plan = session.get(AppTransportPlan, (recipient, week))
-    if plan is None:
-        plan = AppTransportPlan(recipient=recipient, week=week, sent_no=0)
-        session.add(plan)
-    plan.sent_no = int(plan.sent_no or 0) + 1
-    plan.sent_at, plan.sent_by = utcnow(), user
-    plan.snapshot_json = json.dumps([{"transport_id": t.transport_id, "supplier_id": t.supplier_id, "date": t.date.isoformat(), "time": t.time,
-                                      "docks": T.split_docks(t.docks), "status": t.status, "orders": [{"order_id": o.order_id, "ref": o.ref, "article_id": o.article_id, "qty": o.qty} for o in t.orders]}
-                                     for t in ts], default=str)
-    for t in ts:
-        t.changed_since_sent = False
-        t.change_note = ""
-    session.flush()
-    audit(session, user, "send", "transport_plan", f"{recipient}/{week}", None, {"sent_no": plan.sent_no, "trucks": sum(1 for t in ts if t.status == "planned")})
-    return _plan_row(recipient, week, [t for t in ts if t.status == "planned"], plan, sups, carriers)
-
-
 # ----------------------------------------------------------------------------- docks × slots
 def dock_day(session: Session, ds: Dataset, params: EngineParams, day: dt.date, dock_closed: dict[str, set[dt.date]] | None = None) -> dict[str, Any]:
     """Who comes when : every planned truck of the day (shuttles included) on the docks × slots grid."""
@@ -667,7 +514,7 @@ def dock_day(session: Session, ds: Dataset, params: EngineParams, day: dt.date, 
     off: list[dict[str, Any]] = []
     for t in T.list_transports(session, day, day):
         item = {"transport_id": t.transport_id, "supplier_id": t.supplier_id, "supplier_name": T.MAF_LABEL if t.supplier_id == T.MAF_ID else names.get(t.supplier_id, ""),
-                "origin": t.origin or MANUAL, "check_reason": t.check_reason or "", "docks": T.split_docks(t.docks)}
+                "origin": t.origin or MANUAL, "mode": t.mode or "fournisseur", "check_reason": t.check_reason or "", "docks": T.split_docks(t.docks)}
         slot = slot_of(t.time, grid)
         if slot is None:
             off.append(item)

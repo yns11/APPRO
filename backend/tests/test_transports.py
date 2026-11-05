@@ -1,6 +1,6 @@
-"""Planning de livraisons : firm orders per supplier and day, transports (EM counter, CSV for the transport
-tool with header and one line per dock, e-mail to the transport contacts), global CSV, cancellation, supplier
-default docks, grid marks, and the supplier portal (role, gate, overview)."""
+"""Planning transport : firm orders per supplier and day, transports (EM counter, CSV for the transport tool with
+header and one line per dock), global CSV, cancellation (a split family gives its orders back), EV returns and
+one-off trucks, supplier default docks, grid marks, and the supplier portal (role, gate, overview)."""
 from __future__ import annotations
 
 from test_api import client  # noqa: F401
@@ -48,11 +48,8 @@ def test_transports_planning_create_pack_cancel(client):  # noqa: F811
     assert lines[1] == f"EM00001A;{row['name']};Geodis;{d}/{m}/{y};08:30:00;S-000378;R;;;B15"
     assert lines[2] == f"EM00001B;{row['name']};Geodis;{d}/{m}/{y};14:00:00;S-000378;R;;;B2 NORD"
     assert lines[3] == f"EM00001B;{row['name']};Geodis;{d}/{m}/{y};14:00:00;S-000378;R;;;B6 NORD"
-    assert pack["csv_filename"] == "ATR_EM00001A-EM00001B.csv"
-    mail = pack["mail"]
-    assert mail["to"] == ["transport@fournisseur.example", "quai@fournisseur.example"]
-    assert "EM00001A, EM00001B" in mail["subject"] and f"{d}/{m}/{y}" in mail["subject"] and "quai B15 / B2 NORD / B6 NORD" in mail["subject"]
-    assert "EM00001B – " in mail["body"] and "14:00" in mail["body"] and "Deux camions" in mail["body"] and "transporteur Geodis" in mail["body"]
+    assert pack["csv_filename"] == "ATR_EM00001A-EM00001B.csv" and "mail" not in pack      # the transport tool notifies the supplier
+    qty_a = {o["order_id"]: o["qty"] for o in pack["transports"][0]["orders"]}
 
     # the planning shows the transports on the orders ; the grid marks the firm order slot ; the counter goes on
     plan = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2}).json()
@@ -65,11 +62,14 @@ def test_transports_planning_create_pack_cancel(client):  # noqa: F811
     assert r.json()["transports"][0]["transport_id"] == "EM00002A"
 
     # pack again, per-transport CSV, global CSV (every planned transport from today on), list, cancel, journal
-    again = client.get("/api/transports/EM00001B/pack").json()
+    again = client.post("/api/transports/pack", json={"transport_ids": ["EM00001B"]}).json()
     assert again["csv"].split("\r\n")[1].startswith("EM00001B;") and again["csv_filename"] == "ATR_EM00001B.csv"
     one = client.get("/api/transports/EM00001B/atr.csv")
     assert one.status_code == 200 and one.headers["content-disposition"].endswith('filename="ATR_EM00001B.csv"') and one.text.lstrip("﻿").startswith(HEADER)
     assert client.delete("/api/transports/EM00001B").json()["status"] == "cancelled"
+    # EM00001A (same family, same day) takes the orders back ; both trucks carried them whole : no quantity doubles
+    kept = next(t for t in client.get("/api/transports", params={"supplier_id": "S-000378"}).json() if t["transport_id"] == "EM00001A")
+    assert {o["order_id"]: o["qty"] for o in kept["orders"]} == qty_a and kept["pinned"] is True
     glob = client.get("/api/transports/atr.csv")
     assert glob.status_code == 200 and glob.headers["content-disposition"].endswith('filename="ATR_transports_20260919.csv"')
     glines = glob.text.lstrip("﻿").split("\r\n")
@@ -117,29 +117,42 @@ def test_supplier_portal_role_and_gate(client):  # noqa: F811
     assert client.get("/api/portal/overview", params={"supplier_id": "S-000378"}).status_code == 200
 
 
-def test_legacy_dock_column_is_retired(tmp_path):
+def test_legacy_dock_column_is_retired_and_transports_start_fresh(tmp_path):
     """A database created by the first version holds ``app_transports.dock NOT NULL`` : the start-up migration
-    copies it into ``docks`` and drops it, so the new version's INSERT no longer fails (NotNullViolation)."""
+    copies it into ``docks`` and drops it, so the new version's INSERT no longer fails (NotNullViolation).  The
+    fresh start of November 2026 then deletes every transport, the counters, the suppressed days, the former
+    weekly plans table and the ✱ columns : the next reconciliation starts from nothing."""
     import datetime as dt
 
     from sqlalchemy import create_engine, inspect, text
 
-    from appro.data.store import AppTransport, init_store
+    from appro.data.store import AppCounter, AppMeta, AppTransport, apply_transports_fresh_start, init_store
 
     engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
     with engine.begin() as conn:
         conn.execute(text("CREATE TABLE app_transports (transport_id VARCHAR(20) PRIMARY KEY, supplier_id VARCHAR(40) NOT NULL, date DATE NOT NULL, "
                           "time VARCHAR(8) NOT NULL, dock VARCHAR(20) NOT NULL, note TEXT NOT NULL, status VARCHAR(12) NOT NULL, "
-                          "created_by VARCHAR(120) NOT NULL, created_at DATETIME NOT NULL)"))
-        conn.execute(text("INSERT INTO app_transports VALUES ('EM000001', 'S-1', '2026-10-30', '08:00', 'B15', '', 'planned', 'x', '2026-10-29 06:00:00')"))
+                          "created_by VARCHAR(120) NOT NULL, created_at DATETIME NOT NULL, changed_since_sent BOOLEAN, change_note TEXT)"))
+        conn.execute(text("INSERT INTO app_transports VALUES ('EM000001', 'S-1', '2026-10-30', '08:00', 'B15', '', 'planned', 'x', '2026-10-29 06:00:00', 0, '')"))
+        conn.execute(text("CREATE TABLE app_transport_plans (recipient VARCHAR(160), week VARCHAR(8), sent_no INTEGER)"))
     factory = init_store(engine)
     cols = {c["name"] for c in inspect(engine).get_columns("app_transports")}
-    assert "dock" not in cols and {"docks", "carrier"} <= cols
+    assert "dock" not in cols and {"docks", "carrier"} <= cols and not {"changed_since_sent", "change_note"} & cols
+    assert not inspect(engine).has_table("app_transport_plans")
+    with engine.connect() as conn:
+        assert "transports_fresh_start_2026_11" in {r[0] for r in conn.execute(text("SELECT name FROM app_migrations")).all()}
     with factory() as session:
-        assert session.get(AppTransport, "EM000001").docks == "B15"
-        session.add(AppTransport(transport_id="EM000002", supplier_id="S-1", date=dt.date(2026, 10, 30), time="09:00", docks="B15;B6 EST", created_by="y"))
+        assert session.get(AppTransport, "EM000001") is None          # purged by the fresh start
+        session.add(AppTransport(transport_id="EM00002A", supplier_id="S-1", date=dt.date(2026, 10, 30), time="09:00", docks="B15;B6 EST", created_by="y"))
+        session.add(AppCounter(name="transport", value=2))
+        session.add(AppMeta(key="transports_reconciled_version", value="7"))
         session.commit()
-        assert session.get(AppTransport, "EM000002").docks == "B15;B6 EST"
+        assert session.get(AppTransport, "EM00002A").docks == "B15;B6 EST"
+    # the fresh start itself : transports, counters and the reconciled version go ; the next start reconciles again
+    assert apply_transports_fresh_start(engine) == 1
+    with factory() as session:
+        assert session.get(AppTransport, "EM00002A") is None and session.get(AppCounter, "transport") is None
+        assert session.get(AppMeta, "transports_reconciled_version") is None
 
 
 def _set_mode(c, sid: str, mode: str, contact: str | None = None):
@@ -153,8 +166,8 @@ def _set_mode(c, sid: str, mode: str, contact: str | None = None):
 
 def test_transport_modes_carrier_maf_parcel_and_batches(client):  # noqa: F811
     """Carriers table ; supplier transport mode (Fournisseur by default, a carrier, MAF Hambach, Messagerie) ;
-    the main planning against the MAF planning ; shuttle transports across suppliers ; CSV and e-mail per mode ;
-    batch cancel, CSV and mail of a selection."""
+    the main planning against the MAF planning ; shuttle transports across suppliers ; CSV per mode ; batch cancel,
+    CSV of a selection."""
     # ---- carriers : seeded, validated
     carriers = client.get("/api/reference/ref_carriers/rows").json()
     assert {c["name"] for c in carriers} >= {"Geodis", "DB Schenker"}
@@ -172,13 +185,13 @@ def test_transport_modes_carrier_maf_parcel_and_batches(client):  # noqa: F811
     row = next(s for s in plan["suppliers"] if s["supplier_id"] == "S-000378")
     assert row["mode"] == "Dachser" and row["carrier"] == "Dachser" and row["emails"] == ["booking@dachser.example", "quai@dachser.example"]
     o = row["orders"][0]
-    # ---- a carrier transport : the carrier fills the CSV column, the mail goes to the carrier's contacts
+    # ---- a carrier transport : the carrier fills the CSV column
     r = client.post("/api/transports", json={"supplier_id": "S-000378", "order_ids": [o["order_id"]], "slots": [{"date": o["expected_date"], "time": "09:00", "docks": ["B15"]}]})
     assert r.status_code == 201, r.text
     pack = r.json()
     t1 = pack["transports"][0]
     assert t1["mode"] == "transporteur" and t1["carrier"] == "Dachser" and t1["orders"][0]["supplier_id"] == "S-000378"
-    assert pack["csv"].split("\r\n")[1].split(";")[2] == "Dachser" and pack["mail"]["to"] == ["booking@dachser.example", "quai@dachser.example"]
+    assert pack["csv"].split("\r\n")[1].split(";")[2] == "Dachser"
 
     # ---- MAF Hambach : two suppliers with an order on the same day leave the main planning for the shuttle planning
     others = [s for s in plan["suppliers"] if s["supplier_id"] != "S-000378"]
@@ -208,7 +221,6 @@ def test_transport_modes_carrier_maf_parcel_and_batches(client):  # noqa: F811
     assert t2["mode"] == "maf" and t2["supplier_name"] == "NAVETTE HAMBACH" and {x["supplier_id"] for x in t2["orders"]} == set(pair)
     line = pack["csv"].split("\r\n")[1].split(";")
     assert line[1] == "NAVETTE HAMBACH" and line[5] == "NAVETTE HAMBACH" and line[9] == "B6 EST"
-    assert sorted(pack["mail"]["to"]) == ["maf-a@example.com", "maf-b@example.com"] and "NAVETTE HAMBACH" in pack["mail"]["subject"]
     maf = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 2, "scope": "maf"}).json()
     assert [t["transport_id"] for t in maf["transports"]] == [t2["transport_id"]]
     # a second shuttle the same day shares the number : A then B ; another day draws a new number
@@ -230,13 +242,47 @@ def test_transport_modes_carrier_maf_parcel_and_batches(client):  # noqa: F811
     assert all(o["transports"] == ["Messagerie"] for o in lane["orders"] if o["order_type"] == "FIRM")
     assert client.post("/api/transports", json={"supplier_id": parcel, "order_ids": [lane["orders"][0]["order_id"]], "slots": [{"date": day, "time": "10:00", "docks": ["B15"]}]}).status_code == 422
 
-    # ---- batches : CSV of a selection, one mail per recipient group, cancel several at once
+    # ---- batches : CSV of a selection, cancel several at once
     sel = client.get("/api/transports/atr.csv", params={"transport_id": [t1["transport_id"], t2["transport_id"]]})
     assert sel.status_code == 200 and [l.split(";")[0] for l in sel.text.lstrip("﻿").split("\r\n")[1:] if l] == [t1["transport_id"], t2["transport_id"]]
-    assert client.post("/api/transports/pack", json={"transport_ids": [t1["transport_id"], t2["transport_id"]]}).status_code == 422
-    assert client.post("/api/transports/pack", json={"transport_ids": [t2["transport_id"]]}).json()["mail"]["to"] == sorted(["maf-a@example.com", "maf-b@example.com"])
+    assert client.post("/api/transports/pack", json={"transport_ids": [t1["transport_id"], t2["transport_id"]]}).json()["csv_filename"] == f"ATR_{t1['transport_id']}-{t2['transport_id']}.csv"
     out = client.post("/api/transports/cancel", json={"transport_ids": [t1["transport_id"], t2["transport_id"]]}).json()
     assert [t["status"] for t in out] == ["cancelled", "cancelled"]
+    # the second shuttle of the day (same number, letter B) took the orders of the cancelled first one
+    shuttle_b = next(t for t in client.get("/api/transports", params={"supplier_id": "MAF-HAMBACH"}).json() if t["transport_id"] == t2["transport_id"][:7] + "B")
+    assert {o["order_id"] for o in shuttle_b["orders"]} == set(ids)
     assert client.post("/api/transports/cancel", json={"transport_ids": ["EM999999"]}).status_code == 404
     labels = [a["label"] for a in client.get("/api/actions").json()]
     assert any("annulé(s)" in x for x in labels)
+
+
+def test_ev_return_and_one_off_truck(client):  # noqa: F811
+    """A truck without order : the EV return has its own counter (``EM0001EV``), the one-off truck a new family ;
+    both are pinned, listed in the planning (the supplier gets a row even without order), in the CSV and the docks
+    view ; the reconciliation never touches them."""
+    r = client.post("/api/transports/special", json={"kind": "ev", "supplier_id": "S-000378", "date": "2026-09-29", "time": "10:00", "docks": ["B6 EST"], "note": "enlèvement emballages"})
+    assert r.status_code == 201, r.text
+    ev = r.json()["transports"][0]
+    assert ev["transport_id"] == "EM0001EV" and ev["mode"] == "ev" and ev["orders"] == [] and ev["pinned"] is True and ev["origin"] == "manuel"
+    assert r.json()["csv"].split("\r\n")[1] == f"EM0001EV;{ev['supplier_name']};;29/09/2026;10:00:00;S-000378;R;;;B6 EST"
+    r = client.post("/api/transports/special", json={"kind": "ev", "supplier_id": "S-000517", "date": "2026-09-29", "time": "10:00", "docks": ["B6 EST"]})
+    assert r.json()["transports"][0]["transport_id"] == "EM0002EV"
+    r = client.post("/api/transports/special", json={"kind": "ponctuel", "supplier_id": "S-000378", "date": "2026-09-30", "time": "14:00", "docks": ["B15"], "carrier": "Geodis", "note": "échantillons"})
+    assert r.status_code == 201, r.text
+    one = r.json()["transports"][0]
+    assert one["transport_id"] == "EM00001A" and one["mode"] == "ponctuel" and one["carrier"] == "Geodis"
+    # the EV counter and the family counter are independent ; a manual truck with orders follows the family counter
+    plan = client.get("/api/transports/planning", params={"start": "2026-09-28", "weeks": 1}).json()
+    assert {t["transport_id"] for t in plan["transports"]} >= {"EM0001EV", "EM0002EV", "EM00001A"}
+    assert any(s["supplier_id"] == "S-000378" for s in plan["suppliers"])
+    assert client.post("/api/transports/special", json={"kind": "ev", "supplier_id": "S-NOPE", "date": "2026-09-29", "time": "10:00", "docks": ["B15"]}).status_code == 422
+    assert client.post("/api/transports/special", json={"kind": "autre", "supplier_id": "S-000378", "date": "2026-09-29", "time": "10:00", "docks": ["B15"]}).status_code == 422
+    assert client.post("/api/transports/special", json={"kind": "ev", "supplier_id": "S-000378", "date": "2026-09-29", "time": "10:00", "docks": ["B99"]}).status_code == 422
+    # no order on board : nothing to split ; cancel works and gives nothing back
+    assert client.post("/api/transports/EM0001EV/split", json={"order_ids": ["x"]}).status_code == 422
+    assert client.delete("/api/transports/EM0001EV").json()["status"] == "cancelled"
+    day = client.get("/api/transports/docks", params={"date": "2026-09-29"}).json()
+    b6 = next(d for d in day["docks"] if d["dock"] == "B6 EST")
+    assert [x["transport_id"] for x in b6["slots"]["10:00"]] == ["EM0002EV"] and b6["slots"]["10:00"][0]["mode"] == "ev"
+    labels = [a["label"] for a in client.get("/api/actions").json()]
+    assert any(x.startswith("Retour EV EM0001EV") for x in labels) and any(x.startswith("Camion ponctuel EM00001A") for x in labels)

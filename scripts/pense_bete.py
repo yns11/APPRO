@@ -37,7 +37,7 @@ from appro.engine.models import (  # noqa: E402
 
 OUT_HTML = RACINE / "docs" / "pense_bete_approvisionneur.html"
 OUT_JSON = RACINE / "backend" / "appro" / "help" / "pense_bete.json"
-VERSION = "4 novembre 2026"
+VERSION = "5 novembre 2026"
 D = dt.timedelta
 
 # ----------------------------------------------------------------------------- charts
@@ -449,7 +449,7 @@ def sections() -> list[dict[str, str]]:
 <div class="callout"><b>Vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se recalcule.</b></div>
 <p><b>Partie A · Tableau d'approvisionnement</b> : une ligne <b>Consommation et besoin</b> (consommé réel dans le passé, besoin du PDP dans le futur) ; par fournisseur actif : <b>Ordre ferme</b>, <b>Prévisionnel EDI</b>, <b>Quantité reçue</b>, <b>Quantité à retenir</b>, <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Stock projeté</b>, seule projection de stock du tableau, comparée au <b>stock ERP de la veille</b> (5 bis). Deux lignes se saisissent (Quantité à retenir, Ajustement), trois se cliquent (Ordre ferme, Proposition CBN, Quantité reçue), le reste se lit.</p>
 <p><b>Partie B · Tableau de bord</b> : l'onglet <b>Couvertures et stocks</b> répond à « que dois-je faire aujourd'hui ? » article par article ; l'onglet <b>Flux d'approvisionnement</b> suit commandes, transports et réceptions du jour.</p>
-<p><b>Planning de livraisons</b> : les ordres fermes de chaque fournisseur jour par jour ; pour un fournisseur en <b>camions automatiques</b>, l'application crée un camion par jour et vous envoyez le <b>plan de la semaine</b> depuis la bande ; sinon cochez les commandes d'un jour et créez le <b>transport</b> (date, heure, quais, identifiant <b>EM</b>) ; <b>CSV ATR</b> et <b>e-mail</b> dans la liste (section 9).</p>
+<p><b>Planning transport</b> : les ordres fermes de chaque fournisseur jour par jour, sur cette semaine et la suivante ; pour un fournisseur en <b>camions automatiques</b>, l'application crée et tient à jour un camion par jour ; sinon cliquez « + camion » et cochez les commandes du jour (identifiant <b>EM</b>) ; navette MAF, retour EV et camion ponctuel par les boutons de droite ; <b>CSV ATR</b> pour l'outil de transport, qui prévient lui-même les fournisseurs (section 9).</p>
 <p>Les boutons <b>FR | EN</b> du tableau d'approvisionnement et de la fiche article passent les intitulés en anglais, pour un partage d'écran ou une capture envoyée à un fournisseur.</p>
 <p class="cmt">Règles détaillées : <i>docs/regles_metier.md</i> ; calculs pas à pas : <i>docs/guide_moteur.md</i>.</p>""")
 
@@ -650,45 +650,39 @@ def sections() -> list[dict[str, str]]:
          ]))
 
     # ============================================================== Livraisons
-    page("livraisons", "B", PART_B, "9. Planning de livraisons et transports",
-         """<p>Les ordres fermes ERP de chaque fournisseur, <b>jour par jour</b> (fournisseurs en lignes, jours ouvrés en colonnes ; seuls les fournisseurs qui ont une commande sur la période apparaissent ; article et restant à livrer dans la cellule, le reste dans l'infobulle).</p>
-<h4>Créer un transport</h4>
-<ol>
-<li>Cochez les commandes <b>d'un même jour</b> d'un fournisseur, puis <b>Créer le transport</b>.</li>
-<li>Un camion = une date (préremplie, modifiable), une heure et <b>un ou plusieurs quais</b> (cases <b>B15</b>, <b>B6 EST</b>, <b>B2 NORD</b>, <b>B6 NORD</b> ; les quais par défaut du fournisseur, colonne <i>Quais</i> du Référentiel, sont précochés). <b>Ajouter un transport</b> pour un second camion sur les mêmes commandes. Transporteur et commentaire facultatifs.</li>
-<li>À la validation, chaque camion reçoit un identifiant <b>EM</b> + 5 chiffres + une lettre (<b>EM00123A</b>) : le numéro, incrémental et jamais réutilisé, désigne une famille ; la lettre classe le camion dans sa famille (<b>A</b> nouveau, <b>B</b> puis <b>C</b>… pour un camion scindé ou créé sur les mêmes commandes ; pour la navette MAF, A le premier camion du jour, B le deuxième…). Les commandes portent un badge, le tableau d'approvisionnement une petite icône camion dans la cellule <i>Ordre ferme</i>.</li>
-</ol>
-<h4>Fichier ATR et e-mail</h4>
+    page("livraisons", "B", PART_B, "9. Planning transport",
+         """<p>Les camions attendus des fournisseurs sur <b>cette semaine et la suivante</b> (rien au-delà). L'application <b>crée, modifie et annule</b> les transports ; elle n'envoie aucun e-mail : le système de transport <b>ATR</b> prévient les fournisseurs et les transporteurs à partir du fichier CSV.</p>
+<h4>Deux écrans, sept boutons, trois ajouts</h4>
 <ul>
-<li><b>CSV ATR des transports à venir</b> (bouton en haut de la page) : tous les transports prévus à partir d'aujourd'hui, tous fournisseurs et tous approvisionneurs : <b>un seul import</b> dans l'outil de transport. Chaque transport a aussi son bouton <i>CSV</i> dans la liste du bas.</li>
+<li>En haut à gauche, <b>Fournisseurs</b> (fournisseurs × jours ouvrés, <b>une case par camion</b> : identifiant et heure, quai et nombre de commandes) ou <b>Quais</b> (la charge des quais sur la semaine, ou l'agenda d'une journée).</li>
+<li>Au milieu, <b>Cette semaine</b>, <b>Semaine prochaine</b> et les <b>cinq jours</b> de la semaine choisie. Dans Fournisseurs les jours sont grisés ; dans Quais, une semaine montre les camions par quai et demi-journée (un clic sur une case ouvre la journée), un jour montre l'agenda des quais (une ligne par créneau, un quai = deux voies, un bloc = un camion, quai fermé hachuré).</li>
+<li>À droite, <b>Navette MAF</b> (le jour, puis les commandes MAF de ce jour, plusieurs fournisseurs dans un camion), <b>Retour EV</b> (le fournisseur vient enlever ses emballages vides : identifiant <b>EM0001EV</b>, compteur à part) et <b>Camion ponctuel</b> (tout autre camion hors commandes : échantillons, retour de pièces, dépannage…). Le périmètre (carnet, tous, Planning MAF) et le <b>CSV ATR</b> sont dans la barre du tableau.</li>
+</ul>
+<h4>Le menu d'un camion (un clic)</h4>
+<p>Le camion en deux lignes (jour, créneau, quai, commandes, raison du « à vérifier », note), puis : <b>Copier l'identifiant</b> (pour le coller dans un e-mail), <i>Vu</i> (efface « à vérifier »), <b>Déplacer</b> (jour, créneau, quais ; le camion est épinglé, l'ordonnanceur ne le bouge plus), <b>Scinder</b> (tout camion est scindable : des commandes entières ou <b>une quantité</b>, même avec une seule commande ; même numéro, lettre suivante), <b>Note</b>, <b>CSV ATR de ce camion</b>, <b>Annuler</b>. <b>Annuler un camion scindé</b> (A, B ou C) rend ses commandes à l'autre camion de la famille ; annuler le dernier camion automatique d'un jour laisse le jour sans camion tant qu'aucune nouvelle commande n'apparaît. Pas de Ctrl+Z : retirez le camion de l'outil de transport.</p>
+<h4>Identifiants</h4>
+<p><b>EM</b> + 5 chiffres + une lettre (<b>EM00123A</b>) : le numéro, incrémental et jamais réutilisé, désigne une famille ; la lettre classe le camion dans sa famille (<b>A</b> nouveau, <b>B</b> puis <b>C</b>… pour un camion scindé ou créé sur les mêmes commandes ; pour la navette MAF, A le premier camion du jour, B le deuxième…). Un retour EV : <b>EM</b> + 4 chiffres + <b>EV</b>. Les compteurs sont repartis de zéro le 05/11/2026. Les commandes portent un badge, le tableau d'approvisionnement une petite icône camion dans la cellule <i>Ordre ferme</i>.</p>
+<h4>Camion d'un fournisseur en manuel</h4>
+<p>Case <b>« + camion · n cmd »</b> en pointillé : cochez les commandes du jour, un camion = une date, une heure et <b>un ou plusieurs quais</b> (cases <b>B15</b>, <b>B6 EST</b>, <b>B2 NORD</b>, <b>B6 NORD</b> ; les quais par défaut du fournisseur, colonne <i>Quais</i> du Référentiel, sont précochés), transporteur et note facultatifs.</p>
+<h4>Fichier ATR</h4>
+<ul>
+<li><b>CSV ATR</b> (barre du tableau) : tous les transports prévus à partir d'aujourd'hui, tous fournisseurs et tous approvisionneurs : <b>un seul import</b> dans l'outil de transport. Chaque camion a aussi son CSV dans son menu.</li>
 <li>Le fichier contient l'en-tête attendu par ATR et <b>une ligne par transport et par quai</b> (identifiant répété), flux toujours <b>R</b>.</li>
-<li><b>E-mail</b> : le bouton de la liste ouvre Outlook avec les destinataires (colonne <i>Contact transport</i> du fournisseur), l'objet et le corps (identifiants, dates, heures, quais, commandes ; français puis anglais). Relisez, envoyez. Un fournisseur <b>sans contact transport</b> est signalé en orange : complétez le Référentiel.</li>
-<li><b>Annuler</b> un transport le garde avec le statut <i>annulé</i> (hors CSV global) ; prévenez le fournisseur et retirez-le de l'outil de transport. Création et annulation sont journalisées, pas de Ctrl+Z.</li>
-<li>La liste des transports se <b>filtre</b> par colonne et se <b>sélectionne</b> : CSV, e-mail (même destinataire) ou annulation de toute la sélection.</li>
 </ul>
 <h4>Modes de transport</h4>
 <p>Colonne <i>Mode transport</i> du fournisseur (Référentiel ou fiche fournisseur), « Fournisseur » au départ.</p>
 <ul>
 <li><b>Fournisseur</b> : il livre lui-même ; planning principal.</li>
-<li><b>MAF Hambach</b> : pièces au magasin avancé ; onglet <b>Planning MAF</b>, ouvert à tous les approvisionneurs ; une <b>navette</b> peut emporter les commandes d'un même jour de plusieurs fournisseurs ; le fichier ATR porte <i>NAVETTE HAMBACH</i>.</li>
+<li><b>MAF Hambach</b> : pièces au magasin avancé ; périmètre <b>Planning MAF</b>, ouvert à tous les approvisionneurs ; une <b>navette</b> peut emporter les commandes d'un même jour de plusieurs fournisseurs ; le fichier ATR porte <i>NAVETTE HAMBACH</i>.</li>
 <li><b>Messagerie</b> : colis, pas de camion ; hors planning ; ses ordres fermes portent d'office l'icône camion.</li>
-<li><b>Un transporteur</b> (table <i>Transporteurs</i> : nom, contacts) : son nom dans le fichier ATR, l'e-mail à ses contacts.</li>
+<li><b>Un transporteur</b> (table <i>Transporteurs</i> : nom, contacts) : son nom dans le fichier ATR.</li>
 </ul>
-<p>Les semaines affichées se choisissent avec le <b>sélecteur de semaines</b>, comme dans le tableau d'approvisionnement.</p>
-<h4>Trois vues, cinq couleurs</h4>
-<p>La page <b>Planning transport</b> a un en-tête commun (vue, période, périmètre : carnet, tous ou Planning MAF, CSV ATR) et trois vues : <b>Semaine</b> (fournisseurs × jours, une case par camion : identifiant, heure, quai, nombre de commandes ; un clic ouvre le <b>panneau de détail</b> à droite), <b>Quais</b> (l'agenda d'une journée : une ligne par créneau, un quai = deux voies, un bloc = un camion ; quai fermé hachuré) et <b>Charge</b> (camions par quai et demi-journée sur la semaine, du blanc au bleu plein ; un clic ouvre la journée). Partout les mêmes couleurs : <b>bleu</b> à envoyer, <b>vert</b> envoyé, <b>orange ✱</b> changé depuis l'envoi, <b>rouge</b> à vérifier, <b>gris barré</b> annulé.</p>
 <h4>Camions automatiques</h4>
-<p>Colonne <b>Camions automatiques</b> du fournisseur (Référentiel ou fiche fournisseur › Paramétrage). Dès lors, vous ne créez plus rien pour lui : à chaque synchronisation l'application pose <b>un camion par jour</b> dès qu'un ordre ferme est attendu (trois semaines : en cours et les deux suivantes), y fait monter les commandes qui apparaissent, retire celles qui disparaissent, annule un camion vide, et place chaque camion sur un <b>créneau de quai</b> (07:00 → 15:30 toutes les 30 min, 2 camions par quai et par créneau) : heure habituelle du fournisseur si le quai a de la place, sinon le créneau libre le plus proche.</p>
+<p>Colonne <b>Camions automatiques</b> du fournisseur (Référentiel ou fiche fournisseur › Paramétrage). Dès lors, vous ne créez plus rien pour lui : à chaque synchronisation l'application pose <b>un camion par jour</b> dès qu'un ordre ferme est attendu (semaine en cours et suivante), y fait monter les commandes qui apparaissent, retire celles qui disparaissent, annule un camion vide, et place chaque camion sur un <b>créneau de quai</b> (07:00 → 15:30 toutes les 30 min, 2 camions par quai et par créneau) : heure habituelle du fournisseur si le quai a de la place, sinon le créneau libre le plus proche.</p>
 <ul>
-<li><b>Lire la case</b> : <span class="chip" style="background:#fee4e2;color:#b42318">rouge « à vérifier »</span> avec la raison (quai complet, quai fermé, commande apparue pour aujourd'hui ou demain) ; <b>✱</b> = changé depuis l'envoi du plan ; « épinglé » dans le panneau = touché à la main ; barré = annulé, encore à renvoyer ; « sans camion » = jour supprimé après une annulation ; « + camion » en pointillé = fournisseur en manuel, à créer d'un clic.</li>
-<li><b>Le panneau de détail</b> : jour, créneau, quai, plan, commandes à bord, et les actions <i>Vu</i>, <b>Déplacer</b> (jour, créneau, quais ; le camion est épinglé, l'ordonnanceur ne le bouge plus), <b>Scinder</b> (tout camion est scindable : des commandes entières ou <b>une quantité</b>, même avec une seule commande), <b>Note</b> pour le fournisseur, e-mail et CSV du camion, <b>Annuler</b> (le jour reste sans camion tant qu'aucune nouvelle commande n'apparaît).</li>
-</ul>
-<h4>Plan de semaine (ligne au-dessus du planning, page Envois)</h4>
-<ul>
-<li><b>Jeudi</b> (réglable) : la ligne « Plan S+1 » compte les envoyés, les à envoyer et les à renvoyer, avec un bouton pour le prochain ; <b>Tous les envois</b> ouvre la page qui liste chaque destinataire (fournisseur ou transporteur), son état, son dernier envoi et ce qui a changé. <b>Envoyer</b> ouvre dans Outlook <b>le plan complet de la semaine</b> (camions, jours, heures, quais, commandes ; résumé anglais) et note l'envoi. Vous relisez, vous envoyez : l'application n'envoie rien elle-même.</li>
-<li><b>Rectificatif</b> : si un camion d'une semaine déjà envoyée change (jour, heure, quai, commande ajoutée ou retirée, camion créé ou annulé), la semaine passe <b>à renvoyer</b> pour ce destinataire, avec le motif. <b>Renvoyer</b> ouvre le même plan entier, « mise à jour du … (remplace l'envoi du …) », lignes changées marquées ✱, camions annulés barrés. Le dernier e-mail reçu est la vérité du fournisseur.</li>
-<li>Rien ne part au-delà de la semaine suivante : le changement attend le jeudi. Une quantité ou une note ne déclenche pas de renvoi. Un plan trop long pour Outlook part en un e-mail par fournisseur.</li>
-<li>Pendant l'essai, le Planning de livraisons n'est visible que des utilisateurs désignés.</li>
+<li><b>Lire la case</b> : <span class="chip" style="background:#fee4e2;color:#b42318">rouge « à vérifier »</span> avec la raison (quai complet, quai fermé, commande apparue pour aujourd'hui ou demain) ; « épinglé » dans le menu = touché à la main ; « sans camion » = jour supprimé après une annulation ; « + camion » en pointillé = fournisseur en manuel, à créer d'un clic.</li>
+<li>Le camion d'aujourd'hui est en route : rien n'en sort ; une commande apparue pour aujourd'hui ou demain monte dans un camion marqué à vérifier. Un camion déplacé à la main garde ses commandes même si l'ERP change leur date.</li>
+<li>Pendant l'essai, le Planning transport n'est visible que des utilisateurs désignés.</li>
 </ul>
 <p>Un <b>contact transport</b> qui se connecte à l'application n'accède qu'à son <b>espace fournisseur</b> : ses commandes fermes en cours et transports, son retard, le prévisionnel, ses DESADV, ses réceptions.</p>""")
 
@@ -718,9 +712,8 @@ def sections() -> list[dict[str, str]]:
              ["Proposition CBN, tableau de bord", '<span class="mk off">◇</span>', "hors jour standard : jour ouvré tenable, pas le jour habituel"],
              ["Proposition CBN", "barré", "refusée d'un clic, ce fournisseur ce jour-là"],
              ["Ordre ferme", "orange / vert / rouge barré", "en cours / soldée / ignorée"],
-             ["Ordre ferme", "petite icône camion en haut à gauche", "transport créé dans le Planning de livraisons (identifiants dans l'infobulle)"],
-             ["Planning transport", '<span class="chip brand">EM00123A 09:30</span> bleu · vert · <span class="chip" style="background:#fef0c7;color:#b54708">orange ✱</span> · <span class="chip" style="background:#fee4e2;color:#b42318">rouge</span> · gris barré', "camion à envoyer · envoyé · changé depuis l'envoi (semaine à renvoyer) · à vérifier (raison dans la case) · annulé jusqu'au renvoi ; mêmes couleurs dans les vues Semaine, Quais et Charge"],
-             ["Page Envois", "à envoyer / envoyée / ✱ à renvoyer", "état du plan de semaine d'un destinataire ; Envoyer, Renvoyer (le même plan complet) ou Rouvrir"],
+             ["Ordre ferme", "petite icône camion en haut à gauche", "transport créé dans le Planning transport (identifiants dans l'infobulle)"],
+             ["Planning transport", '<span class="chip brand">EM00123A 09:30</span> bleu · <span class="chip" style="background:#fee4e2;color:#b42318">rouge</span> · pointillé', "camion prévu · à vérifier (raison dans la case) · à créer (fournisseur en manuel) ; mêmes couleurs dans les écrans Fournisseurs et Quais"],
              ["Quantité reçue", "italique orange 🚚 / blanc / vert", "en transit (jamais compté) / reçu / comptabilisé"],
              ["Quantité reçue", '<span class="dot ok"></span> / <span class="dot ko"></span>', "DESADV traité / aucun DESADV traité"],
              ["Quantité à retenir", "gris / bleu", "ERP (vide) / votre saisie (0 = rien attendu)"],
@@ -761,7 +754,7 @@ def page() -> str:
 </header>
 <nav class="toc" aria-label="Sommaire">
 <span class="part">Tableau d'appro</span><a href="#cbn">CBN</a><a href="#ferme">Ordre ferme</a><a href="#recu">Quantité reçue</a><a href="#appro">Quantité à retenir</a><a href="#stock">Stock projeté</a><a href="#multi">Multi-sourcing</a>
-<span class="part">Cockpit</span><a href="#stocks">Couvertures et stocks</a><a href="#flux">Flux d'approvisionnement</a><a href="#livraisons">Planning de livraisons</a><a href="#performance">Exceptions, performance, calendriers</a><a href="#memo">Mémo</a>
+<span class="part">Cockpit</span><a href="#stocks">Couvertures et stocks</a><a href="#flux">Flux d'approvisionnement</a><a href="#livraisons">Planning transport</a><a href="#performance">Exceptions, performance, calendriers</a><a href="#memo">Mémo</a>
 </nav>
 <main>""")
     parts.append(f'<section class="part" id="tableau">\n<h2><span class="part">Partie A</span>{PART_A}</h2>\n{by["accueil"]["html"]}')

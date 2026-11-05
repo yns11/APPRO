@@ -49,7 +49,7 @@ class Access:
     delegated_from: list[str] = field(default_factory=list)   # planner ids delegating to the user
     bootstrap: bool = False               # no planner declared yet: everybody is admin
     supplier_ids: list[str] = field(default_factory=list)   # supplier role : the suppliers whose transport contact the user is
-    transport_access: bool = True         # sees the « Planning de livraisons » and the trucks (``APPRO_TRANSPORT_USERS``)
+    transport_access: bool = True         # sees the « Planning transport » and the trucks (``APPRO_TRANSPORT_USERS``)
     _article_planner: dict[str, str] = field(default_factory=dict, repr=False)
     _planner_name: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -78,7 +78,7 @@ class Access:
 
     def require_transports(self) -> None:
         if not self.can_transports:
-            raise HTTPException(403, "Planning de livraisons : accès réservé pendant l'essai des camions automatiques")
+            raise HTTPException(403, "Planning transport : accès réservé pendant l'essai des camions automatiques")
 
     def can_edit_planner(self, planner_name: str | None) -> bool:
         return self.is_admin or (planner_name or "").upper() in self.portfolio

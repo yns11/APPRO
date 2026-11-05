@@ -1,4 +1,5 @@
-import { slotOf, stateOf } from "@/lib/transports";
+import type { MouseEvent } from "react";
+import { kindOf, slotOf, stateOf } from "@/lib/transports";
 import type { PlanningResponse, TransportOut } from "@/lib/types";
 
 /**
@@ -6,7 +7,7 @@ import type { PlanningResponse, TransportOut } from "@/lib/types";
  * is hatched ; the red line is now ; trucks outside the grid are listed under it.  ``all`` = every planned truck of
  * the week, every supplier (the docks are shared).
  */
-export function DocksView({ d, all, day, sent, selected, onSelect, now }: { d: PlanningResponse; all: TransportOut[]; day: string; sent: Set<string>; selected: string | null; onSelect: (id: string) => void; now?: string }) {
+export function DocksView({ d, all, day, selected, onSelect, now }: { d: PlanningResponse; all: TransportOut[]; day: string; selected: string | null; onSelect: (t: TransportOut, e: MouseEvent<HTMLButtonElement>) => void; now?: string }) {
   const cap = Math.max(d.capacity, 1);
   const closed = new Set(d.closed_docks[day] ?? []);
   const trucks = all.filter((t) => t.date === day && t.status === "planned");
@@ -18,7 +19,7 @@ export function DocksView({ d, all, day, sent, selected, onSelect, now }: { d: P
     for (const dock of t.docks) ((lanes[dock] ??= {})[slot] ??= []).push(t);
   }
   const nowSlot = now && now.slice(0, 10) === day ? slotOf(now.slice(11, 16), d.slots) : null;
-  const short = (t: TransportOut) => (t.mode === "maf" ? "NAVETTE" : t.supplier_name.split(/\s+/)[0].slice(0, 11));
+  const short = (t: TransportOut) => (t.mode === "maf" ? "NAVETTE" : `${t.supplier_name.split(/\s+/)[0].slice(0, 11)}${kindOf(t) ? ` · ${kindOf(t)}` : ""}`);
   return (
     <div className="tp-agenda-wrap">
       <div className="tp-agenda" style={{ gridTemplateColumns: `64px repeat(${d.docks.length * cap}, minmax(0, 1fr))`, gridTemplateRows: `40px repeat(${d.slots.length}, 36px)` }} role="grid" aria-label={`Quais et créneaux du ${day}`}>
@@ -33,7 +34,7 @@ export function DocksView({ d, all, day, sent, selected, onSelect, now }: { d: P
               const extra = i === cap - 1 && xs.length > cap ? xs.length - cap : 0;
               return (
                 <div key={`${dock}-${i}`} className={`lane ${i === cap - 1 ? "b" : ""} ${closed.has(dock) ? "closed" : ""} ${nowSlot === slot ? "now" : ""}`} style={{ gridRow: r + 2 }}>
-                  {t && <button type="button" className={`tp-blk ${stateOf(t, sent)} ${selected === t.transport_id ? "sel" : ""}`} onClick={() => onSelect(t.transport_id)} title={`${t.transport_id} · ${t.supplier_name} · ${t.time}${t.check_reason ? ` · à vérifier : ${t.check_reason}` : ""}`}><span className="id">{t.transport_id}{t.changed_since_sent ? " ✱" : ""}</span><span className="s">{short(t)}{extra ? ` +${extra}` : ""}</span></button>}
+                  {t && <button type="button" className={`tp-blk ${stateOf(t)} ${selected === t.transport_id ? "sel" : ""}`} aria-haspopup="menu" onClick={(e) => onSelect(t, e)} title={`${t.transport_id} · ${t.supplier_name} · ${t.time}${t.check_reason ? ` · à vérifier : ${t.check_reason}` : ""}`}><span className="id">{t.transport_id}</span><span className="s">{short(t)}{extra ? ` +${extra}` : ""}</span></button>}
                 </div>
               );
             }))}

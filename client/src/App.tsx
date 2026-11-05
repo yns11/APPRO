@@ -23,7 +23,6 @@ const HelpPage = lazy(() => import("@/pages/HelpPage"));
 const SupplierPortalPage = lazy(() => import("@/pages/SupplierPortalPage"));
 const PerformancePage = lazy(() => import("@/pages/PerformancePage"));
 const OtdSheetPage = lazy(() => import("@/pages/OtdSheetPage"));
-const TransportPlansPage = lazy(() => import("@/pages/TransportPlansPage"));
 
 /** The search page can be hidden again by turning this off (no menu entry, no route). */
 const SEARCH_ENABLED = true;
@@ -58,7 +57,6 @@ export default function App() {
         <Route path="/fournisseurs/:supplierId" element={<SupplierPage />} />
         <Route path="/tableau" element={<SupplyTablePage />} />
         {(!config || config.access?.can_transports) && <Route path="/livraisons" element={<DeliveriesPage />} />}
-        {(!config || config.access?.can_transports) && <Route path="/livraisons/envois" element={<TransportPlansPage />} />}
         <Route path="/propositions" element={<Navigate to="/?tab=flux" replace />} />
         {SEARCH_ENABLED && <Route path="/recherche" element={<SearchPage />} />}
         <Route path="/programmes" element={<ProgramsPage />} />
