@@ -38,7 +38,7 @@ export function TruckMenu({ menu, d, onClose }: { menu: MenuAt | null; d: BoardR
   const copy = async (t: TransportOut) => { toast.push((await copyText(t.transport_id)) ? `${t.transport_id} copié` : `Copie impossible : ${t.transport_id}`, "success"); onClose(); };
   const t = menu?.t;
   const tone = t ? toneOf(t) : "mine";
-  const own = !!t && t.mine && canWrite;
+  const own = !!t && t.editable && canWrite;      // the rights follow the e-mail ; the colour (tone) follows the portfolio shown
   return (
     <>
       {menu && t && (
@@ -51,7 +51,7 @@ export function TruckMenu({ menu, d, onClose }: { menu: MenuAt | null; d: BoardR
             {!isShuttle(t) && <div className="small">{t.supplier_name || t.supplier_id} · <span className="mono">{t.supplier_id}</span>{t.carrier ? ` · via ${t.carrier}` : ""}</div>}
             <div className="small"><b>{dayLabel(t.date)}</b> · {t.time || "–"} · {isShuttle(t) ? <>aller quai {t.docks.join(" / ")}{t.return_trip ? ` · retour quai ${(t.return_docks.length ? t.return_docks : t.docks).join(" / ")}` : ""}</> : <>quai {t.docks.join(" / ")}</>}</div>
             <Lines t={t} />
-            {t.check_reason && <div className="small" style={{ color: "var(--critical-fg)" }}>{t.mine ? "À vérifier" : "À vérifier chez son approvisionneur"} : {t.check_reason}</div>}
+            {t.check_reason && <div className="small" style={{ color: "var(--critical-fg)" }}>{t.editable ? "À vérifier" : "À vérifier chez son approvisionneur"} : {t.check_reason}</div>}
             {t.note && <div className="small">Note : {t.note}</div>}
             {tone === "off" && !isShuttle(t) && t.mode !== "ev" && t.mode !== "ponctuel" && <div className="small subtle">Ses commandes attendent : aucun camion ne renaît tant qu'une nouvelle commande n'apparaît pas ce jour-là.</div>}
           </div>
@@ -67,7 +67,7 @@ export function TruckMenu({ menu, d, onClose }: { menu: MenuAt | null; d: BoardR
           </>}
           {tone !== "off" && <button type="button" role="menuitem" onClick={() => { window.location.href = api.downloadUrl(`/api/transports/${encodeURIComponent(t.transport_id)}/atr.csv`); onClose(); }}><Download />CSV ATR de ce camion</button>}
           {tone !== "off" && own && <button type="button" role="menuitem" className="danger" onClick={() => { onClose(); if (window.confirm(`Annuler ${isShuttle(t) ? "la navette" : "le camion"} ${t.transport_id} ?${t.orders.length && !isShuttle(t) ? "\nUn camion de la même famille ce jour-là reprend ses commandes ; sinon le jour reste sans camion tant qu'aucune nouvelle commande n'apparaît." : ""}`)) cancel.mutate(t.transport_id); }}><Trash2 />Annuler {isShuttle(t) ? "la navette" : "le camion"}</button>}
-          {tone === "other" && canWrite && <div className="off-hint"><Lock />Déplacer, scinder, annuler : réservés à son approvisionneur (ou à un manager)</div>}
+          {tone !== "off" && !own && canWrite && <div className="off-hint"><Lock />Déplacer, scinder, annuler : réservés à son approvisionneur (ou à un manager)</div>}
         </div>
       )}
       {action?.kind === "move" && <MoveDrawer t={action.t} d={d} onClose={() => setAction(null)} />}
@@ -81,9 +81,9 @@ export function TruckMenu({ menu, d, onClose }: { menu: MenuAt | null; d: BoardR
 function tagOf(t: TransportOut, d: BoardResponse): string {
   if (t.status === "cancelled") return `annulé par ${who(t.cancelled_by, d.people)}${t.cancelled_at ? ` · ${fmtDateTime(t.cancelled_at).slice(11)}` : ""}`;
   if (isShuttle(t)) return `navette${t.return_trip ? " A/R" : ""} · créée par ${who(t.created_by, d.people)}`;
-  if (!t.mine) return "autre approvisionneur";
+  if (!t.mine) return t.editable ? "autre carnet" : "autre approvisionneur";
   if (t.check_reason) return "à vérifier";
-  return t.mode === "ev" ? "retour EV" : t.mode === "ponctuel" ? `ponctuel · ${who(t.created_by, d.people)}` : t.pinned ? "placé à la main" : "automatique";
+  return t.mode === "ev" ? `retour EV · ${who(t.created_by, d.people)}` : t.mode === "ponctuel" ? `ponctuel · ${who(t.created_by, d.people)}` : t.pinned ? "automatique · touché à la main" : t.note ? "automatique · annoté" : "automatique";
 }
 
 /** The lines of a truck : article, designation and quantity ; the supplier instead of the designation on a shuttle ; the typed lines after. */

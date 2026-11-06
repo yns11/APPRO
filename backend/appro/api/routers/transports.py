@@ -90,6 +90,15 @@ def _mine(ds: Dataset, access: Access) -> set[str]:
     return {l.supplier_id for l in ds.links if getattr(l, "active", True) and planners.get(l.article_id, "") in access.portfolio}
 
 
+def _shown(ds: Dataset, access: Access, planner: str | None) -> set[str]:
+    """The suppliers whose trucks are **blue** : those of the portfolio chosen at the top of the screen (``planner``),
+    else the signed-in user's own (:func:`_mine`).  The colours follow the portfolio, the rights follow the e-mail."""
+    if not planner:
+        return _mine(ds, access)
+    arts = {a.article_id for a in ds.articles if (a.planner or "").upper() == planner.upper()}
+    return {l.supplier_id for l in ds.links if getattr(l, "active", True) and l.article_id in arts}
+
+
 def _require_own(access: Access, t: AppTransport, mine: set[str]) -> None:
     if access.is_manager or t.mode == "maf" or t.supplier_id == T.MAF_ID or t.supplier_id in mine:
         return
@@ -156,12 +165,12 @@ def planning(planner: str | None = None, start: dt.date | None = None, weeks: in
     return json_response(S.PlanningResponse(**out).model_dump(mode="json"))
 
 
-def _board(ctx: AppContext, session: Session, access: Access, start: dt.date | None, weeks: int) -> dict:
+def _board(ctx: AppContext, session: Session, access: Access, start: dt.date | None, weeks: int, planner: str | None = None) -> dict:
     ds, params, as_of = _sync(ctx, session)
     first = start or iso_week_monday(as_of)
     days = T.working_days(first, weeks, sorted(set(ctx.settings.holiday_dates) | set(ds.holidays)), ds.open_days)
     end = days[-1] if days else first
-    mine = _mine(ds, access)
+    mine, editable = _shown(ds, access, planner), _mine(ds, access)
     names, labels = _names(ctx), T.article_labels(ds)
     rows = [t for t in T.list_transports(session, first, end, include_cancelled=True) if t.status == "planned" or (t.cancelled_by or "") not in ("", T.APP_USER)]
     closed = _dock_closed(ctx)
@@ -169,24 +178,26 @@ def _board(ctx: AppContext, session: Session, access: Access, start: dt.date | N
     return {"as_of": as_of, "start": first, "end": end, "days": days, "docks": list(T.DOCKS), "slots": A.slot_grid(params), "day_slots": T.day_slots(),
             "capacity": A.capacity_of(params), "hard_max": A.capacity_of(params) * A.FORCE_FACTOR,
             "closed_docks": {d.isoformat(): [dock for dock in T.DOCKS if d in closed.get(dock.upper(), set())] for d in days if any(d in closed.get(dock.upper(), set()) for dock in T.DOCKS)},
-            "maf_day": maf_day, "maf_pending": pending, "user_label": _label(access),
-            "transports": [T.transport_out(t, names, labels, mine) for t in rows], "people": _people(ctx)}
+            "maf_day": maf_day, "maf_pending": pending, "user_label": _label(access), "planner": (planner or "").upper() or None,
+            "transports": [T.transport_out(t, names, labels, mine, editable) for t in rows], "people": _people(ctx)}
 
 
 @router.get("/board", response_model=S.BoardResponse)
-def board(start: dt.date | None = None, weeks: int = Query(2, ge=1, le=4), ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
-          access: Access = Depends(access_dep)):
+def board(start: dt.date | None = None, weeks: int = Query(2, ge=1, le=4), planner: str | None = None, ctx: AppContext = Depends(ctx_dep),
+          session: Session = Depends(session_dep), access: Access = Depends(access_dep)):
     """The single screen : every truck of every supplier over the window (default : the current week and the next),
-    flagged **mine** when the planner may act on it ; the trucks a person cancelled stay (struck in the agenda) ; the
-    counter of the « Navette MAF » button (MAF orders of the next working day without shuttle)."""
-    return json_response(S.BoardResponse(**_board(ctx, session, access, start, weeks)).model_dump(mode="json"))
+    flagged **mine** (blue) when it belongs to the portfolio shown (``planner`` : the one chosen at the top of the
+    screen, else the signed-in user's own) and **editable** when the signed-in user may act on it ; the trucks a person
+    cancelled stay (struck in the agenda) ; the counter of the « Navette MAF » button (MAF orders of the next working
+    day without shuttle)."""
+    return json_response(S.BoardResponse(**_board(ctx, session, access, start, weeks, planner)).model_dump(mode="json"))
 
 
 @router.get("/planning.pdf")
-def planning_pdf(ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep), access: Access = Depends(access_dep)):
+def planning_pdf(planner: str | None = None, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep), access: Access = Depends(access_dep)):
     """The printable planning : A4 landscape, the current week (docks × days), its working days (agenda of the
-    docks), the next week and its days ; the planner's trucks in blue, no quantity nor order number."""
-    out = _board(ctx, session, access, None, 2)
+    docks), the next week and its days ; the trucks of the portfolio shown in blue, no quantity nor order number."""
+    out = _board(ctx, session, access, None, 2, planner)
     return _pdf_response(pdf_service.planning_pdf(out, _label(access), out["people"]), f"planning_transport_{out['start']:%Y%m%d}.pdf")
 
 

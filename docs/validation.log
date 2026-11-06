@@ -108,3 +108,15 @@
 - OK   eslint (client)
 - OK   tsc + vite build (client)
 
+## 2026-11-05T23:24:29Z · commit e5bbc7b · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+
+## 2026-11-06T00:42:32Z · commit e5bbc7b · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+

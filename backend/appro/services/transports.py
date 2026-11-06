@@ -247,15 +247,19 @@ def article_labels(ds: Dataset) -> dict[str, tuple[str, str]]:
     return {a.article_id: (a.designation or "", a.unit or "") for a in ds.articles}
 
 
-def transport_out(t: AppTransport, names: dict[str, str], arts: dict[str, tuple[str, str]] | None = None, mine: set[str] | None = None) -> dict[str, Any]:
-    """The API view of a truck.  ``mine`` = the suppliers of the planner's portfolio : a truck of one of them, or a
-    shuttle, is **his** (editable) ; without ``mine`` nothing is."""
+def transport_out(t: AppTransport, names: dict[str, str], arts: dict[str, tuple[str, str]] | None = None, mine: set[str] | None = None,
+                  editable: set[str] | None = None) -> dict[str, Any]:
+    """The API view of a truck.  ``mine`` = the suppliers of the portfolio **shown** (the one chosen at the top of the
+    screen) : a truck of one of them, or a shuttle, is blue ; ``editable`` = the suppliers the signed-in user may act
+    on (his own portfolio, a manager : all) ; without them nothing is."""
     arts = arts or {}
-    own = t.mode == "maf" or t.supplier_id == MAF_ID or (mine is not None and t.supplier_id in mine)
+    shuttle = t.mode == "maf" or t.supplier_id == MAF_ID
+    own = shuttle or (mine is not None and t.supplier_id in mine)
+    may = own if editable is None else (shuttle or t.supplier_id in editable)
     return {"transport_id": t.transport_id, "supplier_id": t.supplier_id, "supplier_name": MAF_LABEL if t.supplier_id == MAF_ID else names.get(t.supplier_id, ""),
             "date": t.date, "time": t.time, "docks": split_docks(t.docks), "carrier": t.carrier or "", "note": t.note or "", "status": t.status,
             "mode": t.mode or "fournisseur", "created_by": t.created_by, "created_at": t.created_at,
-            "pinned": bool(t.pinned), "check_reason": t.check_reason or "", "mine": own,
+            "pinned": bool(t.pinned), "check_reason": t.check_reason or "", "mine": own, "editable": may,
             "return_trip": bool(t.return_trip), "return_docks": split_docks(t.return_docks),
             "cancelled_by": t.cancelled_by or "", "cancelled_at": t.cancelled_at,
             "orders": [{"order_id": o.order_id, "article_id": o.article_id, "designation": arts.get(o.article_id, ("", ""))[0], "unit": arts.get(o.article_id, ("", ""))[1],

@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import { KindIcon } from "@/components/transports/icons";
-import { dayLabel, shortName, toneOf } from "@/lib/transports";
+import { dayLabel, shortName, toneOf, touchedBy } from "@/lib/transports";
 import type { BoardResponse, TransportOut } from "@/lib/types";
 
 /**
@@ -9,7 +9,7 @@ import type { BoardResponse, TransportOut } from "@/lib/types";
  * red, the others grey with a red dot when they have something to check).  Totals per day (bottom) and per dock
  * (right).  A click on a day header opens its agenda ; a click on a chip opens the truck's menu.
  */
-export function WeekBoard({ d, days, selected, onSelect, onDay }: { d: BoardResponse; days: string[]; selected: string | null; onSelect: (t: TransportOut, e: MouseEvent<HTMLButtonElement>) => void; onDay: (day: string) => void }) {
+export function WeekBoard({ d, days, selected, onSelect, onDay, whose = "à vous" }: { d: BoardResponse; days: string[]; selected: string | null; onSelect: (t: TransportOut, e: MouseEvent<HTMLButtonElement>) => void; onDay: (day: string) => void; whose?: string }) {
   const planned = d.transports.filter((t) => t.status === "planned" && days.includes(t.date));
   const cell = (dock: string, day: string) => planned.filter((t) => t.date === day && t.docks.includes(dock)).sort((a, b) => a.time.localeCompare(b.time) || a.transport_id.localeCompare(b.transport_id));
   const dayTotal = (day: string) => planned.filter((t) => t.date === day).length;
@@ -34,12 +34,12 @@ export function WeekBoard({ d, days, selected, onSelect, onDay }: { d: BoardResp
             return (
               <div key={day} className={`tp-cell ${day === d.as_of ? "today" : ""} ${day < d.as_of ? "past" : ""} ${closed ? "closed" : ""}`}>
                 <div className="cnt">
-                  {closed && !xs.length ? <b className="closed-lbl">fermé</b> : <><b className={`big ${xs.length ? "" : "zero"}`}>{xs.length}</b><span>camion{xs.length > 1 ? "s" : ""}</span>{mine > 0 && <span className="me">{mine} à vous</span>}</>}
+                  {closed && !xs.length ? <b className="closed-lbl">fermé</b> : <><b className={`big ${xs.length ? "" : "zero"}`}>{xs.length}</b><span>camion{xs.length > 1 ? "s" : ""}</span>{mine > 0 && <span className="me">{mine} {whose}</span>}</>}
                 </div>
                 <div className="chips">
                   {xs.map((t) => (
-                    <button key={t.transport_id} type="button" className={`tp-chip ${toneOf(t)} ${t.check_reason && !t.mine ? "dot" : ""} ${selected === t.transport_id ? "sel" : ""}`} aria-haspopup="menu" aria-label={`Camion ${t.transport_id}`}
-                      title={`${t.transport_id} · ${t.time} · ${t.supplier_name || t.supplier_id}${t.check_reason ? ` · à vérifier : ${t.check_reason}` : ""}`} onClick={(e) => onSelect(t, e)}>
+                    <button key={t.transport_id} type="button" className={`tp-chip ${toneOf(t)} ${t.check_reason && !t.mine ? "dot" : ""} ${touchedBy(t) ? "touched" : ""} ${selected === t.transport_id ? "sel" : ""}`} aria-haspopup="menu" aria-label={`Camion ${t.transport_id}`}
+                      title={`${t.transport_id} · ${t.time} · ${t.supplier_name || t.supplier_id}${t.check_reason ? ` · à vérifier : ${t.check_reason}` : ""}${touchedBy(t) ? " · touché à la main" : ""}`} onClick={(e) => onSelect(t, e)}>
                       <KindIcon t={t} size={11} /><span className="n">{shortName(t)}</span>
                     </button>
                   ))}

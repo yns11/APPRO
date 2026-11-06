@@ -222,13 +222,15 @@ export type TransportMode = "fournisseur" | "transporteur" | "maf" | "ev" | "pon
 export interface TransportOut { transport_id: string; supplier_id: string; supplier_name: string; date: string; time: string; docks: string[]; carrier: string; note: string; mode: TransportMode; status: string; created_by: string; created_at: string | null;
   /** placed by a planner (moved, split) : keeps its orders when the ERP moves their date */
   pinned: boolean; check_reason: string;
-  /** a truck of the planner's suppliers, or a shuttle : the planner may act on it */
-  mine: boolean; return_trip: boolean; return_docks: string[]; cancelled_by: string; cancelled_at: string | null; orders: TransportOrderOut[]; lines: TransportLine[]; }
+  /** a truck of the portfolio shown (chosen at the top of the screen), or a shuttle : blue */
+  mine: boolean;
+  /** the signed-in user may act on it (his own portfolio, a manager : all, every shuttle) */
+  editable: boolean; return_trip: boolean; return_docks: string[]; cancelled_by: string; cancelled_at: string | null; orders: TransportOrderOut[]; lines: TransportLine[]; }
 export interface PlanningOrder { order_id: string; article_id: string; designation: string; unit: string; ref: string; expected_date: string; qty_ordered: number; qty_open: number; ignored: boolean; transports: string[]; }
 export interface PlanningSupplier { supplier_id: string; name: string; transport_contact: string; emails: string[]; docks: string[]; mode: string; carrier: string; hours: string[]; orders: PlanningOrder[]; }
 export interface PlanningResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; scope: "main" | "maf"; slots: string[]; capacity: number; closed_docks: Record<string, string[]>; suppliers: PlanningSupplier[]; transports: TransportOut[]; }
 /** The single screen : every truck of the two weeks, every supplier, flagged ``mine`` ; the cancelled trucks of a person stay (struck). */
-export interface BoardResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; slots: string[]; day_slots: string[]; capacity: number; hard_max: number; closed_docks: Record<string, string[]>; maf_day: string | null; maf_pending: number; user_label: string; people: Record<string, string>; transports: TransportOut[]; }
+export interface BoardResponse { as_of: string; start: string; end: string; days: string[]; docks: string[]; slots: string[]; day_slots: string[]; capacity: number; hard_max: number; closed_docks: Record<string, string[]>; maf_day: string | null; maf_pending: number; user_label: string; planner: string | null; people: Record<string, string>; transports: TransportOut[]; }
 /** An occupied slot : who is there, the nearest free slot, whether forcing is possible (also the body of a 409). */
 export interface SlotCheck { date: string; time: string; slot: string | null; docks: string[]; count: number; capacity: number; hard_max: number; proposed: string | null; others: string[]; free: boolean; forceable: boolean; }
 export interface DockSlotTruck { transport_id: string; supplier_id: string; supplier_name: string; mode: string; time: string; check_reason: string; docks: string[]; }

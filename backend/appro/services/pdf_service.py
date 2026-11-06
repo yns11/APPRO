@@ -385,6 +385,7 @@ def planning_pdf(board: dict, user_label: str, people: dict[str, str] | None = N
     tot = ParagraphStyle("tot", parent=styles["Normal"], fontSize=11, leading=13, fontName="Helvetica-Bold", alignment=1)
     blk = ParagraphStyle("blk", parent=styles["Normal"], fontSize=6.6, leading=8)
     stamp = f"Ma Routine Appro · édité le {dt.datetime.now():%d/%m/%Y %H:%M} par {user_label}"
+    blue = (f"bleu = camions du carnet {board['planner']}" if board.get("planner") else "bleu = vos camions") + " · jaune = navettes, retours EV et camions ponctuels posés à la main · • = touché à la main"
     docks: list[str] = board["docks"]
     slots: list[str] = board["slots"]
     trucks = [t for t in board["transports"]]
@@ -401,14 +402,19 @@ def planning_pdf(board: dict, user_label: str, people: dict[str, str] | None = N
         if t["status"] != "planned":
             return "#9ca3af"
         if t.get("mine"):
-            return "#b42318" if t.get("check_reason") else _BLUE
+            if t.get("check_reason"):
+                return "#b42318"
+            return "#b54708" if t["mode"] in ("maf", "ev", "ponctuel") else _BLUE
         return "#374151"
+
+    def touched(t: dict) -> str:
+        return " •" if t["status"] == "planned" and t["mode"] not in ("maf", "ev", "ponctuel") and (t.get("pinned") or t.get("note")) else ""
 
     def week_page(days: list[dt.date]) -> None:
         wk = days[0].isocalendar()[1]
         n_week = sum(1 for t in planned if t["date"] in days)
         story.append(Paragraph(f"Planning transport · S{wk:02d} · {days[0]:%d/%m} → {days[-1]:%d/%m/%Y}", h1))
-        story.append(Paragraph(f"{n_week} camion(s) · {board['capacity']} par quai et par créneau · bleu = vos camions et les navettes · rouge = à vérifier", meta))
+        story.append(Paragraph(f"{n_week} camion(s) · {board['capacity']} par quai et par créneau · {blue} · rouge = à vérifier", meta))
         story.append(Spacer(1, 3 * mm))
         rows = [[Paragraph("Quai", head)] + [Paragraph(f"{_WD_SHORT[d.weekday()]} {d:%d/%m}<br/><font size='7' color='#475467'>{sum(1 for t in planned if t['date'] == d)} camion(s)</font>", head_c) for d in days]
                 + [Paragraph("Semaine", head_c)]]
@@ -423,9 +429,9 @@ def planning_pdf(board: dict, user_label: str, people: dict[str, str] | None = N
                 if closed and not here:
                     line.append(Paragraph("<font color='#475467'>fermé</font>", cell))
                     continue
-                items = " · ".join(f"<font color='{colour(t)}'>{t['time']} {_short_name(t)}</font>" for t in here)
+                items = " · ".join(f"<font color='{colour(t)}'>{t['time']} {_short_name(t)}{touched(t)}</font>" for t in here)
                 line.append(Paragraph(f"<font size='15'><b>{len(here)}</b></font> <font size='6.5' color='#475467'>camion(s)</font>"
-                                      + (f" <font size='7' color='{_BLUE}'><b>{mine_n} à vous</b></font>" if mine_n else "") + f"<br/>{items}", cell))
+                                      + (f" <font size='7' color='{_BLUE}'><b>{mine_n} {'du carnet' if board.get('planner') else 'à vous'}</b></font>" if mine_n else "") + f"<br/>{items}", cell))
             line.append(Paragraph(str(sum(1 for t in planned if t["date"] in days and dock in t["docks"])), tot))
             rows.append(line)
             heights.append(avail * (0.55 if dock == docks[0] else 0.45 / max(len(docks) - 1, 1)))
@@ -449,7 +455,7 @@ def planning_pdf(board: dict, user_label: str, people: dict[str, str] | None = N
         here = [t for t in trucks if t["date"] == d]
         n_day = sum(1 for t in here if t["status"] == "planned")
         story.append(Paragraph(f"{_WD[d.weekday()]} {d:%d/%m/%Y} · agenda des quais", h1))
-        story.append(Paragraph(f"{n_day} camion(s) · bleu = vos camions et les navettes · rouge = à vérifier · barré = annulé", meta))
+        story.append(Paragraph(f"{n_day} camion(s) · {blue} · rouge = à vérifier · barré = annulé", meta))
         story.append(Spacer(1, 2 * mm))
         keys = ["before"] + slots + ["after"]
         labels = {"before": f"< {int(slots[0][:2])}h", "after": f"≥ {int(slots[-1][:2]) + (1 if slots[-1][3:] != '00' else 0)}h" if slots[-1][3:] == "30" else f"≥ {int(slots[-1][:2]) + 1}h"}
@@ -460,7 +466,7 @@ def planning_pdf(board: dict, user_label: str, people: dict[str, str] | None = N
                 xs = sorted((t for t in here if dock in t["docks"] and _slot_floor(t["time"], slots) == k), key=lambda t: (t["time"], t["transport_id"]))
                 parts = []
                 for t in xs:
-                    txt = f"<b>{t['transport_id']}</b> {_short_name(t)}" + (f" {t['time']}" if k in labels else "")
+                    txt = f"<b>{t['transport_id']}</b> {_short_name(t)}{touched(t)}" + (f" {t['time']}" if k in labels else "")
                     if t["status"] != "planned":
                         txt = f"<strike>{txt}</strike> annulé"
                     parts.append(f"<font color='{colour(t)}'>{txt}</font>")

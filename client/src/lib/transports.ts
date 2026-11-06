@@ -3,9 +3,10 @@ import type { ApiError } from "@/lib/api";
 import type { SlotCheck, TransportLineIn, TransportOrderOut, TransportOut } from "@/lib/types";
 import { WEEKDAY_LONG, WEEKDAY_SHORT, fmtDate, fmtQty } from "@/lib/format";
 
-/** The four tones a truck can show, the same in every view : mine (blue), mine to check (red), another planner's (grey), cancelled (struck). */
-export type TruckTone = "mine" | "check" | "other" | "off";
-export const TONE_LABEL: Record<TruckTone, string> = { mine: "vos camions et les navettes", check: "vos camions à vérifier", other: "autres approvisionneurs", off: "annulé" };
+/** The tones a truck can show, the same in every view : of the portfolio shown (blue), to check (red), by hand (yellow : every
+ * shuttle, the EV returns and one-off trucks of the portfolio shown), another portfolio's (grey), cancelled (struck). */
+export type TruckTone = "mine" | "check" | "manual" | "other" | "off";
+export const TONE_LABEL: Record<TruckTone, string> = { mine: "camions du carnet", check: "à vérifier", manual: "navettes, retours EV et camions ponctuels du carnet", other: "autres carnets", off: "annulé" };
 /** What a truck without supplier orders is called. */
 export const KIND_LABEL: Record<string, string> = { ev: "retour EV", ponctuel: "ponctuel", maf: "navette MAF" };
 /** The screens write HAMBACH on a shuttle (the CSV keeps NAVETTE HAMBACH). */
@@ -50,8 +51,11 @@ export const dayLong = (iso: string) => { const d = new Date(`${iso}T12:00:00`);
 export function toneOf(t: TransportOut): TruckTone {
   if (t.status === "cancelled") return "off";
   if (!t.mine) return "other";
-  return t.check_reason ? "check" : "mine";
+  if (t.check_reason) return "check";
+  return t.mode === "maf" || t.mode === "ev" || t.mode === "ponctuel" ? "manual" : "mine";
 }
+/** An automatic truck a planner touched (moved, split, restored, annotated) : a small dot on its right tells it from one never modified. */
+export const touchedBy = (t: TransportOut) => t.status === "planned" && t.mode !== "maf" && t.mode !== "ev" && t.mode !== "ponctuel" && (t.pinned || !!t.note);
 export const isShuttle = (t: TransportOut) => t.mode === "maf";
 /** The name written on a chip or a block : HAMBACH for a shuttle (· A/R), the first word of the supplier otherwise. */
 export function shortName(t: TransportOut, max = 12): string {

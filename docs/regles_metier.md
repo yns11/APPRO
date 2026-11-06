@@ -532,11 +532,16 @@ de l'en-tête : **Navette MAF** (avec le nombre de commandes MAF du **prochain j
 Ni écran Fournisseurs, ni Planning MAF, ni liste déroulante de périmètre : tous les camions de tous les fournisseurs
 sont là, les quais étant partagés.
 
-**Quatre tons, partout** (semaine, agenda, menu, PDF) : **bleu** = vos camions (ceux des fournisseurs de votre carnet)
-et toute navette MAF ; **rouge** = vos camions **à vérifier** ; **gris** = les camions des autres approvisionneurs (un
-point rouge s'ils ont quelque chose à vérifier chez eux) ; **gris barré** = annulé (il reste dans l'agenda jusqu'à la
-fin de son jour). Un approvisionneur **ne modifie que ses camions et les navettes** ; un manager ou un administrateur,
-tous. Un camion d'un collègue n'offre que *Copier l'identifiant* et *CSV ATR*.
+**Cinq tons, partout** (semaine, agenda, menu, PDF) : **bleu** = les camions automatiques du **carnet sélectionné en
+haut à gauche** (les fournisseurs liés aux articles de ce carnet ; sans carnet choisi, le vôtre) ; **rouge** = ceux de
+ce carnet **à vérifier** ; **jaune** = ce qui est posé à la main : toute navette MAF, les retours EV et les camions
+ponctuels de ce carnet ; **gris** = les camions des autres carnets (un point rouge s'ils ont quelque chose à
+vérifier) ; **gris barré** = annulé (il reste dans l'agenda jusqu'à la fin de son jour). Un **petit point à droite**
+marque un camion automatique **touché à la main** (déplacé, scindé, rétabli ou annoté), pour le distinguer d'un camion
+jamais modifié. La couleur suit
+le carnet affiché ; **les droits suivent l'e-mail connecté** : un approvisionneur **ne modifie que les camions de son
+propre carnet et les navettes**, quel que soit le carnet affiché ; un manager ou un administrateur, tous. Un camion qu'on
+ne peut pas modifier n'offre que *Copier l'identifiant* et *CSV ATR*.
 
 **Aucun numéro de commande n'est affiché** : ni dans les tuiles, ni dans le menu, ni dans les infobulles, ni dans les
 PDF. Un camion se lit en **articles** (article, désignation, quantité restante ; deux commandes d'un même article sont

@@ -295,6 +295,15 @@ def test_ownership_mine_and_shuttles(two_planners):
     assert sh["mine"] is True and sh["created_by"] == "martin@example.com" and sh["mode"] == "maf"
     assert c.post(f"/api/transports/{sh['transport_id']}/move", json={"time": "08:30"}).status_code == 200
     assert next(t for t in _board(c, MATE)["transports"] if t["transport_id"] == sh["transport_id"])["mine"] is True
+    # the colours follow the portfolio chosen at the top of the screen, the rights follow the e-mail
+    seen = _board(c, MATE)
+    assert all(not t["editable"] for t in seen["transports"] if t["mode"] != "maf") and seen["planner"] is None
+    as_quentin = c.get("/api/transports/board", params={"planner": "QUENTIN"}, headers=MATE).json()
+    assert as_quentin["planner"] == "QUENTIN" and all(t["mine"] for t in as_quentin["transports"]) and not any(t["editable"] for t in as_quentin["transports"] if t["mode"] != "maf")
+    assert c.post(f"/api/transports/{em}/note", json={"note": "x"}, headers=MATE).status_code == 403     # blue, still not his
+    as_martin = c.get("/api/transports/board", params={"planner": "MARTIN"}).json()
+    assert not any(t["mine"] for t in as_martin["transports"] if t["mode"] != "maf") and all(t["editable"] for t in as_martin["transports"])
+    assert c.get("/api/transports/planning.pdf", params={"planner": "MARTIN"}).status_code == 200
     # a manager owns everything
     assert c.put("/api/reference/ref_planners/rows", json={"values": {"planner_id": "PROC2", "name": "MARTIN", "email": "martin@example.com", "role": "manager", "active": True}}, headers=ROOT).status_code == 200
     assert c.post(f"/api/transports/{em}/note", json={"note": "x"}, headers=MATE).status_code == 200

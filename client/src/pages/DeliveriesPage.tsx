@@ -24,15 +24,16 @@ type Dialog = { kind: "maf" } | { kind: SpecialKind; date: string };
  * tool.  A click on a truck opens its menu where the click happened.
  */
 export default function DeliveriesPage() {
-  const { config } = usePerimeter();
+  const { config, perimeter } = usePerimeter();
+  const planner = perimeter.planner ?? undefined;        // the colours follow the portfolio chosen at the top ; the rights follow the e-mail
   const today = config?.as_of ?? localIso(new Date());
   const monday = mondayOf(today);
   const [week, setWeek] = useState<0 | 1>(0);
   const [day, setDay] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const q = useQuery({ queryKey: ["transports-board", monday], enabled: !!config, refetchInterval: 120_000,
-    queryFn: () => api.get<BoardResponse>("/api/transports/board", { start: monday, weeks: 2 }) });
+  const q = useQuery({ queryKey: ["transports-board", monday, planner ?? null], enabled: !!config, refetchInterval: 120_000,
+    queryFn: () => api.get<BoardResponse>("/api/transports/board", { start: monday, weeks: 2, planner }) });
   const d = q.data;
   const weeks = useMemo(() => [0, 1].map((i) => { const m = addDays(monday, 7 * i); return { monday: m, days: (d?.days ?? []).filter((x) => x >= m && x < addDays(m, 7)) }; }), [d, monday]);
   const shown = weeks[week];
@@ -44,6 +45,7 @@ export default function DeliveriesPage() {
   const planned = (d?.transports ?? []).filter((t) => t.status === "planned");
   const inView = planned.filter((t) => (dayShown ? t.date === dayShown : shown.days.includes(t.date)));
   const mine = inView.filter((t) => t.mine).length;
+  const whose = planner ? `du carnet ${planner}` : "à vous";
   const canWrite = !!config?.access?.can_write;
   const defaultDay = dayShown ?? (shown.days.find((x) => x >= today) ?? d?.maf_day ?? today);
 
@@ -58,7 +60,7 @@ export default function DeliveriesPage() {
           <Button size="sm" disabled={!d || !canWrite} title="Retour EV : le fournisseur vient enlever ses emballages vides (EM…EV)" onClick={() => setDialog({ kind: "ev", date: defaultDay })}><PalletIcon width={14} height={14} />Retour EV</Button>
           <Button size="sm" disabled={!d || !canWrite} title="Camion ponctuel : tout autre camion hors commandes (échantillons, retour de pièces…)" onClick={() => setDialog({ kind: "ponctuel", date: defaultDay })}><Truck />Camion ponctuel</Button>
           <span className="tp-sep" />
-          <a className="btn sm icon" href={api.downloadUrl("/api/transports/planning.pdf")} target="_blank" rel="noreferrer" title="PDF imprimable : cette semaine, ses jours, la semaine prochaine, ses jours" aria-label="PDF imprimable du planning"><Printer /></a>
+          <a className="btn sm icon" href={api.downloadUrl("/api/transports/planning.pdf", { planner })} target="_blank" rel="noreferrer" title="PDF imprimable : cette semaine, ses jours, la semaine prochaine, ses jours" aria-label="PDF imprimable du planning"><Printer /></a>
           <a className="btn sm icon" href={api.downloadUrl("/api/transports/atr.csv")} download title="CSV pour l'outil de transport ATR : tous les transports prévus à partir d'aujourd'hui" aria-label="CSV ATR"><FileDown /></a>
         </div>
       </div>
@@ -78,14 +80,14 @@ export default function DeliveriesPage() {
         <Card flush className="tp-main">
           <div className="tp-title">
             <b>{dayShown ? dayLong(dayShown) : `${weekShort(isoWeekKey(shown.monday))} · ${fmtDate(shown.monday, "dd/MM")} → ${fmtDate(addDays(shown.monday, 4), "dd/MM")}`}</b>
-            <span className="subtle">{dayShown ? `agenda des quais · un bloc = un camion · ${d.capacity} camion${d.capacity > 1 ? "s" : ""} par quai et par créneau, ${d.hard_max} au plus en forçant · le retour d'une navette n'occupe pas de créneau` : "camions par quai et par jour · les vôtres en bleu · un jour pour l'agenda, un camion pour ses actions"}</span>
-            <span style={{ marginLeft: "auto", fontWeight: 600 }}>{inView.length} camion{inView.length > 1 ? "s" : ""} {dayShown ? "" : "cette semaine"}{mine ? ` · ${mine} à vous` : ""}</span>
+            <span className="subtle">{dayShown ? `agenda des quais · un bloc = un camion · ${d.capacity} camion${d.capacity > 1 ? "s" : ""} par quai et par créneau, ${d.hard_max} au plus en forçant · le retour d'une navette n'occupe pas de créneau` : `par quai et par jour · bleu = ${planner ? `carnet ${planner}` : "vos camions"}, jaune = posé à la main · un jour pour l'agenda, un camion pour ses actions`}</span>
+            <span style={{ marginLeft: "auto", fontWeight: 600 }}>{inView.length} camion{inView.length > 1 ? "s" : ""} {dayShown ? "" : "cette semaine"}{mine ? ` · ${mine} ${whose}` : ""}</span>
           </div>
           {dayShown
             ? <DayAgenda d={d} day={dayShown} selected={menu?.t.transport_id ?? null} onSelect={openMenu} now={config?.as_of === localIso(new Date()) ? `${today}T${new Date().toTimeString().slice(0, 5)}` : undefined} />
-            : <WeekBoard d={d} days={shown.days} selected={menu?.t.transport_id ?? null} onSelect={openMenu} onDay={(x) => pickDay(week, x)} />}
+            : <WeekBoard d={d} days={shown.days} selected={menu?.t.transport_id ?? null} onSelect={openMenu} onDay={(x) => pickDay(week, x)} whose={planner ? "du carnet" : "à vous"} />}
           <div className="tp-legend">
-            <span><i className="mine" /> vos camions et les navettes</span><span><i className="check" /> vos camions à vérifier</span><span><i className="other" /> autres approvisionneurs (point rouge : à vérifier chez eux)</span>
+            <span><i className="mine" /> {planner ? `camions du carnet ${planner}` : "vos camions"}</span><span><i className="check" /> {planner ? "à vérifier dans ce carnet" : "vos camions à vérifier"}</span><span><i className="manual" /> navettes, retours EV et camions ponctuels {planner ? "du carnet" : "à vous"}</span><span><i className="other" /> autres carnets (point rouge : à vérifier chez eux)</span><span><i className="touched" /> point = touché à la main</span>
             {dayShown && <><span><i className="off" /> annulé</span><span><i className="forced" /> créneau forcé</span></>}
             <span><KindIcon t={{ mode: "maf" }} /> navette MAF</span><span><KindIcon t={{ mode: "ev" }} /> retour EV</span><span><KindIcon t={{ mode: "ponctuel" }} /> camion ponctuel</span>
             <span style={{ marginLeft: "auto" }}>horizon : cette semaine et la suivante</span>

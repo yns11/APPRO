@@ -888,7 +888,8 @@ class TransportOut(BaseModel):
     created_at: dt.datetime | None = None
     pinned: bool = False                   # placed by a planner : keeps its orders when the ERP moves their date
     check_reason: str = ""                 # « à vérifier » : why
-    mine: bool = False                     # a truck of the planner's suppliers, or a shuttle : he may act on it
+    mine: bool = False                     # a truck of the portfolio shown (the one chosen at the top of the screen), or a shuttle : blue
+    editable: bool = False                 # the signed-in user may act on it (his own portfolio, a manager : all, every shuttle)
     return_trip: bool = False              # shuttle : goes back loaded to the MAF (no slot of its own)
     return_docks: list[str] = Field(default_factory=list)
     cancelled_by: str = ""
@@ -952,6 +953,7 @@ class BoardResponse(BaseModel):
     maf_day: dt.date | None = None         # the next working day
     maf_pending: int = 0                   # its MAF orders without a shuttle yet
     user_label: str = ""
+    planner: str | None = None             # the portfolio the colours follow (None : the signed-in user's own)
     people: dict[str, str] = Field(default_factory=dict)   # e-mail → first name of the declared planners (authors)
     transports: list[TransportOut]         # planned, plus the trucks a person cancelled (struck in the agenda)
 

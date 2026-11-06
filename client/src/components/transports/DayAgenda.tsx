@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import { KindIcon } from "@/components/transports/icons";
-import { agendaRow, hourLabel, shortName, toneOf } from "@/lib/transports";
+import { agendaRow, hourLabel, shortName, toneOf, touchedBy } from "@/lib/transports";
 import type { BoardResponse, TransportOut } from "@/lib/types";
 
 /**
@@ -37,8 +37,8 @@ export function DayAgenda({ d, day, selected, onSelect, now }: { d: BoardRespons
                 return (
                   <div key={dock} className={`sl ${r.endsWith(":00") || edge ? "hr" : ""} ${closed.has(dock) ? "closed" : ""} ${nowRow === r ? "now" : ""} ${live > d.capacity ? "forced" : ""} ${edge ? "edge" : ""}`}>
                     {here.map((t) => (
-                      <button key={t.transport_id} type="button" className={`tp-blk ${toneOf(t)} ${t.check_reason && !t.mine ? "dot" : ""} ${here.length === 1 ? "one" : ""} ${selected === t.transport_id ? "sel" : ""}`} aria-haspopup="menu"
-                        onClick={(e) => onSelect(t, e)} title={`${t.transport_id} · ${t.supplier_name || t.supplier_id} · ${t.time}${t.status === "cancelled" ? " · annulé" : ""}${t.check_reason ? ` · à vérifier : ${t.check_reason}` : ""}`}>
+                      <button key={t.transport_id} type="button" className={`tp-blk ${toneOf(t)} ${t.check_reason && !t.mine ? "dot" : ""} ${touchedBy(t) ? "touched" : ""} ${here.length === 1 ? "one" : ""} ${selected === t.transport_id ? "sel" : ""}`} aria-haspopup="menu"
+                        onClick={(e) => onSelect(t, e)} title={`${t.transport_id} · ${t.supplier_name || t.supplier_id} · ${t.time}${t.status === "cancelled" ? " · annulé" : ""}${t.check_reason ? ` · à vérifier : ${t.check_reason}` : ""}${touchedBy(t) ? " · touché à la main" : ""}`}>
                         <KindIcon t={t} size={12} /><span className="id">{t.transport_id}</span><span className="n">{shortName(t)}{edge ? ` · ${t.time}` : ""}{t.status === "cancelled" ? " · annulé" : ""}</span>
                       </button>
                     ))}
