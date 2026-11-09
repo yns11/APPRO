@@ -529,7 +529,8 @@ ligne par créneau de la grille automatique (07:00 → 15:30), une ligne « < 7h
 les camions placés à la main en dehors, une colonne par quai sans séparation de voies, un bloc = un camion (deux
 côte à côte = la capacité), un créneau forcé en orange, un quai fermé hachuré, le trait rouge « maintenant ». À droite
 de l'en-tête : **Navette MAF** (avec le nombre de commandes MAF du **prochain jour ouvré** encore sans navette),
-**Retour EV**, **Camion ponctuel**, puis deux icônes : l'imprimante (**PDF du planning**) et la flèche (**CSV ATR**).
+**Retour EV**, **Camion ponctuel**, puis l'imprimante (**PDF du planning**), le **CSV du carnet** et le **CSV des
+navettes MAF**.
 Ni écran Fournisseurs, ni Planning MAF, ni liste déroulante de périmètre : tous les camions de tous les fournisseurs
 sont là, les quais étant partagés.
 
@@ -580,8 +581,12 @@ transporteurs sont prévenus par le système de transport (ATR) à partir du fic
 - **Fichier pour l'outil de transport (ATR)** : CSV `;`, en-tête `ID TRANSPORT;FOURNISSEUR;TRANSPORTEUR;DATE;HEURE;
   CODE FOURNISSEUR;FLUX;CHAMP1;CHAMP2;QUAIS`, **une ligne par transport et par quai de l'aller** (tous les autres champs
   répétés), date `jj/mm/aaaa`, heure `hh:mm:ss`, flux toujours `R`, **aucune ligne pour le retour d'une navette**.
-  *CSV ATR de ce camion* dans le menu, **CSV ATR** global (tous les transports prévus datés d'aujourd'hui ou plus
-  tard, tous fournisseurs et tous approvisionneurs) dans l'en-tête.
+  *CSV ATR de ce camion* dans le menu ; dans l'en-tête, **deux fichiers** : le **CSV du carnet** (les transports
+  prévus datés d'aujourd'hui ou plus tard des fournisseurs du carnet affiché, **sans les navettes MAF** :
+  `GET /api/transports/atr.csv?planner=`, chaque approvisionneur charge son fichier dans ATR quand ses camions sont
+  prêts, sans emporter la semaine inachevée d'un collègue ; sans carnet choisi, le sien ; un manager, tous les
+  fournisseurs) et le **CSV des navettes MAF** (toutes les navettes prévues, quel que soit leur auteur :
+  `GET /api/transports/atr-maf.csv`), que tout le monde peut télécharger.
 - **PDF du planning** (icône imprimante) : A4 paysage, **douze pages** : la semaine en cours (quais × jours, nombres
   en gros, « n à vous », les fournisseurs à leur heure, totaux), ses cinq jours (agenda des quais, identifiant et
   fournisseur de chaque camion), la semaine prochaine, ses cinq jours ; les camions de l'approvisionneur connecté en
@@ -597,7 +602,7 @@ transporteurs sont prévenus par le système de transport (ATR) à partir du fic
   roulent déjà sur un autre camion du jour ne se rétablit pas. Création, annulation et rétablissement sont
   journalisés ; ils ne sont **pas annulables par Ctrl+Z** (le fichier a pu quitter l'application).
 - **Droits** : écrire demande d'être approvisionneur déclaré, manager ou administrateur ; sur un camion, d'en être
-  l'approvisionneur (fournisseur de son carnet) ou qu'il s'agisse d'une navette ; le CSV global et le PDF se
+  l'approvisionneur (fournisseur de son carnet) ou qu'il s'agisse d'une navette ; les deux CSV et le PDF se
   téléchargent par tout utilisateur qui voit le planning.
 
 **Modes de transport** (colonne *Mode transport* du fournisseur, liste déroulante, « Fournisseur » partout à

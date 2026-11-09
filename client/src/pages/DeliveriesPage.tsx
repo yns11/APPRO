@@ -61,7 +61,8 @@ export default function DeliveriesPage() {
           <Button size="sm" disabled={!d || !canWrite} title="Camion ponctuel : tout autre camion hors commandes (échantillons, retour de pièces…)" onClick={() => setDialog({ kind: "ponctuel", date: defaultDay })}><Truck />Camion ponctuel</Button>
           <span className="tp-sep" />
           <a className="btn sm icon" href={api.downloadUrl("/api/transports/planning.pdf", { planner })} target="_blank" rel="noreferrer" title="PDF imprimable : cette semaine, ses jours, la semaine prochaine, ses jours" aria-label="PDF imprimable du planning"><Printer /></a>
-          <a className="btn sm icon" href={api.downloadUrl("/api/transports/atr.csv")} download title="CSV pour l'outil de transport ATR : tous les transports prévus à partir d'aujourd'hui" aria-label="CSV ATR"><FileDown /></a>
+          <a className="btn sm" href={api.downloadUrl("/api/transports/atr.csv", { planner })} download title={`CSV pour l'outil de transport ATR : les transports prévus à partir d'aujourd'hui ${planner ? `du carnet ${planner}` : "de votre carnet"}, sans les navettes MAF (chaque approvisionneur charge son fichier)`} aria-label="CSV ATR du carnet"><FileDown />CSV {planner ? planner : "carnet"}</a>
+          <a className="btn sm" href={api.downloadUrl("/api/transports/atr-maf.csv")} download title="CSV pour l'outil de transport ATR : toutes les navettes MAF prévues à partir d'aujourd'hui, quel que soit leur auteur" aria-label="CSV ATR des navettes MAF"><FileDown />CSV navettes</a>
         </div>
       </div>
       <div className="tp-periods">

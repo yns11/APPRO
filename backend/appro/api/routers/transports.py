@@ -226,16 +226,30 @@ def slot(date: dt.date, time: str = Query(..., pattern=S.TIME_PATTERN), dock: li
 
 # ----------------------------------------------------------------------------- CSV and lists
 @router.get("/atr.csv")
-def atr_csv_upcoming(transport_id: list[str] | None = Query(None), ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
-    """The **global CSV for the transport tool** : every planned transport dated today or later, every supplier
-    and every planner (one import into the tool instead of one per transport) ; or, with ``transport_id``
-    repeated, the selected transports only."""
+def atr_csv_upcoming(transport_id: list[str] | None = Query(None), planner: str | None = None, ctx: AppContext = Depends(ctx_dep),
+                     session: Session = Depends(session_dep), access: Access = Depends(access_dep)):
+    """The **CSV of one planner for the transport tool** : the planned transports dated today or later of the
+    suppliers of the portfolio shown (``planner`` ; without it, the signed-in user's own portfolio, every supplier
+    for a manager), **MAF shuttles excluded** (they have their own file, :func:`atr_csv_maf`) : each planner loads
+    his own file once his trucks are ready, without carrying a colleague's unfinished week ; or, with
+    ``transport_id`` repeated, the selected transports only."""
     if transport_id:
         rows = _rows(session, transport_id)
         return _csv_response(T.atr_csv(rows, _names(ctx)), T.csv_filename(rows))
+    ds, _params, as_of = _sync(ctx, session)
+    shown = _shown(ds, access, planner)
+    rows = [t for t in T.list_transports(session, start=as_of) if t.mode != "maf" and t.supplier_id != T.MAF_ID and t.supplier_id in shown]
+    who = (planner or "").upper() or (access.name or "").upper() or "transports"
+    return _csv_response(T.atr_csv(rows, _names(ctx)), f"ATR_{who}_{as_of:%Y%m%d}.csv")
+
+
+@router.get("/atr-maf.csv")
+def atr_csv_maf(ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """The **CSV of the MAF shuttles** for the transport tool : every planned shuttle dated today or later, whoever
+    created it (the shuttles are shared : anyone who sees the planning downloads it)."""
     _ds, _params, as_of = _sync(ctx, session)
-    rows = T.list_transports(session, start=as_of)
-    return _csv_response(T.atr_csv(rows, _names(ctx)), f"ATR_transports_{as_of:%Y%m%d}.csv")
+    rows = [t for t in T.list_transports(session, start=as_of) if t.mode == "maf" or t.supplier_id == T.MAF_ID]
+    return _csv_response(T.atr_csv(rows, _names(ctx)), f"ATR_navettes_MAF_{as_of:%Y%m%d}.csv")
 
 
 @router.get("", response_model=list[S.TransportOut])

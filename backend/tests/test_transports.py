@@ -113,11 +113,18 @@ def test_shuttle_lines_return_leg_pdf_and_csv(client):  # noqa: F811
     assert client.post("/api/transports/cancel", json={"transport_ids": ["EM999999"]}).status_code == 404
     labels = [a["label"] for a in client.get("/api/actions").json()]
     assert any("annulé(s)" in x for x in labels) and any(x.startswith(f"Navette MAF {t['transport_id']}") for x in labels)
-    # the global CSV : every planned transport from today on, shuttles included
+    # the planner's CSV : his planned transports from today on, shuttles excluded ; the shuttles have their own CSV
     glob = client.get("/api/transports/atr.csv")
-    assert glob.status_code == 200 and glob.headers["content-disposition"].endswith('filename="ATR_transports_20260919.csv"')
+    assert glob.status_code == 200 and glob.headers["content-disposition"].endswith('_20260919.csv"')
     glines = glob.text.lstrip("﻿").split("\r\n")
-    assert glines[0] == HEADER and shuttle_b["transport_id"] in {l.split(";")[0] for l in glines[1:] if l}
+    ids = {l.split(";")[0] for l in glines[1:] if l}
+    assert glines[0] == HEADER and ids and shuttle_b["transport_id"] not in ids and not any(l.split(";")[1] == "NAVETTE HAMBACH" for l in glines[1:] if l)
+    maf = client.get("/api/transports/atr-maf.csv")
+    assert maf.status_code == 200 and maf.headers["content-disposition"].endswith('filename="ATR_navettes_MAF_20260919.csv"')
+    mlines = maf.text.lstrip("﻿").split("\r\n")
+    assert mlines[0] == HEADER and shuttle_b["transport_id"] in {l.split(";")[0] for l in mlines[1:] if l} and all(l.split(";")[1] == "NAVETTE HAMBACH" for l in mlines[1:] if l)
+    by_planner = client.get("/api/transports/atr.csv", params={"planner": "QUENTIN"})
+    assert by_planner.status_code == 200 and by_planner.headers["content-disposition"].endswith('filename="ATR_QUENTIN_20260919.csv"')
 
 
 def test_transport_modes_carrier_and_parcel(client):  # noqa: F811
