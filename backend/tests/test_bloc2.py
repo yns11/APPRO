@@ -118,7 +118,11 @@ def test_calendars_table_feeds_the_plant_calendar_and_the_suppliers(client):  # 
     assert put({"calendar": "usine", "key": "", "date_from": "2026-10-05", "date_to": "2026-10-06", "kind": "fermeture", "note": "inventaire", "active": True}).status_code == 200
     assert put({"calendar": "usine", "key": "", "date_from": "2026-10-10", "kind": "ouvert", "active": True}).status_code == 200   # a Saturday worked
     assert put({"calendar": "fournisseur", "key": "S-000545", "date_from": "2026-10-12", "date_to": "2026-10-16", "active": True}).status_code == 200
-    assert put({"calendar": "transit", "key": "IT", "date_from": "2026-10-19", "active": True}).status_code == 200                # every Italian supplier
+    # a transit closure is keyed by a carrier : every supplier whose transport mode is that carrier
+    rows = client.get("/api/reference/ref_suppliers/rows").json()
+    me = next(r for r in rows if r["supplier_id"] == "S-000545")
+    assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**{k: v for k, v in me.items() if k not in ("updated_by", "updated_at", "articles", "article_count")}, "transport_mode": "Geodis"}}).status_code == 200
+    assert put({"calendar": "transit", "key": "Geodis", "date_from": "2026-10-19", "active": True}).status_code == 200            # every supplier carried by Geodis
     assert put({"calendar": "quai", "key": "B15", "date_from": "2026-10-20", "active": True}).status_code == 200
     # refused : unknown calendar, open day on a supplier, missing key, dates reversed, unknown supplier
     assert put({"calendar": "lune", "key": "", "date_from": "2026-10-05", "active": True}).status_code == 422
@@ -129,7 +133,7 @@ def test_calendars_table_feeds_the_plant_calendar_and_the_suppliers(client):  # 
     cal = client.get("/api/data/calendar").json()
     assert {"2026-10-05", "2026-10-06"} <= set(cal["holidays"]) and cal["holiday_sources"]["2026-10-05"] == "table" and cal["open_days"] == ["2026-10-10"]
     sup = {s["supplier_id"]: s for s in cal["suppliers"]}
-    assert "2026-10-12" in sup["S-000545"]["closures"] and "2026-10-19" in sup["S-000545"]["closures"]   # own closure + Italian transit
+    assert "2026-10-12" in sup["S-000545"]["closures"] and "2026-10-19" in sup["S-000545"]["closures"]   # own closure + carrier transit
     # every supplier whose default docks are all B15 cannot deliver on the 20th
     assert all("2026-10-20" in s["closures"] for s in cal["suppliers"] if s["supplier_id"] != "S-000545") or True
     assert "2026-10-20" in sup["S-000545"]["closures"]

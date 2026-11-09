@@ -201,6 +201,14 @@ def planning_pdf(planner: str | None = None, ctx: AppContext = Depends(ctx_dep),
     return _pdf_response(pdf_service.planning_pdf(out, _label(access), out["people"]), f"planning_transport_{out['start']:%Y%m%d}.pdf")
 
 
+@router.get("/packaging", response_model=list[S.PackagingLineOut])
+def packaging(supplier_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
+    """The packaging a supplier may take back (Référentiel › Emballages of the articles he supplies) : the lines of the
+    EV return dialog, each with a planned quantity to type."""
+    ds = _dataset(ctx, session)
+    return json_response([S.PackagingLineOut(**x).model_dump(mode="json") for x in T.packaging_of(ds, ctx.table("ref_packaging").to_dict("records"), supplier_id)])
+
+
 @router.get("/docks", response_model=S.DockDayOut)
 def docks(date: dt.date, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     """Docks × half-hour slots of one day : the planned trucks (shuttles included), the closed docks, the trucks off the grid."""
@@ -278,7 +286,8 @@ def create_special(body: S.TransportSpecialIn, response: Response, ctx: AppConte
     if not access.is_manager and body.supplier_id not in mine:
         raise HTTPException(403, f"{body.supplier_id} : fournisseur d'un autre approvisionneur")
     _slot_errors(lambda: A.ensure_slot(session, params, body.date, body.time, T.check_docks(body.docks), body.force))
-    t = _slot_errors(lambda: T.create_special(session, user, ds, body.kind, body.supplier_id, body.date, body.time, body.docks, body.carrier, body.note))
+    t = _slot_errors(lambda: T.create_special(session, user, ds, body.kind, body.supplier_id, body.date, body.time, body.docks, body.carrier, body.note,
+                                              [ln.model_dump() for ln in body.lines]))
     label = "Retour EV" if body.kind == T.MODE_EV else "Camion ponctuel"
     actions.record_fixed(session, user, "transport", f"{label} {t.transport_id} : {_names(ctx).get(body.supplier_id, body.supplier_id)}, {t.date:%d/%m/%Y} {t.time}", None, response)
     ctx.commit(session)
@@ -331,6 +340,27 @@ def shuttle_pdf(transport_id: str, ctx: AppContext = Depends(ctx_dep), session: 
     ds = _dataset(ctx, session)
     out = T.transport_out(t, _names(ctx), T.article_labels(ds), _mine(ds, access))
     return _pdf_response(pdf_service.shuttle_pdf(out, _people(ctx)), f"navette_{transport_id}.pdf")
+
+
+@router.get("/{transport_id}/retour-ev.pdf")
+def ev_return_pdf(transport_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep), access: Access = Depends(access_dep)):
+    """The **empty packaging return note** of an EV return : letterhead and SHIP FROM (settings), SHIP TO (the
+    supplier and his address), one line per packaging with its planned quantity, blank quantity and weight columns to
+    fill by hand at loading, notes, sender and carrier boxes."""
+    t = _one(session, transport_id)
+    if t.mode != T.MODE_EV:
+        raise HTTPException(422, f"{transport_id} n'est pas un retour EV")
+    ds = _dataset(ctx, session)
+    sup = ctx.table("ref_suppliers")
+    row = sup[sup["supplier_id"] == t.supplier_id]
+    supplier = {"supplier_id": t.supplier_id, "name": str(row["name"].iloc[0]) if not row.empty else t.supplier_id, "address": str(row["address"].iloc[0] or "") if not row.empty and "address" in row.columns else ""}
+    out = T.transport_out(t, _names(ctx), T.article_labels(ds), _mine(ds, access))
+    weights = {(str(r.get("article_id") or "").strip(), str(r.get("packaging_code") or "").strip()): r.get("unit_weight_kg") for r in ctx.table("ref_packaging").to_dict("records")}
+    for ln in out["lines"]:
+        w = weights.get((ln["article"], ln["code"]))
+        ln["unit_weight"] = "" if w in (None, "") or (isinstance(w, float) and w != w) else f"{float(w):g}"
+    st = ctx.settings
+    return _pdf_response(pdf_service.ev_return_pdf(out, supplier, st.company_header, st.ship_from, st.ev_return_contacts), f"retour_EV_{transport_id}.pdf")
 
 
 @router.delete("/{transport_id}", response_model=S.TransportOut)
@@ -423,7 +453,7 @@ def restore(transport_id: str, body: S.ForceIn, response: Response, ctx: AppCont
 @router.post("/{transport_id}/lines", response_model=S.TransportOut)
 def lines(transport_id: str, body: S.TransportLinesIn, response: Response, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep),
           user: str = Depends(current_user), access: Access = Depends(access_dep)):
-    """The typed lines of a shuttle (both legs) and its return leg, replaced as a whole."""
+    """The typed lines of a shuttle (both legs) and its return leg, or the packaging lines of an EV return, replaced as a whole."""
     t, ds, mine = _owned(ctx, session, transport_id, access)
     _action(lambda: T.set_lines(session, user, t, [ln.model_dump() for ln in body.lines], body.return_trip, body.return_docks, [ln.model_dump() for ln in body.return_lines]),
             session, ctx, user, response, f"Navette {transport_id} : lignes")

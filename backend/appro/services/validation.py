@@ -141,7 +141,7 @@ def check_calendars(rows: list[dict], supplier_ids: set[str]) -> None:
         if cal == "usine":
             r["key"] = ""
         elif not key:
-            raise ValueError(f"calendrier {cal} : la clé est obligatoire (fournisseur, pays ou quai)")
+            raise ValueError(f"calendrier {cal} : la clé est obligatoire (fournisseur, transporteur ou quai)")
         elif cal == "fournisseur" and key not in supplier_ids:
             raise ValueError(f"calendrier fournisseur : fournisseur inconnu « {key} »")
         a, b = r.get("date_from"), r.get("date_to")

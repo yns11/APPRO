@@ -38,7 +38,8 @@ se lit.
     exceptionnellement (un samedi travaillé : il compte comme jour ouvré, reçoit du besoin et des livraisons) ;
     une fermeture l'emporte sur un jour ouvert ;
   * *fournisseur* (clé : code fournisseur) : le fournisseur n'expédie ni ne livre ; *transit* (clé : code fournisseur
-    ou **code pays** : tous les fournisseurs du pays) : transporteur ou pays à l'arrêt, aucune livraison ; *quai* (clé :
+    ou **nom du transporteur** : tous les fournisseurs dont c'est le mode de transport) : transporteur à l'arrêt,
+    aucune livraison ; *quai* (clé :
     nom du quai) : quai fermé, les fournisseurs dont **tous** les quais par défaut sont fermés ne livrent pas ce jour-là.
     Ces jours sont retirés des **jours de livraison possibles** du fournisseur : la proposition CBN glisse au jour
     standard précédent tenable, ou ◇ sur un autre jour ouvré, exactement comme un jour refusé ; le besoin de l'usine
@@ -541,7 +542,7 @@ marque un camion automatique **touché à la main** (déplacé, scindé, rétabl
 jamais modifié. La couleur suit
 le carnet affiché ; **les droits suivent l'e-mail connecté** : un approvisionneur **ne modifie que les camions de son
 propre carnet et les navettes**, quel que soit le carnet affiché ; un manager ou un administrateur, tous. Un camion qu'on
-ne peut pas modifier n'offre que *Copier l'identifiant* et *CSV ATR*.
+ne peut pas modifier n'offre que *CSV ATR* (et le *BL de retour EV* d'un retour EV).
 
 **Aucun numéro de commande n'est affiché** : ni dans les tuiles, ni dans le menu, ni dans les infobulles, ni dans les
 PDF. Un camion se lit en **articles** (article, désignation, quantité restante ; deux commandes d'un même article sont
@@ -556,7 +557,7 @@ transporteurs sont prévenus par le système de transport (ATR) à partir du fic
   lettre classe le camion dans sa famille : `A` pour un camion nouveau, `B` puis `C`… pour les camions issus d'une
   **scission** (même numéro, lettre suivante) ; pour la **navette MAF**, le premier camion de la journée prend `A`, le
   deuxième `B`, et ainsi de suite. Un **retour EV** porte `EM` + **4 chiffres + `EV`** (`EM0001EV`), d'un compteur à
-  part. **Copier l'identifiant** est la première action du menu d'un camion.
+  part. Le menu ne propose pas de copie de l'identifiant : il se lit sur la tuile et dans le menu.
 - **Camions des fournisseurs** : tous automatiques (§ 9 ter bis). Personne ne crée un camion de fournisseur à la main.
 - **Navette MAF** (bouton) : le jour (le prochain jour ouvré d'abord), le créneau et les quais de l'**aller**, les
   commandes MAF de ce jour à cocher (fournisseur, article, désignation, quantité ; celles qui n'ont pas encore de
@@ -664,13 +665,28 @@ déplacer le camion ») ; un quai fermé ce jour-là (table Calendriers, calendr
 
 **Actions de l'approvisionneur** sur ses camions et sur les navettes : un clic sur un camion (semaine ou agenda) ouvre
 son **menu** à l'endroit du clic : le camion (identifiant, à qui il est, jour, créneau, quais, ses articles, raison du
-« à vérifier », note) puis **Copier l'identifiant**, *Vu* (efface « à vérifier »), **PDF de la navette** et **Modifier
-les lignes** (navette), **Déplacer** (jour, créneau parmi les demi-heures 06:00 → 21:00, quais ; contrôle du créneau
+« à vérifier », note) puis *Vu* (efface « à vérifier »), **PDF de la navette** et **Modifier
+les lignes** (navette), **BL de retour EV** et **Emballages à retourner** (retour EV, ci-dessous), **Déplacer** (jour, créneau parmi les demi-heures 06:00 → 21:00, quais ; contrôle du créneau
 occupé), **Scinder** (une quantité par **article** part dans un second camion du même jour, même numéro et lettre
 suivante, créneau choisi et contrôlé ou le plus proche libre ; les commandes d'un article donnent dans l'ordre ; **tout
 camion est scindable**, un camion à un seul article par quantité), **Note**, *CSV ATR de ce camion*, **Annuler** ;
-sur un camion annulé : **Rétablir** et *Copier l'identifiant* ; sur le camion d'un collègue : *Copier l'identifiant*
-et *CSV ATR* seulement.
+sur un camion annulé : **Rétablir** seulement ; sur le camion d'un collègue : *CSV ATR* (et le *BL de retour EV*)
+seulement.
+
+**Retour EV et BL de retour des emballages vides.** La table **Emballages** du Référentiel (`ref_packaging` :
+article, code emballage, nom de l'emballage, poids unitaire facultatif ; l'article doit exister) est la nomenclature
+d'emballages. Dans la fenêtre *Retour EV*, dès que le fournisseur est choisi, l'application liste **tous les emballages
+des articles de ce fournisseur** (article et désignation, code emballage, nom, poids) avec un champ **Quantité
+prévue** ; seules les lignes avec une quantité sont enregistrées (lignes `app_transport_lines`, trajet `ev`, le code
+emballage dans `code`). Le menu du retour EV offre **Emballages à retourner** (même tableau, prérempli, remplacement
+en bloc) et **Créer le BL de retour EV** : un PDF A4 portrait « EMPTY PACKAGING RETURN » : en-tête de la société
+(`APPRO_COMPANY_HEADER`), numéro du BL = identifiant du transport, date du camion, identifiant client = code
+fournisseur, immatriculation à remplir, **SHIP FROM** (`APPRO_SHIP_FROM`) et **SHIP TO** (nom et **adresse** du
+fournisseur, colonne *Adresse* du Référentiel, qui remplace l'ancienne colonne *Pays*), puis une ligne par emballage :
+code, nom, poids unitaire, **Planned Qty** (la quantité prévue saisie), **Quantity** (vide, manuscrite au chargement),
+poids ; total des quantités prévues ; note du camion en *Notes / Instructions* ; cases de visa expéditeur et
+transporteur ; contacts (`APPRO_EV_RETURN_CONTACTS`) en pied. Les lignes EV comme le BL sont refusés (422) sur un
+camion qui n'est pas un retour EV.
 
 **Remises à zéro du 05/11/2026** : la migration `transports_fresh_start_2026_11` a supprimé tous les transports et
 remis les compteurs à zéro ; la migration `transports_all_automatic_2026_11` retire la colonne « Camions

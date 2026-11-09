@@ -583,3 +583,86 @@ def shuttle_pdf(t: dict, people: dict[str, str] | None = None) -> bytes:
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()
+
+
+def _block_lines(text: str) -> list[str]:
+    return [x.strip() for x in str(text or "").replace("\r", "").replace("|", "\n").replace(";", "\n").split("\n") if x.strip()]
+
+
+def ev_return_pdf(t: dict, supplier: dict, company_header: str, ship_from: str, contacts: str) -> bytes:
+    """A4 portrait, one page : the **empty packaging return** note of an EV return.  Letterhead (settings), title and
+    reference box (delivery note = the truck identifier, date, client id, plate number blank), SHIP FROM (settings)
+    and SHIP TO (the supplier, his address from the Référentiel), one line per packaging (code, description, unit
+    weight, **planned quantity** from the truck, then blank Quantity and Weight columns to fill by hand at loading),
+    totals, notes, sender and carrier / driver boxes, contacts at the foot."""
+    from reportlab.platypus import Table
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=14 * mm, rightMargin=14 * mm, topMargin=12 * mm, bottomMargin=14 * mm,
+                            title=f"Retour EV {t['transport_id']}", author="Ma Routine Appro")
+    W = A4[0] - 28 * mm
+    blue, pink = colors.HexColor("#1f6fc5"), colors.HexColor("#f5d0f0")
+    styles = getSampleStyleSheet()
+    head_l = ParagraphStyle("hl", parent=styles["Normal"], fontSize=9, leading=12, textColor=blue)
+    brand = ParagraphStyle("brand", parent=styles["Normal"], fontSize=18, leading=20, fontName="Helvetica-Bold", textColor=colors.HexColor("#1b2b5a"))
+    title = ParagraphStyle("title", parent=styles["Normal"], fontSize=17, leading=20, fontName="Helvetica-Bold", textColor=blue, alignment=2)
+    band = ParagraphStyle("band", parent=styles["Normal"], fontSize=8.5, leading=11, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
+    band_l = ParagraphStyle("band_l", parent=band, alignment=0)
+    val = ParagraphStyle("val", parent=styles["Normal"], fontSize=8.5, leading=11, alignment=1)
+    body = ParagraphStyle("body", parent=styles["Normal"], fontSize=8.5, leading=11)
+    body_b = ParagraphStyle("body_b", parent=body, fontName="Helvetica-Bold")
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=8.5, leading=11)
+    cell_c = ParagraphStyle("cell_c", parent=cell, alignment=1)
+    cell_b = ParagraphStyle("cell_b", parent=cell, fontName="Helvetica-Bold")
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=7.5, leading=10, textColor=colors.HexColor("#1f6fc5"))
+    day: dt.date = t["date"]
+    header_lines = _block_lines(company_header)
+    letterhead = [Paragraph(header_lines[0] if header_lines else "", brand)] + [Paragraph(x, head_l) for x in header_lines[1:]]
+    ref = Table([[Paragraph("DELIVERY NOTE No.", band), Paragraph("DATE", band)],
+                 [Paragraph(t["transport_id"], val), Paragraph(f"{day:%Y-%m-%d}", val)],
+                 [Paragraph("ID CLIENT", band), Paragraph("PLATE No.", band)],
+                 [Paragraph(supplier["supplier_id"], val), Paragraph("", val)]], colWidths=[W * 0.21, W * 0.16])
+    ref.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), blue), ("BACKGROUND", (0, 2), (-1, 2), blue), ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
+    top = Table([[letterhead, [Paragraph("EMPTY PACKAGING RETURN", title), Spacer(1, 2 * mm), ref]]], colWidths=[W * 0.55, W * 0.45])
+    top.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    from_lines = _block_lines(ship_from)
+    ship_to = [Paragraph(f"{supplier['supplier_id']} : {supplier['name']}".upper(), ParagraphStyle("st", parent=body_b, textColor=colors.HexColor("#475467"), fontSize=7.5))]
+    ship_to += [Paragraph(x, body_b) for x in _block_lines(supplier.get("address") or "")] or [Paragraph("<font color='#98a2b3'>adresse à renseigner dans le Référentiel (colonne Adresse du fournisseur)</font>", body)]
+    ship = Table([[Paragraph("SHIP FROM", band_l), "", Paragraph("SHIP TO", band_l)],
+                  [[Paragraph(from_lines[0] if from_lines else "", body_b)] + [Paragraph(x, body_b) for x in from_lines[1:]], "", ship_to]], colWidths=[W * 0.49, W * 0.04, W * 0.47])
+    ship.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, 0), blue), ("BACKGROUND", (2, 0), (2, 0), blue), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
+    rows = [[Paragraph("ITEM No.", band), Paragraph("DESCRIPTION", band), Paragraph("Unit Weight (Kg)", band), Paragraph("Planned Qty", band), Paragraph("Quantity", band), Paragraph("Weight (Kg)", band)]]
+    lines = [ln for ln in t["lines"] if ln.get("leg") == "ev"]
+    planned_total = 0.0
+    for ln in lines:
+        try:
+            planned_total += float(str(ln.get("qty") or "0").replace(",", "."))
+        except ValueError:
+            pass
+        rows.append([Paragraph(ln.get("code") or "", cell_b), Paragraph(f"{ln.get('designation') or ''}{(' · ' + ln['article']) if ln.get('article') else ''}", cell_b),
+                     Paragraph(ln.get("unit_weight") or "", cell_c), Paragraph(str(ln.get("qty") or ""), cell_c), "", ""])
+    for _ in range(max(3, 8 - len(lines))):
+        rows.append(["", "", "", "", "", ""])
+    rows.append(["", "", Paragraph("TOTAL", cell_b), Paragraph(f"<b>{planned_total:g}</b>", cell_c), Paragraph("<b>0</b>", cell_c), Paragraph("<b>0</b>", cell_c)])
+    tbl = Table(rows, colWidths=[W * 0.18, W * 0.38, W * 0.13, W * 0.11, W * 0.10, W * 0.10], rowHeights=[8 * mm] + [7.5 * mm] * (len(rows) - 1))
+    style = [("BACKGROUND", (0, 0), (-1, 0), blue), ("GRID", (0, 0), (-1, -2), 0.5, pink), ("BOX", (0, 0), (-1, -1), 0.5, pink), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+             ("BACKGROUND", (4, 1), (4, -2), colors.HexColor("#f2f2f2")), ("BACKGROUND", (2, -1), (-1, -1), pink), ("LINEABOVE", (2, -1), (-1, -1), 0.5, pink), ("LINEBELOW", (0, -1), (-1, -1), 0.5, pink)]
+    tbl.setStyle(TableStyle(style))
+    note = Table([[Paragraph(f"Notes/Instructions :<br/>{t.get('note') or ''}", body)]], colWidths=[W], rowHeights=[22 * mm])
+    note.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.5, pink), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    boxes = Table([[Paragraph("SENDER", small), "", Paragraph("CARRIER / DRIVER", small)]], colWidths=[W * 0.49, W * 0.04, W * 0.47], rowHeights=[26 * mm])
+    boxes.setStyle(TableStyle([("BOX", (0, 0), (0, 0), 0.5, pink), ("BOX", (2, 0), (2, 0), 0.5, pink), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    story = [top, Spacer(1, 5 * mm), ship, Spacer(1, 6 * mm), tbl, Spacer(1, 8 * mm), note, Spacer(1, 4 * mm), boxes, Spacer(1, 10 * mm),
+             Paragraph("<i>For any question related to this delivery note, please contact</i>", ParagraphStyle("c", parent=small, alignment=1, fontSize=8.5)),
+             Paragraph(f"<u>{contacts}</u>", ParagraphStyle("c2", parent=small, alignment=1))]
+
+    def footer(canvas, d):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#667085"))
+        canvas.drawString(14 * mm, 8 * mm, f"Ma Routine Appro · retour EV {t['transport_id']} · {day:%d/%m/%Y} {t.get('time') or ''} · quai {' / '.join(t.get('docks') or [])}")
+        canvas.drawRightString(A4[0] - 14 * mm, 8 * mm, f"généré le {dt.datetime.now():%d/%m/%Y %H:%M}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return buf.getvalue()

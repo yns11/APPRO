@@ -7,7 +7,7 @@ import { Button, Drawer, useToast } from "@/components/ui";
 import { DockPicker } from "@/components/DockPicker";
 import { ConflictBox, SlotField, busyMap, useSlotWrite } from "@/components/transports/SlotField";
 import { fmtDate, fmtQty } from "@/lib/format";
-import { cleanLines, copyText, emptyLine, mondayOf } from "@/lib/transports";
+import { cleanLines, emptyLine, mondayOf } from "@/lib/transports";
 import type { BoardResponse, PlanningResponse, ShuttleIn, TransportLineIn, TransportLinesIn, TransportOut, TransportPackOut } from "@/lib/types";
 
 /**
@@ -35,7 +35,7 @@ export function ShuttleDialog({ d, edit, onClose }: { d: BoardResponse; edit?: T
   const rows = useMemo(() => (maf.data?.suppliers ?? []).flatMap((s) => s.orders.filter((o) => o.expected_date === day && !o.ignored && o.qty_open > 0).map((o) => ({ s, o }))), [maf.data, day]);
   useEffect(() => { if (!edit && maf.data) setPicked(new Set(rows.filter(({ o }) => !o.transports.length).map(({ o }) => o.order_id))); }, [rows, maf.data, edit]);
   const create = useSlotWrite((body: ShuttleIn) => api.post<TransportPackOut>("/api/transports", body),
-    async (pack) => { const id = pack.transports[0].transport_id; const ok = await copyText(id); toast.push(`Navette ${id} créée${ok ? " · identifiant copié" : ""}`, "success"); onClose(); });
+    (pack) => { const id = pack.transports[0].transport_id; toast.push(`Navette ${id} créée`, "success"); onClose(); });
   const save = useWrite((body: TransportLinesIn) => api.post<TransportOut>(`/api/transports/${encodeURIComponent(edit!.transport_id)}/lines`, body), () => { toast.push("Lignes enregistrées", "success"); onClose(); });
   const body = (force?: boolean): ShuttleIn => ({ date: day, time, docks, order_ids: [...picked], lines: cleanLines(lines), return_trip: back, return_docks: back ? backDocks : [], return_lines: back ? cleanLines(backLines) : [], carrier, note, force });
   const hasLoad = picked.size > 0 || cleanLines(lines).length > 0 || (back && cleanLines(backLines).length > 0);

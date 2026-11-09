@@ -14,7 +14,7 @@ import type { RefRow, RefValue, SupplierArticleRow } from "@/lib/types";
 
 const FIELDS: { key: string; label: string; help: string; width?: number }[] = [
   { key: "name", label: "Nom", help: "raison sociale", width: 320 },
-  { key: "country", label: "Pays", help: "code pays", width: 80 },
+  { key: "address", label: "Adresse", help: "rue, code postal, ville, pays (séparés par des virgules) : imprimée sur le BL de retour des emballages vides", width: 420 },
   { key: "contact", label: "Contact", help: "contact commercial ou logistique (texte libre)", width: 320 },
   { key: "transport_contact", label: "Contact transport", help: "adresses e-mail du contact transport, séparées par ; ou , ; elles donnent accès à l'espace fournisseur", width: 420 },
   { key: "lead_time_days", label: "Délai (j ouvrés)", help: "délai commande → livraison, inclusif (lundi + 5 = lundi suivant) ; valeur par défaut des liens", width: 80 },
@@ -22,7 +22,7 @@ const FIELDS: { key: string; label: string; help: string; width?: number }[] = [
 ];
 
 /**
- * Fiche fournisseur › Paramétrage : the supplier's reference row edited in place (name, country, contacts, docks,
+ * Fiche fournisseur › Paramétrage : the supplier's reference row edited in place (name, address, contacts, docks,
  * delivery weekdays, strict days, lead time, active) and the article ↔ supplier rules of the supplier (add, edit, delete).
  * Open to every declared planner, like the Référentiel.
  */

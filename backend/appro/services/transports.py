@@ -266,7 +266,7 @@ def transport_out(t: AppTransport, names: dict[str, str], arts: dict[str, tuple[
                         "supplier_id": o.supplier_id or t.supplier_id, "supplier_name": names.get(o.supplier_id or t.supplier_id, ""), "ref": o.ref or "",
                         "expected_date": o.expected_date, "qty": o.qty}
                        for o in t.orders],
-            "lines": [{"id": ln.id, "leg": ln.leg or "aller", "article": ln.article or "", "designation": ln.designation or "", "qty": ln.qty or ""} for ln in t.lines]}
+            "lines": [{"id": ln.id, "leg": ln.leg or "aller", "article": ln.article or "", "code": ln.code or "", "designation": ln.designation or "", "qty": ln.qty or ""} for ln in t.lines]}
 
 
 def planning(ds: Dataset, session: Session, start: dt.date, weeks: int, holidays: list[dt.date], as_of: dt.date,
@@ -362,18 +362,47 @@ def check_time(time: str | None) -> str:
     return time
 
 
+LEG_EV = "ev"
+
+
 def _clean_lines(lines: list[dict[str, Any]] | None, leg: str) -> list[AppTransportLine]:
+    """Typed lines of a shuttle (article required) or packaging lines of an EV return (``leg = ev`` : article and
+    packaging code, kept only with a planned quantity)."""
     out: list[AppTransportLine] = []
     for ln in lines or []:
         article = str(ln.get("article") or "").strip()[:120]
+        code = str(ln.get("code") or "").strip()[:60]
         designation = str(ln.get("designation") or "").strip()[:200]
         qty = str(ln.get("qty") or "").strip()[:40]
+        if leg == LEG_EV:
+            if not qty or qty in ("0", "0.0", "0,0"):
+                continue
+            if not code:
+                raise TransportError(f"Emballage sans code : « {designation or article} »")
+            out.append(AppTransportLine(leg=leg, article=article, code=code, designation=designation, qty=qty))
+            continue
         if not article and not designation:
             continue
         if not article:
             raise TransportError(f"Ligne {leg} sans article : « {designation} »")
-        out.append(AppTransportLine(leg=leg, article=article, designation=designation, qty=qty))
+        out.append(AppTransportLine(leg=leg, article=article, code=code, designation=designation, qty=qty))
     return out
+
+
+def packaging_of(ds: Dataset, packaging: list[dict[str, Any]], supplier_id: str) -> list[dict[str, Any]]:
+    """The packaging lines a supplier may take back : the ``ref_packaging`` rows of the articles he supplies (active
+    article ↔ supplier rules), one line per article and packaging code, with the article's designation."""
+    arts = {a.article_id: a for a in ds.articles}
+    mine = {l.article_id for l in ds.links if l.supplier_id == supplier_id and getattr(l, "active", True)}
+    out = []
+    for r in packaging:
+        aid = str(r.get("article_id") or "").strip()
+        if aid not in mine:
+            continue
+        w = r.get("unit_weight_kg")
+        out.append({"article_id": aid, "designation": arts[aid].designation if aid in arts else "", "packaging_code": str(r.get("packaging_code") or "").strip(),
+                    "packaging_name": str(r.get("packaging_name") or "").strip(), "unit_weight_kg": None if w in (None, "") or (isinstance(w, float) and w != w) else float(w)})
+    return sorted(out, key=lambda x: (x["article_id"], x["packaging_code"]))
 
 
 def create_shuttle(session: Session, user: str, ds: Dataset, day: dt.date, time: str, docks: list[str], order_ids: list[str],
@@ -412,11 +441,19 @@ def create_shuttle(session: Session, user: str, ds: Dataset, day: dt.date, time:
 
 def set_lines(session: Session, user: str, t: AppTransport, lines: list[dict[str, Any]] | None, return_trip: bool | None = None,
               return_docks: list[str] | None = None, return_lines: list[dict[str, Any]] | None = None) -> None:
-    """The typed lines of a shuttle (both legs) and its return leg, replaced as a whole.  Does not commit."""
-    if t.mode != "maf":
-        raise TransportError(f"{t.transport_id} n'est pas une navette")
+    """The typed lines of a shuttle (both legs) and its return leg, or the packaging lines of an EV return, replaced
+    as a whole.  Does not commit."""
     if t.status != "planned":
-        raise TransportError(f"{t.transport_id} est annulée")
+        raise TransportError(f"{t.transport_id} est annulé")
+    if t.mode == MODE_EV:
+        new_lines = _clean_lines(lines, LEG_EV)
+        t.lines.clear()
+        t.lines.extend(new_lines)
+        session.flush()
+        audit(session, user, "lines", "transport", t.transport_id, None, {"lines": len(new_lines), "leg": LEG_EV})
+        return
+    if t.mode != "maf":
+        raise TransportError(f"{t.transport_id} n'est ni une navette ni un retour EV")
     back = bool(t.return_trip) if return_trip is None else bool(return_trip)
     new_lines = _clean_lines(lines, "aller") + (_clean_lines(return_lines, "retour") if back else [])
     if back:
@@ -431,10 +468,11 @@ def set_lines(session: Session, user: str, t: AppTransport, lines: list[dict[str
 
 
 def create_special(session: Session, user: str, ds: Dataset, kind: str, supplier_id: str, day: dt.date, time: str, docks: list[str],
-                   carrier: str = "", note: str = "") -> AppTransport:
+                   carrier: str = "", note: str = "", lines: list[dict[str, Any]] | None = None) -> AppTransport:
     """A truck **without order** : ``ev`` = an EV return (the supplier comes to take his empty packaging back ;
-    identifier ``EM0001EV`` from its own counter) or ``ponctuel`` = a one-off truck (anything else : samples, a
-    return of parts, a truck outside the orders ; a new family ``EM00124A``).  Does not commit."""
+    identifier ``EM0001EV`` from its own counter ; ``lines`` = the packaging and planned quantities, printed on the
+    return note) or ``ponctuel`` = a one-off truck (anything else : samples, a return of parts, a truck outside the
+    orders ; a new family ``EM00124A``).  Does not commit."""
     if kind not in NO_ORDER_MODES:
         raise TransportError(f"Type de camion inconnu : « {kind} »")
     sp = next((s for s in ds.suppliers if s.supplier_id == supplier_id), None)
@@ -445,10 +483,12 @@ def create_special(session: Session, user: str, ds: Dataset, kind: str, supplier
     tid = next_ev_id(session) if kind == MODE_EV else next_transport_id(session)
     t = AppTransport(transport_id=tid, supplier_id=supplier_id, date=day, time=time, docks=";".join(docks), carrier=(carrier or "").strip()[:120],
                      note=(note or "").strip()[:500], mode=kind, status="planned", created_by=user, pinned=True, check_reason="")
+    if kind == MODE_EV:
+        t.lines.extend(_clean_lines(lines, LEG_EV))
     session.add(t)
     session.flush()
     audit(session, user, "create", "transport", t.transport_id, None,
-          {"supplier_id": supplier_id, "mode": kind, "date": day.isoformat(), "time": time, "docks": docks, "carrier": t.carrier, "orders": []})
+          {"supplier_id": supplier_id, "mode": kind, "date": day.isoformat(), "time": time, "docks": docks, "carrier": t.carrier, "orders": [], "lines": len(t.lines)})
     return t
 
 

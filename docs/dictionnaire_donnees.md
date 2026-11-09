@@ -9,7 +9,7 @@ Deux familles :
 
 | Famille | Tables | Source | Où elles vivent |
 |---|---|---|---|
-| **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | **gérées dans l'application** (page Référentiel : ligne par ligne, modèle Excel par table, modification en lot ; fiche article › Paramétrage) | base applicative (Lakebase ; SQLite en local) |
+| **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `ref_packaging`, `fct_stock`, `ref_planners`, `ref_delegations` | **gérées dans l'application** (page Référentiel : ligne par ligne, modèle Excel par table, modification en lot ; fiche article › Paramétrage) | base applicative (Lakebase ; SQLite en local) |
 | **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_desadv`, `fct_prices`, `fct_stock_snapshot` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
 
 ## 1. Référentiel (géré dans l'application)
@@ -56,7 +56,7 @@ plus ; les anciennes colonnes sont ignorées à l'import.
 |---|---|---|---|---|
 | supplier_id | Fournisseur | texte **clé** | oui | code (`S-000…`), identique à `Code_fournisseur` |
 | name | Nom | texte | oui | |
-| country | Pays | texte | non | |
+| address | Adresse | texte | non | adresse postale, imprimée dans le bloc **SHIP TO** du BL de retour des emballages vides (remplace l'ancienne colonne *Pays*, renommée au démarrage) |
 | contact | Contact | texte | non | |
 | transport_contact | Contact transport | texte | non | adresses e-mail du contact transport, séparées par `;` ou `,` ; une personne connectée avec l'une de ces adresses n'accède qu'à l'**espace fournisseur** (l'application n'envoie aucun e-mail : les avis de transport partent de l'outil ATR) |
 | docks | Quais | texte | non (`B15`) | quais de livraison par défaut, séparés par `;` (`B15`, `B6 EST`, `B2 NORD`, `B6 NORD`), présélectionnés à la création d'un transport ; cases à cocher à un clic dans le Référentiel ; les lignes vides reçoivent `B15` au démarrage |
@@ -86,7 +86,7 @@ règles § 1 de `regles_metier.md`.
 | Colonne | Libellé | Type | Obligatoire | Description |
 |---|---|---|---|---|
 | calendar | Calendrier | texte **clé** | oui | `usine`, `fournisseur`, `transit` ou `quai` |
-| key | Clé | texte **clé** | non | vide pour l'usine ; code fournisseur (`fournisseur`, `transit`) ; code pays (`transit` : tous les fournisseurs du pays) ; nom du quai (`quai`) |
+| key | Clé | texte **clé** | non | vide pour l'usine ; code fournisseur (`fournisseur`, `transit`) ; nom du transporteur (`transit` : tous les fournisseurs dont c'est le *Mode transport*) ; nom du quai (`quai`) |
 | date_from | Du | date **clé** | oui | premier jour |
 | date_to | Au | date | non | dernier jour inclus (vide = le jour seul ; 400 jours au plus) |
 | kind | Nature | texte | non (`fermeture`) | `fermeture`, ou `ouvert` (jour exceptionnellement travaillé : usine seulement) |
@@ -158,6 +158,18 @@ fournisseurs). Depuis *Recherche*, le bouton « Déclarer la PO » d'une récept
 | unit | Unité | texte | oui | |
 | scrap_pct | Rebut % | nombre | non | majore le besoin |
 | valid_from / valid_to | Valide du / au | date | non | |
+
+### 1.5 bis `ref_packaging` — Emballages
+
+Nomenclature d'emballages : les contenants retournables de chaque article, proposés avec une quantité prévue dans la
+fenêtre *Retour EV* et imprimés sur le BL de retour des emballages vides (règles métier § 9 ter).
+
+| Colonne | Libellé | Type | Obligatoire | Description |
+|---|---|---|---|---|
+| article_id | Article | texte **clé** | oui | doit exister dans `ref_articles` |
+| packaging_code | Code emballage | texte **clé** | oui | code du contenant (`R200044`) |
+| packaging_name | Nom emballage | texte | oui | libellé imprimé sur le BL (`REGR EMC BUSBAR ASSY BEV`) |
+| unit_weight_kg | Poids unitaire (kg) | nombre | non | poids d'un emballage vide, ≥ 0, imprimé sur le BL |
 
 ### 1.6 `fct_stock` — Stock de référence
 
@@ -388,7 +400,7 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 
 | Table | Contenu | Clé |
 |---|---|---|
-| `ref_articles`, `ref_suppliers`, `ref_calendars`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) ; `updated_at` sert de **tampon de version** (une écriture d'écran qui renvoie un tampon périmé est refusée, HTTP 409) + `updated_by`, `updated_at` ; les colonnes ajoutées sont créées au démarrage (`ensure_columns`), les anciennes (stock de sécurité, cycle de commande, délai du lien) ignorées puis supprimables ; un 0 hérité dans un délai spécifique ou un plafond est remis à vide au démarrage | clé de la table |
+| `ref_articles`, `ref_suppliers`, `ref_calendars`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `ref_packaging`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) ; `updated_at` sert de **tampon de version** (une écriture d'écran qui renvoie un tampon périmé est refusée, HTTP 409) + `updated_by`, `updated_at` ; les colonnes ajoutées sont créées au démarrage (`ensure_columns`), les anciennes (stock de sécurité, cycle de commande, délai du lien) ignorées puis supprimables ; un 0 hérité dans un délai spécifique ou un plafond est remis à vide au démarrage | clé de la table |
 | `app_meta` | clé / valeur partagées par tous les processus de l'App : `data_version`, incrémentée **dans la transaction** de chaque écriture (et par le job de synchronisation) pour invalider les caches mémoire de chaque worker | key |
 | `app_migrations` | corrections de données ponctuelles déjà appliquées (nom, horodatage) : chacune s'exécute une seule fois par base ; les migrations de schéma du démarrage tournent sous `pg_advisory_lock` | name |
 | `app_plan_cells` | **cellules du plan** : article, fournisseur (`""` si aucun), date, expression saisie, quantité, commentaire, auteur | (article, fournisseur, date) |
@@ -402,7 +414,7 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 | `app_audit_log` | journal : horodatage, utilisateur (`x-forwarded-email`), action, objet, article, détail JSON | id |
 | `app_transports` | **transports** du Planning transport : identifiant `EM` + 5 chiffres + lettre (numéro de famille tiré du compteur, lettre = rang dans la famille : `A` nouveau, `B`, `C`… scissions et navettes MAF suivantes du jour) ou `EM` + 4 chiffres + `EV` (retour EV, compteur à part), fournisseur (`MAF-HAMBACH` pour une navette), date, heure, quais (`;`), transporteur, note, **mode** (`fournisseur`, `transporteur`, `maf`, `ev` retour d'emballages vides, `ponctuel` tout autre camion sans commande), statut `planned` / `cancelled`, auteur (`application` pour un camion automatique), horodatage ; `pinned` (placé à la main : garde ses commandes si l'ERP change leur date), `check_reason` (« à vérifier » : pourquoi) ; navette : `return_trip` (aller / retour), `return_docks` (quais du retour) ; annulation : `cancelled_by`, `cancelled_at` (`application` = camion vidé par la réconciliation, non montré) ; chaque commande emportée (`app_transport_orders`) garde son fournisseur ; **purgée deux fois le 05/11/2026** (migrations `transports_fresh_start_2026_11` puis `transports_fresh_start_2026_11_b` après la saisie des plages habituelles), colonne `origin` retirée le même jour (`transports_all_automatic_2026_11` : tout fournisseur livrant est automatique) | transport_id |
 | `app_transport_orders` | commandes fermes portées par un transport (`order_id` du créneau ERP, article, numéros de commande, date prévue, quantité restante au moment de la création, tenue à jour par la réconciliation) ; les écrans n'affichent jamais le numéro de commande, seulement l'article | id |
-| `app_transport_lines` | **lignes saisies** d'une navette MAF, hors commandes ERP : trajet (`aller` / `retour`), article ou objet, désignation, quantité telle que tapée (« 6 U », « 18 PAL ») | id |
+| `app_transport_lines` | **lignes saisies** hors commandes ERP : navette MAF, trajet (`aller` / `retour`), article ou objet, désignation, quantité telle que tapée (« 6 U », « 18 PAL ») ; retour EV, trajet `ev`, article, `code` = code emballage, désignation = nom de l'emballage, quantité prévue (imprimée en *Planned Qty* sur le BL de retour) | id |
 | `app_transport_days_suppressed` | jours fournisseur dont le camion a été **annulé à la main** sans camion frère (commandes qu'il portait) : un camion n'y renaît que si une commande absente de cette liste apparaît ; effacé si le camion est rétabli | (supplier_id, date) |
 | `app_meta.transports_reconciled_version` | version des données déjà réconciliée par les camions automatiques (une réconciliation par version, sous verrou) | key |
 | `app_counters` | compteurs incrémentaux nommés (`transport` → dernier numéro de famille EM attribué, `transport_ev` → dernier retour EV), lus avec `FOR UPDATE` ; remis à zéro le 05/11/2026 (deux fois : avant et après la saisie des plages habituelles) | name |

@@ -122,7 +122,7 @@ def supplier_detail(supplier_id: str, ctx: AppContext = Depends(ctx_dep), sessio
                                    purch_id=o.ref, ignored=(o.article_id, supplier_id, o.expected_date) in ignored))
     upcoming.sort(key=lambda o: (o.expected_date, o.article_id))
     return json_response(S.SupplierDetail(
-        supplier=S.SupplierRef(supplier_id=sup.supplier_id, name=sup.name, country=sup.country, contact=sup.contact,
+        supplier=S.SupplierRef(supplier_id=sup.supplier_id, name=sup.name, address=sup.address, contact=sup.contact,
                                delivery_weekdays=",".join(str(d) for d in sorted(sup.delivery_weekdays)),
                                lead_time_days=sup.lead_time_days, active=sup.active, strict_days=sup.strict_days),
         as_of=result.as_of, articles=articles, late=mine(flows.late), in_transit=mine(flows.in_transit),

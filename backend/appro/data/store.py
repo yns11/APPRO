@@ -338,14 +338,16 @@ class AppTransportOrder(Base):
 
 
 class AppTransportLine(Base):
-    """A **typed line** of a MAF shuttle (outside the ERP orders) : article or object, description, quantity as
-    typed (« 6 U », « 18 PAL »), on the outward leg (``aller``) or the return leg (``retour``)."""
+    """A **typed line** of a MAF shuttle (outside the ERP orders : article or object, description, quantity as typed,
+    « 6 U », « 18 PAL », on the outward leg ``aller`` or the return leg ``retour``) or a **packaging line** of an EV
+    return (leg ``ev`` : article, packaging code and name, planned quantity)."""
 
     __tablename__ = "app_transport_lines"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     transport_id: Mapped[str] = mapped_column(String(20), ForeignKey("app_transports.transport_id", ondelete="CASCADE"), index=True)
-    leg: Mapped[str] = mapped_column(String(8), default="aller")       # aller | retour
+    leg: Mapped[str] = mapped_column(String(8), default="aller")       # aller | retour (shuttle) | ev (packaging of an EV return)
     article: Mapped[str] = mapped_column(Text, default="")
+    code: Mapped[str | None] = mapped_column(String(60), default="", nullable=True)   # packaging code (EV return)
     designation: Mapped[str] = mapped_column(Text, default="")
     qty: Mapped[str] = mapped_column(String(40), default="")
     transport: Mapped["AppTransport"] = relationship(back_populates="lines")
@@ -580,7 +582,7 @@ def ensure_columns(engine) -> list[str]:
 #: columns an earlier version wrote and the current one no longer maps : ``(table, old column, new column)`` ;
 #: the values are copied into the new column (when it is empty) and the old column is dropped, otherwise an
 #: INSERT of the new version fails on its NOT NULL constraint
-RENAMED_COLUMNS = (("app_transports", "dock", "docks"),)
+RENAMED_COLUMNS = (("app_transports", "dock", "docks"), ("ref_suppliers", "country", "address"))
 
 
 def retire_columns(engine) -> list[str]:

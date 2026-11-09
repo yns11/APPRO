@@ -60,7 +60,7 @@ WEEKLY_FIELDS = ("coverage_target_days", "alert_red_days", "alert_yellow_days", 
 class Supplier:
     supplier_id: str
     name: str = ""
-    country: str = ""
+    address: str = ""              # postal address, printed on the empty packaging return note
     contact: str = ""
     delivery_weekdays: frozenset[int] = frozenset({1, 2, 3, 4, 5})
     lead_time_days: int = 5        # default lead time of the supplier, working days, inclusive (Monday + 5 = next Monday)
@@ -69,7 +69,7 @@ class Supplier:
     transport_contact: str = ""    # e-mail addresses of the transport notices (« ; » or « , » separated)
     docks: str = "B15"             # default delivery docks (« ; » separated), preselected when a transport is created
     cutoff_time: str = ""          # order cut-off hour « HH:MM » : an order placed later leaves the next working day ; "" = none
-    closures: frozenset[dt.date] = frozenset()   # days the supplier cannot deliver (own closures, carrier / country, docks closed)
+    closures: frozenset[dt.date] = frozenset()   # days the supplier cannot deliver (own closures, carrier, docks closed)
     transport_mode: str = "Fournisseur"          # Fournisseur | MAF Hambach | Messagerie | a carrier name (services/transports.py)
     transport_hours: str = ""                    # habitual delivery ranges, « ; » separated (06-10, 08-12, 10-14, 12-16, 14-18, 16+ ; two at most) : the scheduler places the trucks inside (services/transports_auto.py)
 

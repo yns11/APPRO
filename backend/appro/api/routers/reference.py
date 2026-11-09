@@ -122,6 +122,17 @@ def _check_rows(session: Session, name: str, rows: list[dict], replace: bool) ->
                 if not (len(ref) == 6 and ref.isdigit()):
                     raise ValueError(f"{ref or '(vide)'} : un numéro de PO compte six chiffres (exemple 024596)")
                 r["purch_id"] = ref
+        elif name == "ref_packaging":
+            known = {r["article_id"] for r in reference.rows_out(session, "ref_articles")}
+            for r in rows:
+                r["article_id"] = str(r.get("article_id") or "").strip()
+                r["packaging_code"] = str(r.get("packaging_code") or "").strip()
+                r["packaging_name"] = str(r.get("packaging_name") or "").strip()
+                if r["article_id"] not in known:
+                    raise ValueError(f"emballage {r['packaging_code'] or '(sans code)'} : article inconnu « {r['article_id'] or '(vide)'} »")
+                w = r.get("unit_weight_kg")
+                if w not in (None, "") and float(w) < 0:
+                    raise ValueError(f"emballage {r['packaging_code']} : le poids unitaire ne peut pas être négatif")
         elif name == "ref_carriers":
             for r in rows:
                 r["name"] = str(r.get("name") or "").strip()
@@ -192,7 +203,7 @@ def rows(name: str, planner: str | None = None, ctx: AppContext = Depends(ctx_de
         ids = {r["article_id"] for r in reference.rows_out(session, "ref_articles") if str(r.get("planner") or "").upper() == want}
         if name == "ref_articles":
             out = [r for r in out if str(r.get("planner") or "").upper() == want]
-        elif name in ("ref_article_suppliers", "ref_bom", "fct_stock"):
+        elif name in ("ref_article_suppliers", "ref_bom", "ref_packaging", "fct_stock"):
             out = [r for r in out if r.get("article_id") in ids]
         elif name == "ref_suppliers":
             sids = {r["supplier_id"] for r in reference.rows_out(session, "ref_article_suppliers") if r.get("article_id") in ids}
@@ -386,7 +397,7 @@ def consumption_sources(article_id: str, session: Session = Depends(session_dep)
 @router.get("/reference/suppliers", response_model=list[S.SupplierRef])
 def suppliers_list(ctx: AppContext = Depends(ctx_dep)):
     df = ctx.table("ref_suppliers")
-    return [S.SupplierRef(supplier_id=r["supplier_id"], name=r["name"], country=r["country"], contact=r["contact"],
+    return [S.SupplierRef(supplier_id=r["supplier_id"], name=r["name"], address=str(r.get("address") or ""), contact=r["contact"],
                           delivery_weekdays=r["delivery_weekdays"] or "1,2,3,4,5",
                           lead_time_days=int(r["lead_time_days"]) if int(r["lead_time_days"] or 0) > 0 else 5,
                           active=bool(r["active"]), strict_days=bool(r.get("strict_days") or False)) for r in df.to_dict("records")]

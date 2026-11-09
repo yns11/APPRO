@@ -232,7 +232,7 @@ def test_reference_crud_template_and_import(client):
     tables = client.get("/api/reference/tables").json()
     names = {t["name"]: t for t in tables}
     assert set(names) == {"ref_articles", "ref_suppliers", "ref_calendars", "ref_carriers", "ref_article_suppliers", "ref_consumption_terms", "ref_closed_orders",
-                          "ref_programs", "ref_bom", "fct_stock", "ref_planners", "ref_delegations"}
+                          "ref_programs", "ref_bom", "ref_packaging", "fct_stock", "ref_planners", "ref_delegations"}
     assert names["ref_articles"]["rows"] == 16 and names["ref_suppliers"]["rows"] == 11 and names["ref_programs"]["rows"] == 25
     assert names["ref_articles"]["key"] == ["article_id"] and any(c["label"] == "Couverture cible (j ouvrés)" for c in names["ref_articles"]["columns"])
     # edit a threshold directly: the engine sees it
@@ -260,7 +260,7 @@ def test_reference_crud_template_and_import(client):
     wb = load_workbook(io.BytesIO(t.content))
     assert wb.sheetnames == ["Fournisseurs", "NOTICE"]
     ws = wb["Fournisseurs"]
-    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Pays", "Contact", "Contact transport", "Quais", "Jours de livraison", "Jours stricts", "Délai (j ouvrés)", "Heure limite", "Actif", "Mode transport", "Plages habituelles"]
+    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Adresse", "Contact", "Contact transport", "Quais", "Jours de livraison", "Jours stricts", "Délai (j ouvrés)", "Heure limite", "Actif", "Mode transport", "Plages habituelles"]
     ws["A2"], ws["B2"], ws["F2"], ws["G2"], ws["H2"], ws["I2"], ws["J2"], ws["K2"] = "S-NEW", "New supplier", "B15;B6 EST", "1,3", "oui", 7, "11:30", "oui"
     buf = io.BytesIO()
     wb.save(buf)
@@ -275,8 +275,8 @@ def test_reference_crud_template_and_import(client):
     assert rep2.status_code == 201 and len(client.get("/api/reference/ref_suppliers/rows").json()) == 1
     # missing mandatory column
     wb2 = Workbook()
-    wb2.active.append(["Fournisseur", "Pays"])
-    wb2.active.append(["S-X", "FR"])
+    wb2.active.append(["Fournisseur", "Adresse"])
+    wb2.active.append(["S-X", "Rue X"])
     b2 = io.BytesIO()
     wb2.save(b2)
     assert client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", b2.getvalue())}).status_code == 422
@@ -1225,12 +1225,12 @@ def test_undo_group_header_merges_a_bulk_edit(client):
     two = rows[:2]
     hdr = {"X-Action-Group": "bulk-1"}
     for r in two:
-        assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**r, "country": "ZZ"}}, headers=hdr).status_code == 200
+        assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**r, "address": "Rue ZZ"}}, headers=hdr).status_code == 200
     acts = _acts(client)
     assert acts[0]["items"] == 2 and acts[0]["label"] == "Fournisseurs : 2 lignes" and acts[0]["group_id"] == "bulk-1"
     assert client.post(f"/api/actions/{acts[0]['id']}/undo").status_code == 200
-    after = {r["supplier_id"]: r["country"] for r in client.get("/api/reference/ref_suppliers/rows").json()}
-    assert [after[r["supplier_id"]] for r in two] == [r["country"] for r in two]
+    after = {r["supplier_id"]: r["address"] for r in client.get("/api/reference/ref_suppliers/rows").json()}
+    assert [after[r["supplier_id"]] for r in two] == [r["address"] for r in two]
     # a deleted row comes back on undo, with every column
     victim = {k: v for k, v in rows[-1].items() if k not in ("updated_by", "updated_at")}
     assert client.post("/api/reference/ref_suppliers/delete", json={"key": {"supplier_id": victim["supplier_id"]}}).status_code == 204

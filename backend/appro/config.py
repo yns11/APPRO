@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     working_weekdays: str = Field("1,2,3,4,5")
     holidays: str = Field("", description="Comma separated ISO dates of plant closures (the Calendriers table adds to them)")
     timezone: str = Field("Europe/Paris", description="Local time zone of the plant (order cut-off hours of the suppliers)")
+    company_header: str = Field("Nidec PSA emotors SAS | Building 8 – Courrier CI47 | 212 Boulevard Pelletier | 78955 CARRIERES SOUS POISSY | France",
+                                description="Letterhead of the empty packaging return note (lines separated by | or newlines)")
+    ship_from: str = Field("NIDEC PSA EMOTORS | Site de Trémery | 57301 HAGONDANGE | France", description="SHIP FROM block of the empty packaging return note (lines separated by | or newlines)")
+    ev_return_contacts: str = Field("appro.tremery@emotors.com; emolog@transalliance.eu", description="Contacts printed at the foot of the empty packaging return note")
     cache_budget_mb: int = Field(256, description="Memory budget of the in-process cache of engine results (least recently used results evicted beyond it)")
 
     # --- web -------------------------------------------------------------------------------

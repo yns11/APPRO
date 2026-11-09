@@ -120,3 +120,10 @@
 - OK   eslint (client)
 - OK   tsc + vite build (client)
 
+## 2026-11-09T11:01:29Z · commit dc6fdc6 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+

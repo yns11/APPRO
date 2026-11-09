@@ -54,7 +54,7 @@ def _row(c, sid: str) -> dict:
 
 def _set(c, sid: str, **values):
     r = _row(c, sid)
-    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "country", "contact", "delivery_weekdays", "strict_days", "lead_time_days", "active", "docks",
+    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "address", "contact", "delivery_weekdays", "strict_days", "lead_time_days", "active", "docks",
                                                   "transport_contact", "transport_mode", "cutoff_time", "transport_hours")}
     return c.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, **values}})
 

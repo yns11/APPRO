@@ -24,7 +24,7 @@ const CHOICES: Record<string, Record<string, { value: string; label: string }[]>
   ref_planners: { role: [{ value: "appro", label: "appro – écrit sur son carnet" }, { value: "manager", label: "manager – + paramètres pour tous, import PDP" }, { value: "admin", label: "admin – tous les droits" }] },
   ref_calendars: {
     calendar: [{ value: "usine", label: "usine – fermeture (ni besoin, ni livraison) ou jour exceptionnellement ouvert" }, { value: "fournisseur", label: "fournisseur – n'expédie ni ne livre (clé : code fournisseur)" },
-      { value: "transit", label: "transit – transporteur ou pays : aucune livraison (clé : code fournisseur ou code pays)" }, { value: "quai", label: "quai – quai fermé (clé : B15, B6 EST, B2 NORD, B6 NORD)" }],
+      { value: "transit", label: "transit – transporteur : aucune livraison (clé : code fournisseur ou nom du transporteur)" }, { value: "quai", label: "quai – quai fermé (clé : B15, B6 EST, B2 NORD, B6 NORD)" }],
     kind: [{ value: "fermeture", label: "fermeture" }, { value: "ouvert", label: "ouvert – jour exceptionnellement travaillé (usine seulement)" }],
   },
   ref_articles: {

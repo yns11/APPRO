@@ -7,7 +7,7 @@ import { DataTable, type Column } from "@/components/DataTable";
 import { fmtInt, fmtWeekdays } from "@/lib/format";
 import type { RefRow } from "@/lib/types";
 
-interface Row { supplier_id: string; name: string; country: string; delivery_weekdays: string; lead_time_days: number; active: boolean; articles: number; critical: number; warning: number; backlog_articles: number; urgent: number; }
+interface Row { supplier_id: string; name: string; address: string; delivery_weekdays: string; lead_time_days: number; active: boolean; articles: number; critical: number; warning: number; backlog_articles: number; urgent: number; }
 
 /** Supplier picker : one line per supplier of the perimeter, with the state of its articles ; the detail is SupplierPage. */
 export default function SuppliersPage() {
@@ -30,7 +30,7 @@ export default function SuppliersPage() {
     }
     return (suppliers.data ?? []).map((r: RefRow) => {
       const s = stats.get(String(r.supplier_id));
-      return { supplier_id: String(r.supplier_id), name: String(r.name ?? ""), country: String(r.country ?? ""), delivery_weekdays: String(r.delivery_weekdays ?? "1,2,3,4,5"),
+      return { supplier_id: String(r.supplier_id), name: String(r.name ?? ""), address: String(r.address ?? ""), delivery_weekdays: String(r.delivery_weekdays ?? "1,2,3,4,5"),
         lead_time_days: Number(r.lead_time_days ?? 5), active: r.active !== false, articles: Number(r.article_count ?? s?.n ?? 0),
         critical: s?.critical ?? 0, warning: s?.warning ?? 0, backlog_articles: s?.backlog ?? 0, urgent: s?.urgent ?? 0 };
     });
@@ -38,7 +38,7 @@ export default function SuppliersPage() {
   const cols = useMemo<Column<Row>[]>(() => [
     { key: "supplier_id", label: "Code", get: (r) => r.supplier_id, render: (r) => <b>{r.supplier_id}</b> },
     { key: "name", label: "Fournisseur", get: (r) => r.name },
-    { key: "country", label: "Pays", get: (r) => r.country, filter: "select" },
+    { key: "address", label: "Adresse", get: (r) => r.address },
     { key: "days", label: "Jours de livraison", get: (r) => fmtWeekdays(r.delivery_weekdays), filter: "select" },
     { key: "lead", label: "Délai (j ouvrés)", get: (r) => r.lead_time_days, num: true },
     { key: "articles", label: "Articles", get: (r) => r.articles, num: true, sum: true },

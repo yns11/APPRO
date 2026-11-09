@@ -84,7 +84,7 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
     _t("ref_suppliers", "Fournisseurs", "Fournisseurs (COFOR) et leurs jours de livraison.", ("supplier_id",), [
         Column("supplier_id", "str", "Fournisseur", "code fournisseur (S-000…)", True, "S-000545"),
         Column("name", "str", "Nom", "raison sociale", True, "ELANTAS EUROPE S.R.L."),
-        Column("country", "str", "Pays", "", False, "IT"),
+        Column("address", "str", "Adresse", "adresse postale du fournisseur (rue, code postal, ville, pays ; séparez les lignes par des virgules ou des retours à la ligne) : imprimée sur le BL de retour des emballages vides", False, ""),
         Column("contact", "str", "Contact", "", False, ""),
         Column("transport_contact", "str", "Contact transport", "adresses e-mail du contact transport (séparées par ; ou ,) ; une personne connectée avec l'une de ces adresses n'accède qu'à l'espace fournisseur", False, ""),
         Column("docks", "str", "Quais", "quais de livraison par défaut du fournisseur (B15, B6 EST, B2 NORD, B6 NORD ; séparés par ;), présélectionnés à la création d'un transport ; initialisé à B15", False, "B15"),
@@ -157,6 +157,13 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
         Column("valid_from", "date", "Valide du", "facultatif", False, ""),
         Column("valid_to", "date", "Valide au", "facultatif", False, ""),
     ]),
+    _t("ref_packaging", "Emballages", "Nomenclature d'emballages : les emballages dans lesquels un article voyage, que le fournisseur reprend vides (retour EV).",
+       ("article_id", "packaging_code"), [
+           Column("article_id", "str", "Article", "référence article (P-00…)", True, "P-00001046"),
+           Column("packaging_code", "str", "Code emballage", "code de l'emballage (ITEM No. du BL de retour)", True, "R200044"),
+           Column("packaging_name", "str", "Nom emballage", "désignation de l'emballage (DESCRIPTION du BL de retour)", True, "REGR EMC BUSBAR ASSY BEV"),
+           Column("unit_weight_kg", "float", "Poids unitaire (kg)", "poids d'un emballage vide, facultatif (colonne Unit Weight du BL de retour)", False, 80, nullable=True),
+       ]),
     _t("fct_stock", "Stock de référence", "Stock physique par article à la fin d'une journée (le plus récent est utilisé).",
        ("article_id", "snapshot_date"), [
            Column("article_id", "str", "Article", "", True, "P-00001046"),

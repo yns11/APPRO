@@ -71,7 +71,7 @@ def test_f03_undo_outside_the_portfolio_is_refused(client):  # noqa: F811
 def test_f24_portal_export_is_allowed_to_a_supplier(client):  # noqa: F811
     rows = client.get("/api/reference/ref_suppliers/rows").json()
     r = next(x for x in rows if x["supplier_id"] == "S-000378")
-    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "country", "contact", "delivery_weekdays", "strict_days", "lead_time_days", "active", "docks")}
+    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "address", "contact", "delivery_weekdays", "strict_days", "lead_time_days", "active", "docks")}
     assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, "transport_contact": "quai@fournisseur.example"}}).status_code == 200
     h = {"x-forwarded-email": "quai@fournisseur.example"}
     body = {"title": "Commandes", "sheet": "Commandes", "columns": [{"key": "a", "label": "A"}], "rows": [{"a": 1}], "footer": None}

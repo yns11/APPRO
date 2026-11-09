@@ -61,11 +61,6 @@ SUPPLIER_LEAD_TIMES = {
     "S-000545": 15,  # ELANTAS EUROPE (IT)
     "S-000904": 20,  # ESSEX Furukawa (FR/…)
 }
-SUPPLIER_COUNTRIES = {
-    "S-000032": "FR", "S-001033": "IT", "S-000378": "IT", "S-001562": "IT", "S-000599": "CZ",
-    "S-000517": "HU", "S-000186": "DE", "S-000286": "IT", "S-000106": "AT", "S-000545": "IT",
-    "S-000904": "FR",
-}
 # Supplier quotas for dual-sourced articles (share of the demand in %, demo assumption).
 DUAL_SOURCE_QUOTAS = {
     ("P-00005775", "S-000032"): 100, ("P-00005775", "S-001033"): 0,
@@ -235,7 +230,7 @@ def main() -> None:
         suppliers.setdefault(sid, {
             "supplier_id": sid,
             "name": (b["SUPPLIER"] or "").strip(),
-            "country": SUPPLIER_COUNTRIES.get(sid, ""),
+            "address": "",
             "contact": (b.get("Contact") or ""),
             "delivery_weekdays": "1,2,3,4,5",
             "calendar_id": "DEFAULT",

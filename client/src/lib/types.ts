@@ -15,7 +15,7 @@ export interface LinkRef {
   /** standard delivery weekdays of the supplier (ISO, "1,2,4") and whether it delivers on those days only (no ◇) */
   delivery_weekdays: string; strict_days: boolean;
 }
-export interface SupplierRef { supplier_id: string; name: string; country: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; strict_days: boolean; transport_contact?: string; docks?: string; cutoff_time?: string; }
+export interface SupplierRef { supplier_id: string; name: string; address: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; strict_days: boolean; transport_contact?: string; docks?: string; cutoff_time?: string; }
 export interface ProgramRef { program_id: string; name: string; family: string; active: boolean; components: number; }
 
 /** Reference tables managed in the application (generic CRUD). */
@@ -215,9 +215,11 @@ export interface ExportColumn { key: string; label: string; type?: ExportType; }
 
 // ---------------------------------------------------------------- transports (planning de livraisons)
 export interface TransportOrderOut { order_id: string; article_id: string; designation: string; unit: string; supplier_id: string; supplier_name: string; ref: string; expected_date: string | null; qty: number; }
-export type TransportLeg = "aller" | "retour";
-export interface TransportLine { id?: number | null; leg: TransportLeg; article: string; designation: string; qty: string; }
-export interface TransportLineIn { article: string; designation: string; qty: string; }
+export type TransportLeg = "aller" | "retour" | "ev";
+export interface TransportLine { id?: number | null; leg: TransportLeg; article: string; code: string; designation: string; qty: string; }
+export interface TransportLineIn { article: string; code?: string; designation: string; qty: string; }
+/** A packaging a supplier may take back (Référentiel › Emballages of the articles he supplies). */
+export interface PackagingLine { article_id: string; designation: string; packaging_code: string; packaging_name: string; unit_weight_kg: number | null; }
 export type TransportMode = "fournisseur" | "transporteur" | "maf" | "ev" | "ponctuel";
 export interface TransportOut { transport_id: string; supplier_id: string; supplier_name: string; date: string; time: string; docks: string[]; carrier: string; note: string; mode: TransportMode; status: string; created_by: string; created_at: string | null;
   /** placed by a planner (moved, split) : keeps its orders when the ERP moves their date */
@@ -239,7 +241,7 @@ export interface ShuttleIn { date: string; time: string; docks: string[]; order_
 export interface TransportLinesIn { lines: TransportLineIn[]; return_trip: boolean; return_docks: string[]; return_lines: TransportLineIn[]; }
 export interface TransportPackOut { transports: TransportOut[]; csv: string; csv_filename: string; }
 export type SpecialKind = "ev" | "ponctuel";
-export interface TransportSpecialIn { kind: SpecialKind; supplier_id: string; date: string; time: string; docks: string[]; carrier: string; note: string; force?: boolean; }
+export interface TransportSpecialIn { kind: SpecialKind; supplier_id: string; date: string; time: string; docks: string[]; carrier: string; note: string; lines?: TransportLineIn[]; force?: boolean; }
 export interface PortalKpis { open_orders: number; open_qty_lines: number; late_orders: number; today_orders: number; next_delivery: string | null; transports: number; next_transport: string | null; forecast_lines: number; forecast_weeks: number; desadv_open: number; desadv_ko: number; receipts_30d: number; }
 export interface PortalOrderRow { order_id: string; article_id: string; designation: string; unit: string; planner: string; supplier_id: string | null; supplier_name: string; linked: boolean; date: string; order_type: string; qty_ordered: number; qty_open: number; purch_id: string; first_seen: string | null; transports: string[]; status: string; }
 export interface PortalDesadvRow { desadv_id: string; article_id: string; designation: string; unit: string; supplier_id: string | null; supplier_name: string; date: string; qty: number; purch_id: string; packing_slip: string; state: string; final_processing: string; received: boolean; journal: boolean; status: string; }

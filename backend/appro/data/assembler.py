@@ -92,16 +92,16 @@ def _days(r: dict) -> list[dt.date]:
 
 def calendar_sets(rows: Iterable[dict], suppliers: Iterable[Supplier]) -> tuple[set[dt.date], set[dt.date], dict[str, set[dt.date]]]:
     """From the ``ref_calendars`` rows : the plant closures, the plant days exceptionally worked and, per supplier,
-    the days he cannot deliver (his own closures, the carrier / country closures, the docks closed when every one
+    the days he cannot deliver (his own closures, the closures of his carrier, the docks closed when every one
     of his default docks is)."""
     closed: set[dt.date] = set()
     opened: set[dt.date] = set()
     by_sup: dict[str, set[dt.date]] = {}
     dock_closed: dict[str, set[dt.date]] = {}
     sups = list(suppliers)
-    by_country: dict[str, list[Supplier]] = {}
+    by_carrier: dict[str, list[Supplier]] = {}      # transit closures : keyed by the carrier name of the supplier's transport mode
     for sp in sups:
-        by_country.setdefault((sp.country or "").strip().upper(), []).append(sp)
+        by_carrier.setdefault((sp.transport_mode or "").strip().lower(), []).append(sp)
     for r in rows:
         if not bool(r.get("active", True)):
             continue
@@ -114,7 +114,7 @@ def calendar_sets(rows: Iterable[dict], suppliers: Iterable[Supplier]) -> tuple[
         elif cal == "fournisseur":
             by_sup.setdefault(key, set()).update(days)
         elif cal == "transit":
-            targets = [key] if any(sp.supplier_id == key for sp in sups) else [sp.supplier_id for sp in by_country.get(key.upper(), [])]
+            targets = [key] if any(sp.supplier_id == key for sp in sups) else [sp.supplier_id for sp in by_carrier.get(key.lower(), [])]
             for sid in targets:
                 by_sup.setdefault(sid, set()).update(days)
         elif cal == "quai":
@@ -158,7 +158,7 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
     # uses the article's own ERP consumption until terms are declared
     source_ids = {src for a in articles for src, _c in a.derived_terms}
 
-    suppliers = [Supplier(r["supplier_id"], r["name"], r["country"], r["contact"], parse_weekdays(r["delivery_weekdays"]),
+    suppliers = [Supplier(r["supplier_id"], r["name"], str(r.get("address") or ""), r["contact"], parse_weekdays(r["delivery_weekdays"]),
                           _lead(r.get("lead_time_days")), bool(r["active"]), strict_days=bool(r.get("strict_days") or False),
                           transport_contact=str(r.get("transport_contact") or ""), docks=str(r.get("docks") or "") or "B15",
                           cutoff_time=str(r.get("cutoff_time") or "").strip(), transport_mode=str(r.get("transport_mode") or "").strip() or "Fournisseur",

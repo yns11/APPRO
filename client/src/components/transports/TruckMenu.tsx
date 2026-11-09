@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Download, Eye, FileText, ListChecks, Lock, MoveRight, RotateCcw, Scissors, StickyNote, Trash2 } from "lucide-react";
+import { Download, Eye, FileText, ListChecks, Lock, MoveRight, RotateCcw, Scissors, StickyNote, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
@@ -8,18 +8,19 @@ import { DockPicker } from "@/components/DockPicker";
 import { KindIcon } from "@/components/transports/icons";
 import { ConflictBox, SlotField, busyMap, useSlotWrite } from "@/components/transports/SlotField";
 import { ShuttleDialog } from "@/components/transports/ShuttleDialog";
+import { EvLinesDrawer } from "@/components/transports/SpecialTruckDialog";
 import { fmtDate, fmtDateTime } from "@/lib/format";
-import { articleLines, copyText, dayLabel, isShuttle, qtyLabel, splitItems, toneOf, who, type ArticleLine } from "@/lib/transports";
+import { articleLines, dayLabel, isShuttle, qtyLabel, splitItems, toneOf, who, type ArticleLine } from "@/lib/transports";
 import type { BoardResponse, TransportOut } from "@/lib/types";
 
-export type Action = "move" | "split" | "note" | "lines";
+export type Action = "move" | "split" | "note" | "lines" | "ev";
 export interface MenuAt { t: TransportOut; x: number; y: number }
 
 /**
  * The menu a click on a truck opens, where the click happened : the truck (identifier, who it belongs to, day, slot,
  * docks, its lines as article + designation + quantity — never an order number —, why to check, note), then the
- * actions.  Your trucks and the shuttles : copy the identifier, seen, move, split, note, lines and PDF of a shuttle,
- * CSV, cancel ; a colleague's truck : copy and CSV only ; a cancelled truck : restore and copy.
+ * actions.  Your trucks and the shuttles : seen, move, split, note, lines and PDF of a shuttle, packaging and return
+ * note of an EV return, CSV, cancel ; a colleague's truck : CSV only ; a cancelled truck : restore.
  */
 export function TruckMenu({ menu, d, onClose }: { menu: MenuAt | null; d: BoardResponse; onClose: () => void }) {
   const toast = useToast();
@@ -35,7 +36,6 @@ export function TruckMenu({ menu, d, onClose }: { menu: MenuAt | null; d: BoardR
   }, [menu, onClose]);
   const seen = useWrite((id: string) => api.post<TransportOut>(`/api/transports/${encodeURIComponent(id)}/seen`), () => toast.push("Camion vérifié", "success"));
   const cancel = useWrite((id: string) => api.del<TransportOut>(`/api/transports/${encodeURIComponent(id)}`), (out) => toast.push(`${out.transport_id} annulé ; retirez-le de l'outil de transport`, "info"));
-  const copy = async (t: TransportOut) => { toast.push((await copyText(t.transport_id)) ? `${t.transport_id} copié` : `Copie impossible : ${t.transport_id}`, "success"); onClose(); };
   const t = menu?.t;
   const tone = t ? toneOf(t) : "mine";
   const own = !!t && t.editable && canWrite;      // the rights follow the e-mail ; the colour (tone) follows the portfolio shown
@@ -56,10 +56,11 @@ export function TruckMenu({ menu, d, onClose }: { menu: MenuAt | null; d: BoardR
             {tone === "off" && !isShuttle(t) && t.mode !== "ev" && t.mode !== "ponctuel" && <div className="small subtle">Ses commandes attendent : aucun camion ne renaît tant qu'une nouvelle commande n'apparaît pas ce jour-là.</div>}
           </div>
           {tone === "off" && own && <RestoreItem t={t} onClose={onClose} />}
-          <button type="button" role="menuitem" onClick={() => copy(t)}><Copy />Copier l'identifiant</button>
           {tone !== "off" && own && <>
             {t.check_reason && <button type="button" role="menuitem" onClick={() => { seen.mutate(t.transport_id); onClose(); }}><Eye />Vu, rien à changer</button>}
             {isShuttle(t) && <button type="button" role="menuitem" onClick={() => { window.open(api.downloadUrl(`/api/transports/${encodeURIComponent(t.transport_id)}/navette.pdf`), "_blank"); onClose(); }}><FileText />PDF de la navette</button>}
+            {t.mode === "ev" && <button type="button" role="menuitem" onClick={() => { window.open(api.downloadUrl(`/api/transports/${encodeURIComponent(t.transport_id)}/retour-ev.pdf`), "_blank"); onClose(); }}><FileText />Créer le BL de retour EV</button>}
+            {t.mode === "ev" && <button type="button" role="menuitem" onClick={() => { setAction({ kind: "ev", t }); onClose(); }}><ListChecks />Emballages à retourner</button>}
             <button type="button" role="menuitem" onClick={() => { setAction({ kind: "move", t }); onClose(); }}><MoveRight />Déplacer (jour, créneau, quais)</button>
             {t.orders.length > 0 && !isShuttle(t) && <button type="button" role="menuitem" onClick={() => { setAction({ kind: "split", t }); onClose(); }}><Scissors />Scinder en deux camions</button>}
             {isShuttle(t) && <button type="button" role="menuitem" onClick={() => { setAction({ kind: "lines", t }); onClose(); }}><ListChecks />Modifier les lignes</button>}
@@ -68,12 +69,14 @@ export function TruckMenu({ menu, d, onClose }: { menu: MenuAt | null; d: BoardR
           {tone !== "off" && <button type="button" role="menuitem" onClick={() => { window.location.href = api.downloadUrl(`/api/transports/${encodeURIComponent(t.transport_id)}/atr.csv`); onClose(); }}><Download />CSV ATR de ce camion</button>}
           {tone !== "off" && own && <button type="button" role="menuitem" className="danger" onClick={() => { onClose(); if (window.confirm(`Annuler ${isShuttle(t) ? "la navette" : "le camion"} ${t.transport_id} ?${t.orders.length && !isShuttle(t) ? "\nUn camion de la même famille ce jour-là reprend ses commandes ; sinon le jour reste sans camion tant qu'aucune nouvelle commande n'apparaît." : ""}`)) cancel.mutate(t.transport_id); }}><Trash2 />Annuler {isShuttle(t) ? "la navette" : "le camion"}</button>}
           {tone !== "off" && !own && canWrite && <div className="off-hint"><Lock />Déplacer, scinder, annuler : réservés à son approvisionneur (ou à un manager)</div>}
+          {tone === "off" && !own && <div className="off-hint"><Lock />Rétablir : réservé à son approvisionneur (ou à un manager)</div>}
         </div>
       )}
       {action?.kind === "move" && <MoveDrawer t={action.t} d={d} onClose={() => setAction(null)} />}
       {action?.kind === "split" && <SplitDrawer t={action.t} d={d} onClose={() => setAction(null)} />}
       {action?.kind === "note" && <NoteDrawer t={action.t} onClose={() => setAction(null)} />}
       {action?.kind === "lines" && <ShuttleDialog d={d} edit={action.t} onClose={() => setAction(null)} />}
+      {action?.kind === "ev" && <EvLinesDrawer t={action.t} onClose={() => setAction(null)} />}
     </>
   );
 }
@@ -93,7 +96,7 @@ function Lines({ t }: { t: TransportOut }) {
   return (
     <div className="tp-lines">
       {lines.map((l) => <div key={`${l.supplier_id}|${l.article_id}`} className="ln"><span className="a"><b>{l.article_id}</b> <span className="s">{isShuttle(t) ? l.supplier_name || l.supplier_id : l.designation}</span></span><span className="q">{qtyLabel(l.qty, l.unit)}</span></div>)}
-      {t.lines.map((l) => <div key={l.id ?? `${l.leg}-${l.article}`} className="ln"><span className="a"><b>{l.article}</b> <span className="s">{l.leg === "retour" ? "retour · " : ""}{l.designation || "saisi"}</span></span><span className="q">{l.qty}</span></div>)}
+      {t.lines.map((l) => <div key={l.id ?? `${l.leg}-${l.code}-${l.article}`} className="ln"><span className="a"><b>{l.leg === "ev" ? l.code : l.article}</b> <span className="s">{l.leg === "retour" ? "retour · " : ""}{l.designation || (l.leg === "ev" ? l.article : "saisi")}</span></span><span className="q">{l.qty}</span></div>)}
     </div>
   );
 }

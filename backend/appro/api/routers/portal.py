@@ -64,7 +64,7 @@ def overview(supplier_id: list[str] | None = Query(None), ctx: AppContext = Depe
         forecast_lines=len(forecasts), forecast_weeks=len(weeks),
         desadv_open=sum(1 for r in desadv if r["status"] == "en transit"), desadv_ko=sum(1 for r in desadv if r["status"] == "erreur"),
         receipts_30d=sum(1 for r in receipts if r["date"] and r["date"] >= as_of - dt.timedelta(days=30)))
-    refs = [S.SupplierRef(supplier_id=s.supplier_id, name=s.name, country=s.country, contact=s.contact, delivery_weekdays=",".join(str(d) for d in sorted(s.delivery_weekdays)),
+    refs = [S.SupplierRef(supplier_id=s.supplier_id, name=s.name, address=s.address, contact=s.contact, delivery_weekdays=",".join(str(d) for d in sorted(s.delivery_weekdays)),
                           lead_time_days=s.lead_time_days, active=s.active, strict_days=s.strict_days, transport_contact=s.transport_contact, docks=s.docks) for s in sups]
     out = S.PortalResponse(suppliers=refs, as_of=as_of, kpis=kpis, orders=open_orders, backlog=backlog,
                            forecasts=forecasts, transports=[S.TransportOut(**t) for t in transports], desadv=desadv, receipts=receipts)

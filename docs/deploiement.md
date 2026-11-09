@@ -224,7 +224,10 @@ redéployer (`scripts/deploy.sh dev PROD --var=...`) ; l'App rejoue le `GRANT` �
    seule (règles métier § 12). L'identité qui déploie le bundle reste administrateur quoi qu'il arrive
    (`admin_emails`, `APPRO_ADMINS`). Pendant l'essai des camions automatiques, le **Planning transport** et
    l'API `/api/transports` ne sont visibles que des e-mails de `APPRO_TRANSPORT_USERS` (une seule personne par
-   défaut ; vide = tout le monde). Au premier démarrage de la version du 05/11/2026, la migration
+   défaut ; vide = tout le monde). Le **BL de retour des emballages vides** (PDF d'un retour EV) imprime l'en-tête
+   de la société `APPRO_COMPANY_HEADER`, le bloc expéditeur `APPRO_SHIP_FROM` et les contacts de pied
+   `APPRO_EV_RETURN_CONTACTS` (lignes séparées par `|` ; valeurs par défaut dans `config.py`, à adapter par cible).
+   Au premier démarrage de la version du 05/11/2026, la migration
    `transports_fresh_start_2026_11` supprime tous les transports et remet les compteurs EM à zéro, puis
    `transports_all_automatic_2026_11` retire la colonne « Camions automatiques » des fournisseurs (tout fournisseur
    qui livre est automatique) et `transports_fresh_start_2026_11_b` purge de nouveau les transports et les compteurs

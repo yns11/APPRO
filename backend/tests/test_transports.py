@@ -11,7 +11,7 @@ HEADER = "ID TRANSPORT;FOURNISSEUR;TRANSPORTEUR;DATE;HEURE;CODE FOURNISSEUR;FLUX
 def _set_contact(c, sid: str, contact: str, docks: str | None = None):
     rows = c.get("/api/reference/ref_suppliers/rows").json()
     r = next(x for x in rows if x["supplier_id"] == sid)
-    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "country", "contact", "delivery_weekdays", "strict_days", "lead_time_days", "active", "docks")}
+    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "address", "contact", "delivery_weekdays", "strict_days", "lead_time_days", "active", "docks")}
     if docks is not None:
         keep["docks"] = docks
     res = c.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, "transport_contact": contact}})
@@ -270,3 +270,45 @@ def test_ev_return_and_one_off_truck(client):  # noqa: F811
     assert next(t for t in board["transports"] if t["transport_id"] == "EM0001EV")["status"] == "cancelled"
     labels = [a["label"] for a in client.get("/api/actions").json()]
     assert any(x.startswith("Retour EV EM0001EV") for x in labels) and any(x.startswith(f"Camion ponctuel {one['transport_id']}") for x in labels)
+
+
+def test_packaging_table_ev_return_lines_and_return_note(client):  # noqa: F811
+    """Référentiel › Emballages (article, code, name, unit weight) ; the EV return dialog lists the packaging of the
+    supplier's articles ; the planned quantities ride the truck (lines, leg « ev ») and print on the return note with the
+    supplier's address ; the lines change as a whole."""
+    put = lambda vals: client.put("/api/reference/ref_packaging/rows", json={"values": vals})  # noqa: E731
+    art = next(r for r in client.get("/api/reference/ref_article_suppliers/rows").json() if r["supplier_id"] == "S-000599")["article_id"]
+    assert put({"article_id": art, "packaging_code": "R200044", "packaging_name": "REGR EMC BUSBAR ASSY BEV", "unit_weight_kg": 80}).status_code in (200, 201)
+    assert put({"article_id": art, "packaging_code": "R200045", "packaging_name": "REGR AC BUSBAR ASSY BEV"}).status_code in (200, 201)
+    assert put({"article_id": "P-NOPE", "packaging_code": "X", "packaging_name": "x"}).status_code == 422
+    assert put({"article_id": art, "packaging_code": "R200046", "packaging_name": "x", "unit_weight_kg": -1}).status_code == 422
+    rows = client.get("/api/reference/ref_packaging/rows").json()
+    assert [(r["packaging_code"], r["unit_weight_kg"]) for r in rows] == [("R200044", 80.0), ("R200045", None)]
+    assert client.get("/api/reference/ref_packaging/rows", params={"planner": "QUENTIN"}).json() == rows
+    # the supplier's packaging lines ; another supplier has none
+    lines = client.get("/api/transports/packaging", params={"supplier_id": "S-000599"}).json()
+    assert [(x["article_id"], x["packaging_code"], x["packaging_name"], x["unit_weight_kg"]) for x in lines] == [(art, "R200044", "REGR EMC BUSBAR ASSY BEV", 80.0), (art, "R200045", "REGR AC BUSBAR ASSY BEV", None)]
+    assert lines[0]["designation"]
+    assert client.get("/api/transports/packaging", params={"supplier_id": "S-000378"}).json() == []
+    # the address of the supplier (former country column) prints on the note
+    _set_contact(client, "S-000599", "", None)
+    me = next(r for r in client.get("/api/reference/ref_suppliers/rows").json() if r["supplier_id"] == "S-000599")
+    assert "country" not in me and "address" in me
+    keep = {k: v for k, v in me.items() if k not in ("updated_by", "updated_at", "articles", "article_count")}
+    assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, "address": "SOLUBAC, 5 rue Charles de Coulomb, 14120 MONDEVILLE"}}).status_code == 200
+    # the EV return with planned quantities : a line without quantity is dropped, a line without code refused
+    body = {"kind": "ev", "supplier_id": "S-000599", "date": "2026-09-29", "time": "10:00", "docks": ["B6 EST"], "note": "palettes à sangler",
+            "lines": [{"article": art, "code": "R200044", "designation": "REGR EMC BUSBAR ASSY BEV", "qty": "12"}, {"article": art, "code": "R200045", "designation": "REGR AC BUSBAR ASSY BEV", "qty": ""}]}
+    r = client.post("/api/transports/special", json=body)
+    assert r.status_code == 201, r.text
+    ev = r.json()["transports"][0]
+    assert [(ln["leg"], ln["code"], ln["qty"]) for ln in ev["lines"]] == [("ev", "R200044", "12")]
+    assert client.post("/api/transports/special", json={**body, "lines": [{"article": art, "code": "", "designation": "x", "qty": "3"}]}).status_code == 422
+    pdf = client.get(f"/api/transports/{ev['transport_id']}/retour-ev.pdf")
+    assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf" and pdf.content.startswith(b"%PDF")
+    # the lines change as a whole ; a one-off truck has no return note
+    r = client.post(f"/api/transports/{ev['transport_id']}/lines", json={"lines": [{"article": art, "code": "R200044", "designation": "x", "qty": "10"}, {"article": art, "code": "R200045", "designation": "y", "qty": "2"}]})
+    assert r.status_code == 200 and [(ln["code"], ln["qty"]) for ln in r.json()["lines"]] == [("R200044", "10"), ("R200045", "2")]
+    one = client.post("/api/transports/special", json={"kind": "ponctuel", "supplier_id": "S-000599", "date": "2026-09-30", "time": "10:00", "docks": ["B15"]}).json()["transports"][0]
+    assert client.get(f"/api/transports/{one['transport_id']}/retour-ev.pdf").status_code == 422
+    assert client.post(f"/api/transports/{one['transport_id']}/lines", json={"lines": []}).status_code == 422

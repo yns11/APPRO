@@ -88,7 +88,7 @@ export default function ReferencePage() {
     const hidden = HIDDEN[table.name] ?? [];
     const out: Column<RefRow>[] = table.columns.filter((c) => !hidden.includes(c.name)).map((c) => ({
       key: c.name, label: c.label, num: c.type === "float" || c.type === "int", title: c.description || undefined,
-      filter: c.type === "bool" || (c.type === "str" && ["unit", "planner", "family", "country", "program_id", "active", "role", "sourcing_policy", "consumption_source", "delivery_weekdays"].includes(c.name) && !c.key) || c.name === "demand_days" ? "select" : undefined,
+      filter: c.type === "bool" || (c.type === "str" && ["unit", "planner", "family", "program_id", "active", "role", "sourcing_policy", "consumption_source", "delivery_weekdays"].includes(c.name) && !c.key) || c.name === "demand_days" ? "select" : undefined,
       get: (r) => (c.type === "bool" ? (r[c.name] ? "oui" : "non") : c.name === "supplier_id" && table.name !== "ref_suppliers" ? `${r[c.name] ?? ""} ${names.get(String(r[c.name] ?? "")) ?? ""}` : c.name === "consumption_source" ? CONSUMPTION_SOURCE_SHORT[String(r[c.name] ?? "erp")] ?? String(r[c.name]) : c.name === "sourcing_policy" ? SOURCING_LABELS[String(r[c.name] ?? "quota")] ?? String(r[c.name]) : c.name === "delivery_weekdays" ? fmtWeekdays(String(r[c.name] ?? "")) : (r[c.name] as string | number | null)),
       exportGet: (r) => (r[c.name] as string | number | boolean | null),
       render: (r) => c.name === "article_id" ? <Link to={`/articles/${encodeURIComponent(String(r[c.name]))}`} onClick={(e) => e.stopPropagation()} title="Ouvrir la fiche article"><b>{String(r[c.name])}</b></Link>

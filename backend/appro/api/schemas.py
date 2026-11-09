@@ -49,7 +49,7 @@ class LinkRef(ORM):
 class SupplierRef(ORM):
     supplier_id: str
     name: str = ""
-    country: str = ""
+    address: str = ""
     contact: str = ""
     delivery_weekdays: str = "1,2,3,4,5"
     lead_time_days: int = 5
@@ -858,19 +858,31 @@ class TransportOrderOut(BaseModel):
 
 
 class TransportLineOut(BaseModel):
-    """A typed line of a MAF shuttle (outside the ERP orders), on the outward or the return leg."""
+    """A typed line of a MAF shuttle (outside the ERP orders, outward or return leg) or a packaging line of an EV return."""
 
     id: int | None = None
-    leg: str = "aller"                     # aller | retour
+    leg: str = "aller"                     # aller | retour | ev
     article: str = ""
+    code: str = ""                         # packaging code (EV return)
     designation: str = ""
-    qty: str = ""                          # as typed : « 6 U », « 18 PAL »
+    qty: str = ""                          # as typed : « 6 U », « 18 PAL » ; planned quantity of an EV return
 
 
 class TransportLineIn(BaseModel):
     article: str = Field("", max_length=120)
+    code: str = Field("", max_length=60)
     designation: str = Field("", max_length=200)
     qty: str = Field("", max_length=40)
+
+
+class PackagingLineOut(BaseModel):
+    """A packaging a supplier may take back (``ref_packaging`` of the articles he supplies)."""
+
+    article_id: str
+    designation: str = ""
+    packaging_code: str
+    packaging_name: str = ""
+    unit_weight_kg: float | None = None
 
 
 class TransportOut(BaseModel):
@@ -1067,6 +1079,7 @@ class TransportSpecialIn(BaseModel):
     docks: list[str] = Field(..., min_length=1)
     carrier: str = ""
     note: str = Field("", max_length=500)
+    lines: list[TransportLineIn] = Field(default_factory=list)   # EV return : packaging and planned quantities
     force: bool = False
 
 
