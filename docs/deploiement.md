@@ -222,9 +222,8 @@ redéployer (`scripts/deploy.sh dev PROD --var=...`) ; l'App rejoue le `GRANT` �
    (`appro`, `manager`, `admin`), actif. **Commencer par soi-même avec le rôle `admin`** : tant que la table
    est vide tout le monde est administrateur, dès la première ligne les autres utilisateurs passent en lecture
    seule (règles métier § 12). L'identité qui déploie le bundle reste administrateur quoi qu'il arrive
-   (`admin_emails`, `APPRO_ADMINS`). Pendant l'essai des camions automatiques, le **Planning transport** et
-   l'API `/api/transports` ne sont visibles que des e-mails de `APPRO_TRANSPORT_USERS` (une seule personne par
-   défaut ; vide = tout le monde). Le **BL de retour des emballages vides** (PDF d'un retour EV) imprime l'en-tête
+   (`admin_emails`, `APPRO_ADMINS`). Le **Planning transport** et l'API `/api/transports` sont ouverts à tous
+   (`APPRO_TRANSPORT_USERS`, vide par défaut, les réserve à quelques e-mails si besoin). Le **BL de retour des emballages vides** (PDF d'un retour EV) imprime l'en-tête
    de la société `APPRO_COMPANY_HEADER`, le bloc expéditeur `APPRO_SHIP_FROM` et les contacts de pied
    `APPRO_EV_RETURN_CONTACTS` (lignes séparées par `|` ; valeurs par défaut dans `config.py`, à adapter par cible).
    Au premier démarrage de la version du 05/11/2026, la migration

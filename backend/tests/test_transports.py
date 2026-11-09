@@ -296,13 +296,13 @@ def test_packaging_table_ev_return_lines_and_return_note(client):  # noqa: F811
     assert "country" not in me and "address" in me
     keep = {k: v for k, v in me.items() if k not in ("updated_by", "updated_at", "articles", "article_count")}
     assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, "address": "SOLUBAC, 5 rue Charles de Coulomb, 14120 MONDEVILLE"}}).status_code == 200
-    # the EV return with planned quantities : a line without quantity is dropped, a line without code refused
+    # the EV return with planned quantities : every packaging line is kept, with or without quantity ; no code = refused
     body = {"kind": "ev", "supplier_id": "S-000599", "date": "2026-09-29", "time": "10:00", "docks": ["B6 EST"], "note": "palettes à sangler",
             "lines": [{"article": art, "code": "R200044", "designation": "REGR EMC BUSBAR ASSY BEV", "qty": "12"}, {"article": art, "code": "R200045", "designation": "REGR AC BUSBAR ASSY BEV", "qty": ""}]}
     r = client.post("/api/transports/special", json=body)
     assert r.status_code == 201, r.text
     ev = r.json()["transports"][0]
-    assert [(ln["leg"], ln["code"], ln["qty"]) for ln in ev["lines"]] == [("ev", "R200044", "12")]
+    assert [(ln["leg"], ln["code"], ln["qty"]) for ln in ev["lines"]] == [("ev", "R200044", "12"), ("ev", "R200045", "")]
     assert client.post("/api/transports/special", json={**body, "lines": [{"article": art, "code": "", "designation": "x", "qty": "3"}]}).status_code == 422
     pdf = client.get(f"/api/transports/{ev['transport_id']}/retour-ev.pdf")
     assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf" and pdf.content.startswith(b"%PDF")

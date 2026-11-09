@@ -38,9 +38,9 @@ export function PackagingTable({ lines, qty, onQty, loading }: { lines: Packagin
   );
 }
 
-/** The typed quantities as the lines of the truck (only the lines with a quantity). */
+/** Every packaging of the supplier as a line of the truck, with the typed planned quantity (empty when none). */
 export function packagingLines(lines: PackagingLine[], qty: Record<string, string>): TransportLineIn[] {
-  return lines.flatMap((l) => { const v = (qty[`${l.article_id}|${l.packaging_code}`] ?? "").trim(); return v && Number(v.replace(",", ".")) > 0 ? [{ article: l.article_id, code: l.packaging_code, designation: l.packaging_name, qty: v }] : []; });
+  return lines.map((l) => ({ article: l.article_id, code: l.packaging_code, designation: l.packaging_name, qty: (qty[`${l.article_id}|${l.packaging_code}`] ?? "").trim() }));
 }
 
 /** A truck without order : one of your suppliers, day, slot (half hours, occupied slot checked), docks, carrier, note ; an EV return adds the packaging to take back. */

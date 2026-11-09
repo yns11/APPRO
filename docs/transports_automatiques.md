@@ -23,7 +23,7 @@ code : `backend/appro/services/transports_auto.py`). Maquettes : https://claude.
 vie). Écarts de mise en œuvre : le jour d'aujourd'hui est figé pour les retraits (un camion du jour est en route :
 une commande disparue n'en sort pas, une commande apparue y monte et le marque « à vérifier ») ; un camion déplacé par
 l'approvisionneur garde ses commandes même si l'ERP change leur date ; la bande n'affiche que la semaine en cours et
-la suivante ; **pendant l'essai, le Planning de livraisons n'est visible que des e-mails de `APPRO_TRANSPORT_USERS`** ;
+la suivante ; le Planning transport est ouvert à tous depuis le 09/11/2026 (`APPRO_TRANSPORT_USERS`, vide par défaut, peut encore le réserver) ;
 tout camion est scindable, un camion à une seule commande par **quantité** ; les écrans ont été refondus le 05/11
 (vues Semaine, Quais, Charge, panneau de détail, page Envois : règles métier § 9 ter bis).
 

@@ -643,7 +643,7 @@ def ev_return_pdf(t: dict, supplier: dict, company_header: str, ship_from: str, 
                      Paragraph(ln.get("unit_weight") or "", cell_c), Paragraph(str(ln.get("qty") or ""), cell_c), "", ""])
     for _ in range(max(3, 8 - len(lines))):
         rows.append(["", "", "", "", "", ""])
-    rows.append(["", "", Paragraph("TOTAL", cell_b), Paragraph(f"<b>{planned_total:g}</b>", cell_c), Paragraph("<b>0</b>", cell_c), Paragraph("<b>0</b>", cell_c)])
+    rows.append(["", "", Paragraph("TOTAL", cell_b), Paragraph(f"<b>{planned_total:g}</b>", cell_c), "", ""])   # quantity and weight totals : written by hand
     tbl = Table(rows, colWidths=[W * 0.18, W * 0.38, W * 0.13, W * 0.11, W * 0.10, W * 0.10], rowHeights=[8 * mm] + [7.5 * mm] * (len(rows) - 1))
     style = [("BACKGROUND", (0, 0), (-1, 0), blue), ("GRID", (0, 0), (-1, -2), 0.5, pink), ("BOX", (0, 0), (-1, -1), 0.5, pink), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
              ("BACKGROUND", (4, 1), (4, -2), colors.HexColor("#f2f2f2")), ("BACKGROUND", (2, -1), (-1, -1), pink), ("LINEABOVE", (2, -1), (-1, -1), 0.5, pink), ("LINEBELOW", (0, -1), (-1, -1), 0.5, pink)]

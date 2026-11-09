@@ -618,10 +618,10 @@ par l'application à la synchronisation suivante.
 ## 9 ter bis. Camions automatiques
 
 Règle arrêtée le 04/11/2026, resserrée le 05/11/2026 en deux temps (genèse : docs/transports_automatiques.md ;
-code : `backend/appro/services/transports_auto.py`). **Accès** : pendant l'essai, le Planning transport, l'onglet
-*Transports* de la fiche fournisseur et l'API `/api/transports` ne sont visibles que des e-mails de
-`APPRO_TRANSPORT_USERS` (une personne par défaut ; vide = tout le monde) ; l'espace fournisseur et les marques du
-tableau d'approvisionnement ne changent pas.
+code : `backend/appro/services/transports_auto.py`). **Accès** : le Planning transport, l'onglet *Transports* de la
+fiche fournisseur et l'API `/api/transports` sont ouverts à **tous les utilisateurs** depuis le 09/11/2026 (fin de
+l'essai) ; `APPRO_TRANSPORT_USERS` (vide par défaut) permet encore de les réserver à quelques e-mails ; l'espace
+fournisseur et les marques du tableau d'approvisionnement ne changent pas.
 
 **Qui est automatique : tout fournisseur qui livre**, lui-même (mode *Fournisseur*) ou par un transporteur. Il n'y a
 plus de case « Camions automatiques » ni de notion de camion manuel ou automatique : les seuls camions créés à la main
@@ -677,14 +677,14 @@ seulement.
 article, code emballage, nom de l'emballage, poids unitaire facultatif ; l'article doit exister) est la nomenclature
 d'emballages. Dans la fenêtre *Retour EV*, dès que le fournisseur est choisi, l'application liste **tous les emballages
 des articles de ce fournisseur** (article et désignation, code emballage, nom, poids) avec un champ **Quantité
-prévue** ; seules les lignes avec une quantité sont enregistrées (lignes `app_transport_lines`, trajet `ev`, le code
-emballage dans `code`). Le menu du retour EV offre **Emballages à retourner** (même tableau, prérempli, remplacement
+prévue** ; **toutes les lignes sont enregistrées**, avec ou sans quantité (lignes `app_transport_lines`, trajet `ev`,
+le code emballage dans `code`), et toutes s'impriment sur le BL. Le menu du retour EV offre **Emballages à retourner** (même tableau, prérempli, remplacement
 en bloc) et **Créer le BL de retour EV** : un PDF A4 portrait « EMPTY PACKAGING RETURN » : en-tête de la société
 (`APPRO_COMPANY_HEADER`), numéro du BL = identifiant du transport, date du camion, identifiant client = code
 fournisseur, immatriculation à remplir, **SHIP FROM** (`APPRO_SHIP_FROM`) et **SHIP TO** (nom et **adresse** du
 fournisseur, colonne *Adresse* du Référentiel, qui remplace l'ancienne colonne *Pays*), puis une ligne par emballage :
-code, nom, poids unitaire, **Planned Qty** (la quantité prévue saisie), **Quantity** (vide, manuscrite au chargement),
-poids ; total des quantités prévues ; note du camion en *Notes / Instructions* ; cases de visa expéditeur et
+code, nom, poids unitaire, **Planned Qty** (la quantité prévue saisie, vide sinon), **Quantity** (vide, manuscrite au
+chargement), poids ; ligne TOTAL : la somme des quantités prévues, les totaux Quantity et Weight vides (manuscrits) ; note du camion en *Notes / Instructions* ; cases de visa expéditeur et
 transporteur ; contacts (`APPRO_EV_RETURN_CONTACTS`) en pied. Les lignes EV comme le BL sont refusés (422) sur un
 camion qui n'est pas un retour EV.
 
@@ -858,7 +858,7 @@ verrouille ce qui n'est pas permis (cellules non éditables, cadenas sur l'artic
 | **appro** | les cellules Plan / Ajustement / Ferme / CBN et les paramètres hebdomadaires **des articles de son carnet** = ceux dont la colonne *Approvisionneur* porte son nom ; ses propres délégations ; **les données fournisseur et article de tout le référentiel**, depuis la page Référentiel, l'onglet *Paramétrage* de la fiche article (fiche, politique de stock, jours et source de consommation, fournisseurs et règles) et l'onglet *Paramétrage* de la fiche fournisseur (fiche, jours de livraison, quais, contacts, règles article ↔ fournisseur) ; techniquement, **toutes les tables du référentiel** (articles, fournisseurs, article ↔ fournisseur, termes de consommation, **commandes fermées (PO)** : déclaration depuis Recherche ou le Référentiel, programmes, nomenclatures, stock), ligne par ligne ou par import, carnet ou non (`OPEN_REFERENCE` dans `services/access.py` ; remettre à `False` pour revenir au carnet) |
 | **manager** | comme un appro, **plus** la règle commune du moteur (tolérance), les paramètres hebdomadaires de tout article, la saisie, l'import et l'activation des PDP |
 | **admin** | tout, y compris la table des approvisionneurs |
-| utilisateur de `APPRO_TRANSPORT_USERS` | seul à voir, pendant l'essai des camions automatiques, le **Planning transport** (camions, API `/api/transports`) ; il n'y modifie que les camions de ses fournisseurs et les navettes MAF (un manager : tous) |
+| tout utilisateur déclaré (ou de `APPRO_TRANSPORT_USERS` si la variable est renseignée) | voit le **Planning transport** (camions, API `/api/transports`) ; un approvisionneur n'y modifie que les camions de ses fournisseurs et les navettes MAF (un manager : tous) |
 | **fournisseur** (e-mail présent dans la colonne *Contact transport* d'un fournisseur actif, et absent de la table des approvisionneurs et de `APPRO_ADMINS`) | rien ; **ne voit que l'espace fournisseur** (`/portail`) : ses commandes fermes en cours et leurs transports, son retard, les transports annoncés, le prévisionnel EDI (DELFOR) qui lui est attribué, ses DESADV, ses réceptions, avec leurs KPI et des filtres (article, dates, statut) ; toute autre route de l'API répond 403 (`supplier_gate`). Un manager ou un administrateur prévisualise cet espace avec `?supplier_id=` |
 
 L'identité est l'e-mail transmis par Databricks Apps (`x-forwarded-email`), comparé sans tenir compte de la

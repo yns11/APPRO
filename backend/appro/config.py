@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     as_of: dt.date | None = Field(None, description="Simulated « today » (demo, tests). Default: the real date of the day")
     default_planner: str | None = Field(None)
     admins: str = Field("", description="Comma separated e-mails that are always administrators, whatever the planners table (the bundle deployer by default): no lock-out possible")
-    transport_users: str = Field("younes.elhachi1@emotors.com", description="Comma separated e-mails of the only users who see the « Planning transport » and the trucks (API /api/transports) while the automatic trucks are tried out ; empty = everybody")
+    transport_users: str = Field("", description="Comma separated e-mails of the only users who see the « Planning transport » and the trucks (API /api/transports) while the automatic trucks are tried out ; empty = everybody")
     horizon_days: int = Field(364, description="Projection horizon after today : 52 weeks (fixed in the application)")
     history_weeks: int = Field(2, description="Weeks shown before the current week in the supply table")
     working_weekdays: str = Field("1,2,3,4,5")

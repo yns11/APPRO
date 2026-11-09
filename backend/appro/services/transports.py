@@ -366,8 +366,8 @@ LEG_EV = "ev"
 
 
 def _clean_lines(lines: list[dict[str, Any]] | None, leg: str) -> list[AppTransportLine]:
-    """Typed lines of a shuttle (article required) or packaging lines of an EV return (``leg = ev`` : article and
-    packaging code, kept only with a planned quantity)."""
+    """Typed lines of a shuttle (article required) or packaging lines of an EV return (``leg = ev`` : every packaging
+    of the supplier is kept, with or without a planned quantity ; the code is required)."""
     out: list[AppTransportLine] = []
     for ln in lines or []:
         article = str(ln.get("article") or "").strip()[:120]
@@ -375,8 +375,6 @@ def _clean_lines(lines: list[dict[str, Any]] | None, leg: str) -> list[AppTransp
         designation = str(ln.get("designation") or "").strip()[:200]
         qty = str(ln.get("qty") or "").strip()[:40]
         if leg == LEG_EV:
-            if not qty or qty in ("0", "0.0", "0,0"):
-                continue
             if not code:
                 raise TransportError(f"Emballage sans code : « {designation or article} »")
             out.append(AppTransportLine(leg=leg, article=article, code=code, designation=designation, qty=qty))
