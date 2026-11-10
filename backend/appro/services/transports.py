@@ -500,13 +500,15 @@ def cancel_transport(session: Session, user: str, t: AppTransport) -> None:
 # ----------------------------------------------------------------------------- CSV (ATR)
 def atr_csv(transports: list[AppTransport], names: dict[str, str]) -> str:
     """Header then **one line per transport and per dock** (identifier and every other field repeated), ``;``
-    separated, CRLF (the tool runs on Windows) ; the return leg of a shuttle has no line :
-    ``EM00001A;ENNOVI HUNGARY;;03/11/2026;14:00:00;S-000517;R;;;B15``."""
+    separated, CRLF (the tool runs on Windows) ; the return leg of a shuttle has no line ; a transport without a
+    carrier gets the FOURNISSEUR cell as TRANSPORTEUR (the supplier delivers himself ; the tool wants the column
+    filled) : ``EM00001A;ENNOVI HUNGARY;ENNOVI HUNGARY;03/11/2026;14:00:00;S-000517;R;;;B15``."""
     lines = [";".join(CSV_HEADER)]
     for t in transports:
         for dock in split_docks(t.docks) or [""]:
             shuttle = t.mode == "maf" or t.supplier_id == MAF_ID
-            cells = [t.transport_id, MAF_LABEL if shuttle else names.get(t.supplier_id, t.supplier_id), t.carrier or "", f"{t.date:%d/%m/%Y}", f"{t.time}:00",
+            supplier = MAF_LABEL if shuttle else names.get(t.supplier_id, t.supplier_id)
+            cells = [t.transport_id, supplier, (t.carrier or "").strip() or supplier, f"{t.date:%d/%m/%Y}", f"{t.time}:00",
                      MAF_LABEL if shuttle else t.supplier_id, FLOW, "", "", dock]
             lines.append(";".join(c.replace(";", " ") for c in cells))
     return "\r\n".join(lines) + "\r\n"

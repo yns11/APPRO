@@ -201,6 +201,14 @@ def test_every_supplier_is_automatic_and_actions(client):  # noqa: F811
     oid, qty = single["orders"][0]["order_id"], single["orders"][0]["qty"]
     assert client.post(f"/api/transports/{single['transport_id']}/split", json={"items": [{"order_id": oid, "qty": qty + 1}]}).status_code == 422
     assert client.post(f"/api/transports/{single['transport_id']}/split", json={"items": [{"order_id": oid}]}).status_code == 422
+    # a zero on a line is accepted as long as another line moves ; all zeros = nothing to split ; a negative is refused
+    assert client.post(f"/api/transports/{single['transport_id']}/split", json={"items": [{"order_id": oid, "qty": 0}]}).status_code == 422
+    assert client.post(f"/api/transports/{single['transport_id']}/split", json={"items": [{"order_id": oid, "qty": -1}]}).status_code == 422
+    two = next(t for t in _planning(client)["transports"] if len(t["orders"]) >= 2 and t["status"] == "planned")
+    o1, o2 = two["orders"][0], two["orders"][1]
+    r = client.post(f"/api/transports/{two['transport_id']}/split", json={"items": [{"order_id": o1["order_id"], "qty": 0}, {"order_id": o2["order_id"], "qty": o2["qty"]}]})
+    assert r.status_code == 200, r.text
+    assert [o["order_id"] for o in r.json()[1]["orders"]] == [o2["order_id"]] and o1["order_id"] in {o["order_id"] for o in r.json()[0]["orders"]}
     r = client.post(f"/api/transports/{single['transport_id']}/split", json={"items": [{"order_id": oid, "qty": round(qty / 3, 3)}], "time": "11:00"})
     assert r.status_code == 200, r.text
     b, c = r.json()
@@ -313,9 +321,11 @@ def test_reconcile_runs_once_per_version_and_board_counters(client):  # noqa: F8
     first = _planning(client)
     n = len([t for t in first["transports"] if t["supplier_id"] == "S-000032"])
     assert n == 5
-    # the global CSV lists the automatic trucks (today and later)
+    # the planner's CSV lists the automatic trucks (today and later) ; without a carrier, TRANSPORTEUR = FOURNISSEUR
     csv = client.get("/api/transports/atr.csv").text
     assert csv.count("S-000032") == 5
+    row = next(l.split(";") for l in csv.split("\r\n")[1:] if l.endswith("S-000032;R;;;B15") or ";S-000032;" in l)
+    assert row[2] == row[1] and row[1]
     # the reconciliation is journalised once
     log = [a for a in client.get("/api/entries/audit", params={"limit": 500}).json() if a["entity_type"] == "transports"]
     assert len(log) == 1 and log[0]["payload"]["created"] >= 5 and log[0]["user"] == "application" and "moved" not in log[0]["payload"]

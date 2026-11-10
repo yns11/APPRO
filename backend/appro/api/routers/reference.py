@@ -220,7 +220,8 @@ def query_columns(ctx: AppContext, session: Session, name: str, out: list[dict])
 
     * articles : ``programs`` (names of the programmes whose bill of material uses the article),
       ``program_count``, ``supplier_count`` (active article ↔ supplier rules) ;
-    * suppliers : ``articles`` (ids of the articles with an active rule for the supplier), ``article_count`` ;
+    * suppliers : ``articles`` (ids of the articles with an active rule for the supplier), ``article_count``,
+      ``planners`` (the planners of those articles, comma separated) ;
     * programmes : ``article_count`` (components of the bill of material), ``has_plan`` (a quantity
       planned from the current week on, PDP ERP or active version) ;
     * closed orders (PO) : ``receipt_count``, ``receipt_qty``, ``last_receipt``, ``receipt_suppliers``,
@@ -242,9 +243,11 @@ def query_columns(ctx: AppContext, session: Session, name: str, out: list[dict])
         for lk in reference.rows_out(session, "ref_article_suppliers"):
             if lk.get("active", True):
                 arts.setdefault(lk["supplier_id"], set()).add(str(lk["article_id"]))
+        owner = {str(a["article_id"]): str(a.get("planner") or "").strip().upper() for a in reference.rows_out(session, "ref_articles")}
         for r in out:
             found = sorted(arts.get(r["supplier_id"], ()))
             r["articles"], r["article_count"] = ", ".join(found), len(found)
+            r["planners"] = ", ".join(sorted({owner[a] for a in found if owner.get(a)}))
     elif name == "ref_closed_orders":
         # receipts of the ERP carrying that PO number : count, quantity, last date, suppliers and articles
         rec = ctx.table("fct_receipts")

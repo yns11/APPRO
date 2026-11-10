@@ -24,7 +24,7 @@ tables (`GET /api/reference/<table>/rows`) ; elles ne sont ni stockées, ni expo
 | Table | Colonnes requête | Boutons de filtre rapide (cumulables) |
 |---|---|---|
 | `ref_articles` | *Programmes* (noms des programmes dont la nomenclature utilise l'article, `programs`, `program_count`) ; *Fourn.* (`supplier_count`, règles article ↔ fournisseur actives). La colonne *Famille* n'est pas affichée. | *Sans fournisseur*, *Multi-sourcing* (≥ 2 fournisseurs actifs), *Sans programme*, *Conso dérivée / PDP*, *Jours conso ≠ 5* |
-| `ref_suppliers` | *Articles* (nombre et références des articles reliés par une règle active, `articles`, `article_count`) | *Sans article*, *Délai ≠ 5* ; modification en lot : délai, jours de livraison, jours stricts, actif |
+| `ref_suppliers` | *Articles* (nombre et références des articles reliés par une règle active, `articles`, `article_count`) ; *Approvisionneurs* (`planners` : les approvisionneurs de ces articles) | *Sans article*, *Délai ≠ 5* ; modification en lot : délai, jours de livraison, jours stricts, actif |
 | `ref_article_suppliers` | — | *Plafonnés*, *Délai spécifique* |
 | `ref_programs` | *Articles* (nombre de composants de la nomenclature, `article_count`) ; `has_plan` (une quantité planifiée à partir de la semaine en cours dans le PDP effectif) | *Sans nomenclature*, *Sans plan* |
 

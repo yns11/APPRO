@@ -519,11 +519,12 @@ def split_transport(session: Session, user: str, t: AppTransport, items: list[di
         total = float(o.qty or 0.0)
         qty = it.get("qty")
         qty = total if qty is None else float(qty)
-        if qty <= 0 or qty > total + 1e-9:
+        if qty < 0 or qty > total + 1e-9:
             raise ActionError(f"Quantité invalide pour {o.article_id} : {qty:g} (à bord : {total:g})")
-        moves.append((o, min(qty, total)))
+        if qty > 0:            # a zero stays on the first truck : fine as long as another line moves
+            moves.append((o, min(qty, total)))
     if not moves:
-        raise ActionError("Aucune commande à scinder")
+        raise ActionError("Aucune commande à scinder : au moins un article doit avoir une quantité")
     if len(moves) == len(t.orders) and all(abs(q - float(o.qty or 0.0)) < 1e-9 for o, q in moves):
         raise ActionError("Tout partirait dans le second camion : il resterait un camion vide, déplacez-le plutôt")
     new_docks = [d for d in dict.fromkeys(str(x).strip() for x in (docks or T.split_docks(t.docks))) if d] or ["B15"]

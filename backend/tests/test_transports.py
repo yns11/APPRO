@@ -72,7 +72,7 @@ def test_shuttle_lines_return_leg_pdf_and_csv(client):  # noqa: F811
     # the CSV : one line per outward dock, NAVETTE HAMBACH as name and code, no line for the return leg
     lines = pack["csv"].split("\r\n")
     d, m, y = day[8:10], day[5:7], day[0:4]
-    assert lines[0] == HEADER and lines[1] == f"{t['transport_id']};NAVETTE HAMBACH;;{d}/{m}/{y};08:00:00;NAVETTE HAMBACH;R;;;B6 EST" and lines[2] == "" and len(lines) == 3
+    assert lines[0] == HEADER and lines[1] == f"{t['transport_id']};NAVETTE HAMBACH;NAVETTE HAMBACH;{d}/{m}/{y};08:00:00;NAVETTE HAMBACH;R;;;B6 EST" and lines[2] == "" and len(lines) == 3
     assert pack["csv_filename"] == f"ATR_{t['transport_id']}.csv"
     # the sheet of the shuttle ; a non-shuttle has none
     pdf = client.get(f"/api/transports/{t['transport_id']}/navette.pdf")
@@ -247,7 +247,7 @@ def test_ev_return_and_one_off_truck(client):  # noqa: F811
     assert r.status_code == 201, r.text
     ev = r.json()["transports"][0]
     assert ev["transport_id"] == "EM0001EV" and ev["mode"] == "ev" and ev["orders"] == [] and ev["pinned"] is True and ev["mine"] is True
-    assert r.json()["csv"].split("\r\n")[1] == f"EM0001EV;{ev['supplier_name']};;29/09/2026;10:00:00;S-000599;R;;;B6 EST"
+    assert r.json()["csv"].split("\r\n")[1] == f"EM0001EV;{ev['supplier_name']};{ev['supplier_name']};29/09/2026;10:00:00;S-000599;R;;;B6 EST"
     r = client.post("/api/transports/special", json={"kind": "ev", "supplier_id": "S-000517", "date": "2026-09-29", "time": "10:00", "docks": ["B6 EST"]})
     assert r.json()["transports"][0]["transport_id"] == "EM0002EV"
     # capacity 2 : a third truck at 10:00 on B6 EST is refused with 10:30 proposed, forced it passes, a fifth never

@@ -580,7 +580,9 @@ transporteurs sont prévenus par le système de transport (ATR) à partir du fic
   forcé apparaît en orange dans l'agenda.
 - **Fichier pour l'outil de transport (ATR)** : CSV `;`, en-tête `ID TRANSPORT;FOURNISSEUR;TRANSPORTEUR;DATE;HEURE;
   CODE FOURNISSEUR;FLUX;CHAMP1;CHAMP2;QUAIS`, **une ligne par transport et par quai de l'aller** (tous les autres champs
-  répétés), date `jj/mm/aaaa`, heure `hh:mm:ss`, flux toujours `R`, **aucune ligne pour le retour d'une navette**.
+  répétés), date `jj/mm/aaaa`, heure `hh:mm:ss`, flux toujours `R`, **aucune ligne pour le retour d'une navette** ;
+  un transport **sans transporteur** porte en TRANSPORTEUR la valeur de sa colonne FOURNISSEUR (le fournisseur livre
+  lui-même ; `NAVETTE HAMBACH` pour une navette) : la colonne n'est jamais vide, dans tous les CSV.
   *CSV ATR de ce camion* dans le menu ; dans l'en-tête, **deux fichiers** : le **CSV du carnet** (les transports
   prévus datés d'aujourd'hui ou plus tard des fournisseurs du carnet affiché, **sans les navettes MAF** :
   `GET /api/transports/atr.csv?planner=`, chaque approvisionneur charge son fichier dans ATR quand ses camions sont

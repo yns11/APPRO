@@ -886,9 +886,12 @@ def test_reference_query_columns(client):
         assert r["supplier_count"] == sum(1 for lk in links if lk["article_id"] == aid)
     assert any(r["supplier_count"] >= 2 for r in arts.values())   # the seed holds a multi-sourced article
     sups = client.get("/api/reference/ref_suppliers/rows").json()
+    owner = {a["article_id"]: (a.get("planner") or "").upper() for a in client.get("/api/reference/ref_articles/rows").json()}
     for s in sups:
         want = sorted({lk["article_id"] for lk in links if lk["supplier_id"] == s["supplier_id"]})
         assert s["articles"] == ", ".join(want) and s["article_count"] == len(want)
+        assert s["planners"] == ", ".join(sorted({owner[a] for a in want if owner.get(a)}))   # the planners of those articles
+    assert any(s["planners"] for s in sups)
     progs = {p["program_id"]: p for p in client.get("/api/reference/ref_programs/rows").json()}
     assert all(p["article_count"] == sum(1 for b in bom if b["program_id"] == pid) for pid, p in progs.items())
     assert {p["has_plan"] for p in progs.values()} <= {True, False} and any(p["has_plan"] for p in progs.values())

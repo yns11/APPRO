@@ -146,7 +146,8 @@ function SplitDrawer({ t, d, onClose }: { t: TransportOut; d: BoardResponse; onC
   const [docks, setDocks] = useState<string[]>(t.docks);
   const run = useSlotWrite((body: { items: { order_id: string; qty: number | null }[]; time?: string; docks: string[]; force?: boolean }) => api.post<TransportOut[]>(`/api/transports/${encodeURIComponent(t.transport_id)}/split`, body),
     (out) => { toast.push(`${out[1].transport_id} créé à ${out[1].time} ; ${out[0].transport_id} garde ${articleLines(out[0]).length} article(s)`, "success"); onClose(); });
-  const parsed = lines.map((l) => { const v = qty[key(l)]?.trim(); if (!v) return { l, n: 0, bad: false }; const n = Number(v.replace(",", ".")); return { l, n, bad: !(Number.isFinite(n) && n > 0 && n <= l.qty + 1e-9) }; });
+  // a zero (typed or left empty) keeps the article on the first truck : fine as long as another article moves
+  const parsed = lines.map((l) => { const v = qty[key(l)]?.trim(); if (!v) return { l, n: 0, bad: false }; const n = Number(v.replace(",", ".")); return { l, n, bad: !(Number.isFinite(n) && n >= 0 && n <= l.qty + 1e-9) }; });
   const items = parsed.flatMap(({ l, n, bad }) => (n > 0 && !bad ? splitItems(l, n) : []));
   const bad = parsed.some((x) => x.bad);
   const all = parsed.every(({ l, n }) => n >= l.qty - 1e-9) && parsed.length > 0;
