@@ -1,0 +1,157 @@
+## 2026-10-31T22:11:37Z · commit 465a76d · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+
+## 2026-10-31T22:16:42Z · commit cad8477 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-01T14:54:08Z · commit 65a83f2 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-01T19:56:43Z · commit 14e14e8 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-01T21:17:08Z · commit 9f98969 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-01T22:22:04Z · commit 9e4120e · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-02T13:41:23Z · commit e3423b4 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-02T20:54:03Z · commit 1d7ea33 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-02T23:27:57Z · commit c28c65a · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-02T23:32:27Z · commit 30ec11e · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-04T06:56:22Z · commit 2b1f6af · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-05T00:47:55Z · commit 1052ce0 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-05T00:56:23Z · commit 7004410 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-05T04:01:00Z · commit c0136b5 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-05T14:31:32Z · commit 66c4287 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-05T17:12:09Z · commit f8e70ce · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+
+## 2026-11-05T23:24:29Z · commit e5bbc7b · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+
+## 2026-11-06T00:42:32Z · commit e5bbc7b · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+
+## 2026-11-09T11:01:29Z · commit dc6fdc6 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-09T11:58:20Z · commit 9a0cfc1 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-09T13:16:14Z · commit d6df2b2 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-10T15:33:01Z · commit f80d60a · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+
+## 2026-11-12T12:54:53Z · commit 0fbcdd1 · root
+- OK   ruff (backend, scripts, jobs)
+- OK   pytest (backend)
+- OK   eslint (client)
+- OK   tsc + vite build (client)
+- OK   parcours Playwright (client/e2e/smoke.mjs)
+

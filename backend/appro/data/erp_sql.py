@@ -1,0 +1,175 @@
+"""The **single** mapping between the ERP extractions and the canonical fact tables.
+
+The same Databricks SQL is used by the application when it reads Unity Catalog through a SQL
+warehouse (``APPRO_DATA_SOURCE=uc``) and by the synchronisation job that copies the facts into
+Lakebase (``jobs/sync_erp_to_lakebase.py``).  Changing a column mapping is therefore one edit.
+
+Sources (schema ``emotors_data_champions.silver_erp_ye`` by default) :
+
+* ``commandes_edi`` – firm and forecast schedule lines aggregated by supplier / purchase order /
+  article / delivery date (``ID`` = ``vendaccount|itemid|yyyyMMdd|silfirmorder``) ;
+* ``recep_edi`` – arrival journals by supplier / purchase order / packing slip / article / day and
+  **status** : ``En transit`` (journal created, not validated : shown, never counted), ``Reçu``
+  (journal validated, acknowledgement of receipt pending) or ``Comptabilisé`` (acknowledgement of
+  receipt validated) ; several BL may be joined by `` | `` ;
+* ``silver_base_article`` – item master : ``std_cost_price`` (euros) values the stocks ;
+* an optional daily **actual consumption** table (``APPRO_ERP_CONSUMPTION_TABLE``) with the canonical
+  columns ``article_id, date, qty`` – the consumption is given **per component, already exploded**
+  through the bill of material (unlike the PDP, exploded by the engine) ;
+* an optional daily **physical stock snapshot** (``APPRO_ERP_STOCK_TABLE``, ``stock_snapshot`` : ``item_id,
+  snapshot_date, entrepot, stock_physique``), summed over the configured warehouses, last 400 days by default : compared
+  with the projected stock of the same day (gap, drift, « caler sur l'ERP »), never a starting stock.
+"""
+from __future__ import annotations
+
+import datetime as dt
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, kw_only=True)
+class ErpTables:
+    """Keyword-only on purpose: a positional construction once sent the DESADV table to the PDP query."""
+
+    catalog: str = "emotors_data_champions"
+    schema: str = "silver_erp_ye"
+    orders: str = "commandes_edi"
+    receipts: str = "recep_edi"
+    consumption: str = ""         # empty: no actual consumption read from the ERP
+    desadv: str = ""              # empty: no despatch advices (DESADV) read from the ERP
+    prices: str = ""              # empty: no article prices (no stock valuation)
+    stock: str = ""               # empty: no ERP stock snapshot (no comparison with the projected stock)
+    stock_warehouses: tuple[str, ...] = ("B06", "B06VRAC")
+    stock_history_days: int = 400
+
+    def fqn(self, table: str) -> str:
+        return f"`{self.catalog}`.`{self.schema}`.`{table}`"
+
+
+def purchase_orders_sql(t: ErpTables) -> str:
+    """One row per delivery slot ``ID`` (several purchase orders may share a slot: summed)."""
+    return f"""
+SELECT
+  c.ID                                                            AS order_id,
+  c.Article                                                       AS article_id,
+  c.Code_fournisseur                                              AS supplier_id,
+  MAX(c.Nom_fournisseur)                                          AS supplier_name,
+  CASE WHEN MAX(c.Ordre_ferme) = 'Oui' THEN 'FIRM' ELSE 'FORECAST' END AS order_type,
+  CAST(MIN(c.Date_de_debut) AS DATE)                              AS expected_date,
+  CAST(SUM(c.Quantite) AS DOUBLE)                                 AS qty_ordered,
+  CAST(SUM(GREATEST(c.Quantite_restante, 0)) AS DOUBLE)           AS qty_open,
+  CONCAT_WS(', ', SORT_ARRAY(COLLECT_SET(c.Commande)))            AS purch_id,
+  MAX(c.Niveau_engagement)                                        AS commitment
+FROM {t.fqn(t.orders)} c
+WHERE c.ID IS NOT NULL
+GROUP BY c.ID, c.Article, c.Code_fournisseur
+""".strip()
+
+
+def receipts_sql(t: ErpTables) -> str:
+    """One row per supplier / order / BL / article / day / status (``En transit``, ``Reçu`` or ``Comptabilisé``).
+    A BL list may be long (dozens of BL) : the identifier keeps a 16-character hash of the list instead of the
+    list itself, the ``packing_slip`` column keeps it whole."""
+    return f"""
+SELECT
+  CONCAT_WS('|', r.Code_fournisseur, r.Commande,
+            CASE WHEN LENGTH(COALESCE(r.BL, '')) > 60 THEN LEFT(SHA2(r.BL, 256), 16) ELSE COALESCE(r.BL, '') END,
+            r.Article, DATE_FORMAT(r.Date_reception, 'yyyyMMdd'), COALESCE(r.Statut_reception, '')) AS receipt_id,
+  r.Article                                                       AS article_id,
+  r.Code_fournisseur                                              AS supplier_id,
+  CAST(r.Date_reception AS DATE)                                  AS receipt_date,
+  CAST(r.Quantite_recue AS DOUBLE)                                AS qty,
+  r.Commande                                                      AS purch_id,
+  r.BL                                                            AS packing_slip,
+  COALESCE(r.Statut_reception, 'Reçu')                            AS status
+FROM {t.fqn(t.receipts)} r
+WHERE r.Quantite_recue IS NOT NULL AND r.Quantite_recue <> 0
+""".strip()
+
+
+def consumption_actual_sql(t: ErpTables) -> str:
+    """Actual consumption per component and day.  The source table carries the canonical columns
+    ``article_id`` (the component, as in ``ref_articles``), ``date`` and ``qty`` (stock unit of the
+    article) ; several rows of a day (several programmes, several movements) are summed."""
+    return f"""
+SELECT c.article_id AS article_id, CAST(c.date AS DATE) AS date, CAST(SUM(c.qty) AS DOUBLE) AS qty
+FROM {t.fqn(t.consumption)} c
+WHERE c.article_id IS NOT NULL AND c.date IS NOT NULL AND c.qty IS NOT NULL
+GROUP BY c.article_id, CAST(c.date AS DATE)
+""".strip()
+
+
+def desadv_sql(t: ErpTables) -> str:
+    """Despatch advices, one row per article line of a DespatchAdvice-Purchase message (``desadv_edi``)."""
+    return f"""
+SELECT
+  CONCAT_WS('|', CAST(d.Document_ID AS STRING), CAST(d.ID_Ligne AS STRING)) AS desadv_id,
+  d.Code_article                                                  AS article_id,
+  d.Code_fournisseur                                              AS supplier_id,
+  d.Nom_fournisseur                                               AS supplier_name,
+  CAST(d.BL AS STRING)                                            AS packing_slip,
+  CAST(d.Commande_ouverte AS STRING)                              AS purch_id,
+  CAST(d.Date_emission AS DATE)                                   AS issue_date,
+  CAST(d.Quantite_achat AS DOUBLE)                                AS qty,
+  d.Etat_message                                                  AS state,
+  d.Traitement_final                                              AS final_processing,
+  CAST(d.ID_transaction_stock AS STRING)                          AS stock_trans_id
+FROM {t.fqn(t.desadv)} d
+WHERE d.Code_article IS NOT NULL AND d.Date_emission IS NOT NULL
+""".strip()
+
+
+def prices_sql(t: ErpTables) -> str:
+    """Standard cost price per article (euros).  The item master holds far more items than the
+    application : the engine only values the articles of its reference table."""
+    return f"""
+SELECT a.item_id AS article_id, CAST(MAX(a.std_cost_price) AS DOUBLE) AS price
+FROM {t.fqn(t.prices)} a
+WHERE a.item_id IS NOT NULL AND a.std_cost_price IS NOT NULL AND a.item_id LIKE 'P-00%'
+GROUP BY a.item_id
+""".strip()
+
+
+def stock_snapshot_sql(t: ErpTables) -> str:
+    """Physical stock at the end of each day per article and warehouse, configured warehouses only, last
+    ``stock_history_days`` days (the drift history) ; several rows of a warehouse / day are summed."""
+    wh = ", ".join("'" + w.replace("'", "''") + "'" for w in t.stock_warehouses)
+    where_wh = f" AND s.entrepot IN ({wh})" if wh else ""
+    return f"""
+SELECT
+  s.item_id                                                       AS article_id,
+  CAST(s.snapshot_date AS DATE)                                   AS snapshot_date,
+  s.entrepot                                                      AS warehouse,
+  CAST(SUM(s.stock_physique) AS DOUBLE)                           AS qty
+FROM {t.fqn(t.stock)} s
+WHERE s.item_id IS NOT NULL AND s.snapshot_date IS NOT NULL AND s.stock_physique IS NOT NULL
+  AND CAST(s.snapshot_date AS DATE) >= DATE_SUB(CURRENT_DATE(), {int(t.stock_history_days)}){where_wh}
+GROUP BY s.item_id, CAST(s.snapshot_date AS DATE), s.entrepot
+""".strip()
+
+
+def carry_first_seen(previous: dict[str, dt.date | None], order_id: str, today: dt.date) -> dt.date:
+    """``first_seen`` of a delivery slot : the day it was first copied by the synchronisation job,
+    kept from the previous copy ; a slot unknown so far appeared today."""
+    prev = previous.get(order_id)
+    return prev if prev else today
+
+
+def fact_queries(t: ErpTables) -> dict[str, str]:
+    """Canonical fact table → SQL (only the tables that are configured)."""
+    out = {"fct_purchase_orders": purchase_orders_sql(t), "fct_receipts": receipts_sql(t)}
+    if t.consumption:
+        out["fct_consumption_actual"] = consumption_actual_sql(t)
+    if t.desadv:
+        out["fct_desadv"] = desadv_sql(t)
+    if t.prices:
+        out["fct_prices"] = prices_sql(t)
+    if t.stock:
+        out["fct_stock_snapshot"] = stock_snapshot_sql(t)
+    return out
+
+
+def source_of(t: ErpTables, name: str) -> str:
+    """Fully qualified source table of a canonical fact table."""
+    return {"fct_purchase_orders": t.fqn(t.orders), "fct_receipts": t.fqn(t.receipts),
+            "fct_consumption_actual": t.fqn(t.consumption),
+            "fct_desadv": t.fqn(t.desadv), "fct_prices": t.fqn(t.prices), "fct_stock_snapshot": t.fqn(t.stock)}[name]

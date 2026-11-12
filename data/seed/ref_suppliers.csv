@@ -1,0 +1,12 @@
+supplier_id,name,address,contact,delivery_weekdays,lead_time_days,active,docks
+S-000545,ELANTAS EUROPE S.R.L.,,,"1,2,3,4,5",5,true,B15
+S-000599,ENNOVI Czech Republic,,,"1,2,3,4,5",5,true,B15
+S-000186,SCHWERING HASSE ELEKTRODRAHT GMBH,,,"1,2,3,4,5",5,true,B15
+S-000286,COVEME SPA,,,"1,2,3,4,5",5,true,B15
+S-000106,ISOVOLTA,,,"1,2,3,4,5",5,true,B15
+S-000032,R.BOURGEOIS S.A.,,,"1,2,3,4,5",5,true,B15
+S-001033,ERNESTO MALVESTITI,,,"1,2,3,4,5",5,true,B15
+S-000517,ENNOVI HUNGARY,,,"1,2,3,4,5",5,true,B15
+S-000378,EUROTRANCIATURA,,,"1,2,3,4,5",5,true,B15
+S-000904,ESSEX Furukawa Magnet Wire,,,"1,2,3,4,5",5,true,B15
+S-001562,EUROMISI,,,"1,2,3,4,5",5,true,B15
