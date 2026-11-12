@@ -321,11 +321,14 @@ def test_reconcile_runs_once_per_version_and_board_counters(client):  # noqa: F8
     first = _planning(client)
     n = len([t for t in first["transports"] if t["supplier_id"] == "S-000032"])
     assert n == 5
-    # the planner's CSV lists the automatic trucks (today and later) ; without a carrier, TRANSPORTEUR = FOURNISSEUR
+    # the planner's CSV lists the automatic trucks (today and later) ; a supplier delivering himself : FOURNISSEUR =
+    # his purchase orders | his docks (the « Route » of the tool's e-mail), TRANSPORTEUR = his name
     csv = client.get("/api/transports/atr.csv").text
     assert csv.count("S-000032") == 5
-    row = next(l.split(";") for l in csv.split("\r\n")[1:] if l.endswith("S-000032;R;;;B15") or ";S-000032;" in l)
-    assert row[2] == row[1] and row[1]
+    row = next(l.split(";") for l in csv.split("\r\n")[1:] if ";S-000032;" in l)
+    truck = next(t for t in first["transports"] if t["transport_id"] == row[0])
+    refs = list(dict.fromkeys(o["ref"] for o in truck["orders"] if o.get("ref")))
+    assert row[2] == "R.BOURGEOIS S.A." and row[1] == " | ".join(([", ".join(refs)] if refs else []) + truck["docks"]) and refs
     # the reconciliation is journalised once
     log = [a for a in client.get("/api/entries/audit", params={"limit": 500}).json() if a["entity_type"] == "transports"]
     assert len(log) == 1 and log[0]["payload"]["created"] >= 5 and log[0]["user"] == "application" and "moved" not in log[0]["payload"]

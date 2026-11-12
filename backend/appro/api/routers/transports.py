@@ -44,6 +44,12 @@ def _names(ctx: AppContext) -> dict[str, str]:
     return dict(zip(df["supplier_id"], df["name"]))
 
 
+def _modes(ctx: AppContext) -> dict[str, str]:
+    """``supplier_id → transport mode`` (the ATR file names the carrier of an EV return or a one-off truck from it)."""
+    df = ctx.table("ref_suppliers")
+    return {sid: str(m or "") for sid, m in zip(df["supplier_id"], df["transport_mode"] if "transport_mode" in df.columns else [""] * len(df))}
+
+
 def _people(ctx: AppContext) -> dict[str, str]:
     """``e-mail → first name`` of the declared planners (the screens name the author of a shuttle, who cancelled)."""
     df = ctx.table("ref_planners")
@@ -107,7 +113,7 @@ def _require_own(access: Access, t: AppTransport, mine: set[str]) -> None:
 
 def _pack(ctx: AppContext, ds: Dataset, rows: list[AppTransport], mine: set[str]) -> dict:
     names = _names(ctx)
-    return {"transports": [T.transport_out(t, names, T.article_labels(ds), mine) for t in rows], "csv": T.atr_csv(rows, names), "csv_filename": T.csv_filename(rows)}
+    return {"transports": [T.transport_out(t, names, T.article_labels(ds), mine) for t in rows], "csv": T.atr_csv(rows, names, _modes(ctx)), "csv_filename": T.csv_filename(rows)}
 
 
 def _open_qty(ds: Dataset) -> dict[str, float]:
@@ -235,12 +241,12 @@ def atr_csv_upcoming(transport_id: list[str] | None = Query(None), planner: str 
     ``transport_id`` repeated, the selected transports only."""
     if transport_id:
         rows = _rows(session, transport_id)
-        return _csv_response(T.atr_csv(rows, _names(ctx)), T.csv_filename(rows))
+        return _csv_response(T.atr_csv(rows, _names(ctx), _modes(ctx)), T.csv_filename(rows))
     ds, _params, as_of = _sync(ctx, session)
     shown = _shown(ds, access, planner)
     rows = [t for t in T.list_transports(session, start=as_of) if t.mode != "maf" and t.supplier_id != T.MAF_ID and t.supplier_id in shown]
     who = (planner or "").upper() or (access.name or "").upper() or "transports"
-    return _csv_response(T.atr_csv(rows, _names(ctx)), f"ATR_{who}_{as_of:%Y%m%d}.csv")
+    return _csv_response(T.atr_csv(rows, _names(ctx), _modes(ctx)), f"ATR_{who}_{as_of:%Y%m%d}.csv")
 
 
 @router.get("/atr-maf.csv")
@@ -249,7 +255,7 @@ def atr_csv_maf(ctx: AppContext = Depends(ctx_dep), session: Session = Depends(s
     created it (the shuttles are shared : anyone who sees the planning downloads it)."""
     _ds, _params, as_of = _sync(ctx, session)
     rows = [t for t in T.list_transports(session, start=as_of) if t.mode == "maf" or t.supplier_id == T.MAF_ID]
-    return _csv_response(T.atr_csv(rows, _names(ctx)), f"ATR_navettes_MAF_{as_of:%Y%m%d}.csv")
+    return _csv_response(T.atr_csv(rows, _names(ctx), _modes(ctx)), f"ATR_navettes_MAF_{as_of:%Y%m%d}.csv")
 
 
 @router.get("", response_model=list[S.TransportOut])
@@ -341,7 +347,7 @@ def cancel_many(body: S.TransportIdsIn, response: Response, ctx: AppContext = De
 @router.get("/{transport_id}/atr.csv")
 def transport_csv(transport_id: str, ctx: AppContext = Depends(ctx_dep), session: Session = Depends(session_dep)):
     t = _one(session, transport_id)
-    return _csv_response(T.atr_csv([t], _names(ctx)), T.csv_filename([t]))
+    return _csv_response(T.atr_csv([t], _names(ctx), _modes(ctx)), T.csv_filename([t]))
 
 
 @router.get("/{transport_id}/navette.pdf")

@@ -580,9 +580,16 @@ transporteurs sont prévenus par le système de transport (ATR) à partir du fic
   forcé apparaît en orange dans l'agenda.
 - **Fichier pour l'outil de transport (ATR)** : CSV `;`, en-tête `ID TRANSPORT;FOURNISSEUR;TRANSPORTEUR;DATE;HEURE;
   CODE FOURNISSEUR;FLUX;CHAMP1;CHAMP2;QUAIS`, **une ligne par transport et par quai de l'aller** (tous les autres champs
-  répétés), date `jj/mm/aaaa`, heure `hh:mm:ss`, flux toujours `R`, **aucune ligne pour le retour d'une navette** ;
-  un transport **sans transporteur** porte en TRANSPORTEUR la valeur de sa colonne FOURNISSEUR (le fournisseur livre
-  lui-même ; `NAVETTE HAMBACH` pour une navette) : la colonne n'est jamais vide, dans tous les CSV.
+  répétés), date `jj/mm/aaaa`, heure `hh:mm:ss`, flux toujours `R`, **aucune ligne pour le retour d'une navette**.
+  ATR affiche la colonne FOURNISSEUR comme « Route » dans le mail qu'il envoie au contact transport, et retrouve ce
+  contact par CODE FOURNISSEUR ; les deux colonnes FOURNISSEUR / TRANSPORTEUR portent donc, selon le camion :
+  **navette MAF** `NAVETTE HAMBACH` / `TRANSCO` ; **retour EV** `PACKAGING` / le fournisseur (son transporteur si son
+  mode est un transporteur) ; **camion ponctuel** le fournisseur / le fournisseur (ou son transporteur) ; **camion
+  d'un fournisseur livré par un transporteur** le fournisseur / le transporteur ; **camion d'un fournisseur qui
+  livre lui-même** ses numéros de commande puis ses quais, `CO-000001 | B15 | B6 EST` (plusieurs commandes séparées
+  par une virgule) / le fournisseur, qui lit ainsi ses commandes et ses quais dans le mail au lieu de son propre nom ;
+  un transporteur saisi à la main sur un retour EV ou un camion ponctuel l'emporte. Un fournisseur en **Messagerie**
+  n'a jamais de ligne. CODE FOURNISSEUR reste le code du fournisseur (`NAVETTE HAMBACH` pour une navette).
   *CSV ATR de ce camion* dans le menu ; dans l'en-tête, **deux fichiers** : le **CSV du carnet** (les transports
   prévus datés d'aujourd'hui ou plus tard des fournisseurs du carnet affiché, **sans les navettes MAF** :
   `GET /api/transports/atr.csv?planner=`, chaque approvisionneur charge son fichier dans ATR quand ses camions sont

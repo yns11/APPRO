@@ -498,18 +498,52 @@ def cancel_transport(session: Session, user: str, t: AppTransport) -> None:
 
 
 # ----------------------------------------------------------------------------- CSV (ATR)
-def atr_csv(transports: list[AppTransport], names: dict[str, str]) -> str:
+SHUTTLE_CARRIER = "TRANSCO"            # TRANSPORTEUR of a MAF shuttle
+PACKAGING_LABEL = "PACKAGING"          # FOURNISSEUR of an EV return
+
+
+def csv_cells(t: AppTransport, names: dict[str, str], modes: dict[str, str] | None = None) -> tuple[str, str] | None:
+    """The FOURNISSEUR and TRANSPORTEUR cells of a transport in the ATR file, or ``None`` when the transport has no
+    line (supplier in Messagerie mode).  The tool shows FOURNISSEUR as the « Route » of the e-mail it sends to the
+    transport contact, so the cell carries what that contact needs :
+
+    * MAF shuttle : ``NAVETTE HAMBACH`` / ``TRANSCO`` ;
+    * EV return : ``PACKAGING`` / the supplier (or his carrier) ;
+    * one-off truck : the supplier / the supplier (or his carrier) ;
+    * supplier truck by a carrier : the supplier / the carrier (unchanged) ;
+    * supplier truck delivered by the supplier himself : ``CO-000001 | B15 | B6 EST`` (its purchase orders then its
+      docks) / the supplier, who reads his own orders and docks in the e-mail instead of his own name."""
+    if t.mode == "maf" or t.supplier_id == MAF_ID:
+        return MAF_LABEL, SHUTTLE_CARRIER
+    name = names.get(t.supplier_id, t.supplier_id)
+    mode = (modes or {}).get(t.supplier_id, MODE_SUPPLIER)
+    kind = mode_kind(mode)
+    if kind == "messagerie":
+        return None
+    by_carrier = (t.carrier or "").strip() or (mode.strip() if kind == "transporteur" else "")
+    if t.mode == MODE_EV:
+        return PACKAGING_LABEL, by_carrier or name
+    if t.mode == MODE_PONCTUEL:
+        return name, by_carrier or name
+    if t.mode == "transporteur" or by_carrier:
+        return name, by_carrier
+    refs = list(dict.fromkeys(x.strip() for o in t.orders for x in (o.ref or "").replace(";", ",").split(",") if x.strip()))
+    return " | ".join(([", ".join(refs)] if refs else []) + split_docks(t.docks)), name
+
+
+def atr_csv(transports: list[AppTransport], names: dict[str, str], modes: dict[str, str] | None = None) -> str:
     """Header then **one line per transport and per dock** (identifier and every other field repeated), ``;``
-    separated, CRLF (the tool runs on Windows) ; the return leg of a shuttle has no line ; a transport without a
-    carrier gets the FOURNISSEUR cell as TRANSPORTEUR (the supplier delivers himself ; the tool wants the column
-    filled) : ``EM00001A;ENNOVI HUNGARY;ENNOVI HUNGARY;03/11/2026;14:00:00;S-000517;R;;;B15``."""
+    separated, CRLF (the tool runs on Windows) ; the return leg of a shuttle has no line ; FOURNISSEUR and
+    TRANSPORTEUR as :func:`csv_cells` (a Messagerie supplier never appears) :
+    ``EM00001A;CO-000001 | B15;ENNOVI HUNGARY;03/11/2026;14:00:00;S-000517;R;;;B15``."""
     lines = [";".join(CSV_HEADER)]
     for t in transports:
+        cells2 = csv_cells(t, names, modes)
+        if cells2 is None:
+            continue
+        shuttle = t.mode == "maf" or t.supplier_id == MAF_ID
         for dock in split_docks(t.docks) or [""]:
-            shuttle = t.mode == "maf" or t.supplier_id == MAF_ID
-            supplier = MAF_LABEL if shuttle else names.get(t.supplier_id, t.supplier_id)
-            cells = [t.transport_id, supplier, (t.carrier or "").strip() or supplier, f"{t.date:%d/%m/%Y}", f"{t.time}:00",
-                     MAF_LABEL if shuttle else t.supplier_id, FLOW, "", "", dock]
+            cells = [t.transport_id, cells2[0], cells2[1], f"{t.date:%d/%m/%Y}", f"{t.time}:00", MAF_LABEL if shuttle else t.supplier_id, FLOW, "", "", dock]
             lines.append(";".join(c.replace(";", " ") for c in cells))
     return "\r\n".join(lines) + "\r\n"
 

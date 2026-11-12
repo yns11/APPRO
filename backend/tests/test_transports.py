@@ -72,7 +72,7 @@ def test_shuttle_lines_return_leg_pdf_and_csv(client):  # noqa: F811
     # the CSV : one line per outward dock, NAVETTE HAMBACH as name and code, no line for the return leg
     lines = pack["csv"].split("\r\n")
     d, m, y = day[8:10], day[5:7], day[0:4]
-    assert lines[0] == HEADER and lines[1] == f"{t['transport_id']};NAVETTE HAMBACH;NAVETTE HAMBACH;{d}/{m}/{y};08:00:00;NAVETTE HAMBACH;R;;;B6 EST" and lines[2] == "" and len(lines) == 3
+    assert lines[0] == HEADER and lines[1] == f"{t['transport_id']};NAVETTE HAMBACH;TRANSCO;{d}/{m}/{y};08:00:00;NAVETTE HAMBACH;R;;;B6 EST" and lines[2] == "" and len(lines) == 3
     assert pack["csv_filename"] == f"ATR_{t['transport_id']}.csv"
     # the sheet of the shuttle ; a non-shuttle has none
     pdf = client.get(f"/api/transports/{t['transport_id']}/navette.pdf")
@@ -144,7 +144,7 @@ def test_transport_modes_carrier_and_parcel(client):  # noqa: F811
     mine = [t for t in plan["transports"] if t["supplier_id"] == "S-000378"]
     assert mine and all(t["mode"] == "transporteur" and t["carrier"] == "Dachser" for t in mine)
     csv = client.get(f"/api/transports/{mine[0]['transport_id']}/atr.csv").text.lstrip("﻿").split("\r\n")
-    assert csv[1].split(";")[2] == "Dachser" and csv[1].split(";")[5] == "S-000378"
+    assert csv[1].split(";")[1] == "EUROTRANCIATURA" and csv[1].split(";")[2] == "Dachser" and csv[1].split(";")[5] == "S-000378"   # by a carrier : unchanged
     # Messagerie : out of the planning, firm orders marked in the grid, the trucks to come cancelled
     aid = row["orders"][0]["article_id"]
     assert _set_mode(client, "S-000378", "Messagerie").status_code in (200, 201)
@@ -247,7 +247,7 @@ def test_ev_return_and_one_off_truck(client):  # noqa: F811
     assert r.status_code == 201, r.text
     ev = r.json()["transports"][0]
     assert ev["transport_id"] == "EM0001EV" and ev["mode"] == "ev" and ev["orders"] == [] and ev["pinned"] is True and ev["mine"] is True
-    assert r.json()["csv"].split("\r\n")[1] == f"EM0001EV;{ev['supplier_name']};{ev['supplier_name']};29/09/2026;10:00:00;S-000599;R;;;B6 EST"
+    assert r.json()["csv"].split("\r\n")[1] == f"EM0001EV;PACKAGING;{ev['supplier_name']};29/09/2026;10:00:00;S-000599;R;;;B6 EST"   # EV : PACKAGING / the supplier
     r = client.post("/api/transports/special", json={"kind": "ev", "supplier_id": "S-000517", "date": "2026-09-29", "time": "10:00", "docks": ["B6 EST"]})
     assert r.json()["transports"][0]["transport_id"] == "EM0002EV"
     # capacity 2 : a third truck at 10:00 on B6 EST is refused with 10:30 proposed, forced it passes, a fifth never
@@ -277,6 +277,21 @@ def test_ev_return_and_one_off_truck(client):  # noqa: F811
     assert next(t for t in board["transports"] if t["transport_id"] == "EM0001EV")["status"] == "cancelled"
     labels = [a["label"] for a in client.get("/api/actions").json()]
     assert any(x.startswith("Retour EV EM0001EV") for x in labels) and any(x.startswith(f"Camion ponctuel {one['transport_id']}") for x in labels)
+    # one-off truck : FOURNISSEUR = the supplier, TRANSPORTEUR = the typed carrier (the supplier himself without one)
+    one_csv = client.get(f"/api/transports/{one['transport_id']}/atr.csv").text.lstrip("\ufeff").split("\r\n")
+    assert one_csv[1] == f"{one['transport_id']};{one['supplier_name']};Geodis;29/09/2026;10:00:00;S-000599;R;;;B6 EST"
+    plain = client.post("/api/transports/special", json={"kind": "ponctuel", "supplier_id": "S-000186", "date": "2026-09-30", "time": "09:00", "docks": ["B15"]}).json()
+    assert plain["csv"].split("\r\n")[1].split(";")[1:3] == [plain["transports"][0]["supplier_name"]] * 2
+    # the EV return of a supplier served by a carrier names the carrier ; a Messagerie supplier never appears
+    client.put("/api/reference/ref_carriers/rows", json={"values": {"name": "Dachser", "contacts": "", "active": True}})
+    me = next(s for s in client.get("/api/reference/ref_suppliers/rows").json() if s["supplier_id"] == "S-000186")
+    keep = {k: v for k, v in me.items() if k not in ("updated_by", "updated_at", "articles", "article_count", "planners")}
+    assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, "transport_mode": "Dachser"}}).status_code == 200
+    ev2 = client.post("/api/transports/special", json={"kind": "ev", "supplier_id": "S-000186", "date": "2026-09-30", "time": "11:00", "docks": ["B15"]}).json()
+    assert ev2["csv"].split("\r\n")[1].split(";")[1:3] == ["PACKAGING", "Dachser"]
+    assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, "transport_mode": "Messagerie"}}).status_code == 200
+    assert client.get(f"/api/transports/{ev2['transports'][0]['transport_id']}/atr.csv").text.lstrip("\ufeff").split("\r\n")[1] == ""
+    assert client.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, "transport_mode": "Fournisseur"}}).status_code == 200
 
 
 def test_packaging_table_ev_return_lines_and_return_note(client):  # noqa: F811
