@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -27,6 +28,8 @@ class Column:
     example: object = ""
     #: numeric column where « empty » is a value of its own (no cap, inherited lead time) : kept NULL, never 0
     nullable: bool = False
+    #: other header spellings accepted at import (« Jeu » for « Jeudi »…)
+    aliases: tuple[str, ...] = ()
 
     @property
     def keeps_null(self) -> bool:
@@ -81,20 +84,28 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("consumption_source", "str", "Source conso", "erp (consommation déclarée), plan (PDP éclaté : pas de consommation fiable) ou derived (dérivée d'autres articles, table Termes de consommation)", False, "erp"),
            Column("active", "bool", "Actif", "oui / non", True, True),
        ]),
-    _t("ref_suppliers", "Fournisseurs", "Fournisseurs (COFOR) et leurs jours de livraison.", ("supplier_id",), [
+    _t("ref_suppliers", "Fournisseurs", "Fournisseurs (COFOR) : contacts, délai, quais, mode de transport (jours et heures de livraison : table Heures de livraison).", ("supplier_id",), [
         Column("supplier_id", "str", "Fournisseur", "code fournisseur (S-000…)", True, "S-000545"),
         Column("name", "str", "Nom", "raison sociale", True, "ELANTAS EUROPE S.R.L."),
         Column("address", "str", "Adresse", "adresse postale du fournisseur (rue, code postal, ville, pays ; séparez les lignes par des virgules ou des retours à la ligne) : imprimée sur le BL de retour des emballages vides", False, ""),
         Column("contact", "str", "Contact", "", False, ""),
         Column("transport_contact", "str", "Contact transport", "adresses e-mail du contact transport (séparées par ; ou ,) ; une personne connectée avec l'une de ces adresses n'accède qu'à l'espace fournisseur", False, ""),
         Column("docks", "str", "Quais", "quais de livraison par défaut du fournisseur (B15, B6 EST, B2 NORD, B6 NORD ; séparés par ;), présélectionnés à la création d'un transport ; initialisé à B15", False, "B15"),
-        Column("delivery_weekdays", "str", "Jours de livraison", "jours de livraison standard, ISO, ex. 1,2,3,4,5 (1 = lundi)", True, "1,2,3,4,5"),
-        Column("strict_days", "bool", "Jours stricts", "oui : livraisons uniquement les jours standard, jamais de proposition hors jour standard (◇) ; non (défaut) : un jour ouvré tenable avant le besoin est proposé quand le jour standard ne l'est plus", False, False),
         Column("lead_time_days", "int", "Délai (j ouvrés)", "délai commande → livraison en jours ouvrés, inclus (lundi + 5 = lundi suivant) ; valeur par défaut des liens", True, 5),
         Column("cutoff_time", "str", "Heure limite", "heure limite de commande (HH:MM, heure de Paris) : une commande passée après cette heure part le jour ouvré suivant, le délai compte à partir de là ; vide = aucune", False, ""),
         Column("active", "bool", "Actif", "", True, True),
         Column("transport_mode", "str", "Mode transport", "Fournisseur (défaut : le fournisseur livre, camions automatiques du Planning transport) ; MAF Hambach (pièces au magasin avancé : navette commune à plusieurs fournisseurs, pas de camion automatique) ; Messagerie (pas de transport camion : hors planning, ordres fermes marqués) ; ou le nom d'un transporteur de la table Transporteurs (camions automatiques, transporteur dans le fichier ATR)", False, "Fournisseur"),
-        Column("transport_hours", "str", "Plages habituelles", "plages horaires habituelles de livraison du fournisseur, deux au plus parmi 06-10, 08-12, 10-14, 12-16, 14-18 et 16+ (séparées par ;) ; l'application pose ses camions dans ces plages ; vide = n'importe quand entre 07:00 et 15:30", False, ""),
+    ]),
+    _t("ref_delivery_schedule", "Heures de livraison", "Protocole logistique d'achat (PLA) : pour chaque fournisseur, l'heure de livraison de chaque jour de la semaine ; "
+       "un jour sans heure n'est pas un jour de livraison. Les jours cochés sont les seuls jours de livraison du CBN (tout fournisseur est strict) ; "
+       "l'heure place les camions automatiques (après l'heure portée par la commande ferme). Un fournisseur absent de la table livre du lundi au vendredi, sans heure.",
+       ("supplier_id",), [
+        Column("supplier_id", "str", "Fournisseur", "code fournisseur (S-000…), doit exister dans Fournisseurs", True, "S-000032"),
+        Column("mon", "str", "Lundi", "heure de livraison du lundi (HH:MM) ; vide = pas de livraison ce jour-là", False, "08:00", aliases=('lun', 'lu', 'monday')),
+        Column("tue", "str", "Mardi", "heure de livraison du mardi (HH:MM) ; vide = pas de livraison ce jour-là", False, "", aliases=('mar', 'ma', 'tuesday')),
+        Column("wed", "str", "Mercredi", "heure de livraison du mercredi (HH:MM) ; vide = pas de livraison ce jour-là", False, "", aliases=('mer', 'me', 'wednesday')),
+        Column("thu", "str", "Jeudi", "heure de livraison du jeudi (HH:MM) ; vide = pas de livraison ce jour-là", False, "", aliases=('jeu', 'je', 'thursday')),
+        Column("fri", "str", "Vendredi", "heure de livraison du vendredi (HH:MM) ; vide = pas de livraison ce jour-là", False, "", aliases=('ven', 've', 'friday')),
     ]),
     _t("ref_carriers", "Transporteurs", "Transporteurs connus de l'application : un fournisseur dont le mode transport est le nom d'un transporteur voit ce nom dans le fichier ATR et l'avis de transport part à ses contacts.", ("name",), [
         Column("name", "str", "Nom", "nom du transporteur (clé ; valeur du mode transport des fournisseurs)", True, "Geodis"),
@@ -200,6 +211,7 @@ TABLES: dict[str, TableSchema] = {t.name: t for t in [
            Column("supplier_name", "str", "Nom fournisseur", "", False),
            Column("order_type", "str", "Type", "FIRM (Ordre_ferme = Oui) ou FORECAST", True),
            Column("expected_date", "date", "Date de livraison", "", True),
+           Column("expected_time", "str", "Heure de livraison", "heure ERP de la livraison du jour (Heure_debut de commandes_edi, HH:MM : l'heure la plus tôt du fournisseur ce jour-là) ; vide = non renseignée", False),
            Column("qty_ordered", "float", "Quantité commandée", "", True),
            Column("qty_open", "float", "Quantité restante", "restant ERP (non fiable une fois la date passée)", True),
            Column("purch_id", "str", "N° commande", "numéros de commande d'achat (information)", False),
@@ -330,6 +342,38 @@ def parse_weekdays(spec: str | None) -> frozenset[int]:
     if not spec:
         return frozenset({1, 2, 3, 4, 5})
     return frozenset(int(x) for x in str(spec).replace(";", ",").split(",") if x.strip())
+
+
+SCHEDULE_DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri")      # columns of ref_delivery_schedule, ISO weekdays 1 → 5
+
+
+def normalise_hour(value: object) -> str:
+    """``« 8:00 », « 08:00:00 », datetime.time(8, 0), « 8h30 »`` → ``« 08:00 »`` ; empty → ``""`` ; raises on anything else."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    if isinstance(value, dt.datetime):
+        value = value.time()
+    if isinstance(value, dt.time):
+        return f"{value.hour:02d}:{value.minute:02d}"
+    text = str(value).strip().lower().replace("h", ":")
+    if not text or text in ("nan", "none", "nat"):
+        return ""
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?", text)
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        raise ValueError(f"heure « {value} » attendue au format HH:MM")
+    return f"{int(m.group(1)):02d}:{m.group(2)}"
+
+
+def schedule_of(rows: Iterable[dict]) -> dict[str, dict[int, str]]:
+    """``supplier_id → {ISO weekday → « HH:MM »}`` from the Heures de livraison rows (days without an hour left out)."""
+    out: dict[str, dict[int, str]] = {}
+    for r in rows:
+        sid = str(r.get("supplier_id") or "").strip()
+        if not sid:
+            continue
+        hours = {i + 1: h for i, d in enumerate(SCHEDULE_DAYS) if (h := normalise_hour(r.get(d)))}
+        out[sid] = hours
+    return out
 
 
 def as_date(v) -> dt.date | None:

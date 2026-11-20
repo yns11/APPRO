@@ -23,25 +23,27 @@ type Dialog = { kind: "maf" } | { kind: SpecialKind; date: string };
  * shuttle, EV return, one-off truck) ; the printer gives the PDF of the two weeks, the arrow the CSV for the transport
  * tool.  A click on a truck opens its menu where the click happened.
  */
+const WEEK_LABELS = ["Cette semaine", "Semaine prochaine", "Semaine d'après"];
+
 export default function DeliveriesPage() {
   const { config, perimeter } = usePerimeter();
   const planner = perimeter.planner ?? undefined;        // the colours follow the portfolio chosen at the top ; the rights follow the e-mail
   const today = config?.as_of ?? localIso(new Date());
   const monday = mondayOf(today);
-  const [week, setWeek] = useState<0 | 1>(0);
+  const [week, setWeek] = useState<0 | 1 | 2>(0);
   const [day, setDay] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const q = useQuery({ queryKey: ["transports-board", monday, planner ?? null], enabled: !!config, refetchInterval: 120_000,
-    queryFn: () => api.get<BoardResponse>("/api/transports/board", { start: monday, weeks: 2, planner }) });
+    queryFn: () => api.get<BoardResponse>("/api/transports/board", { start: monday, weeks: 3, planner }) });   // three weeks, provisionally : the week after next shows the new hour-based placement
   const d = q.data;
-  const weeks = useMemo(() => [0, 1].map((i) => { const m = addDays(monday, 7 * i); return { monday: m, days: (d?.days ?? []).filter((x) => x >= m && x < addDays(m, 7)) }; }), [d, monday]);
+  const weeks = useMemo(() => [0, 1, 2].map((i) => { const m = addDays(monday, 7 * i); return { monday: m, days: (d?.days ?? []).filter((x) => x >= m && x < addDays(m, 7)) }; }), [d, monday]);
   const shown = weeks[week];
   const dayShown = day && shown.days.includes(day) ? day : null;
   const closeMenu = useCallback(() => setMenu(null), []);
   const openMenu = (t: TransportOut, e: React.MouseEvent<HTMLButtonElement>) => setMenu((m) => (m?.t.transport_id === t.transport_id ? null : { t, x: e.clientX, y: e.clientY }));
-  const pickWeek = (w: 0 | 1) => { setWeek(w); setDay(null); setMenu(null); };
-  const pickDay = (w: 0 | 1, x: string) => { setWeek(w); setDay((cur) => (cur === x ? null : x)); setMenu(null); };
+  const pickWeek = (w: 0 | 1 | 2) => { setWeek(w); setDay(null); setMenu(null); };
+  const pickDay = (w: 0 | 1 | 2, x: string) => { setWeek(w); setDay((cur) => (cur === x ? null : x)); setMenu(null); };
   const planned = (d?.transports ?? []).filter((t) => t.status === "planned");
   const inView = planned.filter((t) => (dayShown ? t.date === dayShown : shown.days.includes(t.date)));
   const mine = inView.filter((t) => t.mine).length;
@@ -67,11 +69,11 @@ export default function DeliveriesPage() {
       </div>
       <div className="tp-periods">
         {weeks.map((w, i) => (
-          <div key={w.monday} className="tp-days" role="group" aria-label={i === 0 ? "Cette semaine" : "Semaine prochaine"}>
-            <button type="button" className={`btn sm wk ${week === i && !dayShown ? "on" : ""}`} aria-pressed={week === i && !dayShown} onClick={() => pickWeek(i as 0 | 1)}>{i === 0 ? "Cette semaine" : "Semaine prochaine"}</button>
+          <div key={w.monday} className="tp-days" role="group" aria-label={WEEK_LABELS[i]}>
+            <button type="button" className={`btn sm wk ${week === i && !dayShown ? "on" : ""}`} aria-pressed={week === i && !dayShown} onClick={() => pickWeek(i as 0 | 1 | 2)}>{WEEK_LABELS[i]}</button>
             {Array.from({ length: 5 }, (_, k) => addDays(w.monday, k)).map((x) => {
               const working = !d || w.days.includes(x);
-              return <button key={x} type="button" className={`btn sm ${dayShown === x ? "on" : ""} ${x === today ? "today" : ""}`} aria-pressed={dayShown === x} disabled={!working} title={working ? dayLong(x) : "Jour non ouvré"} onClick={() => pickDay(i as 0 | 1, x)}>{dayShort(x)}</button>;
+              return <button key={x} type="button" className={`btn sm ${dayShown === x ? "on" : ""} ${x === today ? "today" : ""}`} aria-pressed={dayShown === x} disabled={!working} title={working ? dayLong(x) : "Jour non ouvré"} onClick={() => pickDay(i as 0 | 1 | 2, x)}>{dayShort(x)}</button>;
             })}
           </div>
         ))}
@@ -91,7 +93,7 @@ export default function DeliveriesPage() {
             <span><i className="mine" /> {planner ? `camions du carnet ${planner}` : "vos camions"}</span><span><i className="check" /> {planner ? "à vérifier dans ce carnet" : "vos camions à vérifier"}</span><span><i className="manual" /> navettes, retours EV et camions ponctuels {planner ? "du carnet" : "à vous"}</span><span><i className="other" /> autres carnets (point rouge : à vérifier chez eux)</span><span><i className="touched" /> point = touché à la main</span>
             {dayShown && <><span><i className="off" /> annulé</span><span><i className="forced" /> créneau forcé</span></>}
             <span><KindIcon t={{ mode: "maf" }} /> navette MAF</span><span><KindIcon t={{ mode: "ev" }} /> retour EV</span><span><KindIcon t={{ mode: "ponctuel" }} /> camion ponctuel</span>
-            <span style={{ marginLeft: "auto" }}>horizon : cette semaine et la suivante</span>
+            <span style={{ marginLeft: "auto" }}>horizon : cette semaine et les deux suivantes (la troisième, provisoire, montre le placement à l'heure de livraison dès le 30/11)</span>
           </div>
         </Card>
       )}

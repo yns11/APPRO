@@ -11,13 +11,6 @@ export const TONE_LABEL: Record<TruckTone, string> = { mine: "camions du carnet"
 export const KIND_LABEL: Record<string, string> = { ev: "retour EV", ponctuel: "ponctuel", maf: "navette MAF" };
 /** The screens write HAMBACH on a shuttle (the CSV keeps NAVETTE HAMBACH). */
 export const MAF_SHORT = "HAMBACH";
-/** The habitual ranges a supplier may have (Référentiel) : token → label. */
-export const HOUR_RANGES: { value: string; label: string }[] = [
-  { value: "06-10", label: "6h – 10h" }, { value: "08-12", label: "8h – 12h" }, { value: "10-14", label: "10h – 14h" },
-  { value: "12-16", label: "12h – 16h" }, { value: "14-18", label: "14h – 18h" }, { value: "16+", label: "≥ 16h" },
-];
-export const MAX_HOUR_RANGES = 2;
-export const splitHours = (v: unknown): string[] => String(v ?? "").split(/[;,]+/).map((x) => x.trim()).filter(Boolean);
 
 /** ``YYYY-MM-DD`` of a local date (never ``toISOString`` : it converts to UTC and shifts the day in Europe/Paris). */
 export function localIso(d: Date): string {

@@ -132,12 +132,12 @@ try {
   const sent = [];
   await page.route("**/api/reference/ref_suppliers/rows", async (route) => { sent.push(JSON.parse(route.request().postData() || "{}")); await route.continue(); });
   await page.getByRole("button", { name: "Modifier en lot" }).click();
-  await page.getByLabel("Colonne").selectOption("strict_days");
-  await page.getByLabel("Valeur").selectOption("non");
+  await page.getByLabel("Colonne").selectOption("active");
+  await page.getByLabel("Valeur").selectOption("oui");
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: /Appliquer à/ }).click();
   await page.waitForTimeout(1500);
-  check("F19 lot : la valeur booléenne envoyée est « non » (false) avec le tampon de la ligne", sent.length > 0 && sent.every((b) => b.values.strict_days === false && b.expected_updated_at), `${sent.length} requête(s)`);
+  check("F19 lot : la valeur booléenne envoyée est « oui » (true) avec le tampon de la ligne", sent.length > 0 && sent.every((b) => b.values.active === true && b.expected_updated_at), `${sent.length} requête(s)`);
 
   // ---- F10 : a supplier contact only sees the portal
   const sup = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-email": "transport@fournisseur.example" } });

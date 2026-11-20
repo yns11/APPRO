@@ -62,16 +62,15 @@ class Supplier:
     name: str = ""
     address: str = ""              # postal address, printed on the empty packaging return note
     contact: str = ""
-    delivery_weekdays: frozenset[int] = frozenset({1, 2, 3, 4, 5})
+    delivery_weekdays: frozenset[int] = frozenset({1, 2, 3, 4, 5})    # the days with an hour in the Heures de livraison table (every weekday without a row) : the only delivery days (CBN)
     lead_time_days: int = 5        # default lead time of the supplier, working days, inclusive (Monday + 5 = next Monday)
     active: bool = True
-    strict_days: bool = False      # True : deliveries on the standard weekdays only (no « hors jour standard » proposal)
+    delivery_hours: dict[int, str] = field(default_factory=dict)     # ISO weekday → « HH:MM » delivery hour of the purchasing logistics protocol (PLA) ; places the automatic trucks
     transport_contact: str = ""    # e-mail addresses of the transport notices (« ; » or « , » separated)
     docks: str = "B15"             # default delivery docks (« ; » separated), preselected when a transport is created
     cutoff_time: str = ""          # order cut-off hour « HH:MM » : an order placed later leaves the next working day ; "" = none
     closures: frozenset[dt.date] = frozenset()   # days the supplier cannot deliver (own closures, carrier, docks closed)
     transport_mode: str = "Fournisseur"          # Fournisseur | MAF Hambach | Messagerie | a carrier name (services/transports.py)
-    transport_hours: str = ""                    # habitual delivery ranges, « ; » separated (06-10, 08-12, 10-14, 12-16, 14-18, 16+ ; two at most) : the scheduler places the trucks inside (services/transports_auto.py)
 
     @property
     def cutoff(self) -> dt.time | None:
@@ -93,9 +92,16 @@ class Supplier:
         return [x.strip() for x in re.split(r"[;,]+", self.docks or "") if x.strip()] or ["B15"]
 
     @property
-    def hour_ranges(self) -> list[str]:
-        """The habitual ranges, canonical tokens (``06-10``…) in the order given ; empty = any time."""
-        return [x.strip() for x in re.split(r"[;,]+", self.transport_hours or "") if x.strip()]
+    def usual_hour(self) -> str:
+        """The most common delivery hour of the protocol over the week (the earliest on a tie) ; ``""`` without any."""
+        hours = list(self.delivery_hours.values())
+        if not hours:
+            return ""
+        return max(sorted(set(hours)), key=lambda h: (hours.count(h), -int(h[:2]) * 60 - int(h[3:5])))
+
+    def hour_for(self, day: dt.date) -> str:
+        """The protocol hour of that weekday, else the usual hour (a day outside the protocol, or without an hour)."""
+        return self.delivery_hours.get(day.isoweekday(), "") or self.usual_hour
 
 
 @dataclass
@@ -182,6 +188,7 @@ class OrderLine:
     order_type: OrderType = OrderType.FIRM
     ref: str = ""                          # purchase order numbers, information only
     first_seen: dt.date | None = None      # day the slot first appeared in the ERP copy (synchronisation job)
+    expected_time: str = ""                # ERP delivery hour of the supplier's day (« HH:MM », commandes_edi.Heure_debut) ; "" = none
 
     def __post_init__(self) -> None:
         if self.qty_open is None:

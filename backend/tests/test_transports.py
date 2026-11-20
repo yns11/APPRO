@@ -11,7 +11,7 @@ HEADER = "ID TRANSPORT;FOURNISSEUR;TRANSPORTEUR;DATE;HEURE;CODE FOURNISSEUR;FLUX
 def _set_contact(c, sid: str, contact: str, docks: str | None = None):
     rows = c.get("/api/reference/ref_suppliers/rows").json()
     r = next(x for x in rows if x["supplier_id"] == sid)
-    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "address", "contact", "delivery_weekdays", "strict_days", "lead_time_days", "active", "docks")}
+    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "address", "contact", "lead_time_days", "active", "docks")}
     if docks is not None:
         keep["docks"] = docks
     res = c.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, "transport_contact": contact}})
@@ -134,7 +134,7 @@ def test_transport_modes_carrier_and_parcel(client):  # noqa: F811
     assert client.put("/api/reference/ref_carriers/rows", json={"values": {"name": "Dachser", "contacts": "pas-un-mail", "active": True}}).status_code == 422
     assert client.put("/api/reference/ref_carriers/rows", json={"values": {"name": "Dachser", "contacts": "Booking@dachser.example; Quai@dachser.example", "active": True}}).status_code in (200, 201)
     sups = client.get("/api/reference/ref_suppliers/rows").json()
-    assert all(s["transport_mode"] == "Fournisseur" and s["transport_hours"] == "" for s in sups)
+    assert all(s["transport_mode"] == "Fournisseur" and "transport_hours" not in s for s in sups)
     assert _set_mode(client, "S-000378", "Inconnu").status_code == 422
     assert _set_mode(client, "S-000378", "dachser").status_code in (200, 201)         # case-insensitive, canonical name kept
     assert next(s for s in client.get("/api/reference/ref_suppliers/rows").json() if s["supplier_id"] == "S-000378")["transport_mode"] == "Dachser"
@@ -156,7 +156,7 @@ def test_transport_modes_carrier_and_parcel(client):  # noqa: F811
 
 def test_supplier_portal_role_and_gate(client):  # noqa: F811
     _set_contact(client, "S-000378", "Quai@Fournisseur.example")
-    plan = client.get("/api/transports/planning", params={"start": "2026-09-21", "weeks": 1}).json()
+    plan = client.get("/api/transports/planning", params={"start": "2026-09-21", "weeks": 3}).json()     # the whole horizon : the portal lists every truck to come
     mine = [t for t in plan["transports"] if t["supplier_id"] == "S-000378"]
     assert mine, "the seed holds firm orders of S-000378 in the horizon : automatic trucks"
     h = {"x-forwarded-email": "quai@fournisseur.example"}
@@ -218,7 +218,8 @@ def test_start_up_migrations_of_the_transports(tmp_path):
     assert "dock" not in cols and {"docks", "carrier", "return_trip", "return_docks", "cancelled_by", "cancelled_at"} <= cols
     assert not {"changed_since_sent", "change_note", "origin"} & cols
     assert not inspect(engine).has_table("app_transport_plans") and inspect(engine).has_table("app_transport_lines")
-    assert "transport_auto" not in {c["name"] for c in inspect(engine).get_columns("ref_suppliers")} and "transport_hours" in {c["name"] for c in inspect(engine).get_columns("ref_suppliers")}
+    assert not {"transport_auto", "transport_hours", "delivery_weekdays", "strict_days"} & {c["name"] for c in inspect(engine).get_columns("ref_suppliers")}
+    assert inspect(engine).has_table("ref_delivery_schedule")
     with engine.connect() as conn:
         assert {"transports_fresh_start_2026_11", "transports_all_automatic_2026_11", "transports_fresh_start_2026_11_b"} <= {r[0] for r in conn.execute(text("SELECT name FROM app_migrations")).all()}
     with factory() as session:

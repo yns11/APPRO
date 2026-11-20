@@ -67,8 +67,7 @@ def link_out(l: SupplierLink, supplier_names: dict[str, str], suppliers: dict[st
                      moq=l.moq, pack_qty=l.pack_qty, lead_time_days=l.lead_time(suppliers), lead_time_override=l.lead_time_days,
                      quota_pct=l.quota_pct, priority=l.priority, active=l.active,
                      max_qty_per_delivery=l.max_qty_per_delivery, max_qty_per_week=l.max_qty_per_week,
-                     delivery_weekdays=",".join(str(d) for d in sorted(sup.delivery_weekdays)) if sup is not None else "1,2,3,4,5",
-                     strict_days=bool(getattr(sup, "strict_days", False)) if sup is not None else False)
+                     delivery_weekdays=",".join(str(d) for d in sorted(sup.delivery_weekdays)) if sup is not None else "1,2,3,4,5")
 
 
 def article_ref(ar: ArticleResult) -> S.ArticleRef:

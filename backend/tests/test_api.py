@@ -232,7 +232,7 @@ def test_reference_crud_template_and_import(client):
     tables = client.get("/api/reference/tables").json()
     names = {t["name"]: t for t in tables}
     assert set(names) == {"ref_articles", "ref_suppliers", "ref_calendars", "ref_carriers", "ref_article_suppliers", "ref_consumption_terms", "ref_closed_orders",
-                          "ref_programs", "ref_bom", "ref_packaging", "fct_stock", "ref_planners", "ref_delegations"}
+                          "ref_programs", "ref_bom", "ref_packaging", "ref_delivery_schedule", "fct_stock", "ref_planners", "ref_delegations"}
     assert names["ref_articles"]["rows"] == 16 and names["ref_suppliers"]["rows"] == 11 and names["ref_programs"]["rows"] == 25
     assert names["ref_articles"]["key"] == ["article_id"] and any(c["label"] == "Couverture cible (j ouvrés)" for c in names["ref_articles"]["columns"])
     # edit a threshold directly: the engine sees it
@@ -260,15 +260,37 @@ def test_reference_crud_template_and_import(client):
     wb = load_workbook(io.BytesIO(t.content))
     assert wb.sheetnames == ["Fournisseurs", "NOTICE"]
     ws = wb["Fournisseurs"]
-    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Adresse", "Contact", "Contact transport", "Quais", "Jours de livraison", "Jours stricts", "Délai (j ouvrés)", "Heure limite", "Actif", "Mode transport", "Plages habituelles"]
-    ws["A2"], ws["B2"], ws["F2"], ws["G2"], ws["H2"], ws["I2"], ws["J2"], ws["K2"] = "S-NEW", "New supplier", "B15;B6 EST", "1,3", "oui", 7, "11:30", "oui"
+    assert [c.value for c in ws[1]] == ["Fournisseur", "Nom", "Adresse", "Contact", "Contact transport", "Quais", "Délai (j ouvrés)", "Heure limite", "Actif", "Mode transport"]
+    ws["A2"], ws["B2"], ws["F2"], ws["G2"], ws["H2"], ws["I2"] = "S-NEW", "New supplier", "B15;B6 EST", 7, "11:30", "oui"
     buf = io.BytesIO()
     wb.save(buf)
     rep = client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", buf.getvalue())}, data={"mode": "merge"})
     assert rep.status_code == 201, rep.text
     assert rep.json()["created"] == 1
     sups = {r["supplier_id"]: r for r in client.get("/api/reference/ref_suppliers/rows").json()}
-    assert "S-NEW" in sups and sups["S-NEW"]["delivery_weekdays"] == "1,3" and sups["S-NEW"]["lead_time_days"] == 7 and len(sups) == 12
+    assert "S-NEW" in sups and sups["S-NEW"]["lead_time_days"] == 7 and len(sups) == 12 and "delivery_weekdays" not in sups["S-NEW"]
+    # the delivery days and hours : table Heures de livraison (the purchasing logistics protocol), imported from the ERP
+    # extraction as is (headers « Fournisseur, Lundi, Mardi, Mercredi, Jeu, Vendredi », time cells), one row per supplier
+    pla = Workbook()
+    w = pla.active
+    w.append(["Fournisseur", "Lundi", "Mardi", "Mercredi", "Jeu", "Vendredi"])
+    w.append(["S-NEW", dt.time(8, 0), None, "13:30", None, None])
+    w.append(["S-NOPE", dt.time(8, 0), None, None, None, None])
+    pbuf = io.BytesIO()
+    pla.save(pbuf)
+    rep = client.post("/api/reference/ref_delivery_schedule/import", files={"file": ("pla.xlsx", pbuf.getvalue())}, data={"mode": "merge"})
+    assert rep.status_code == 422 and "fournisseur inconnu" in rep.text
+    w.delete_rows(3)
+    pbuf = io.BytesIO()
+    pla.save(pbuf)
+    rep = client.post("/api/reference/ref_delivery_schedule/import", files={"file": ("pla.xlsx", pbuf.getvalue())}, data={"mode": "merge"})
+    assert rep.status_code == 201, rep.text
+    sched = {r["supplier_id"]: r for r in client.get("/api/reference/ref_delivery_schedule/rows").json()}
+    assert (sched["S-NEW"]["mon"], sched["S-NEW"]["tue"], sched["S-NEW"]["wed"]) == ("08:00", "", "13:30")
+    ref = next(s for s in client.get("/api/reference/suppliers").json() if s["supplier_id"] == "S-NEW")
+    assert ref["delivery_weekdays"] == "1,3" and ref["delivery_hours"] == ["08:00", "", "13:30", "", ""]
+    assert client.put("/api/reference/ref_delivery_schedule/rows", json={"values": {"supplier_id": "S-NEW", "mon": "25:00"}}).status_code == 422
+    assert client.put("/api/reference/ref_delivery_schedule/rows", json={"values": {"supplier_id": "S-NEW"}}).status_code == 422   # no hour at all : delete the row instead
     filled = load_workbook(io.BytesIO(client.get("/api/reference/ref_suppliers/template.xlsx", params={"filled": "true"}).content))
     assert filled["Fournisseurs"].max_row == 13
     rep2 = client.post("/api/reference/ref_suppliers/import", files={"file": ("f.xlsx", buf.getvalue())}, data={"mode": "replace"})

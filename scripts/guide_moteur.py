@@ -313,13 +313,14 @@ def guide() -> str:
       f"du {jour(CAL.add_working_days(TODAY, 9))} (aujourd'hui + délai − marge). "
       f"Le creux arrive le {jour(first.delivery_date)}, **avant** : sa date limite de commande "
       f"({jour(first.order_date)}) est dépassée. Aucun jour ouvré tenable ne précède le besoin : le moteur applique le "
-      "**plancher** : il propose, **urgente** (**!**), au jour du besoin, la quantité **minimale qui évite la rupture** "
+      "**plancher** : il propose, **urgente** (**!**), sur le jour de livraison, la quantité **minimale qui évite la rupture** "
       "(lotie MOQ / UM), répétée à chaque nouveau creux jusqu'à la première livraison tenable, sans remonter à la cible. La date limite, dans le "
       "passé, est affichée telle quelle (« au plus tard le »), et une alerte `URGENT_PROPOSAL` est levée. À partir "
       "de la **première livraison tenable**, la proposition vise la **cible pleine**, sans rampe. (Ici le "
-      "fournisseur livre tous les jours ouvrés : aucune proposition **hors jour standard ◇** ; avec un fournisseur "
-      "du lundi, le besoin non tenable serait posé ◇ sur le premier jour ouvré tenable avant le besoin, sauf jours "
-      "stricts.)\n")
+      "fournisseur livre tous les jours ouvrés. Avec un fournisseur du lundi, le plancher irait sur le dernier lundi "
+      "avant la rupture : une livraison ne sort jamais des jours du protocole logistique d'achat, tout fournisseur est "
+      "strict depuis le 20/11/2026 ; sans lundi entre aujourd'hui et la rupture, rien n'est proposé avant la première "
+      "livraison tenable et le manque reste visible.)\n")
     w(tableau(ar, days=14, rows=["Consommation et besoin", "Prop. CBN", "Stock projeté", "Cible"]))
     w("")
     w(propositions(ar))
@@ -554,8 +555,7 @@ def guide() -> str:
         ("sourcing_policy", "quota (article)", "article", "quotas (chaque besoin partagé) ou priorité"),
         ("consumption_source", "erp (article)", "article", "besoin passé : consommation MOM (déclarée), PDP éclaté, ou dérivée d'autres articles (termes × coefficient)"),
         ("lead_time_days", "5 (fournisseur)", "fournisseur", "délai en jours ouvrés, inclusif (lundi + 5 = lundi suivant) ; date limite de commande, urgence, plancher"),
-        ("delivery_weekdays", "1-5 (fournisseur)", "fournisseur", "jours de livraison standard ; saisie en colonne semaine posée sur le premier"),
-        ("strict_days", "non (fournisseur)", "fournisseur", "oui : jamais de proposition hors jour standard (◇), le besoin non tenable devient un plancher au jour standard"),
+        ("jours de livraison", "lundi à vendredi", "table Heures de livraison", "les jours avec une heure dans le protocole logistique d'achat (un fournisseur sans ligne : tous les jours) ; les seuls jours de livraison, tout fournisseur est strict (jamais de ◇) ; saisie en colonne semaine posée sur le premier"),
         ("moq / pack_qty", "lien article ↔ fournisseur", "lien", "quantité minimale, arrondi UM"),
         ("lead_time_override", "vide (lien)", "lien", "délai spécifique au lien, remplace celui du fournisseur"),
         ("quota_pct / priority", "lien", "lien", "répartition multi-sourcing"),
@@ -563,7 +563,7 @@ def guide() -> str:
         ("target_tolerance_pct", "15", "commune", "retour à la cible dès que le stock projeté passe sous (100 − n) % de la cible ; la quantité vise 100 %"),
         ("lead_margin_days", "1", "commune", "marge de délai : date limite de commande = livraison − (délai − marge) j ouvrés ; 0 = délai strict ; tenable ⇔ date limite ≥ aujourd'hui"),
         ("stock_drift_pct / stock_drift_min_packs / stock_drift_persist", "10 % / 1 UM / 3", "commune", "dérive du stock ERP : écart ERP − projeté au-delà du seuil (% de la cible, UM minimale), du même signe sur n snapshots ; donnée à corriger, calage = ajustement signé daté du snapshot"),
-        ("Règles figées", "—", "application", "jours ouvrés partout ; besoin non servi perdu ; date limite dépassée = plancher ! au jour du besoin, ou livraison hors jour standard ◇ au premier jour ouvré tenable (sauf jours stricts) ; cible pleine dès que tenable ; livraison standard avant le besoin, regroupée ; horizon 52 semaines ; à commander au plus tard sous 5 j ouvrés ; fermes seules comptées ; refus = jour seul, expiré dans le passé"),
+        ("Règles figées", "—", "application", "jours ouvrés partout ; besoin non servi perdu ; date limite dépassée = plancher ! sur le dernier jour de livraison avant le besoin (jamais hors des jours du protocole) ; cible pleine dès que tenable ; livraison standard avant le besoin, regroupée ; horizon 52 semaines ; à commander au plus tard sous 5 j ouvrés ; fermes seules comptées ; refus = jour seul, expiré dans le passé"),
         ("history_weeks / focus_weeks", "2 / 2 (utilisateur)", "affichage", "semaines passées montrées, semaines détaillées jour par jour"),
     ]
     for name, default, scope, effet in recap:

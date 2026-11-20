@@ -62,11 +62,11 @@ def fqn(t):
     return f"`{W['erp_catalog']}`.`{W['erp_schema']}`.`{t}`"
 
 QUERIES = {
-    "erp_purchase_orders": (["order_id", "article_id", "supplier_id", "supplier_name", "order_type", "expected_date",
+    "erp_purchase_orders": (["order_id", "article_id", "supplier_id", "supplier_name", "order_type", "expected_date", "expected_time",
                              "qty_ordered", "qty_open", "purch_id", "commitment", "first_seen"], f"""
 SELECT c.ID AS order_id, c.Article AS article_id, c.Code_fournisseur AS supplier_id, MAX(c.Nom_fournisseur) AS supplier_name,
   CASE WHEN MAX(c.Ordre_ferme) = 'Oui' THEN 'FIRM' ELSE 'FORECAST' END AS order_type,
-  CAST(MIN(c.Date_de_debut) AS DATE) AS expected_date, CAST(SUM(c.Quantite) AS DOUBLE) AS qty_ordered,
+  CAST(MIN(c.Date_de_debut) AS DATE) AS expected_date, MIN(c.Heure_debut) AS expected_time, CAST(SUM(c.Quantite) AS DOUBLE) AS qty_ordered,
   CAST(SUM(GREATEST(c.Quantite_restante, 0)) AS DOUBLE) AS qty_open,
   CONCAT_WS(', ', SORT_ARRAY(COLLECT_SET(c.Commande))) AS purch_id, MAX(c.Niveau_engagement) AS commitment
 FROM {fqn(W['orders_table'])} c WHERE c.ID IS NOT NULL GROUP BY c.ID, c.Article, c.Code_fournisseur"""),

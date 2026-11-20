@@ -191,8 +191,8 @@ def chart(cid: str, title: str, subtitle: str, weeks: list[str], series: list[tu
 LINES = [(500.0, "l-target", "cible 500"), (425.0, "l-trigger", "déclenchement 425")]
 
 
-def monday_supplier(lead: int, strict: bool = False) -> Supplier:
-    return Supplier("A", "Fournisseur A", delivery_weekdays=frozenset({1}), lead_time_days=lead, strict_days=strict)
+def monday_supplier(lead: int) -> Supplier:
+    return Supplier("A", "Fournisseur A", delivery_weekdays=frozenset({1}), lead_time_days=lead)
 
 
 def charts() -> dict[str, str]:
@@ -207,22 +207,22 @@ def charts() -> dict[str, str]:
         marks=[(j5, 400.0, "sans livraison : 400 < 425 → proposition le lundi", "m-trigger"), (1, 800.0, "date limite = lun. S44 − 4 j.o. = mar. S43", "m-order")],
         today=s1["today"], ymin=-100.0,
         caption="Calculé par le moteur. La proposition se pose sur le jour standard (lundi) avant le besoin et regroupe les besoins jusqu'au lundi suivant : le stock redescend à la cible (500) la veille de la livraison suivante. Pointillé : le stock sans la proposition.")
-    # ---- 2. plancher : aujourd'hui mercredi S43, 250 mardi soir, fournisseur du lundi, délai 4, marge 1 → tenable dès lundi S44
-    s2 = engine_scenario(MONDAY0 + D(days=2), 250.0, [monday_supplier(4)], link)
-    c["floor"] = chart(
-        "c2", "Plancher urgent (!) puis cible pleine", "aujourd'hui mercredi S43 · 250 mardi soir, besoin 100 / jour · fournisseur du lundi, délai 4, marge 1 · lundi S44 = première livraison tenable (date limite aujourd'hui)",
-        s2["weeks"], [("s-appro", s2["stock"], "solid"), ("s-ghost", s2["ghost"], "dotted")], s2["bars"], 1200.0, LINES,
-        band=(2, 4, "non tenable : plancher"), today=s2["today"], ymin=-100.0,
-        marks=[(4, -50.0, "sans rien : −50 vendredi", "m-trigger")],
-        caption="Calculé par le moteur. Mercredi 150, jeudi 50 : vendredi serait à −50. Aucune livraison tenable avant : plancher urgent de 50 vendredi, le jour du besoin (◇ : pas un lundi). Lundi S44, première livraison tenable : cible pleine, la livraison couvre la semaine (1 000), puis 500 par semaine. Un fournisseur à jours stricts n'aurait rien vendredi : le manque resterait.")
-    # ---- 3. hors jour standard : aujourd'hui jeudi S43, 550 mercredi soir, fournisseur du lundi, délai 5, marge 1 → tenable dès mercredi S44
+    # ---- 2. plancher sur le jour de livraison : aujourd'hui jeudi S43, 550 mercredi soir, fournisseur du lundi, délai 5, marge 1 → tenable dès mercredi S44
     s3 = engine_scenario(MONDAY0 + D(days=3), 550.0, [monday_supplier(5)], link)
-    c["offday"] = chart(
-        "c3", "Hors jour standard (◇)", "aujourd'hui jeudi S43 · 550 mercredi soir, besoin 100 / jour · fournisseur du lundi, délai 5, marge 1 · tenable à partir de mercredi S44 (jeudi + 4 j.o.)",
+    c["floor"] = chart(
+        "c2", "Plancher urgent (!) sur le jour de livraison, puis cible pleine", "aujourd'hui jeudi S43 · 550 mercredi soir, besoin 100 / jour · fournisseur du lundi, délai 5, marge 1 · tenable à partir de mercredi S44 (jeudi + 4 j.o.)",
         s3["weeks"], [("s-appro", s3["stock"], "solid"), ("s-ghost", s3["ghost"], "dotted")], s3["bars"], 1000.0, LINES,
         band=(3, 6, "non tenable (lundi S44 compris)"), today=s3["today"], ymin=-100.0,
-        marks=[(5, 250.0, "lundi S44 : jour standard, date limite dépassée", "m-trigger"), (8, -50.0, "sans livraison : −50 jeudi S44", "m-trigger")],
-        caption="Calculé par le moteur. Jeudi 450, vendredi 350, lundi 250, mardi 150 : jeudi S44 serait à −50. Le lundi S44 n'est plus tenable et une rupture arriverait avant le lundi S45 : le CBN propose la cible pleine au premier jour ouvré tenable, mercredi S44 (◇). Le lundi S45 reprend le rythme standard avec le complément.")
+        marks=[(5, 250.0, "lundi S44 : jour de livraison, date limite dépassée → plancher 150 !", "m-trigger"), (8, -50.0, "sans livraison : −50 jeudi S44", "m-trigger")],
+        caption="Calculé par le moteur. Jeudi 450, vendredi 350, lundi 250, mardi 150 : jeudi S44 serait à −50. Le lundi S44 n'est plus tenable, mais c'est le seul jour de livraison du fournisseur avant la rupture : plancher urgent de 150 (le minimum qui tient jusqu'au lundi S45), marqué !. Lundi S45, première livraison tenable : cible pleine (1 000), puis 500 par semaine. Jamais de livraison un autre jour que le lundi.")
+    # ---- 3. aucun jour de livraison avant le besoin : aujourd'hui mercredi S43, 250 mardi soir, fournisseur du lundi, délai 4, marge 1 → tenable dès lundi S44
+    s2 = engine_scenario(MONDAY0 + D(days=2), 250.0, [monday_supplier(4)], link)
+    c["gap"] = chart(
+        "c3", "Aucun jour de livraison avant le besoin : le manque reste", "aujourd'hui mercredi S43 · 250 mardi soir, besoin 100 / jour · fournisseur du lundi, délai 4, marge 1 · lundi S44 = première livraison tenable (date limite aujourd'hui)",
+        s2["weeks"], [("s-appro", s2["stock"], "solid"), ("s-ghost", s2["ghost"], "dotted")], s2["bars"], 1200.0, LINES,
+        band=(2, 4, "pas de lundi avant la rupture"), today=s2["today"], ymin=-100.0,
+        marks=[(4, -50.0, "−50 vendredi : manque accepté (−Σ)", "m-trigger")],
+        caption="Calculé par le moteur. Mercredi 150, jeudi 50 : vendredi serait à −50. Aucun lundi entre aujourd'hui et la rupture : le CBN ne propose rien avant le lundi S44 (première livraison tenable, cible pleine 1 000, puis 500 par semaine). Le manque de vendredi reste visible dans le stock projeté (−Σ 50) : à traiter hors CBN (dépannage, camion ponctuel).")
     # ---- 4. multi-sourcing quota : besoin 500 / semaine = 300 A (lundi) + 200 B (jeudi) – schéma de principe
     weeks4 = ["S43", "S44", "S45", "S46"]
     stock, _ = simulate(500.0, 100.0, {0: 300.0, 3: 200.0, 5: 300.0, 8: 200.0, 10: 300.0, 13: 200.0, 15: 300.0, 18: 200.0}, 20)
@@ -449,7 +449,7 @@ def sections() -> list[dict[str, str]]:
 <div class="callout"><b>Vide, c'est l'ERP ; un chiffre, c'est votre plan ; le stock se recalcule.</b></div>
 <p><b>Partie A · Tableau d'approvisionnement</b> : une ligne <b>Consommation et besoin</b> (consommé réel dans le passé, besoin du PDP dans le futur) ; par fournisseur actif : <b>Ordre ferme</b>, <b>Prévisionnel EDI</b>, <b>Quantité reçue</b>, <b>Quantité à retenir</b>, <b>Proposition CBN</b> ; puis <b>Ajustement</b> et <b>Stock projeté</b>, seule projection de stock du tableau, comparée au <b>stock ERP de la veille</b> (5 bis). Deux lignes se saisissent (Quantité à retenir, Ajustement), trois se cliquent (Ordre ferme, Proposition CBN, Quantité reçue), le reste se lit.</p>
 <p><b>Partie B · Tableau de bord</b> : l'onglet <b>Couvertures et stocks</b> répond à « que dois-je faire aujourd'hui ? » article par article ; l'onglet <b>Flux d'approvisionnement</b> suit commandes, transports et réceptions du jour.</p>
-<p><b>Planning transport</b> : un seul écran, les quais, sur cette semaine et la suivante ; l'application crée elle-même <b>un camion par fournisseur et par jour</b> dès qu'un ordre ferme est attendu et le pose une fois pour toutes ; vos camions en bleu, à vérifier en rouge, ceux des collègues en gris ; navette MAF, retour EV et camion ponctuel par les boutons de droite ; <b>PDF</b> du planning et <b>CSV ATR</b> pour l'outil de transport, qui prévient lui-même les fournisseurs (section 9).</p>
+<p><b>Planning transport</b> : un seul écran, les quais, sur cette semaine et les deux suivantes ; l'application crée elle-même <b>un camion par fournisseur et par jour</b> dès qu'un ordre ferme est attendu et le pose une fois pour toutes ; vos camions en bleu, à vérifier en rouge, ceux des collègues en gris ; navette MAF, retour EV et camion ponctuel par les boutons de droite ; <b>PDF</b> du planning et <b>CSV ATR</b> pour l'outil de transport, qui prévient lui-même les fournisseurs (section 9).</p>
 <p>Les boutons <b>FR | EN</b> du tableau d'approvisionnement et de la fiche article passent les intitulés en anglais, pour un partage d'écran ou une capture envoyée à un fournisseur.</p>
 <p class="cmt">Règles détaillées : <i>docs/regles_metier.md</i> ; calculs pas à pas : <i>docs/guide_moteur.md</i>.</p>""")
 
@@ -460,39 +460,36 @@ def sections() -> list[dict[str, str]]:
 <dt>Déclenchement</dt><dd>un besoin non servi, ou un stock projeté <b>sous 85 % de la cible</b> (tolérance 15 %, règle commune réglable).</dd>
 <dt>Cible</dt><dd>le besoin des <b>n prochains jours ouvrés</b> (couverture cible de l'article). Ni stock de sécurité, ni cycle de commande.</dd>
 <dt>Quantité</dt><dd>cible − stock projeté + manque, relevée au <b>MOQ</b>, arrondie au multiple d'<b>UM</b>, tronquée par les plafonds.</dd>
-<dt>Placement</dt><dd>le dernier <b>jour de livraison standard</b> du fournisseur avant le besoin ; les besoins jusqu'à la livraison suivante sont regroupés dessus.</dd>
+<dt>Placement</dt><dd>le dernier <b>jour de livraison</b> du fournisseur avant le besoin (table <b>Heures de livraison</b> du Référentiel : le protocole logistique d'achat ; un fournisseur absent de la table livre du lundi au vendredi) ; les besoins jusqu'à la livraison suivante sont regroupés dessus. <b>Jamais de livraison hors de ces jours</b> : tout fournisseur est strict.</dd>
 <dt>Date limite</dt><dd>livraison − (délai − marge) jours ouvrés : le dernier jour où l'ordre peut partir, affiché « à commander au plus tard le ». <b>Marge</b> : 1 jour ouvré par défaut (règle commune), 0 = délai strict.</dd>
 <dt>Tenable</dt><dd>date limite ≥ aujourd'hui. Le CBN vise alors la <b>cible pleine</b>.</dd>
 </dl>""",
          c["trigger"],
          """<dl class="rule">
-<dt>Hors jour standard ◇</dt><dd>le jour standard n'est pas tenable et une rupture arriverait avant la livraison standard suivante : la proposition se pose sur le <b>premier jour ouvré tenable</b> avant le besoin, marquée ◇. Sauf fournisseur à <b>jours stricts</b> (case du fournisseur, décochée par défaut).</dd>
-<dt>Sous la cible sans rupture</dt><dd>rien ne manque avant la livraison standard suivante tenable : le besoin <b>l'attend</b>, pas de ◇ pour un simple passage sous la cible.</dd>
-<dt>Plancher !</dt><dd>aucun jour ouvré tenable avant le besoin : proposition <b>urgente</b>, limitée au <b>minimum qui évite la rupture</b>, lotie MOQ / UM, posée sur le jour du besoin (sur le jour standard pour un fournisseur à jours stricts). Pas de tolérance sur le plancher.</dd>
+<dt>Sous la cible sans rupture</dt><dd>le jour de livraison n'est plus tenable mais rien ne manque avant la livraison suivante tenable : le besoin <b>l'attend</b> (simple passage sous la cible).</dd>
+<dt>Plancher !</dt><dd>le jour de livraison n'est plus tenable et une rupture arriverait avant le suivant : proposition <b>urgente</b> sur ce jour de livraison, limitée au <b>minimum qui évite la rupture</b>, lotie MOQ / UM. Pas de tolérance sur le plancher. Aucun jour de livraison entre aujourd'hui et la rupture : rien n'est proposé avant, le manque reste visible (−Σ).</dd>
 </dl>""",
-         c["floor"], c["offday"],
+         c["floor"], c["gap"],
          """<dl class="rule">
 <dt>Plafonds ▲</dt><dd>maximum par livraison et par semaine ISO (ordres fermes et quantités à retenir compris) : quantité tronquée au multiple d'UM, l'excédent glisse à la livraison suivante. Un manque qu'aucun plafond n'absorbe est signalé (« plafond fournisseur atteint »).</dd>
 <dt>Refuser</dt><dd>un clic barre la cellule : plus de proposition pour <b>ce fournisseur ce jour-là</b>. Le besoin passe aux autres fournisseurs à quota, sinon glisse au jour suivant. Second clic : rétablie. Un refus daté dans le passé disparaît du tableau.</dd>
-<dt>Reprendre</dt><dd>cliquer la cellule grisée puis Entrée : elle devient une quantité à retenir, à la date de la proposition (◇ comprise), et le CBN se recalcule sans elle.</dd>
+<dt>Reprendre</dt><dd>cliquer la cellule grisée puis Entrée : elle devient une quantité à retenir, à la date de la proposition, et le CBN se recalcule sans elle.</dd>
 </dl>
 <h4>Marqueurs dans la cellule</h4>
 <div class="legend">
 <div><span class="k">""" + cell("1 440", "cbn") + """</span><span>grisé, pointillé orange : proposition (clic puis Entrée pour la reprendre)</span></div>
 <div><span class="k">""" + cell('1 440 <span class="mk urgent">!</span>', "cbn") + """</span><span>urgente : plancher, date limite dépassée</span></div>
 <div><span class="k">""" + cell('1 440 <span class="mk cap">▲</span>', "cbn") + """</span><span>plafonnée par le fournisseur</span></div>
-<div><span class="k">""" + cell('1 440 <span class="mk off">◇</span>', "cbn") + """</span><span>hors jour standard</span></div>
 <div><span class="k">""" + cell("1 440", "cbn refused") + """</span><span>refusée d'un clic (ce jour, ce fournisseur)</span></div>
 </div>
 <h4>Exemple : fournisseur du lundi, délai 5, marge 1, rupture mercredi 4/11, cible 1 440</h4>""",
          table(["L'appro regarde le", "Livraison proposée", "Date limite", "Quantité", "Cockpit"], [
              ["lun. 26/10", "lun. 2/11", "mar. 27/10", cell("1 440", "cbn"), chip("À commander", "warning")],
              ["mar. 27/10", "lun. 2/11", "aujourd'hui", cell("1 440", "cbn"), chip("À commander", "warning")],
-             ["mer. 28/10", "mar. 3/11 ◇ (lundi non tenable)", "aujourd'hui", cell('1 440 <span class="mk off">◇</span>', "cbn"), chip("À commander", "warning")],
-             ["jeu. 29/10", "mer. 4/11 ◇ (le jour du besoin)", "aujourd'hui", cell('1 440 <span class="mk off">◇</span>', "cbn"), chip("À commander", "warning")],
-             ["ven. 30/10", "mer. 4/11 ◇, plancher", "jeu. 29/10, dépassée", cell('240 <span class="mk urgent">!</span>', "cbn"), chip("Critique", "critical")],
+             ["mer. 28/10", "lun. 2/11, plancher (plus tenable, seul lundi avant la rupture)", "mar. 27/10, dépassée", cell('240 <span class="mk urgent">!</span>', "cbn"), chip("Critique", "critical")],
+             ["jeu. 29/10 et ven. 30/10", "lun. 2/11, plancher", "mar. 27/10, dépassée", cell('240 <span class="mk urgent">!</span>', "cbn"), chip("Critique", "critical")],
          ]),
-         '<p class="cmt">Du mardi au jeudi, l\'article reste « à commander » à la cible pleine, sur un jour de livraison réaliste. Le plancher n\'apparaît que lorsque plus aucune livraison tenable ne précède le besoin.</p>')
+         '<p class="cmt">Lundi et mardi, l\'article reste « à commander » à la cible pleine sur le lundi 2/11. Dès mercredi, ce lundi n\'est plus tenable : plancher urgent dessus (240, le minimum jusqu\'au lundi 9/11), jamais une livraison un autre jour de la semaine.</p>')
 
     # ============================================================== A.2 Ordre ferme
     page("ferme", "A", PART_A, "2. Ordre ferme",
@@ -532,7 +529,7 @@ def sections() -> list[dict[str, str]]:
 <ul>
 <li>Une cellule datée avant aujourd'hui a <b>expiré</b> (listée « expirée » dans Saisies &amp; journal).</li>
 <li><b>Colonne semaine</b> : Entrée place la saisie sur le <b>jour de livraison standard</b> du fournisseur dans la semaine (le premier non passé ; le lundi sans fournisseur, ou pour un ajustement). L'info-bulle annonce la date avant la frappe.</li>
-<li>Reprendre une proposition CBN depuis la cellule semaine garde <b>sa date</b>, ◇ comprise.</li>
+<li>Reprendre une proposition CBN depuis la cellule semaine garde <b>sa date</b>.</li>
 <li><b>Maj+Entrée</b> après la frappe, ou clic droit › <b>Placer le jour…</b>, ouvre la liste des jours de la semaine (ERP, saisie, CBN de chaque jour, jour standard surligné) : la saisie se pose sur le jour choisi, la colonne reste en semaine.</li>
 <li>Vider une cellule semaine remet à l'ERP toutes les cellules saisies de la semaine pour ce fournisseur (annulable). Le clic Ordre ferme sur une colonne semaine ignore toute la semaine. L'en-tête de la colonne bascule sur le détail par jour.</li>
 <li>Recopie en tirant le carré. Clic droit : commentaire. Quantité ou expression (<span class="cell">2*600-50</span>). Chaque geste s'annule : toast « Annuler », Ctrl+Z / Ctrl+Y, ↶ ↷ (7 jours).</li>
@@ -611,13 +608,13 @@ def sections() -> list[dict[str, str]]:
 <div class="tile ok"><h4>OK</h4><p>tout le reste : rien à faire aujourd'hui.</p></div>
 </div>
 <h4>Le portefeuille</h4>
-<p>Article, fournisseurs (code et nom), approvisionneur, statut, stock à date (cible dessous), couverture à date (cible dessous), <b>commande en cours</b> (prochain ordre ferme : date, fournisseur, restant), <b>commande à placer</b> (première proposition : date limite « au plus tard le », fournisseur, quantité, livraison, ◇ si hors jour standard), en retard. Colonnes secondaires (dont <i>Rupture Ferme</i>) dans le menu Colonnes.</p>
+<p>Article, fournisseurs (code et nom), approvisionneur, statut, stock à date (cible dessous), couverture à date (cible dessous), <b>commande en cours</b> (prochain ordre ferme : date, fournisseur, restant), <b>commande à placer</b> (première proposition : date limite « au plus tard le », fournisseur, quantité, livraison), en retard. Colonnes secondaires (dont <i>Rupture Ferme</i>) dans le menu Colonnes.</p>
 <h4>Exemple : seuils rouge 2 j, orange 5 j, surstock 30 j, cible 10 j</h4>""",
          table(["Article", "Couverture à date", "Livraison avant l'épuisement ?", "Commande à placer", "Statut", "Commentaire"], [
              ["P-001", chip("1 j", "critical"), "oui, ordre ferme demain", "–", chip("Critique", "critical"), "→ la couverture rouge prime"],
              ["P-002", chip("4 j", "warning"), "non", "–", chip("À commander", "warning"), "→ orange, rien n'arrive"],
              ["P-003", chip("4 j", "warning"), "oui, quantité à retenir jeudi", "–", chip("OK", "ok"), "→ orange mais couvert"],
-             ["P-004", chip("12 j", "ok"), "–", "au plus tard mer. 28/10 · A · 1 440 · liv. 3/11 ◇", chip("À commander", "warning"), "→ date limite sous 5 j ouvrés"],
+             ["P-004", chip("12 j", "ok"), "–", "au plus tard mer. 28/10 · A · 1 440 · liv. lun. 2/11", chip("À commander", "warning"), "→ date limite sous 5 j ouvrés"],
              ["P-005", chip("12 j", "ok"), "–", "27/10 dépassée · plancher !", chip("Critique", "critical"), "→ une urgence CBN rend critique"],
              ["P-006", chip("42 j", "neutral"), "–", "–", chip("OK", "ok") + " + Surstock", "→ sans lien actif : pastille Données"],
          ]),
@@ -627,7 +624,7 @@ def sections() -> list[dict[str, str]]:
     page("flux", "B", PART_B, "8. Onglet Flux d'approvisionnement",
          """<p>Huit cartes ; un clic affiche les lignes dessous, avec export Excel. Calculées sur la copie ERP du jour (bandeau orange si la synchronisation est en retard).</p>
 <div class="tiles">
-<div class="tile critical"><h4>À commander</h4><p>propositions dont la <b>date limite tombe dans les 5 prochains jours ouvrés</b> ; les <b>urgentes</b> en tête, marquées <span class="mk urgent">!</span> ; colonne « au plus tard le », ◇ si hors jour standard. Les propositions <i>refusées</i> sont masquées ; le bouton « Afficher les ignorées » les montre.</p></div>
+<div class="tile critical"><h4>À commander</h4><p>propositions dont la <b>date limite tombe dans les 5 prochains jours ouvrés</b> ; les <b>urgentes</b> en tête, marquées <span class="mk urgent">!</span> ; colonne « au plus tard le ». Les propositions <i>refusées</i> sont masquées ; le bouton « Afficher les ignorées » les montre.</p></div>
 <div class="tile brand"><h4>Commandé</h4><p>ordres fermes <b>apparus aujourd'hui</b> dans la copie ERP, quelle que soit la livraison.</p></div>
 <div class="tile info"><h4>En transit</h4><p>journaux d'arrivée <b>non validés</b> et DESADV qu'aucun journal ne porte, des <b>5 derniers jours ouvrés</b> seulement.</p></div>
 <div class="tile warning"><h4>À traiter</h4><p>DESADV en <b>erreur</b>, ou traités <b>sans journal de saisie</b> ; les 5 derniers jours ouvrés, du plus récent au plus ancien (bouton « Tout afficher »).</p></div>
@@ -638,7 +635,7 @@ def sections() -> list[dict[str, str]]:
 </div>
 <h4>Exemple : une journée, mercredi 28/10</h4>""",
          table(["Ligne du jour", "Carte", "Commentaire"], [
-             ["Proposition A · 1 440 · au plus tard aujourd'hui · liv. mar. 3/11 ◇", chip("À commander", "critical"), "→ date limite sous 5 j ; ◇ mardi au lieu du lundi"],
+             ["Proposition A · 1 440 · au plus tard aujourd'hui · liv. lun. 2/11", chip("À commander", "critical"), "→ date limite sous 5 j"],
              ["Proposition B · 240 ! · au plus tard hier · liv. 4/11", chip("À commander", "critical") + " en tête", "→ urgente : plancher"],
              ["Proposition C refusée lundi", chip("À commander", "critical") + " <i>masquée</i>", "→ visible par « Afficher les ignorées »"],
              ["CO-10234 créée ce matin, livraison 16/11", chip("Commandé", "brand"), "→ apparue aujourd'hui"],
@@ -651,16 +648,16 @@ def sections() -> list[dict[str, str]]:
 
     # ============================================================== Livraisons
     page("livraisons", "B", PART_B, "9. Planning transport",
-         """<p>Les camions attendus sur les quais, sur <b>cette semaine et la suivante</b> (rien au-delà), tous fournisseurs confondus : les quais sont partagés. L'application <b>crée, modifie et annule</b> les transports ; elle n'envoie aucun e-mail : le système de transport <b>ATR</b> prévient les fournisseurs et les transporteurs à partir du fichier CSV.</p>
+         """<p>Les camions attendus sur les quais, sur <b>cette semaine et les deux suivantes</b> (rien au-delà ; la troisième semaine est provisoire, pour voir le placement à l'heure de livraison), tous fournisseurs confondus : les quais sont partagés. L'application <b>crée, modifie et annule</b> les transports ; elle n'envoie aucun e-mail : le système de transport <b>ATR</b> prévient les fournisseurs et les transporteurs à partir du fichier CSV.</p>
 <h4>Un écran, douze boutons, trois ajouts</h4>
 <ul>
-<li><b>Cette semaine</b> et ses cinq jours, <b>Semaine prochaine</b> et ses cinq jours. Une semaine : par quai et par jour, <b>le nombre de camions en gros</b> et « n à vous », une tuile par camion avec le fournisseur ; totaux par jour et par quai. Un jour : l'<b>agenda des quais</b>, une ligne par créneau (plus « &lt; 7h » et « ≥ 16h »), une colonne par quai, un bloc = un camion, créneau forcé en orange, quai fermé hachuré, trait rouge « maintenant ». Cliquer un en-tête de jour ouvre son agenda.</li>
+<li><b>Cette semaine</b> et ses cinq jours, <b>Semaine prochaine</b> et <b>Semaine d'après</b> avec les leurs. Une semaine : par quai et par jour, <b>le nombre de camions en gros</b> et « n à vous », une tuile par camion avec le fournisseur ; totaux par jour et par quai. Un jour : l'<b>agenda des quais</b>, une ligne par créneau (plus « &lt; 7h » et « ≥ 16h »), une colonne par quai, un bloc = un camion, créneau forcé en orange, quai fermé hachuré, trait rouge « maintenant ». Cliquer un en-tête de jour ouvre son agenda.</li>
 <li>À droite, <b>Navette MAF</b> (le nombre affiché = commandes MAF du prochain jour ouvré encore sans navette), <b>Retour EV</b> (le fournisseur vient enlever ses emballages vides : identifiant <b>EM0001EV</b> ; une fois le fournisseur choisi, tous les emballages de ses articles s'affichent avec une <b>quantité prévue</b> à saisir ; toutes les lignes sont gardées, même sans quantité) et <b>Camion ponctuel</b> (tout autre camion hors commandes) ; puis l'imprimante (<b>PDF du planning</b>, douze pages : la semaine, ses jours, la semaine prochaine, ses jours) puis deux fichiers pour ATR : <b>CSV du carnet</b> (les transports prévus à partir d'aujourd'hui des fournisseurs du carnet affiché, <b>sans les navettes</b> : chacun charge son fichier quand ses camions sont prêts, sans emporter la semaine inachevée d'un collègue) et <b>CSV navettes</b> (toutes les navettes MAF prévues, que tout le monde peut télécharger).</li>
 </ul>
 <h4>Cinq tons, partout</h4>
 <p><span class="chip brand">bleu</span> les camions automatiques du <b>carnet sélectionné en haut à gauche</b> (sans carnet choisi : le vôtre) · <span class="chip" style="background:#fee4e2;color:#b42318">rouge</span> ceux de ce carnet à vérifier (la raison dans le menu) · <span class="chip warning">jaune</span> ce qui est posé à la main : toute navette MAF, les retours EV et les camions ponctuels de ce carnet · <span class="chip">gris</span> les camions des autres carnets (point rouge : à vérifier chez eux) · gris barré : annulé, visible jusqu'à la fin de son jour. Un <b>petit point à droite</b> marque un camion automatique touché à la main (déplacé, scindé, rétabli, annoté). La couleur suit le carnet affiché, <b>les droits suivent votre e-mail</b> : vous ne modifiez que les camions de votre propre carnet et les navettes ; sur un autre camion, seulement prendre le CSV (et le BL d'un retour EV).</p>
 <h4>Tout fournisseur qui livre est automatique</h4>
-<p>Plus rien à cocher : à chaque synchronisation l'application pose <b>un camion par fournisseur et par jour ouvré</b> dès qu'un ordre ferme est attendu, y fait monter les commandes qui apparaissent, retire celles qui disparaissent, annule un camion vide. Le camion est <b>posé une fois pour toutes</b> à sa création : dans les <b>plages habituelles</b> du fournisseur s'il en a (fiche fournisseur › Paramétrage : deux plages au plus parmi 6h–10h, 8h–12h, 10h–14h, 12h–16h, 14h–18h, ≥ 16h), sinon dans la grille 07:00 → 15:30 ; sur le créneau <b>le plus éloigné des camions déjà posés</b> sur le quai (le premier à 07:00, le deuxième à 15:30, le troisième vers 11:00…) ; jamais plus de <b>2 camions par quai et par créneau</b>. Ensuite il ne bouge plus de lui-même : seul un approvisionneur le déplace. Le camion d'aujourd'hui est en route : rien n'en sort ; une commande apparue pour aujourd'hui ou demain monte dans un camion marqué à vérifier.</p>
+<p>Plus rien à cocher : à chaque synchronisation l'application pose <b>un camion par fournisseur et par jour ouvré</b> dès qu'un ordre ferme est attendu, y fait monter les commandes qui apparaissent, retire celles qui disparaissent, annule un camion vide. Le camion est <b>posé une fois pour toutes</b> à sa création. Pour toute commande livrée <b>à partir du 30/11/2026</b>, à <b>l'heure de livraison</b> : l'heure portée par la commande ferme dans l'ERP s'il y en a une, sinon l'heure du jour dans la table <b>Heures de livraison</b> du Référentiel (le protocole logistique d'achat), sinon l'heure la plus fréquente de la semaine du fournisseur ; cette heure est <b>respectée même si le créneau est complet</b> (le camion passe alors « à vérifier », créneau orange). Sans aucune heure, comme pour les camions d'avant le 30/11 : dans la grille 07:00 → 15:30, sur le créneau <b>le plus éloigné des camions déjà posés</b> sur le quai, jamais plus de <b>2 camions par quai et par créneau</b>. Ensuite il ne bouge plus de lui-même : seul un approvisionneur le déplace ; les camions déjà posés avant le changement de règle gardent leur créneau. Le camion d'aujourd'hui est en route : rien n'en sort ; une commande apparue pour aujourd'hui ou demain monte dans un camion marqué à vérifier.</p>
 <h4>Créneau occupé</h4>
 <p>Pour tout ce que vous posez à la main (navette, retour EV, camion ponctuel, déplacement, scission, rétablissement) : toute <b>demi-heure de 06:00 à 21:00</b>, le nombre de camions déjà là à côté de chaque créneau. Un créneau <b>complet</b> est refusé avec un avertissement qui nomme les camions présents et propose le créneau libre le plus proche : <b>Prendre 10:30</b>, ou <b>Forcer 10:00 (3 / 4)</b>, jusqu'à 4 camions par quai et par créneau, jamais plus ; le créneau forcé est orange dans l'agenda.</p>
 <h4>Le menu d'un camion (un clic)</h4>
@@ -698,7 +695,6 @@ def sections() -> list[dict[str, str]]:
          table(["Où", "Signe", "Sens"], [
              ["Proposition CBN", '<span class="mk urgent">!</span>', "urgente : plancher, date limite dépassée → Critique, en tête de la carte À commander"],
              ["Proposition CBN", '<span class="mk cap">▲</span>', "plafonnée (max par livraison ou par semaine)"],
-             ["Proposition CBN, tableau de bord", '<span class="mk off">◇</span>', "hors jour standard : jour ouvré tenable, pas le jour habituel"],
              ["Proposition CBN", "barré", "refusée d'un clic, ce fournisseur ce jour-là"],
              ["Ordre ferme", "orange / vert / rouge barré", "en cours / soldée / ignorée"],
              ["Ordre ferme", "petite icône camion en haut à gauche", "transport créé dans le Planning transport (identifiants dans l'infobulle)"],

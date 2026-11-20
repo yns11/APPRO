@@ -9,7 +9,7 @@ Deux familles :
 
 | Famille | Tables | Source | Où elles vivent |
 |---|---|---|---|
-| **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `ref_packaging`, `fct_stock`, `ref_planners`, `ref_delegations` | **gérées dans l'application** (page Référentiel : ligne par ligne, modèle Excel par table, modification en lot ; fiche article › Paramétrage) | base applicative (Lakebase ; SQLite en local) |
+| **Référentiel** | `ref_articles`, `ref_suppliers`, `ref_delivery_schedule`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `ref_packaging`, `fct_stock`, `ref_planners`, `ref_delegations` | **gérées dans l'application** (page Référentiel : ligne par ligne, modèle Excel par table, modification en lot ; fiche article › Paramétrage) | base applicative (Lakebase ; SQLite en local) |
 | **Faits ERP** | `fct_purchase_orders`, `fct_receipts`, `fct_consumption_actual` (facultatif), `fct_desadv`, `fct_prices`, `fct_stock_snapshot` (facultatif) | extractions ERP (`commandes_edi`, `recep_edi`…) | miroir `erp_*` de la base applicative, alimenté par le job (`APPRO_DATA_SOURCE=lakebase`), ou lecture directe par SQL warehouse (`uc`) |
 
 ## 1. Référentiel (géré dans l'application)
@@ -60,12 +60,27 @@ plus ; les anciennes colonnes sont ignorées à l'import.
 | contact | Contact | texte | non | |
 | transport_contact | Contact transport | texte | non | adresses e-mail du contact transport, séparées par `;` ou `,` ; une personne connectée avec l'une de ces adresses n'accède qu'à l'**espace fournisseur** (l'application n'envoie aucun e-mail : les avis de transport partent de l'outil ATR) |
 | docks | Quais | texte | non (`B15`) | quais de livraison par défaut, séparés par `;` (`B15`, `B6 EST`, `B2 NORD`, `B6 NORD`), présélectionnés à la création d'un transport ; cases à cocher à un clic dans le Référentiel ; les lignes vides reçoivent `B15` au démarrage |
-| delivery_weekdays | Jours de livraison | texte | oui | jours de livraison **standard**, ISO, `1,2,3,4,5` (1 = lundi) ; saisie en colonne semaine posée sur le premier de ces jours |
-| strict_days | Jours stricts | oui / non | non (non) | oui : livraisons uniquement les jours standard, jamais de proposition hors jour standard (◇) ; non : le CBN peut poser une proposition ◇ sur un autre jour ouvré quand le jour standard n'est plus tenable |
+| ~~delivery_weekdays~~ | | | | **retirée le 20/11/2026** (supprimée au démarrage) : les jours de livraison sont ceux de la table **Heures de livraison** (§ 1.2 quater) ; saisie en colonne semaine posée sur le premier de ces jours |
+| ~~strict_days~~ | | | | **retirée le 20/11/2026** : tout fournisseur est strict (jamais de proposition hors de ses jours de livraison) ; le CBN peut poser une proposition ◇ sur un autre jour ouvré quand le jour standard n'est plus tenable |
 | lead_time_days | Délai (j ouvrés) | entier | oui | délai du fournisseur en jours **ouvrés**, inclusif (lundi + 5 = lundi suivant) ; initialisé à 5 pour tous |
 | cutoff_time | Heure limite | texte | non | `HH:MM` (heure de Paris, `APPRO_TIMEZONE`) : une commande passée après part le jour ouvré suivant, le délai compte à partir de là ; vide = aucune |
 | active | Actif | oui / non | oui | |
-| transport_hours | Plages habituelles | texte | non (vide) | plages horaires habituelles de livraison, **deux au plus** parmi `06-10`, `08-12`, `10-14`, `12-16`, `14-18`, `16+` (séparées par `;`) ; l'application pose les camions du fournisseur dedans ; vide = n'importe quand dans la grille automatique 07:00 → 15:30 (règles métier § 9 ter bis) ; cases à un clic dans le Référentiel et la fiche fournisseur |
+| ~~transport_hours~~ | | | | **retirée le 20/11/2026** : les heures viennent de la table Heures de livraison et de la commande ferme ; anciennes plages `06-10`, `08-12`, `10-14`, `12-16`, `14-18`, `16+` (séparées par `;`) ; l'application pose les camions du fournisseur dedans ; vide = n'importe quand dans la grille automatique 07:00 → 15:30 (règles métier § 9 ter bis) ; cases à un clic dans le Référentiel et la fiche fournisseur |
+
+### 1.2 quater `ref_delivery_schedule` — Heures de livraison
+
+Le **protocole logistique d'achat** (PLA, extrait de Dynamics 365) : une ligne par fournisseur, l'heure de livraison
+de chaque jour de la semaine. **Un jour sans heure n'est pas un jour de livraison.** Les jours renseignés sont les
+seuls jours de livraison (propositions CBN, colonne semaine, tolérance OTD) ; l'heure place les camions automatiques
+datés du 30/11/2026 ou après, derrière l'heure portée par la commande ferme (règles métier § 7 et 9 ter bis). Un
+fournisseur **absent de la table** livre du lundi au vendredi, sans heure. Import depuis le fichier d'extraction tel
+quel : en-têtes `Fournisseur, Lundi, Mardi, Mercredi, Jeu(di), Vendredi`, cellules au format heure Excel ou texte
+`HH:MM` ; une ligne sans aucune heure est refusée (supprimer la ligne).
+
+| Colonne | Libellé | Type | Obligatoire | Description |
+|---|---|---|---|---|
+| supplier_id | Fournisseur | texte **clé** | oui | doit exister dans `ref_suppliers` |
+| mon … fri | Lundi … Vendredi | texte | non | heure de livraison `HH:MM` ; vide = pas de livraison ce jour-là |
 
 ### 1.2 ter `ref_carriers` : transporteurs
 
@@ -231,6 +246,7 @@ de commande d'achat peuvent partager un créneau : sommés).
 | supplier_name | texte | `Nom_fournisseur` | |
 | order_type | texte | `Ordre_ferme` | `Oui` → `FIRM`, sinon `FORECAST` (seul critère de classement ; `Niveau_engagement` reste informatif) |
 | expected_date | date | `Date_de_debut` | |
+| expected_time | texte | `Heure_debut` (`HH:MM`) | heure ERP de la livraison du jour, l'heure la plus tôt du fournisseur ce jour-là (00:00 = non renseignée) ; place le camion automatique à partir du 30/11/2026 ; colonne ajoutée le 20/11/2026 (requête `commandes_edi` avec `Heure_debut` / `Date_heure_debut`) |
 | qty_ordered | nombre | Σ `Quantite` | |
 | qty_open | nombre | Σ `Quantite_restante` (≥ 0) | restant ERP ; non fiable une fois la date passée |
 | purch_id | texte | `Commande` (liste) | information |
@@ -400,7 +416,7 @@ en local. Chaque écriture est journalisée avec l'utilisateur.
 
 | Table | Contenu | Clé |
 |---|---|---|
-| `ref_articles`, `ref_suppliers`, `ref_calendars`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `ref_packaging`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) ; `updated_at` sert de **tampon de version** (une écriture d'écran qui renvoie un tampon périmé est refusée, HTTP 409) + `updated_by`, `updated_at` ; les colonnes ajoutées sont créées au démarrage (`ensure_columns`), les anciennes (stock de sécurité, cycle de commande, délai du lien) ignorées puis supprimables ; un 0 hérité dans un délai spécifique ou un plafond est remis à vide au démarrage | clé de la table |
+| `ref_articles`, `ref_suppliers`, `ref_delivery_schedule`, `ref_calendars`, `ref_article_suppliers`, `ref_consumption_terms`, `ref_closed_orders`, `ref_programs`, `ref_bom`, `ref_packaging`, `fct_stock`, `ref_planners`, `ref_delegations` | le référentiel (§ 1) ; `updated_at` sert de **tampon de version** (une écriture d'écran qui renvoie un tampon périmé est refusée, HTTP 409) + `updated_by`, `updated_at` ; les colonnes ajoutées sont créées au démarrage (`ensure_columns`), les anciennes (stock de sécurité, cycle de commande, délai du lien) ignorées puis supprimables ; un 0 hérité dans un délai spécifique ou un plafond est remis à vide au démarrage | clé de la table |
 | `app_meta` | clé / valeur partagées par tous les processus de l'App : `data_version`, incrémentée **dans la transaction** de chaque écriture (et par le job de synchronisation) pour invalider les caches mémoire de chaque worker | key |
 | `app_migrations` | corrections de données ponctuelles déjà appliquées (nom, horodatage) : chacune s'exécute une seule fois par base ; les migrations de schéma du démarrage tournent sous `pg_advisory_lock` | name |
 | `app_plan_cells` | **cellules du plan** : article, fournisseur (`""` si aucun), date, expression saisie, quantité, commentaire, auteur | (article, fournisseur, date) |

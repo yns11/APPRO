@@ -583,6 +583,9 @@ def ensure_columns(engine) -> list[str]:
 #: the values are copied into the new column (when it is empty) and the old column is dropped, otherwise an
 #: INSERT of the new version fails on its NOT NULL constraint
 RENAMED_COLUMNS = (("app_transports", "dock", "docks"), ("ref_suppliers", "country", "address"))
+#: columns of an earlier version dropped at start-up (their meaning moved elsewhere) : the habitual ranges, the delivery
+#: weekdays and the strict flag of the suppliers live in the Heures de livraison table since 20/11/2026
+DROPPED_COLUMNS = (("ref_suppliers", "transport_hours"), ("ref_suppliers", "delivery_weekdays"), ("ref_suppliers", "strict_days"))
 
 
 def retire_columns(engine) -> list[str]:
@@ -601,6 +604,10 @@ def retire_columns(engine) -> list[str]:
                 conn.execute(text(f'UPDATE "{table_name}" SET "{new}" = "{old}" WHERE ("{new}" IS NULL OR "{new}" = \'\') AND "{old}" IS NOT NULL'))
                 conn.execute(text(f'ALTER TABLE "{table_name}" DROP COLUMN "{old}"'))
                 done.append(f"{table_name}.{old} → {new}")
+        for table_name, old in DROPPED_COLUMNS:
+            if inspector.has_table(table_name) and old in {c["name"] for c in inspector.get_columns(table_name)}:
+                conn.execute(text(f'ALTER TABLE "{table_name}" DROP COLUMN "{old}"'))
+                done.append(f"{table_name}.{old} (retirée)")
         if engine.dialect.name == "postgresql":
             for table in Base.metadata.sorted_tables:
                 if not table.name.startswith("app_") or not inspector.has_table(table.name):

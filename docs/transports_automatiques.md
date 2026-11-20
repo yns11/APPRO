@@ -9,8 +9,10 @@
 > navettes, rouge = vos camions à vérifier, gris = les autres approvisionneurs, gris barré = annulé ; un approvisionneur
 > ne modifie que ses camions et les navettes ; **aucun numéro de commande** n'est affiché (articles seulement) ; la
 > **navette MAF** a des lignes saisies, un **aller / retour** (quais retour, lignes retour, sans créneau ni ligne ATR)
-> et un **PDF** ; le camion est **posé une fois pour toutes** à sa création, le plus loin possible des camions déjà
-> posés, dans les **plages habituelles** du fournisseur (deux au plus parmi 06-10 … 16+), et ne bouge plus de lui-même ;
+> et un **PDF** ; le camion est **posé une fois pour toutes** à sa création et ne bouge plus de lui-même : depuis le
+> 20/11/2026, à l'**heure de livraison** (heure ERP de la commande ferme, sinon protocole logistique d'achat, table
+> Heures de livraison, sinon heure habituelle) pour les camions datés du 30/11/2026 ou après, heure respectée même quai
+> complet (à vérifier) ; avant, le plus loin possible des camions déjà posés (les plages habituelles ont été retirées) ;
 > un créneau choisi à la main (demi-heures 06:00 → 21:00) qui est **occupé** est refusé avec le créneau libre le plus
 > proche, **forçable** jusqu'à deux fois la capacité ; **Rétablir** un camion annulé ; **PDF imprimable** du planning en
 > douze pages. Premier temps du même jour : horizon de deux semaines, plus d'e-mail (ATR prévient), retour EV

@@ -42,8 +42,7 @@ class LinkRef(ORM):
     active: bool = True
     max_qty_per_delivery: float | None = None
     max_qty_per_week: float | None = None
-    delivery_weekdays: str = "1,2,3,4,5"   # standard delivery weekdays of the supplier (ISO, comma separated)
-    strict_days: bool = False              # the supplier delivers on its standard weekdays only (no ◇)
+    delivery_weekdays: str = "1,2,3,4,5"   # delivery weekdays of the supplier (ISO, comma separated ; the protocol's days)
 
 
 class SupplierRef(ORM):
@@ -51,10 +50,10 @@ class SupplierRef(ORM):
     name: str = ""
     address: str = ""
     contact: str = ""
-    delivery_weekdays: str = "1,2,3,4,5"
+    delivery_weekdays: str = "1,2,3,4,5"          # the days with an hour in the Heures de livraison table (every weekday without a row)
+    delivery_hours: list[str] = Field(default_factory=lambda: ["", "", "", "", ""])   # Monday → Friday, « HH:MM » or ""
     lead_time_days: int = 5
     active: bool = True
-    strict_days: bool = False
     transport_contact: str = ""
     docks: str = "B15"
 
@@ -931,7 +930,7 @@ class PlanningSupplier(BaseModel):
     docks: list[str] = Field(default_factory=list)
     mode: str = "Fournisseur"
     carrier: str = ""
-    hours: list[str] = Field(default_factory=list)   # habitual ranges (06-10 … 16+)
+    hours: list[str] = Field(default_factory=list)   # protocol hours Monday → Friday (« HH:MM » or "")
     orders: list[PlanningOrder]
 
 

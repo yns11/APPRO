@@ -23,7 +23,7 @@ from ..engine.models import (
     SupplierLink,
     order_kind,
 )
-from .schemas import as_date, parse_weekdays
+from .schemas import as_date, normalise_hour, schedule_of
 
 Tables = Callable[[str], pd.DataFrame]
 
@@ -88,6 +88,14 @@ def _days(r: dict) -> list[dt.date]:
     if b < a:
         a, b = b, a
     return [a + dt.timedelta(days=i) for i in range((b - a).days + 1)][:400]
+
+
+def _hour(value: object) -> str:
+    """An ERP hour cell as « HH:MM » ; anything unreadable counts as none."""
+    try:
+        return normalise_hour(value)
+    except ValueError:
+        return ""
 
 
 def calendar_sets(rows: Iterable[dict], suppliers: Iterable[Supplier]) -> tuple[set[dt.date], set[dt.date], dict[str, set[dt.date]]]:
@@ -158,11 +166,14 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
     # uses the article's own ERP consumption until terms are declared
     source_ids = {src for a in articles for src, _c in a.derived_terms}
 
-    suppliers = [Supplier(r["supplier_id"], r["name"], str(r.get("address") or ""), r["contact"], parse_weekdays(r["delivery_weekdays"]),
-                          _lead(r.get("lead_time_days")), bool(r["active"]), strict_days=bool(r.get("strict_days") or False),
+    # delivery days and hours : the purchasing logistics protocol (Heures de livraison) ; a supplier without a row
+    # delivers every weekday, without an hour
+    schedule = schedule_of(_records(t("ref_delivery_schedule")))
+    suppliers = [Supplier(r["supplier_id"], r["name"], str(r.get("address") or ""), r["contact"],
+                          frozenset(schedule[r["supplier_id"]]) if r["supplier_id"] in schedule else frozenset({1, 2, 3, 4, 5}),
+                          _lead(r.get("lead_time_days")), bool(r["active"]), delivery_hours=dict(schedule.get(r["supplier_id"], {})),
                           transport_contact=str(r.get("transport_contact") or ""), docks=str(r.get("docks") or "") or "B15",
-                          cutoff_time=str(r.get("cutoff_time") or "").strip(), transport_mode=str(r.get("transport_mode") or "").strip() or "Fournisseur",
-                          transport_hours=str(r.get("transport_hours") or "").strip())
+                          cutoff_time=str(r.get("cutoff_time") or "").strip(), transport_mode=str(r.get("transport_mode") or "").strip() or "Fournisseur")
                  for r in _records(t("ref_suppliers"))]
     # business calendars : plant closures and exceptional open days, supplier / carrier / dock closures
     plant_closed, plant_open, sup_closed = calendar_sets(_records(t("ref_calendars")), suppliers)
@@ -185,7 +196,7 @@ def erp_dataset(source, planner: str | None = None, article_ids: list[str] | Non
     orders = [OrderLine(order_id=r["order_id"], article_id=r["article_id"], supplier_id=r["supplier_id"] or None,
                         expected_date=as_date(r["expected_date"]), qty_ordered=float(r["qty_ordered"]),
                         qty_open=float(r["qty_open"]), order_type=OrderType(r["order_type"] or "FIRM"), ref=r["purch_id"],
-                        first_seen=as_date(r.get("first_seen")))
+                        first_seen=as_date(r.get("first_seen")), expected_time=_hour(r.get("expected_time")))
               for r in _records(t("fct_purchase_orders")) if r["article_id"] in ids and r["expected_date"]]
     # receipts counted in the stock : those of an open order (CO-…) and of the closed orders (PO) declared in
     # the Référentiel ; every other receipt stays visible (search, flows, supplier page) without counting

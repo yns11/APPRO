@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from ...data import reference
 from ...data.assembler import calendar_sets, erp_dataset
+from ...data.schemas import schedule_of
 from ...data.store import OtdClosing
 from ...engine.calendar import WorkCalendar
 from ...engine.models import EngineParams
@@ -44,7 +45,10 @@ def _otd_data(ctx: AppContext, session: Session) -> tuple[otd.OtdData, EnginePar
     data = ctx.cache_get(key)
     if data is None:
         cal = WorkCalendar.from_spec(params.working_weekdays, holidays, opened)
-        data = otd.build(ctx.table("fct_purchase_orders"), ctx.table("fct_receipts"), ctx.table("fct_desadv"), ctx.table("ref_suppliers"),
+        schedule = schedule_of(ctx.table("ref_delivery_schedule").to_dict("records"))
+        sups = ctx.table("ref_suppliers").copy()
+        sups["delivery_weekdays"] = [",".join(str(d) for d in sorted(schedule[sid])) if sid in schedule else "1,2,3,4,5" for sid in sups["supplier_id"]]
+        data = otd.build(ctx.table("fct_purchase_orders"), ctx.table("fct_receipts"), ctx.table("fct_desadv"), sups,
                          ctx.table("ref_article_suppliers"), ctx.table("ref_articles"), cal, as_of, params)
         ctx.cache_set(key, data, size=data.size())
     return data, params

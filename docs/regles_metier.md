@@ -32,7 +32,9 @@ se lit.
   Référentiel** (`ref_calendars`), visibles dans *Paramètres › Données › Calendrier usine*. Couvertures, seuils,
   surstock, délais : tout compte en **jours ouvrés**. Le **délai fournisseur** (`ref_suppliers.lead_time_days` [5],
   remplaçable par lien : `lead_time_override`) est **inclusif** : commandé lundi avec un délai de 5, livrable le lundi
-  suivant. Les jours de livraison autorisés sont par fournisseur (`delivery_weekdays`).
+  suivant. Les jours de livraison autorisés sont par fournisseur : la table **Heures de livraison** (`ref_delivery_schedule`,
+  le protocole logistique d'achat : une heure par jour de la semaine, un jour sans heure n'est pas un jour de
+  livraison ; un fournisseur absent de la table livre du lundi au vendredi).
 * **Calendriers métier** (table *Calendriers*, une ligne = un calendrier, une clé, une période, une nature) :
   * *usine* : une **fermeture** (ni besoin, ni livraison, ni jour ouvré compté) ou un jour **ouvert**
     exceptionnellement (un samedi travaillé : il compte comme jour ouvré, reçoit du besoin et des livraisons) ;
@@ -124,7 +126,7 @@ du plan saisie ce jour-là est prise telle quelle.
   (elle devient une cellule saisie ordinaire).
 * Une cellule datée avant la référence a **expiré** : ignorée, listée « expirée » dans *Saisies & journal*.
 * Le plan se saisit aussi bien dans une colonne jour que dans une **colonne semaine** : la valeur saisie se place
-  au **premier jour de livraison standard du fournisseur** de la semaine qui n'est pas passé (`delivery_weekdays`,
+  au **premier jour de livraison du fournisseur** de la semaine qui n'est pas passé (table Heures de livraison,
   jours ouvrés du calendrier usine ; à défaut le premier jour ouvré, à défaut le lundi ; jamais avant le jour de
   référence), annoncé dans l'infobulle ; la cellule semaine affiche le total de la semaine (jours saisis plus
   jours ERP). **Maj+Entrée**, ou clic droit › *Placer le jour…*, ouvre la liste des jours de la semaine (quantité
@@ -351,9 +353,10 @@ cellule *Quantité à retenir* (la cellule grisée la prérempli), le CBN se rec
 quantité ramène le stock à **100 % de la cible** (besoin net = cible − stock projeté + manque), relevée au
 **MOQ** puis arrondie au multiple supérieur de l'**UM** du lien.
 
-**Placement** : sur un jour de livraison **standard** du fournisseur (`delivery_weekdays`), le dernier **avant**
-le besoin ; les besoins jusqu'à la livraison suivante sont regroupés sur cette livraison (**une proposition par
-fournisseur et par jour de livraison**, partout).
+**Placement** : sur un jour de livraison du fournisseur (table **Heures de livraison** ; lundi à vendredi sans
+ligne), le dernier **avant** le besoin ; les besoins jusqu'à la livraison suivante sont regroupés sur cette
+livraison (**une proposition par fournisseur et par jour de livraison**, partout). **Tout fournisseur est strict**
+depuis le 20/11/2026 : une proposition ne sort jamais de ses jours de livraison.
 
 **Date limite de commande** = livraison − (délai − marge) jours ouvrés : le dernier jour où l'ordre peut partir.
 La **marge de délai** (`lead_margin_days` [1], règle commune réglable, 0 = délai strict) reconnaît qu'un
@@ -361,17 +364,17 @@ fournisseur livre en général un peu avant son délai contractuel. Une proposit
 date limite n'est pas passée (≥ aujourd'hui) : le CBN vise alors la cible pleine. La date limite est affichée
 « au plus tard le » (flux *À commander*, fiche article, cockpit, courbes).
 
-**Hors jour standard ◇** : quand le jour standard n'est plus tenable mais qu'une rupture arriverait avant la
-livraison standard suivante tenable, la proposition se pose sur le **premier jour ouvré tenable** avant le besoin,
-marquée **◇** (« hors jour standard ») ; si rien ne manque avant la livraison standard suivante, le besoin
-**attend** celle-ci (simple passage sous la cible, pas de ◇). Un fournisseur à **jours stricts**
-(`strict_days`, Référentiel) ne reçoit jamais de ◇ : le besoin non tenable devient un plancher au jour standard.
+**Sous la cible sans rupture** : quand le jour de livraison n'est plus tenable mais que rien ne manque avant la
+livraison suivante tenable, le besoin **attend** celle-ci (simple passage sous la cible).
 
-**Plancher !** : quand aucun jour ouvré tenable ne précède le besoin, la proposition est **urgente** (date limite
-dépassée, marquée **!**) : posée au **jour du besoin** (au jour standard pour un fournisseur à jours stricts),
-limitée à la **quantité minimale qui évite la rupture** jusqu'à la livraison suivante, lotie MOQ / UM. La
-tolérance ne s'applique pas au plancher. Dès la première livraison tenable, la proposition vise la cible pleine,
-sans rampe. Une proposition refusée au jour du besoin glisse au jour suivant (jamais avant).
+**Plancher !** : quand le jour de livraison n'est plus tenable et qu'une rupture arriverait avant le suivant, la
+proposition est **urgente** (date limite dépassée, marquée **!**) : posée sur **ce jour de livraison**, limitée à la
+**quantité minimale qui évite la rupture** jusqu'à la livraison suivante, lotie MOQ / UM. La tolérance ne s'applique
+pas au plancher. Dès la première livraison tenable, la proposition vise la cible pleine, sans rampe. Une proposition
+refusée glisse au jour de livraison suivant (jamais avant). Quand **aucun jour de livraison** ne sépare aujourd'hui de
+la rupture, rien n'est proposé avant la première livraison tenable : le manque reste visible dans le stock projeté
+(−Σ), à traiter hors CBN. La livraison « hors jour standard » (◇) a été **retirée le 20/11/2026** : les jours du
+protocole sont contractuels.
 
 > Version réduite et lisible de ces règles (un fournisseur, pas d'ordre ferme, de refus ni de plafond) :
 > [`docs/mini_cbn.ipynb`](mini_cbn.ipynb), une fonction Python dont `backend/tests/test_mini_cbn.py` vérifie qu'elle
@@ -639,16 +642,18 @@ fournisseur et les marques du tableau d'approvisionnement ne changent pas.
 
 **Qui est automatique : tout fournisseur qui livre**, lui-même (mode *Fournisseur*) ou par un transporteur. Il n'y a
 plus de case « Camions automatiques » ni de notion de camion manuel ou automatique : les seuls camions créés à la main
-sont la navette MAF, le retour EV et le camion ponctuel. Une colonne facultative **Plages habituelles**
-(`ref_suppliers.transport_hours`, Référentiel ou fiche fournisseur › Paramétrage) : **jusqu'à deux plages** parmi
-`06-10`, `08-12`, `10-14`, `12-16`, `14-18` et `16+` (≥ 16h) ; vide = n'importe quand dans la grille automatique.
-Règles communes (Paramètres › Planning transport) : grille automatique de 07:00 à 15:30 toutes les 30 minutes
+sont la navette MAF, le retour EV et le camion ponctuel. Les **heures de livraison** viennent de la table
+**Heures de livraison** du Référentiel (`ref_delivery_schedule`, le protocole logistique d'achat extrait de Dynamics
+365 : une heure `HH:MM` par jour de la semaine ; les anciennes *Plages habituelles* ont été retirées le 20/11/2026) et
+de l'**heure portée par la commande ferme** (`fct_purchase_orders.expected_time`, colonne `Heure_debut` de
+`commandes_edi` : l'heure la plus tôt du fournisseur ce jour-là). Règles communes (Paramètres › Planning transport) : grille automatique de 07:00 à 15:30 toutes les 30 minutes
 (`dock_slot_start`, `dock_slot_end`, `dock_slot_minutes`), **2 camions par quai et par créneau** (`dock_slot_capacity`),
 le double en forçant à la main.
 
 **Création : une réconciliation par version des données.** À chaque changement des données (synchronisation ERP,
 saisie, référentiel), à la première lecture du planning, l'application compare, pour chaque fournisseur livrant et
-chaque jour ouvré de l'**horizon** (semaine en cours et semaine suivante, rien au-delà), les ordres fermes ERP
+chaque jour ouvré de l'**horizon** (semaine en cours, semaine suivante et, provisoirement depuis le 20/11/2026, la
+semaine d'après : `PLANNING_WEEKS = 3`, rien au-delà), les ordres fermes ERP
 attendus (articles actifs, restant > 0, hors commandes *ignorées* dans le tableau d'approvisionnement) et les camions
 existants :
 
@@ -668,14 +673,19 @@ existants :
   journalisée (créés, complétés, retirés, annulés) et n'est pas annulable par Ctrl+Z.
 
 **Placement, une fois pour toutes.** Un camion est posé sur un créneau **à sa création** et **ne bouge plus jamais de
-lui-même** : seul un approvisionneur le replace (menu › Déplacer). Les camions nouveaux d'une journée sont posés du
-fournisseur le plus contraint (des plages habituelles) au plus libre, chacun : 1) parmi les demi-heures de ses
-**plages habituelles** s'il en a, sinon parmi les créneaux de la grille automatique ; 2) **jamais au-delà de la
-capacité** du quai (un camion multi-quais prend une place sur chacun) ; 3) sur le créneau **le plus éloigné des
-camions déjà posés** sur ses quais ce jour-là (le premier camion d'un quai à 07:00, le deuxième à 15:30, le
-troisième vers 11:00…), au plus tôt à égalité ; 4) plus de place dans ses créneaux → le créneau libre le plus proche de
-la journée ; aucune place nulle part → dernier créneau et **à vérifier** (« quai B15 complet toute la journée :
-déplacer le camion ») ; un quai fermé ce jour-là (table Calendriers, calendrier *quai*) → à vérifier aussi.
+lui-même** : seul un approvisionneur le replace (menu › Déplacer). Pour un camion daté du **30/11/2026 ou après**
+(`HOURLY_FROM`), le créneau est **l'heure de livraison** : 1) l'**heure ERP** des commandes fermes du jour
+(`expected_time`, la plus tôt si elles diffèrent) ; 2) sinon l'heure de ce jour de la semaine dans le **protocole**
+(table Heures de livraison) ; 3) sinon l'**heure habituelle** du fournisseur (la plus fréquente de sa semaine, la plus
+tôt à égalité). Cette heure est **respectée même quand le créneau est complet** (elle a été convenue avec le
+fournisseur) : le camion passe alors **à vérifier** (« créneau 08:00 complet sur B15 (2 camion(s) déjà) : heure ERP
+conservée ») et son créneau apparaît en orange. Sans aucune heure, et pour les camions datés avant le 30/11 : la grille
+automatique, **jamais au-delà de la capacité** du quai (un camion multi-quais prend une place sur chacun), sur le
+créneau **le plus éloigné des camions déjà posés** sur ses quais ce jour-là (le premier camion d'un quai à 07:00, le
+deuxième à 15:30, le troisième vers 11:00…), au plus tôt à égalité ; plus de place dans la grille → le créneau libre le
+plus proche de la journée ; aucune place nulle part → dernier créneau et **à vérifier** (« quai B15 complet toute la
+journée : déplacer le camion »). Un quai fermé ce jour-là (table Calendriers, calendrier *quai*) → à vérifier aussi.
+Les camions créés avant le changement de règle **gardent leur créneau** (déjà communiqués aux fournisseurs).
 
 **Actions de l'approvisionneur** sur ses camions et sur les navettes : un clic sur un camion (semaine ou agenda) ouvre
 son **menu** à l'endroit du clic : le camion (identifiant, à qui il est, jour, créneau, quais, ses articles, raison du

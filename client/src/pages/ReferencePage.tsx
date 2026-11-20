@@ -4,14 +4,13 @@ import { CalendarDays, Download, Plus, Trash2, Upload, Wand2 } from "lucide-reac
 import { WeeklyParamsDrawer } from "@/components/WeeklyParamsDrawer";
 import { RefRowEditor } from "@/components/RefRowEditor";
 import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
-import { WeekdayPicker, splitWeekdays } from "@/components/WeekdayPicker";
 import { DataTable, type Column } from "@/components/DataTable";
 import { useRefRows, useRefTables, useSupplierNames, useWrite } from "@/lib/queries";
 import { usePerimeter } from "@/state/PerimeterContext";
 import { useRemembered } from "@/lib/pageState";
 import { api } from "@/lib/api";
 import { Badge, Button, Card, Drawer, ErrorBox, Field, SkeletonBlock, SupplierLink, Tabs, useToast } from "@/components/ui";
-import { CONSUMPTION_SOURCE_SHORT, SOURCING_LABELS, fmtDate, fmtDateTime, fmtDemandDays, fmtQty, fmtWeekdays } from "@/lib/format";
+import { CONSUMPTION_SOURCE_SHORT, SOURCING_LABELS, fmtDate, fmtDateTime, fmtDemandDays, fmtQty, fmtWeekdays, SCHEDULE_DAYS } from "@/lib/format";
 import type { ImportReport, RefColumn, RefRow, RefTableInfo, RefValue } from "@/lib/types";
 
 /** Quick filters of the Référentiel tables, on the query columns the server computes (several buttons combine with AND). */
@@ -25,6 +24,7 @@ const QUICK_FILTERS: Record<string, { id: string; label: string; title: string; 
   ],
   ref_suppliers: [
     { id: "no_article", label: "Sans article", title: "Fournisseurs sans règle article ↔ fournisseur active", test: (r) => Number(r.article_count ?? 0) === 0 },
+    { id: "no_schedule", label: "Sans heures de livraison", title: "Fournisseurs absents de la table Heures de livraison : ils livrent du lundi au vendredi, sans heure", test: (r) => !r.has_schedule },
     { id: "lead", label: "Délai ≠ 5", title: "Fournisseurs dont le délai n'est pas la valeur initiale de 5 jours ouvrés", test: (r) => Number(r.lead_time_days ?? 5) !== 5 },
   ],
   ref_article_suppliers: [
@@ -42,7 +42,7 @@ const QUICK_FILTERS: Record<string, { id: string; label: string; title: string; 
 /** Columns of the table itself that the Référentiel does not show (replaced by query columns). */
 const HIDDEN: Record<string, string[]> = { ref_articles: ["family"] };
 /** Columns that can be set in bulk on the filtered rows. */
-const BULK: Record<string, string[]> = { ref_articles: ["coverage_target_days", "alert_red_days", "alert_yellow_days", "overstock_days", "demand_days", "sourcing_policy", "consumption_source", "planner", "active"], ref_suppliers: ["lead_time_days", "delivery_weekdays", "strict_days", "active"], ref_article_suppliers: ["lead_time_override", "max_qty_per_delivery", "max_qty_per_week", "quota_pct", "priority", "active"] };
+const BULK: Record<string, string[]> = { ref_articles: ["coverage_target_days", "alert_red_days", "alert_yellow_days", "overstock_days", "demand_days", "sourcing_policy", "consumption_source", "planner", "active"], ref_suppliers: ["lead_time_days", "active"], ref_article_suppliers: ["lead_time_override", "max_qty_per_delivery", "max_qty_per_week", "quota_pct", "priority", "active"] };
 
 const fmtCell = (c: RefColumn, v: RefValue) => v === null || v === undefined || v === "" ? "" : c.type === "bool" ? (v ? "oui" : "non") : c.type === "date" ? fmtDate(String(v)) : c.type === "float" ? fmtQty(Number(v)) : String(v);
 
@@ -70,11 +70,6 @@ export default function ReferencePage() {
   const del = useWrite(({ name, key }: { name: string; key: Record<string, RefValue> }) => api.post(`/api/reference/${name}/delete`, { key }), () => toast.push("Ligne supprimée"));
   // one click on a dock of the Quais column saves the supplier row (its default docks, preselected when a transport is created)
   // every one-click write sends the row as the screen loaded it (``expected_updated_at``) : a colleague's save in between is refused, never overwritten
-  const setWeekdays = useWrite(({ row, days }: { row: RefRow; days: number[] }) => {
-    const values: Record<string, RefValue> = {};
-    (table?.columns ?? []).forEach((c) => { if (row[c.name] !== undefined) values[c.name] = row[c.name]; });
-    return api.put(`/api/reference/ref_suppliers/rows`, { values: { ...values, delivery_weekdays: days.join(",") }, expected_updated_at: row.updated_at });
-  });
   const setDocks = useWrite(({ row, docks }: { row: RefRow; docks: string[] }) => {
     const values: Record<string, RefValue> = {};
     (table?.columns ?? []).forEach((c) => { if (row[c.name] !== undefined) values[c.name] = row[c.name]; });
@@ -99,7 +94,7 @@ export default function ReferencePage() {
         : c.name === "consumption_source" ? <Badge tone={String(r[c.name] ?? "erp") === "erp" ? "neutral" : "info"}>{CONSUMPTION_SOURCE_SHORT[String(r[c.name] ?? "erp")]}</Badge>
         : c.name === "demand_days" ? <span title={fmtDemandDays(Number(r[c.name] ?? 5))}>{Number(r[c.name] ?? 5) === 5 ? <span className="subtle">5</span> : <b>{String(r[c.name])}</b>}</span>
         : c.name === "lead_time_override" ? (r[c.name] == null || r[c.name] === "" ? <span className="inherited" title="Délai du fournisseur">hérité</span> : <b>{String(r[c.name])}</b>)
-        : c.name === "delivery_weekdays" && table.name === "ref_suppliers" ? <span onClick={(e) => e.stopPropagation()} title={fmtWeekdays(String(r[c.name] ?? ""))}><WeekdayPicker label={`Jours de livraison de ${String(r.supplier_id)}`} value={splitWeekdays(r[c.name])} disabled={!rights.canEditTable(table.name)} onChange={(v) => setWeekdays.mutate({ row: r, days: v })} /></span>
+        : table.name === "ref_delivery_schedule" && (SCHEDULE_DAYS as readonly string[]).includes(c.name) ? (r[c.name] ? <b>{String(r[c.name])}</b> : <span className="subtle" title="Pas de livraison ce jour-là">–</span>)
         : c.name === "docks" && table.name === "ref_suppliers" ? <span onClick={(e) => e.stopPropagation()}><DockPicker all={DOCKS} size="sm" label={`Quais par défaut de ${String(r.supplier_id)}`} value={splitDocks(r[c.name])} disabled={!rights.canEditTable(table.name)} onChange={(v) => setDocks.mutate({ row: r, docks: v })} /></span>
         : <>{fmtCell(c, r[c.name])}</>,
     }));
@@ -108,6 +103,7 @@ export default function ReferencePage() {
     if (table.name === "ref_articles") after("unit", { key: "programs", label: "Programmes", title: "Programmes dont la nomenclature utilise l'article (colonne calculée)", get: (r) => (r.programs as string) ?? "", render: (r) => list(r.programs, 260) });
     if (table.name === "ref_articles") after("programs", { key: "supplier_count", label: "Fourn.", title: "Nombre de fournisseurs actifs (colonne calculée)", num: true, get: (r) => Number(r.supplier_count ?? 0) });
     if (table.name === "ref_suppliers") after("name", { key: "articles", label: "Articles", title: "Articles reliés au fournisseur par une règle active (colonne calculée)", get: (r) => (r.articles as string) ?? "", render: (r) => <>{Number(r.article_count ?? 0) ? <b style={{ marginRight: 6 }}>{Number(r.article_count)} ·</b> : null}{list(r.articles, 300)}</> });
+    if (table.name === "ref_suppliers") after("docks", { key: "schedule", label: "Livraisons", title: "Jours et heures de livraison du protocole logistique (table Heures de livraison, colonne calculée) ; vide = lundi à vendredi, sans heure", get: (r) => (r.schedule as string) ?? "", render: (r) => r.schedule ? <span className="small">{String(r.schedule)}</span> : <span className="subtle small" title="Absent de la table Heures de livraison">Lun → Ven</span> });
     if (table.name === "ref_suppliers") after("articles", { key: "planners", label: "Approvisionneurs", title: "Approvisionneurs des articles reliés au fournisseur par une règle active (colonne calculée)", get: (r) => (r.planners as string) ?? "", render: (r) => list(r.planners, 160) });
     if (table.name === "ref_programs") after("name", { key: "article_count", label: "Articles", title: "Nombre de composants dans la nomenclature (colonne calculée)", num: true, get: (r) => Number(r.article_count ?? 0) });
     if (table.name === "ref_closed_orders") {

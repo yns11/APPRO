@@ -1,12 +1,9 @@
 import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
-import { HoursPicker } from "@/components/HoursPicker";
-import { splitHours } from "@/lib/transports";
-import { WeekdayPicker, splitWeekdays } from "@/components/WeekdayPicker";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useConsumptionSources, useRefRows, useWrite } from "@/lib/queries";
 import { Button, Drawer, Field, useToast } from "@/components/ui";
-import { CONSUMPTION_SOURCE_LABELS, SOURCING_LABELS, WEEKDAY_SHORT, fmtWeekdays } from "@/lib/format";
+import { CONSUMPTION_SOURCE_LABELS, SCHEDULE_DAYS, SOURCING_LABELS, WEEKDAY_SHORT } from "@/lib/format";
 import type { RefColumn, RefRow, RefTableInfo } from "@/lib/types";
 
 /** The supplier's transport mode : three fixed modes, then the carriers known to the application. */
@@ -62,9 +59,8 @@ export function RefRowEditor({ table, row, onClose, fixed, onSaved }: { table: R
     const set = (v: string) => setValues({ ...values, [c.name]: v });
     const disabled = (c.key && !isNew) || !!fixed?.[c.name];
     if (c.type === "bool") return <select className="select" value={values[c.name] ?? "oui"} onChange={(e) => set(e.target.value)} disabled={disabled}><option value="oui">oui</option><option value="non">non</option></select>;
-    if (table.name === "ref_suppliers" && c.name === "delivery_weekdays") return <span className="row" style={{ height: 34 }}><WeekdayPicker value={splitWeekdays(values[c.name])} onChange={(v) => set(v.join(","))} disabled={disabled} /><span className="small subtle">{fmtWeekdays(values[c.name] || "")}</span></span>;
     if (table.name === "ref_suppliers" && c.name === "docks") return <DockPicker all={DOCKS} value={splitDocks(values[c.name])} onChange={(v) => set(v.join(";"))} disabled={disabled} label="Quais par défaut" />;
-    if (table.name === "ref_suppliers" && c.name === "transport_hours") return <HoursPicker value={splitHours(values[c.name])} onChange={(v) => set(v.join(";"))} disabled={disabled} />;
+    if (table.name === "ref_delivery_schedule" && (SCHEDULE_DAYS as readonly string[]).includes(c.name)) return <span className="row"><input className="input" type="time" step={60} value={values[c.name] ?? ""} onChange={(e) => set(e.target.value)} disabled={disabled} aria-label={c.label} style={{ width: 130 }} />{values[c.name] ? <button type="button" className="btn ghost sm" onClick={() => set("")} disabled={disabled} title="Pas de livraison ce jour-là">effacer</button> : <span className="small subtle">pas de livraison</span>}</span>;
     if (table.name === "ref_suppliers" && c.name === "transport_mode") return <select className="select" value={values[c.name] || "Fournisseur"} onChange={(e) => set(e.target.value)} disabled={disabled}>{modeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
     if (choices[c.name]) return <select className="select" value={values[c.name] || choices[c.name][0].value} onChange={(e) => set(e.target.value)} disabled={disabled}>{choices[c.name].map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
     if (table.name === "ref_consumption_terms" && c.name === "source_article_id") {

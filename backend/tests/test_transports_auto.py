@@ -54,8 +54,8 @@ def _row(c, sid: str) -> dict:
 
 def _set(c, sid: str, **values):
     r = _row(c, sid)
-    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "address", "contact", "delivery_weekdays", "strict_days", "lead_time_days", "active", "docks",
-                                                  "transport_contact", "transport_mode", "cutoff_time", "transport_hours")}
+    keep = {k: v for k, v in r.items() if k in ("supplier_id", "name", "address", "contact", "lead_time_days", "active", "docks",
+                                                  "transport_contact", "transport_mode", "cutoff_time")}
     return c.put("/api/reference/ref_suppliers/rows", json={"values": {**keep, **values}})
 
 
@@ -78,16 +78,14 @@ def test_slot_grid_hours_and_spread_placement():
     assert A.slot_of("07:10", grid) == "07:00" and A.slot_of("15:45", grid) == "15:30" and A.slot_of("16:00", grid) is None and A.slot_of("", grid) is None
     day = T.day_slots()
     assert day[0] == "06:00" and day[-1] == "21:00" and len(day) == 31 and A.slot_of("16:00", day) == "16:00"
-    # habitual ranges : canonical tokens, two at most, unknown refused
-    assert T.parse_hours("6-10 ; >16") == ["06-10", "16+"] and T.parse_hours("") == [] and T.parse_hours("12-16;12-16") == ["12-16"]
-    with pytest.raises(ValueError):
-        T.parse_hours("06-10;08-12;10-14")
-    with pytest.raises(ValueError):
-        T.parse_hours("07-11")
-    assert T.hours_label(["06-10", "16+"]) == "6h – 10h · ≥ 16h"
-    sp = Supplier(supplier_id="S", transport_hours="16+")
-    assert A.candidates_for(sp, grid) == ["16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", "21:00"]
-    assert A.candidates_for(Supplier(supplier_id="S", transport_hours="06-10"), grid)[0] == "06:00" and A.candidates_for(None, grid) == grid
+    # the delivery hour of a day : the ERP hour first, else the protocol hour of the weekday, else the usual hour (most common, earliest on a tie)
+    sp = Supplier(supplier_id="S", delivery_hours={1: "08:00", 3: "08:00", 4: "14:00"})
+    mon, tue = dt.date(2026, 11, 30), dt.date(2026, 12, 1)
+    assert sp.usual_hour == "08:00" and sp.hour_for(mon) == "08:00" and sp.hour_for(tue) == "08:00" and sp.hour_for(dt.date(2026, 12, 3)) == "14:00"
+    assert Supplier(supplier_id="S", delivery_hours={1: "10:00", 2: "09:00"}).usual_hour == "09:00" and Supplier(supplier_id="S").usual_hour == ""
+    o = type("O", (), {"expected_time": "18:00"})()
+    assert A.hour_of(sp, mon, [o]) == ("18:00", "ERP") and A.hour_of(sp, mon, []) == ("08:00", "protocole") and A.hour_of(sp, tue, []) == ("08:00", "heure habituelle")
+    assert A.hour_of(None, mon, []) == ("", "") and A.hour_of(Supplier(supplier_id="S"), mon, [type("O", (), {"expected_time": ""})()]) == ("", "")
     # spread : the first truck takes the first slot, the next ones the slot farthest from the trucks already on the dock
     occ = A.Occupancy()
     got = []
@@ -97,14 +95,12 @@ def test_slot_grid_hours_and_spread_placement():
         occ.add(["B15"], s)
         got.append(s)
     assert got == ["07:00", "15:30", "11:00", "09:00"]
-    # a range : inside it ; the range full → the nearest free slot of the day ; the whole day full → the last slot and a reason
+    # the grid full → the nearest free slot of the day ; the whole day full → the last slot and a reason
     occ = A.Occupancy()
-    s, _ = A.place_spread(occ, A.candidates_for(sp, grid), ["B6 EST"], 1)
-    assert s == "16:00"
-    for x in A.candidates_for(sp, grid):
+    for x in grid:
         occ.add(["B6 EST"], x)
-    s, why = A.place_spread(occ, A.candidates_for(sp, grid), ["B6 EST"], 1)
-    assert s == "15:30" and why == ""
+    s, why = A.place_spread(occ, grid, ["B6 EST"], 1)
+    assert s not in grid and why == "" and s in day
     for x in day:
         occ.add(["B6 EST"], x)
     s, why = A.place_spread(occ, grid, ["B6 EST"], 1)
@@ -124,39 +120,37 @@ def test_access_reserved_to_transport_users(client):  # noqa: F811
 
 
 def test_every_supplier_is_automatic_and_actions(client):  # noqa: F811
-    # capacity 1 per dock and slot ; S-000517 delivers after 16h as a habit
+    # capacity 1 per dock and slot ; before 30/11/2026 the protocol hours do not place the trucks (spread grid)
     assert client.put("/api/params/overrides", json={"scope": "global", "field": "dock_slot_capacity", "value": 1}).status_code == 200
-    assert _set(client, "S-000517", transport_hours="16+").status_code in (200, 201)
-    assert _set(client, "S-000517", transport_hours="06-10;08-12;10-14").status_code == 422
-    assert _set(client, "S-000517", transport_hours="07-11").status_code == 422
-    assert _row(client, "S-000517")["transport_hours"] == "16+"
+    assert client.put("/api/reference/ref_delivery_schedule/rows", json={"values": {"supplier_id": "S-000517", "thu": "16:30"}}).status_code in (200, 201)
     plan = _planning(client)
     assert plan["slots"][0] == "07:00" and len(plan["slots"]) == 18 and "auto" not in plan["suppliers"][0]
     row = next(s for s in plan["suppliers"] if s["supplier_id"] == "S-000032")
-    assert row["hours"] == [] and next(s for s in plan["suppliers"] if s["supplier_id"] == "S-000517")["hours"] == ["16+"]
+    assert row["hours"] == ["08:00"] * 5 and next(s for s in plan["suppliers"] if s["supplier_id"] == "S-000517")["hours"] == ["", "", "", "16:30", ""]
     trucks = [t for t in plan["transports"] if t["mode"] in ("fournisseur", "transporteur")]
     by = {(t["supplier_id"], t["date"]): t for t in trucks}
     # one truck per supplier and working day with a firm order, every supplier, from today to the end of next week
-    assert sorted(d for s, d in by if s == "S-000032") == ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"]
-    assert sorted(d for s, d in by if s == "S-000517") == ["2026-09-24"]
+    assert sorted(d for s, d in by if s == "S-000032")[:5] == ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"]
+    assert sorted(d for s, d in by if s == "S-000517" and d <= "2026-09-27") == ["2026-09-24"]
     with_orders = {s["supplier_id"] for s in plan["suppliers"] if any(o["expected_date"] <= "2026-09-27" and not o["ignored"] and o["qty_open"] > 0 for o in s["orders"])}
     assert with_orders <= {s for s, _d in by} and len(with_orders) >= 3
-    assert all(t["date"] <= "2026-09-27" for t in trucks)
-    assert [t for t in _planning(client, "2026-09-28", 1)["transports"] if t["mode"] in ("fournisseur", "transporteur")] == []
+    # the horizon : the current week, the next and (provisionally) the one after ; nothing beyond
+    assert all(t["date"] <= "2026-10-04" for t in trucks) and any(t["date"] >= "2026-09-28" for t in _planning(client, "2026-09-28", 1)["transports"])
+    assert [t for t in _planning(client, "2026-10-05", 1)["transports"] if t["mode"] in ("fournisseur", "transporteur")] == []
     assert len(by[("S-000032", "2026-09-25")]["orders"]) == 2 and by[("S-000032", "2026-09-25")]["docks"] == ["B15"]
     assert all(t["created_by"] == "application" and t["pinned"] is False and "origin" not in t for t in trucks)
     o = by[("S-000032", "2026-09-25")]["orders"][0]
     assert o["designation"] and o["unit"]      # the screens show the article, never the order number
-    # placed once, spread over the dock : the first truck of a day at 07:00 ; S-000517 inside its range ; everybody is « mine » for an admin
-    assert by[("S-000032", "2026-09-21")]["time"] == "07:00" and by[("S-000517", "2026-09-24")]["time"] >= "16:00"
+    # placed once, spread over the dock (dates before 30/11/2026) : the first truck of a day at 07:00 ; everybody is « mine » for an admin
+    assert by[("S-000032", "2026-09-21")]["time"] == "07:00" and "07:00" <= by[("S-000517", "2026-09-24")]["time"] <= "15:30"
     assert all(t["mine"] for t in trucks)
     # today is Saturday 19/09 : a truck for the next working day is « à vérifier »
     assert by[("S-000032", "2026-09-21")]["check_reason"].startswith("commande apparue pour demain")
     assert by[("S-000032", "2026-09-25")]["check_reason"] == ""
     ids = sorted(t["transport_id"] for t in trucks)
     assert all(i.startswith("EM") and i.endswith("A") and len(i) == 8 for i in ids)
-    # a second read changes nothing (the reconciliation ran once for this data version) ; a habit set afterwards moves nothing
-    assert _set(client, "S-000032", transport_hours="12-16").status_code in (200, 201)
+    # a second read changes nothing (the reconciliation ran once for this data version) ; a protocol set afterwards moves nothing
+    assert client.put("/api/reference/ref_delivery_schedule/rows", json={"values": {"supplier_id": "S-000032", "mon": "12:00", "tue": "12:00", "wed": "12:00", "thu": "12:00", "fri": "12:00"}}).status_code in (200, 201)
     again = _planning(client)
     assert sorted(t["transport_id"] for t in again["transports"] if t["mode"] in ("fournisseur", "transporteur")) == ids
     assert all(t["time"] == by[(t["supplier_id"], t["date"])]["time"] for t in again["transports"] if t["mode"] in ("fournisseur", "transporteur"))
@@ -271,7 +265,7 @@ def test_every_supplier_is_automatic_and_actions(client):  # noqa: F811
     for o in t2["orders"]:
         assert client.post("/api/entries/flags/toggle", json={"article_id": o["article_id"], "supplier_id": "S-000517", "date": "2026-09-24", "kind": "order_ignored"}).status_code == 200
     after = _planning(client)
-    assert not [t for t in after["transports"] if t["supplier_id"] == "S-000517" and t["mode"] != "ev"]       # ignored : no truck is born either
+    assert not [t for t in after["transports"] if t["supplier_id"] == "S-000517" and t["mode"] != "ev" and t["date"] <= "2026-09-27"]   # ignored : no truck is born either
     gone = next(t for t in client.get("/api/transports", params={"supplier_id": "S-000517", "include_cancelled": True}).json() if t["transport_id"] == em2)
     assert gone["status"] == "cancelled" and gone["cancelled_by"] == "application"
     assert em2 not in {t["transport_id"] for t in _board(client)["transports"]}
@@ -319,12 +313,12 @@ def test_ownership_mine_and_shuttles(two_planners):
 
 def test_reconcile_runs_once_per_version_and_board_counters(client):  # noqa: F811
     first = _planning(client)
-    n = len([t for t in first["transports"] if t["supplier_id"] == "S-000032"])
+    n = len([t for t in first["transports"] if t["supplier_id"] == "S-000032" and t["date"] <= "2026-09-27"])
     assert n == 5
     # the planner's CSV lists the automatic trucks (today and later) ; a supplier delivering himself : FOURNISSEUR =
     # his purchase orders | his docks (the « Route » of the tool's e-mail), TRANSPORTEUR = his name
     csv = client.get("/api/transports/atr.csv").text
-    assert csv.count("S-000032") == 5
+    assert csv.count("S-000032") == len([t for t in first["transports"] if t["supplier_id"] == "S-000032"])
     row = next(l.split(";") for l in csv.split("\r\n")[1:] if ";S-000032;" in l)
     truck = next(t for t in first["transports"] if t["transport_id"] == row[0])
     refs = list(dict.fromkeys(o["ref"] for o in truck["orders"] if o.get("ref")))
@@ -345,3 +339,25 @@ def test_reconcile_runs_once_per_version_and_board_counters(client):  # noqa: F8
     r = client.post("/api/transports", json={"date": "2026-09-21", "time": "08:00", "docks": ["B6 EST"], "order_ids": [o["order_id"] for o in monday]})
     assert r.status_code == 201, r.text
     assert _board(client)["maf_pending"] == 0
+
+
+def test_trucks_dated_from_the_switch_take_the_delivery_hour(client, monkeypatch):  # noqa: F811
+    """From ``HOURLY_FROM`` a new truck takes the ERP hour of its orders, else the protocol hour of the weekday, else the
+    supplier's usual hour ; the hour is kept even when the slot is full (à vérifier) ; without any hour the spread grid."""
+    monkeypatch.setattr(A, "HOURLY_FROM", dt.date(2026, 9, 1))
+    assert client.put("/api/params/overrides", json={"scope": "global", "field": "dock_slot_capacity", "value": 1}).status_code == 200
+    plan = _planning(client)
+    by = {(t["supplier_id"], t["date"]): t for t in plan["transports"] if t["mode"] in ("fournisseur", "transporteur")}
+    # S-000032 : protocol 08:00 every day (seed) ; the ERP hour 18:00 of its orders due 24/09 wins that day
+    assert by[("S-000032", "2026-09-21")]["time"] == "08:00" and by[("S-000032", "2026-09-25")]["time"] == "08:00"
+    assert by[("S-000032", "2026-09-24")]["time"] == "18:00" and by[("S-000032", "2026-09-24")]["check_reason"] == ""
+    # S-000186 : Wednesday 13:00 only ; a truck on another day takes its usual hour 13:00 (never « à vérifier » for that alone)
+    others = [t for (s, _d), t in by.items() if s == "S-000186"]
+    assert others and all(t["time"] == "13:00" for t in others)
+    # a supplier without any protocol row : the spread grid (07:00 → 15:30), as before
+    free = [t for (s, _d), t in by.items() if s not in ("S-000032", "S-000186", "S-000599")]
+    assert free and all("07:00" <= t["time"] <= "15:30" for t in free)
+    # the agreed hour is kept when the slot is already full : the truck is flagged instead of moved
+    full = [t for (s, d), t in by.items() if s == "S-000032" and any(o["time"] == t["time"] and o["docks"] == t["docks"] for (s2, d2), o in by.items() if d2 == d and s2 != s)]
+    for t in full:
+        assert "complet" in t["check_reason"] and "conservée" in t["check_reason"]

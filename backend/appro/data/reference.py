@@ -166,6 +166,8 @@ def _header_map(schema: TableSchema) -> dict[str, str]:
     for c in schema.columns:
         m[c.name.lower()] = c.name
         m[c.label.lower()] = c.name
+        for a in c.aliases:
+            m[a.lower()] = c.name
     return m
 
 
@@ -236,6 +238,10 @@ def _same_cell(v: Any, example: Any) -> bool:
     return norm(v) == norm(example)
 
 
+def schema_type(schema: TableSchema, column: str) -> str:
+    return next((c.type for c in schema.columns if c.name == column), "str")
+
+
 def parse_workbook(name: str, content: bytes) -> tuple[pd.DataFrame, list[str]]:
     """Read the first sheet of an import file: headers = French labels or canonical names."""
     schema = schema_of(name)
@@ -270,6 +276,7 @@ def parse_workbook(name: str, content: bytes) -> tuple[pd.DataFrame, list[str]]:
         if any(row.get(k) in (None, "") for k in schema.key):
             notes.append(f"ligne {n} : clé manquante, ignorée")
             continue
-        data.append({k: (v.date() if isinstance(v, dt.datetime) else v) for k, v in row.items()})
+        data.append({k: (v.date() if isinstance(v, dt.datetime) and schema_type(schema, k) == "date" else f"{v.hour:02d}:{v.minute:02d}" if isinstance(v, dt.time)
+                         else f"{v.hour:02d}:{v.minute:02d}" if isinstance(v, dt.datetime) and schema_type(schema, k) == "str" else v) for k, v in row.items()})
     df = coerce(pd.DataFrame(data, columns=list(cols.values())), schema, strict=True)
     return df, notes

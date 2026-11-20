@@ -1,6 +1,7 @@
-"""Order proposals (« Proposition CBN ») : order deadline with a margin, standard delivery day or a
-tenable working day before the need (« hors jour standard », ◇), floor on the need day when nothing is
-tenable, full target otherwise, tolerance, lot sizing, delivery caps, quotas and refusals.
+"""Order proposals (« Proposition CBN ») : order deadline with a margin, delivery on the supplier's delivery
+days only (the purchasing logistics protocol : every supplier is on strict days since 20/11/2026), floor on the
+last delivery day before the need when nothing is tenable, full target otherwise, tolerance, lot sizing,
+delivery caps, quotas and refusals.
 
 Vocabulary (docs/regles_metier.md § 7) :
 
@@ -15,10 +16,9 @@ Algorithm (per article, on the *plan* stock, scanned day by day from tomorrow)::
     for each day d with a shortage or a stock under the trigger:
         delivery day of each eligible supplier :
             the standard day when it is tenable and free (not refused, not full) ;
-            else, unless the supplier is on strict days, the first tenable working day on or before d
-                that is free (◇ hors jour standard) ;
-            else the floor day : d itself (flexible supplier) or the standard day (strict supplier),
-                urgent because its date limite is already past ;
+            else, when nothing runs out before the next tenable standard delivery, that next delivery ;
+            else the floor day : the standard day, urgent because its date limite is already past
+                (never a day outside the protocol : no « hors jour standard » delivery) ;
             a refused or full day makes the need slide : the next day is evaluated the same way.
         every supplier urgent : only a **shortage** triggers a proposal, sized to what avoids it (floor) –
             the stock is not brought back to the target ;
@@ -87,7 +87,6 @@ class _Link:
     lead: int
     weekdays: frozenset[int] | None
     tenable: dt.date                 # first delivery day whose order can still be placed today (margin included)
-    strict: bool                     # deliveries on the standard weekdays only (no ◇)
     order_lead: int                  # lead time − margin, working days : delivery − order_lead = date limite
     cap_day: float | None
     cap_week: float | None
@@ -140,10 +139,8 @@ def _delivery_day(st: _Link, need: dt.date, earliest: dt.date, latest: dt.date, 
     2. the standard day is not tenable (or there is none before the need) : when nothing runs out before
        the **next standard delivery** that is tenable, the need simply **waits for it** (a dip under the
        target is not worth an off-day delivery) ;
-    3. otherwise, unless the supplier is on strict days : the **first tenable working day** on or before
-       the need that is free – ◇ ;
-    4. nothing tenable before the need : the **floor day**, urgent – the need day itself (or the last
-       working day before it) for a flexible supplier, the standard day for a strict one ;
+    3. nothing tenable before the need : the **floor day**, urgent – the standard day (every supplier is on
+       strict days : a delivery never lands outside its protocol) ;
     5. a refused or full day never receives a proposal : the need **slides** to the next day, evaluated
        the same way (never earlier)."""
     one = dt.timedelta(days=1)
@@ -151,9 +148,6 @@ def _delivery_day(st: _Link, need: dt.date, earliest: dt.date, latest: dt.date, 
     def standard(d: dt.date) -> bool:
         return calendar.is_open_weekday(d, st.weekdays) and d not in st.closed
 
-    def deliverable(d: dt.date) -> bool:
-        """A working day of the plant the supplier can deliver on (closures of the supplier excluded)."""
-        return calendar.is_working_day(d) and d not in st.closed
 
     def ok(d: dt.date) -> bool:
         if not with_constraints:
@@ -186,16 +180,7 @@ def _delivery_day(st: _Link, need: dt.date, earliest: dt.date, latest: dt.date, 
             nxt = next_standard(day)
             if nxt is not None and not short_between(need, nxt):
                 return nxt, False                           # 2. nothing runs out before the next standard delivery
-            if not st.strict:
-                d = max(st.tenable, earliest)               # 3. ◇ : first tenable working day before the need
-                while d <= day:
-                    if deliverable(d) and ok(d):
-                        return d, not standard(d)
-                    d += one
-                floor_day = last_before(day, deliverable)   # 4. floor on the need day
-                if floor_day is not None and ok(floor_day):
-                    return floor_day, not standard(floor_day)
-            elif std is not None and ok(std):               # 4. strict supplier : floor on the standard day
+            if std is not None and ok(std):                 # 3. floor on the standard day (strict days for all)
                 return std, False
         day += one                                          # 5. refused or full : the need slides
     return None, False
@@ -255,7 +240,7 @@ def generate_proposals(
         start = calendar.next_working_day(today, inclusive=False) if sid and sid in (params.cutoff_passed or ()) else today
         states[sid] = _Link(
             link=link, supplier_id=sid, lead=lead, weekdays=sup.delivery_weekdays if sup else None,
-            tenable=calendar.add_working_days(start, order_lead), strict=bool(sup.strict_days) if sup else False,
+            tenable=calendar.add_working_days(start, order_lead),
             closed=sup.closures if sup else frozenset(),
             order_lead=order_lead, cap_day=link.max_qty_per_delivery if link else None,
             cap_week=link.max_qty_per_week if link else None, pack=float(link.pack_qty) if link else 0.0,

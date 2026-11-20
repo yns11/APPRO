@@ -1,19 +1,22 @@
 """Automatic trucks (docs/regles_metier.md § 9 ter bis, docs/transports_automatiques.md).
 
 **Every supplier who delivers** (modes *Fournisseur* and carrier) is automatic : at every change of the data version
-the **reconciliation** (:func:`reconcile`) compares, for every working day of the two planning weeks (the current
-one and the next), the firm ERP orders expected from the supplier with the trucks that exist :
+the **reconciliation** (:func:`reconcile`) compares, for every working day of the planning weeks (``PLANNING_WEEKS`` :
+the current one, the next and, provisionally, the one after), the firm ERP orders expected from the supplier with the
+trucks that exist :
 
 * a day with at least one firm order and no truck gets **one truck** carrying every order of the day ; a new order of
   a day that already has its truck **rides it** ; an order that leaves a day (date changed in the ERP, closed,
   deleted, ignored) leaves the truck, and an empty truck is **cancelled** (the EM number is never reused) ;
 * a **new truck is placed once**, at its creation, and never moves by itself afterwards : only a planner replaces
-  it.  The placement (:func:`place_spread`) never exceeds ``dock_slot_capacity`` trucks per dock and slot, stays in
-  the supplier's **habitual ranges** (``ref_suppliers.transport_hours``, up to two of 06-10 … 16+) when he has some,
-  else in the automatic grid (``dock_slot_start`` → ``dock_slot_end`` every ``dock_slot_minutes``), and takes, among
-  the free slots, the one **farthest from the trucks already on the dock** (earliest on a tie) ; the trucks of a day
-  are placed from the most constrained supplier to the least.  No room at all → the last slot and **à vérifier** ;
-  a closed dock, an order appearing for today or tomorrow → **à vérifier** too.
+  it.  From ``HOURLY_FROM`` (30/11/2026) the truck takes **the delivery hour** (:func:`hour_of`) : the ERP hour of the
+  day's firm orders (``commandes_edi.Heure_debut``), else the hour of that weekday in the supplier's purchasing
+  logistics protocol (table Heures de livraison), else his usual hour (the most common one over his week) ; the hour
+  is kept even when the slot is full (it was agreed with the supplier) and the truck is then **à vérifier**.  Without
+  any hour, and for the days before ``HOURLY_FROM``, :func:`place_spread` : the automatic grid (``dock_slot_start`` →
+  ``dock_slot_end`` every ``dock_slot_minutes``), never beyond ``dock_slot_capacity`` trucks per dock and slot, the
+  free slot **farthest from the trucks already on the dock** (earliest on a tie).  No room at all → the last slot and
+  **à vérifier** ; a closed dock, an order appearing for today or tomorrow → **à vérifier** too.
 
 **Slots by hand** (move, split, shuttle, EV return, one-off truck, restore) : every half hour from 06:00 to 21:00.
 An occupied slot (``capacity`` trucks already on one of the docks) is refused with the nearest free slot proposed
@@ -56,7 +59,8 @@ from . import transports as T
 
 log = logging.getLogger(__name__)
 
-PLANNING_WEEKS = 2                      # the current week and the next : nothing is planned beyond
+PLANNING_WEEKS = 3                      # the current week, the next and (provisionally) the one after : nothing is planned beyond
+HOURLY_FROM = dt.date(2026, 11, 30)     # trucks dated from here are placed at the delivery hour ; earlier ones keep the spread grid (and the trucks already placed never move)
 RECONCILED_KEY = "transports_reconciled_version"   # app_meta : the data version the last reconciliation processed
 RECONCILE_LOCK_KEY = 7_419_302          # pg_advisory_xact_lock : one reconciliation at a time across the workers
 APP_USER = T.APP_USER
@@ -129,18 +133,20 @@ class Occupancy:
         return sorted({_minutes(s, "07:00") for (d, s), n in self.count.items() if n > 0 and d in {x.upper() for x in docks}})
 
 
-def candidates_for(sp: Supplier | None, grid: list[str]) -> list[str]:
-    """The slots a new truck of the supplier may take : the half hours of his habitual ranges when he has some, else
-    the automatic grid."""
-    tokens = sp.hour_ranges if sp is not None else []
-    if not tokens:
-        return list(grid)
-    out: list[str] = []
-    for s in T.day_slots():
-        m = _minutes(s, "06:00")
-        if any(lo <= m <= hi for lo, hi in (T.HOUR_RANGES[t] for t in tokens if t in T.HOUR_RANGES)) and s not in out:
-            out.append(s)
-    return out or list(grid)
+def hour_of(sp: Supplier | None, day: dt.date, orders: list[Any]) -> tuple[str, str]:
+    """The delivery hour of a supplier's day and where it comes from : the **ERP hour** of the day's firm orders (the
+    earliest when they differ), else the **protocol** hour of that weekday (table Heures de livraison), else the
+    supplier's **usual hour** (the most common of his week) ; ``("", "")`` when nothing is known."""
+    erp = sorted({str(getattr(o, "expected_time", "") or "").strip() for o in orders} - {""})
+    if erp:
+        return erp[0], "ERP"
+    if sp is not None:
+        h = sp.delivery_hours.get(day.isoweekday(), "")
+        if h:
+            return h, "protocole"
+        if sp.usual_hour:
+            return sp.usual_hour, "heure habituelle"
+    return "", ""
 
 
 def place_spread(occ: Occupancy, candidates: list[str], docks: list[str], capacity: int) -> tuple[str, str]:
@@ -414,13 +420,23 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
             if t.date == day and t.status == "planned" and t.time:
                 occ.add(T.split_docks(t.docks), t.time)
         news = [t for t in born if t.date == day]
-        news.sort(key=lambda t: (len(candidates_for(sups.get(t.supplier_id), grid)), t.supplier_id, t.transport_id))
+        hours = {t.transport_id: hour_of(sups.get(t.supplier_id), day, list(expected.get((t.supplier_id, day), {}).values())) if day >= HOURLY_FROM else ("", "")
+                 for t in news}
+        news.sort(key=lambda t: (not hours[t.transport_id][0], t.supplier_id, t.transport_id))   # the trucks with an agreed hour first : they do not move
         for t in news:
             docks = T.split_docks(t.docks) or ["B15"]
             closed = [d for d in docks if day in dock_closed.get(d.upper(), set())]
-            time, full = place_spread(occ, candidates_for(sups.get(t.supplier_id), grid), docks, capacity)
-            t.time = time
-            occ.add(docks, time)
+            hour, origin = hours[t.transport_id]
+            if hour:
+                slot = slot_of(hour, occ.grid)
+                taken = occ.load(docks, slot) if slot is not None else 0
+                full = f"créneau {hour} complet sur {', '.join(docks)} ({taken} camion(s) déjà) : heure {origin} conservée" if slot is not None and not occ.free(docks, slot, capacity) else ""
+                t.time = hour
+                occ.add(docks, hour)
+            else:
+                time, full = place_spread(occ, list(grid), docks, capacity)
+                t.time = time
+                occ.add(docks, time)
             reason = full or (f"quai {', '.join(closed)} fermé ce jour-là" if closed else "")
             if reason:
                 t.check_reason = reason

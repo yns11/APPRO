@@ -231,7 +231,11 @@ redéployer (`scripts/deploy.sh dev PROD --var=...`) ; l'App rejoue le `GRANT` �
    `transports_all_automatic_2026_11` retire la colonne « Camions automatiques » des fournisseurs (tout fournisseur
    qui livre est automatique) et `transports_fresh_start_2026_11_b` purge de nouveau les transports et les compteurs
    une fois les plages habituelles saisies ; la première lecture du planning crée les camions de la semaine en cours et
-   de la suivante, posés dans ces plages. Enfermé malgré tout ? Dans l'éditeur SQL Lakebase, sur le schéma de la cible :
+   des deux suivantes. Depuis le 20/11/2026 les plages habituelles, les jours de livraison et les jours stricts des
+   fournisseurs sont **retirés au démarrage** (colonnes supprimées) : charger la table **Heures de livraison** du
+   Référentiel depuis l'extraction PLA de Dynamics (fichier tel quel : `Fournisseur, Lundi … Vendredi`) ; la table
+   `commandes_edi` doit porter la colonne `Heure_debut` (requête mise à jour) : le job et le notebook la lisent dans
+   `expected_time`. Enfermé malgré tout ? Dans l'éditeur SQL Lakebase, sur le schéma de la cible :
    `UPDATE appro.ref_planners SET role = 'admin' WHERE lower(email) = '<votre e-mail>';` (ou un `INSERT` de votre
    ligne), puis recharger l'application. Les **Délégations** (délégant, destinataire, dates) se saisissent ensuite.
 6. **Stock de référence** — article, date du stock (veille au soir), stock physique, stock bloqué.

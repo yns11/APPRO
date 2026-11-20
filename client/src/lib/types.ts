@@ -12,10 +12,11 @@ export interface ArticleRef {
 /** ``lead_time_days`` is the effective lead time (link override, else the supplier's) ; ``lead_time_override`` is the link's own value (null = inherited). */
 export interface LinkRef {
   article_id: string; supplier_id: string; supplier_name: string; moq: number; pack_qty: number; lead_time_days: number; lead_time_override: number | null; quota_pct: number; priority: number; active: boolean; max_qty_per_delivery: number | null; max_qty_per_week: number | null;
-  /** standard delivery weekdays of the supplier (ISO, "1,2,4") and whether it delivers on those days only (no ◇) */
-  delivery_weekdays: string; strict_days: boolean;
+  /** delivery weekdays of the supplier (ISO, "1,2,4") : the days of its delivery protocol, the only possible delivery days */
+  delivery_weekdays: string;
 }
-export interface SupplierRef { supplier_id: string; name: string; address: string; contact: string; delivery_weekdays: string; lead_time_days: number; active: boolean; strict_days: boolean; transport_contact?: string; docks?: string; cutoff_time?: string; }
+/** ``delivery_hours`` : Monday → Friday, « HH:MM » or "" (table Heures de livraison : the purchasing logistics protocol). */
+export interface SupplierRef { supplier_id: string; name: string; address: string; contact: string; delivery_weekdays: string; delivery_hours: string[]; lead_time_days: number; active: boolean; transport_contact?: string; docks?: string; cutoff_time?: string; }
 export interface ProgramRef { program_id: string; name: string; family: string; active: boolean; components: number; }
 
 /** Reference tables managed in the application (generic CRUD). */

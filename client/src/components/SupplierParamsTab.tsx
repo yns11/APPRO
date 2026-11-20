@@ -6,10 +6,8 @@ import { usePerimeter } from "@/state/PerimeterContext";
 import { ArticleLink, Badge, Button, Card, Skeleton, useToast } from "@/components/ui";
 import { RefRowEditor, transportModeOptions } from "@/components/RefRowEditor";
 import { DOCKS, DockPicker, splitDocks } from "@/components/DockPicker";
-import { HoursPicker } from "@/components/HoursPicker";
-import { splitHours } from "@/lib/transports";
-import { WeekdayPicker, splitWeekdays } from "@/components/WeekdayPicker";
-import { fmtQty, fmtWeekdays } from "@/lib/format";
+import { Link } from "react-router-dom";
+import { fmtQty, fmtSchedule, scheduleHours } from "@/lib/format";
 import type { RefRow, RefValue, SupplierArticleRow } from "@/lib/types";
 
 const FIELDS: { key: string; label: string; help: string; width?: number }[] = [
@@ -23,8 +21,8 @@ const FIELDS: { key: string; label: string; help: string; width?: number }[] = [
 
 /**
  * Fiche fournisseur › Paramétrage : the supplier's reference row edited in place (name, address, contacts, docks,
- * delivery weekdays, strict days, lead time, active) and the article ↔ supplier rules of the supplier (add, edit, delete).
- * Open to every declared planner, like the Référentiel.
+ * lead time, cut-off, transport mode, active), its delivery protocol (table Heures de livraison, read here, edited in
+ * the Référentiel) and the article ↔ supplier rules of the supplier (add, edit, delete).  Open to every declared planner.
  */
 export function SupplierParamsTab({ supplierId, articles }: { supplierId: string; articles: SupplierArticleRow[] }) {
   const toast = useToast();
@@ -35,6 +33,8 @@ export function SupplierParamsTab({ supplierId, articles }: { supplierId: string
   const supTable = tables.data?.find((t) => t.name === "ref_suppliers");
   const linkTable = tables.data?.find((t) => t.name === "ref_article_suppliers");
   const rows = useRefRows("ref_suppliers");
+  const schedule = useRefRows("ref_delivery_schedule");
+  const protocol = useMemo(() => (schedule.data ?? []).find((r) => String(r.supplier_id) === supplierId), [schedule.data, supplierId]);
   const row = useMemo(() => (rows.data ?? []).find((r) => String(r.supplier_id) === supplierId), [rows.data, supplierId]);
   const canEdit = rights.canEditTable("ref_suppliers");
   const [draft, setDraft] = useState<Record<string, RefValue>>({});
@@ -51,7 +51,7 @@ export function SupplierParamsTab({ supplierId, articles }: { supplierId: string
     <div className="stack">
       {!canEdit && <div className="note">Lecture seule : les données du fournisseur sont modifiables par les approvisionneurs déclarés, les managers et les administrateurs.</div>}
       <Card title="Fiche fournisseur" hint="données du Référentiel ; Enregistrer applique l'ensemble des champs"
-        actions={<Button size="sm" variant="primary" disabled={!canEdit || !dirty || save.isPending} onClick={() => save.mutate({ ...row, ...draft, delivery_weekdays: String(draft.delivery_weekdays || "1,2,3,4,5"), docks: String(draft.docks || "B15") })}><Save />Enregistrer</Button>}>
+        actions={<Button size="sm" variant="primary" disabled={!canEdit || !dirty || save.isPending} onClick={() => save.mutate({ ...row, ...draft, docks: String(draft.docks || "B15") })}><Save />Enregistrer</Button>}>
         <div className="param-grid identity">
           <div className="param"><span className="label">Code</span><span className="value"><b className="mono">{supplierId}</b></span></div>
           {FIELDS.map((f) => (
@@ -62,15 +62,10 @@ export function SupplierParamsTab({ supplierId, articles }: { supplierId: string
               <span className="small subtle">{f.help}</span>
             </div>
           ))}
-          <div className={`param ${canEdit ? "editable" : ""}`} title="Jours de livraison standard : la saisie en colonne semaine se pose sur le premier de ces jours">
-            <span className="label">Jours de livraison</span>
-            <span className="value row"><WeekdayPicker value={splitWeekdays(draft.delivery_weekdays)} disabled={!canEdit} onChange={(v) => set("delivery_weekdays", v.join(","))} /><span className="small subtle">{fmtWeekdays(String(draft.delivery_weekdays ?? ""))}</span></span>
-            <span className="small subtle">cases Lun → Ven</span>
-          </div>
-          <div className={`param ${canEdit ? "editable" : ""}`} title="Jours stricts : jamais de proposition hors jour standard (◇)">
-            <span className="label">Jours stricts</span>
-            <span className="value"><select className="select sm" value={draft.strict_days ? "oui" : "non"} disabled={!canEdit} aria-label="Jours stricts" onChange={(e) => set("strict_days", e.target.value === "oui")}><option value="non">non</option><option value="oui">oui</option></select></span>
-            <span className="small subtle">oui : livraisons uniquement les jours standard</span>
+          <div className="param" title="Protocole logistique d'achat : jours et heures de livraison (table Heures de livraison du Référentiel)">
+            <span className="label">Heures de livraison</span>
+            <span className="value row"><b>{fmtSchedule(scheduleHours(protocol))}</b>{!protocol && <span className="small subtle">· absent de la table : lundi à vendredi, sans heure</span>}<Link className="btn ghost sm" to="/referentiel?table=ref_delivery_schedule">Référentiel</Link></span>
+            <span className="small subtle">Les seuls jours de livraison (propositions CBN, colonne semaine) ; l'heure place les camions automatiques dès le 30/11/2026 (après l'heure portée par la commande ferme).</span>
           </div>
           <div className={`param ${canEdit ? "editable" : ""}`} title="Quais présélectionnés à la création d'un transport">
             <span className="label">Quais par défaut</span>
@@ -80,11 +75,6 @@ export function SupplierParamsTab({ supplierId, articles }: { supplierId: string
             <span className="label">Mode transport</span>
             <span className="value"><select className="select sm" value={String(draft.transport_mode || "Fournisseur")} disabled={!canEdit} aria-label="Mode transport" onChange={(e) => set("transport_mode", e.target.value)} style={{ width: "auto", maxWidth: 420 }}>{modeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></span>
             <span className="small subtle">Fournisseur : camions automatiques du Planning transport ; MAF Hambach : pièces au magasin avancé, navette commune ; Messagerie : hors planning, ordres fermes marqués ; un transporteur : camions automatiques, son nom dans le fichier ATR.</span>
-          </div>
-          <div className={`param ${canEdit ? "editable" : ""}`} title="Plages horaires habituelles de livraison : l'application pose les camions du fournisseur dedans">
-            <span className="label">Plages habituelles</span>
-            <span className="value"><HoursPicker value={splitHours(draft.transport_hours)} disabled={!canEdit || ["MAF Hambach", "Messagerie"].includes(String(draft.transport_mode || ""))} onChange={(v) => set("transport_hours", v.join(";"))} /></span>
-            <span className="small subtle">Deux plages au plus ; aucune = n'importe quand entre 07:00 et 15:30. Les camions sont créés par l'application pour tout fournisseur qui livre (lui-même ou par un transporteur), un par jour ouvré avec un ordre ferme, posés une fois pour toutes dans ces plages ; seul un approvisionneur les déplace ensuite.</span>
           </div>
           <div className={`param ${canEdit ? "editable" : ""}`}>
             <span className="label">Actif</span>

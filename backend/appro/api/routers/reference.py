@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ... import __version__
 from ...data import reference
 from ...data.assembler import erp_dataset
-from ...data.schemas import REFERENCE_TABLES, TABLES
+from ...data.schemas import REFERENCE_TABLES, SCHEDULE_DAYS, TABLES, normalise_hour, schedule_of
 from ...data.store import REF_MODELS, ParamOverride, audit
 from ...engine.models import DatasetError, EngineParams
 from ...engine.runner import resolve_as_of, resolve_init_date
@@ -28,6 +28,7 @@ from .. import schemas as S
 from ..deps import access_dep, ctx_dep, current_user, session_dep
 
 router = APIRouter(prefix="/api", tags=["reference"])
+WEEKDAYS_FR_SHORT = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 PARAM_DOCS: dict[str, tuple[str, list[str] | None]] = {
@@ -111,7 +112,19 @@ def _check_rows(session: Session, name: str, rows: list[dict], replace: bool) ->
     try:
         if name == "ref_article_suppliers":
             sups = {r["supplier_id"]: r for r in reference.rows_out(session, "ref_suppliers")}
+            for sid, hours in schedule_of(reference.rows_out(session, "ref_delivery_schedule")).items():
+                if sid in sups:
+                    sups[sid]["delivery_weekdays"] = ",".join(str(d) for d in sorted(hours))
             validation.check_links(rows, sups)
+        elif name == "ref_delivery_schedule":
+            known = {r["supplier_id"] for r in reference.rows_out(session, "ref_suppliers")}
+            for r in rows:
+                if r.get("supplier_id") not in known:
+                    raise ValueError(f"heures de livraison : fournisseur inconnu « {r.get('supplier_id') or '(vide)'} »")
+                for d in SCHEDULE_DAYS:
+                    r[d] = normalise_hour(r.get(d))
+                if not any(r[d] for d in SCHEDULE_DAYS):
+                    raise ValueError(f"{r['supplier_id']} : aucune heure sur la semaine ; supprimez la ligne pour « livre du lundi au vendredi, sans heure »")
         elif name == "ref_consumption_terms":
             validation.check_terms(session, rows, replace=replace)
         elif name == "ref_closed_orders":
@@ -160,10 +173,6 @@ def _check_rows(session: Session, name: str, rows: list[dict], replace: bool) ->
                     raise ValueError(f"{r.get('supplier_id')} : heure limite « {cutoff} » attendue au format HH:MM")
                 if cutoff:
                     r["cutoff_time"] = f"{int(cutoff.split(':')[0]):02d}:{cutoff.split(':')[1]}"
-                try:
-                    r["transport_hours"] = ";".join(T.parse_hours(str(r.get("transport_hours") or "")))
-                except ValueError as exc:
-                    raise ValueError(f"{r.get('supplier_id')} : plages habituelles : {exc}")
         elif name == "ref_calendars":
             validation.check_calendars(rows, {r["supplier_id"] for r in reference.rows_out(session, "ref_suppliers")})
     except ValueError as exc:
@@ -205,7 +214,7 @@ def rows(name: str, planner: str | None = None, ctx: AppContext = Depends(ctx_de
             out = [r for r in out if str(r.get("planner") or "").upper() == want]
         elif name in ("ref_article_suppliers", "ref_bom", "ref_packaging", "fct_stock"):
             out = [r for r in out if r.get("article_id") in ids]
-        elif name == "ref_suppliers":
+        elif name in ("ref_suppliers", "ref_delivery_schedule"):
             sids = {r["supplier_id"] for r in reference.rows_out(session, "ref_article_suppliers") if r.get("article_id") in ids}
             out = [r for r in out if r.get("supplier_id") in sids]
         elif name == "ref_programs":
@@ -221,7 +230,8 @@ def query_columns(ctx: AppContext, session: Session, name: str, out: list[dict])
     * articles : ``programs`` (names of the programmes whose bill of material uses the article),
       ``program_count``, ``supplier_count`` (active article ↔ supplier rules) ;
     * suppliers : ``articles`` (ids of the articles with an active rule for the supplier), ``article_count``,
-      ``planners`` (the planners of those articles, comma separated) ;
+      ``planners`` (the planners of those articles, comma separated), ``has_schedule`` / ``schedule`` (a row in the
+      Heures de livraison table and its hours in words, « Lun 08:00 · Mer 13:30 ») ;
     * programmes : ``article_count`` (components of the bill of material), ``has_plan`` (a quantity
       planned from the current week on, PDP ERP or active version) ;
     * closed orders (PO) : ``receipt_count``, ``receipt_qty``, ``last_receipt``, ``receipt_suppliers``,
@@ -244,10 +254,13 @@ def query_columns(ctx: AppContext, session: Session, name: str, out: list[dict])
             if lk.get("active", True):
                 arts.setdefault(lk["supplier_id"], set()).add(str(lk["article_id"]))
         owner = {str(a["article_id"]): str(a.get("planner") or "").strip().upper() for a in reference.rows_out(session, "ref_articles")}
+        schedule = schedule_of(reference.rows_out(session, "ref_delivery_schedule"))
         for r in out:
             found = sorted(arts.get(r["supplier_id"], ()))
             r["articles"], r["article_count"] = ", ".join(found), len(found)
             r["planners"] = ", ".join(sorted({owner[a] for a in found if owner.get(a)}))
+            hours = schedule.get(r["supplier_id"])
+            r["has_schedule"], r["schedule"] = hours is not None, " · ".join(f"{WEEKDAYS_FR_SHORT[d - 1]} {h}" for d, h in sorted((hours or {}).items()))
     elif name == "ref_closed_orders":
         # receipts of the ERP carrying that PO number : count, quantity, last date, suppliers and articles
         rec = ctx.table("fct_receipts")
@@ -400,10 +413,12 @@ def consumption_sources(article_id: str, session: Session = Depends(session_dep)
 @router.get("/reference/suppliers", response_model=list[S.SupplierRef])
 def suppliers_list(ctx: AppContext = Depends(ctx_dep)):
     df = ctx.table("ref_suppliers")
+    schedule = schedule_of(ctx.table("ref_delivery_schedule").to_dict("records"))
     return [S.SupplierRef(supplier_id=r["supplier_id"], name=r["name"], address=str(r.get("address") or ""), contact=r["contact"],
-                          delivery_weekdays=r["delivery_weekdays"] or "1,2,3,4,5",
+                          delivery_weekdays=",".join(str(d) for d in sorted(schedule[r["supplier_id"]])) if r["supplier_id"] in schedule else "1,2,3,4,5",
+                          delivery_hours=[schedule.get(r["supplier_id"], {}).get(i, "") for i in range(1, 6)],
                           lead_time_days=int(r["lead_time_days"]) if int(r["lead_time_days"] or 0) > 0 else 5,
-                          active=bool(r["active"]), strict_days=bool(r.get("strict_days") or False)) for r in df.to_dict("records")]
+                          active=bool(r["active"])) for r in df.to_dict("records")]
 
 
 @router.get("/reference/programs", response_model=list[S.ProgramRef])

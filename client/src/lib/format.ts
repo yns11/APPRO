@@ -70,6 +70,15 @@ export function fmtWeekdays(spec: string | null | undefined): string {
   if (days.length === 5 && days.every((d, i) => d === i + 1)) return "Lun → Ven";
   return days.map((d) => WEEKDAY_SHORT[d - 1]).join(" · ");
 }
+/** The delivery protocol in words : « Lun 08:00 · Mer 13:30 » ; without any hour, the weekdays (« Lun → Ven ») ; nothing = every weekday. */
+export function fmtSchedule(hours: (string | null | undefined)[] | null | undefined, weekdays?: string | null): string {
+  const h = (hours ?? []).map((x) => String(x ?? ""));
+  if (h.some(Boolean)) return h.map((x, i) => (x ? `${WEEKDAY_SHORT[i]} ${x}` : "")).filter(Boolean).join(" · ");
+  return fmtWeekdays(weekdays);
+}
+/** Delivery schedule row (``ref_delivery_schedule``) → the five hours Monday → Friday. */
+export const SCHEDULE_DAYS = ["mon", "tue", "wed", "thu", "fri"] as const;
+export const scheduleHours = (row: Record<string, unknown> | undefined | null): string[] => SCHEDULE_DAYS.map((d) => String(row?.[d] ?? ""));
 export const CONSUMPTION_SOURCE_LABELS: Record<string, string> = { erp: "Consommation MOM", plan: "PDP éclaté", derived: "Dérivée d'autres articles" };
 export const CONSUMPTION_SOURCE_SHORT: Record<string, string> = { erp: "MOM", plan: "PDP", derived: "Dérivée" };
 export const SOURCING_LABELS: Record<string, string> = { quota: "Quotas", priority: "Priorité" };

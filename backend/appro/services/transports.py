@@ -33,8 +33,9 @@ transport from today on).  The tool notifies the suppliers and the carriers : th
 **Modes of a truck** (``app_transports.mode``) : ``fournisseur``, ``transporteur``, ``maf`` (shuttle), ``ev`` (EV
 return, no order) and ``ponctuel`` (one-off truck : anything else, no order).
 
-**Habitual ranges** of a supplier (``ref_suppliers.transport_hours``) : up to two of ``06-10``, ``08-12``,
-``10-14``, ``12-16``, ``14-18``, ``16+`` ; the scheduler places his trucks inside.
+**Delivery hours** of a supplier (table Heures de livraison, the purchasing logistics protocol) : the automatic trucks
+dated 30/11/2026 or later take the ERP hour of the day's firm order, else the protocol hour of the weekday, else the
+supplier's usual hour, else a free slot (services/transports_auto.py).
 """
 from __future__ import annotations
 
@@ -65,10 +66,6 @@ CSV_HEADER = ("ID TRANSPORT", "FOURNISSEUR", "TRANSPORTEUR", "DATE", "HEURE", "C
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 APP_USER = "application"
 
-#: habitual ranges : token → (first minute, last minute included) ; ``16+`` runs to the last slot of the day
-HOUR_RANGES: dict[str, tuple[int, int]] = {"06-10": (6 * 60, 10 * 60), "08-12": (8 * 60, 12 * 60), "10-14": (10 * 60, 14 * 60),
-                                           "12-16": (12 * 60, 16 * 60), "14-18": (14 * 60, 18 * 60), "16+": (16 * 60, 21 * 60)}
-MAX_HOUR_RANGES = 2
 #: the slots a planner may pick by hand : every half hour from 06:00 to 21:00 ; the automatic grid (``dock_slot_*``) is inside
 DAY_FIRST, DAY_LAST, DAY_STEP = 6 * 60, 21 * 60, 30
 
@@ -96,33 +93,6 @@ def mode_kind(mode: str | None) -> str:
 def carriers_of(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
     """``carrier name → contact e-mails`` of the active carriers (``ref_carriers``)."""
     return {str(r.get("name") or "").strip(): split_emails(str(r.get("contacts") or "")) for r in rows if str(r.get("name") or "").strip() and bool(r.get("active", True))}
-
-
-def parse_hours(text: str | None) -> list[str]:
-    """Canonical tokens of a « Plages habituelles » value (``6-10 ; >16`` → ``["06-10", "16+"]``) ; raises on an
-    unknown range or more than two."""
-    out: list[str] = []
-    for raw in re.split(r"[;,]+", text or ""):
-        tok = raw.strip().lower().replace("h", "").replace(" ", "").replace("–", "-").replace(">", "")
-        if not tok:
-            continue
-        if tok in ("16+", "16", "16-21", "16-"):
-            tok = "16+"
-        else:
-            m = re.fullmatch(r"(\d{1,2})-(\d{1,2})", tok)
-            if m:
-                tok = f"{int(m.group(1)):02d}-{int(m.group(2)):02d}"
-        if tok not in HOUR_RANGES:
-            raise ValueError(f"plage « {raw.strip()} » inconnue (attendu : {', '.join(HOUR_RANGES)})")
-        if tok not in out:
-            out.append(tok)
-    if len(out) > MAX_HOUR_RANGES:
-        raise ValueError(f"{len(out)} plages : {MAX_HOUR_RANGES} au plus")
-    return out
-
-
-def hours_label(tokens: list[str]) -> str:
-    return " · ".join("≥ 16h" if t == "16+" else f"{int(t[:2])}h – {int(t[3:])}h" for t in tokens)
 
 
 def day_slots() -> list[str]:
@@ -297,7 +267,7 @@ def planning(ds: Dataset, session: Session, start: dt.date, weeks: int, holidays
         carrier = (s.transport_mode.strip() if s and kind == "transporteur" else "")
         return {"supplier_id": sid, "name": s.name if s else "", "transport_contact": s.transport_contact if s else "",
                 "emails": carriers.get(carrier, []) if carrier else (s.transport_emails if s else []), "docks": s.dock_list if s else ["B15"],
-                "mode": s.transport_mode if s else MODE_SUPPLIER, "carrier": carrier, "hours": s.hour_ranges if s else [], "orders": []}
+                "mode": s.transport_mode if s else MODE_SUPPLIER, "carrier": carrier, "hours": [s.delivery_hours.get(i, "") for i in range(1, 6)] if s else [], "orders": []}
 
     for o in ds.orders:
         if o.order_type.value != "FIRM" or not o.supplier_id or o.expected_date < start or o.expected_date > end:

@@ -55,6 +55,7 @@ SELECT
   MAX(c.Nom_fournisseur)                                          AS supplier_name,
   CASE WHEN MAX(c.Ordre_ferme) = 'Oui' THEN 'FIRM' ELSE 'FORECAST' END AS order_type,
   CAST(MIN(c.Date_de_debut) AS DATE)                              AS expected_date,
+  MIN(c.Heure_debut)                                              AS expected_time,
   CAST(SUM(c.Quantite) AS DOUBLE)                                 AS qty_ordered,
   CAST(SUM(GREATEST(c.Quantite_restante, 0)) AS DOUBLE)           AS qty_open,
   CONCAT_WS(', ', SORT_ARRAY(COLLECT_SET(c.Commande)))            AS purch_id,

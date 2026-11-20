@@ -232,7 +232,6 @@ def main() -> None:
             "name": (b["SUPPLIER"] or "").strip(),
             "address": "",
             "contact": (b.get("Contact") or ""),
-            "delivery_weekdays": "1,2,3,4,5",
             "calendar_id": "DEFAULT",
             "active": "true",
         })

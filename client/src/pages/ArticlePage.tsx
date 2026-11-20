@@ -16,7 +16,7 @@ import { AlertList } from "./CockpitPage";
 import { useLang } from "@/lib/i18n";
 import { ErpStockTab } from "@/components/ErpStockTab";
 import { fmtSigned, fmtSignedPct } from "@/components/CalibrateDialog";
-import { CONSUMPTION_SOURCE_LABELS, CONSUMPTION_SOURCE_SHORT, ORDER_TYPE_LABELS, SOURCING_LABELS, WEEKDAY_SHORT, fmtDate, fmtDateTime, fmtDemandDays, fmtQty, fmtWeekdays } from "@/lib/format";
+import { CONSUMPTION_SOURCE_LABELS, CONSUMPTION_SOURCE_SHORT, ORDER_TYPE_LABELS, SOURCING_LABELS, WEEKDAY_SHORT, fmtDate, fmtDateTime, fmtDemandDays, fmtQty, fmtSchedule, scheduleHours } from "@/lib/format";
 import type { ArticleRef, ConsumptionSource, LinkRef, OrderInfo, PlanCellOut, AdjustmentOut, RefRow } from "@/lib/types";
 
 type Tab = "chart" | "delivery" | "params" | "plan" | "orders" | "proposals" | "adjustments" | "alerts" | "erp";
@@ -81,7 +81,7 @@ export default function ArticlePage() {
         <div className="title">
           <div className="row"><Link to="/" className="btn ghost sm"><ArrowLeft />Tableau de bord</Link>{a && <SeverityBadge severity={k?.severity ?? null} />}{a && a.consumption_source !== "erp" && <Badge tone="info" title={CONSUMPTION_SOURCE_LABELS[a.consumption_source]}>conso {CONSUMPTION_SOURCE_SHORT[a.consumption_source]}</Badge>}{a && a.demand_days < 5 && <Badge tone="brand" title="Besoin hebdomadaire réparti sur les premiers jours ouvrés de la semaine">besoin {fmtDemandDays(a.demand_days)}</Badge>}</div>
           <h1 style={{ marginTop: 6 }}>{articleId} {a && <span className="muted" style={{ fontWeight: 400 }}>· {a.designation}</span>}</h1>
-          <p>{a ? <>{a.unit} · {t("page.target")} {a.coverage_target_days} {t("page.unit_wd")} · {t("page.red")} {a.alert_red_days} {t("stock.cov_unit")} · {t("page.orange")} {a.alert_yellow_days} {t("stock.cov_unit")} · {t("page.overstock")} {a.overstock_days} {t("stock.cov_unit")} · {d?.suppliers.map((s, i) => <span key={s.supplier_id}>{i > 0 && " · "}<SupplierLink id={s.supplier_id} name={s.supplier_name} inline /> <span className="subtle">({t("grid.lead")} {s.lead_time_days} {t("stock.cov_unit")}, {t("page.moq")} {fmtQty(s.moq, a.unit)}, {t("page.pack")} {fmtQty(s.pack_qty, a.unit)}{s.max_qty_per_delivery ? `, max ${fmtQty(s.max_qty_per_delivery, a.unit)}${t("grid.max_delivery")}` : ""}{s.max_qty_per_week ? `, max ${fmtQty(s.max_qty_per_week, a.unit)}${t("grid.max_week")}` : ""}{s.strict_days ? ", jours stricts" : ""})</span></span>)}</> : <Skeleton w={400} />}</p>
+          <p>{a ? <>{a.unit} · {t("page.target")} {a.coverage_target_days} {t("page.unit_wd")} · {t("page.red")} {a.alert_red_days} {t("stock.cov_unit")} · {t("page.orange")} {a.alert_yellow_days} {t("stock.cov_unit")} · {t("page.overstock")} {a.overstock_days} {t("stock.cov_unit")} · {d?.suppliers.map((s, i) => <span key={s.supplier_id}>{i > 0 && " · "}<SupplierLink id={s.supplier_id} name={s.supplier_name} inline /> <span className="subtle">({t("grid.lead")} {s.lead_time_days} {t("stock.cov_unit")}, {t("page.moq")} {fmtQty(s.moq, a.unit)}, {t("page.pack")} {fmtQty(s.pack_qty, a.unit)}{s.max_qty_per_delivery ? `, max ${fmtQty(s.max_qty_per_delivery, a.unit)}${t("grid.max_delivery")}` : ""}{s.max_qty_per_week ? `, max ${fmtQty(s.max_qty_per_week, a.unit)}${t("grid.max_week")}` : ""})</span></span>)}</> : <Skeleton w={400} />}</p>
         </div>
         <div className="actions">
           <Segmented size="sm" value={perimeter.granularity} onChange={(g) => set({ granularity: g })} options={[{ id: "default", label: t("page.default") }, { id: "day", label: t("page.day") }, { id: "week", label: t("page.week") }]} />
@@ -342,10 +342,10 @@ function ParamsTab({ article, links, programs, canEdit, diagnostics }: { article
   );
 }
 
-/** Delivery weekdays of a supplier (from the suppliers table). */
+/** Delivery days and hours of a supplier (table Heures de livraison : the purchasing logistics protocol). */
 function SupplierDays({ supplierId }: { supplierId: string }) {
-  const rows = useRefRows("ref_suppliers");
-  const s = (rows.data ?? []).find((r) => String(r.supplier_id) === supplierId);
-  if (!s) return <span>…</span>;
-  return <span title={s.strict_days ? "Jours de livraison standard ; jours stricts : jamais de proposition hors jour standard (◇)" : "Jours de livraison standard ; une proposition peut sortir de ces jours (◇) quand le jour habituel n'est plus tenable"}>{fmtWeekdays(String(s.delivery_weekdays ?? ""))}{s.strict_days ? <Badge tone="neutral" title="Jours stricts">stricts</Badge> : null}</span>;
+  const rows = useRefRows("ref_delivery_schedule");
+  if (!rows.data) return <span>…</span>;
+  const s = rows.data.find((r) => String(r.supplier_id) === supplierId);
+  return <span title="Protocole logistique d'achat : les seuls jours de livraison (une proposition ne sort jamais de ces jours) ; l'heure place les camions automatiques">{fmtSchedule(scheduleHours(s))}</span>;
 }

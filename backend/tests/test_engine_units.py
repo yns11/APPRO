@@ -394,43 +394,29 @@ def hv(ds: Dataset, **params):
 
 def test_floor_inside_the_lead_time_then_full_target():
     """Today Monday 19/10, Thursday supplier, lead time 10, margin 1 : the first tenable delivery is
-    Friday 30/10 (19/10 + 9 working days).  The stock runs out Wednesday 28/10 : nothing is tenable before,
-    the floor (one lot) is posed **on the need day**, urgent and off standard (◇).  Friday 30/10 is the
-    first tenable working day : the standard Thursday 29/10 is not, so the full target lands on the Friday
-    (◇) ; from Thursday 5/11 the standard day resumes.  No shortage anywhere."""
-    r = hv(hv_dataset())
-    got = [(p.delivery_date.isoformat(), p.qty, p.urgent, p.floor, p.off_standard) for p in r.proposals[:4]]
-    assert got == [("2026-10-28", 1440, True, True, True), ("2026-10-30", 2880, False, False, True),
-                   ("2026-11-05", 2880, False, False, False), ("2026-11-12", 1440, False, False, False)]
-    assert max(r.shortage_plan[r.dates.index(dt.date(2026, 10, 19)):]) == 0
-    assert "Plancher" in r.proposals[0].reason and "hors jour standard" in r.proposals[1].reason and "retour à la cible" in r.proposals[2].reason
-    assert r.proposals[0].order_date == dt.date(2026, 10, 15)       # 28/10 − 9 working days : the date limite, past
-    assert r.proposals[1].order_date == dt.date(2026, 10, 19)       # 30/10 − 9 : today, tenable
-    # the urgent alert names the floor and the off-standard day
-    assert any(a.alert_type == AlertType.URGENT_PROPOSAL and "date limite" in a.message and "plancher" in a.message
-               and "hors jour standard" in a.message for a in r.alerts)
-    assert r.kpis["order_due_off_standard"] and r.kpis["order_due_floor"] and r.kpis["order_due_late"]
-    # a supplier on strict days keeps its Thursdays : floor on the standard day before the need, urgent, twice
-    ds = hv_dataset()
-    ds.suppliers[0].strict_days = True
-    s = hv(ds)
+    Friday 30/10 (19/10 + 9 working days).  The stock runs out Wednesday 28/10 : nothing is tenable before.
+    Every supplier is on strict days (its delivery protocol) : a delivery never lands outside its Thursdays, so
+    the floor (one lot) is posed on the **standard day before the need**, urgent, twice (22/10 and 29/10), then
+    the full target on Thursday 5/11.  No « hors jour standard » (◇) anywhere."""
+    s = hv(hv_dataset())
     got = [(p.delivery_date.isoformat(), p.qty, p.urgent, p.floor, p.off_standard) for p in s.proposals[:4]]
     assert got == [("2026-10-22", 1440, True, True, False), ("2026-10-29", 1440, True, True, False),
                    ("2026-11-05", 4320, False, False, False), ("2026-11-12", 1440, False, False, False)]
     assert s.proposals[0].order_date == dt.date(2026, 10, 9) and not any(p.off_standard for p in s.proposals)
-    # margin 0 (strict lead time) : the first tenable day is Monday 2/11 (19/10 + 10)
+    assert "Plancher" in s.proposals[0].reason and "retour à la cible" in s.proposals[2].reason
+    assert any(a.alert_type == AlertType.URGENT_PROPOSAL and "date limite" in a.message and "plancher" in a.message for a in s.alerts)
+    assert s.kpis["order_due_floor"] and s.kpis["order_due_late"] and not s.kpis["order_due_off_standard"]
+    # margin 0 (strict lead time) : the first tenable Thursday is 5/11 (19/10 + 10 = Monday 2/11, next Thursday)
     m0 = hv(hv_dataset(), lead_margin_days=0)
-    assert [(p.delivery_date.isoformat(), p.qty, p.off_standard) for p in m0.proposals[:2]] == [("2026-10-28", 1440, True), ("2026-11-02", 2880, True)]
-    assert m0.proposals[1].order_date == dt.date(2026, 10, 19)
+    assert [(p.delivery_date.isoformat(), p.qty, p.off_standard) for p in m0.proposals[:3]] == [("2026-10-22", 1440, False), ("2026-10-29", 1440, False), ("2026-11-05", 4320, False)]
 
 
-def test_order_deadline_margin_waits_for_the_standard_day_or_goes_off_standard():
+def test_order_deadline_margin_waits_for_the_standard_day_or_floors_on_it():
     """Monday supplier, lead 5, margin 1 ; 1 500 on Sunday evening, 200 a working day : the stock dips under
     the target Friday 25/9 and runs out Wednesday 30/9.  Today Monday 21/9 : Monday 28/9 is tenable (date
     limite Tuesday 22/9), the dip waits for it.  Today Wednesday 23/9 : Monday 28/9 is no longer tenable ;
-    a shortage would occur before the next standard delivery (5/10), so the full target goes to the first
-    tenable working day before the need, Tuesday 29/9 (◇) ; the standard Mondays resume afterwards.  A
-    supplier on strict days gets an urgent floor on Monday 28/9 instead."""
+    a shortage would occur before the next standard delivery (5/10) ; every supplier is on strict days, so
+    the floor goes on Monday 28/9, urgent (never a Tuesday 29/9 « hors jour standard »)."""
     ds = make_dataset(stock=[StockSnapshot("A1", MON - D(days=1), 1500.0)],
                       suppliers=[Supplier("S1", "Lundi", delivery_weekdays=frozenset({1}))])
     r = run(ds, horizon_days=40)
@@ -440,18 +426,10 @@ def test_order_deadline_margin_waits_for_the_standard_day_or_goes_off_standard()
     assert "livraison standard suivante" in p.reason
     r_tue = run(ds, horizon_days=40, as_of=MON + D(days=1))           # date limite = today : still tenable
     assert (r_tue.proposals[0].delivery_date, r_tue.proposals[0].urgent) == (MON + D(days=7), False)
-    r_wed = run(ds, horizon_days=40, as_of=MON + D(days=2))
-    got = [(p.delivery_date.isoformat(), p.qty, p.urgent, p.off_standard) for p in r_wed.proposals[:3]]
-    assert got == [("2026-09-29", 900, False, True), ("2026-10-05", 1600, False, False), ("2026-10-12", 1000, False, False)]
-    assert r_wed.proposals[0].order_date == MON + D(days=2) and "hors jour standard" in r_wed.proposals[0].reason
-    assert r_wed.kpis["order_due_off_standard"] and r_wed.kpis["status"] == "to_order"
-    assert any(a.alert_type == AlertType.ORDER_DUE and "au plus tard le" in a.message and "hors jour standard" in a.message for a in r_wed.alerts)
-    assert max(r_wed.shortage_plan[r_wed.dates.index(MON):]) == 0
-    ds.suppliers[0].strict_days = True
     r_strict = run(ds, horizon_days=40, as_of=MON + D(days=2))
     got = [(p.delivery_date.isoformat(), p.qty, p.urgent, p.floor, p.off_standard) for p in r_strict.proposals[:2]]
     assert got == [("2026-09-28", 500, True, True, False), ("2026-10-05", 2000, False, False, False)]
-    assert r_strict.kpis["status"] == "critical"
+    assert r_strict.kpis["status"] == "critical" and not r_strict.kpis["order_due_off_standard"]
 
 
 def test_tolerance_under_the_target():
@@ -466,12 +444,13 @@ def test_tolerance_under_the_target():
 def test_cap_per_delivery_slides_the_excess_to_the_next_delivery():
     r = hv(hv_dataset(cap_day=2880.0))
     got = [(p.delivery_date.isoformat(), p.qty, p.capped) for p in r.proposals[:4]]
-    assert got == [("2026-10-28", 1440, False), ("2026-10-30", 2880, False), ("2026-11-05", 2880, False), ("2026-11-12", 1440, False)]
+    # strict Thursdays : the two urgent floors, then 2 880 (the cap) instead of 4 320 on 5/11, the rest the week after
+    assert got == [("2026-10-22", 1440, False), ("2026-10-29", 1440, False), ("2026-11-05", 2880, False), ("2026-11-12", 2880, False)]
     assert max(r.shortage_plan[r.dates.index(dt.date(2026, 10, 19)):]) == 0 and not r.cap_shortfalls
     # a cap below the lot : the proposal itself is truncated and flagged ; one lot a week never covers the weekly
     # need (2 100) : the shortage becomes inevitable and is reported
     r2 = hv(hv_dataset(cap_day=1440.0))
-    p = next(x for x in r2.proposals if x.delivery_date == dt.date(2026, 10, 30))
+    p = next(x for x in r2.proposals if x.delivery_date == dt.date(2026, 11, 5))
     assert p.qty == 1440 and p.capped and "plafond par livraison" in p.reason and r2.kpis["capped_proposal_count"] >= 1
     assert all(x.qty <= 1440 for x in r2.proposals) and r2.cap_shortfalls
 
@@ -492,13 +471,13 @@ def test_weekly_cap_below_the_need_leaves_a_shortage_and_an_alert():
 
 def test_refusal_blocks_the_day_only_and_the_need_slides_to_the_next_delivery_day():
     ds = hv_dataset()
-    ds.flags = [CellFlag("A1", "S1", dt.date(2026, 10, 28), "proposal_refused", qty=1440)]
+    ds.flags = [CellFlag("A1", "S1", dt.date(2026, 10, 22), "proposal_refused", qty=1440)]
     r = hv(ds)
-    # the floor of the need day is refused : it slides to the next day (Thursday 29/10, a standard day), still urgent
-    assert (r.proposals[0].delivery_date, r.proposals[0].qty, r.proposals[0].urgent, r.proposals[0].off_standard) == (dt.date(2026, 10, 29), 1440, True, False)
+    # the floor of Thursday 22/10 is refused : the need slides to the next standard day (Thursday 29/10), still urgent, two lots
+    assert (r.proposals[0].delivery_date, r.proposals[0].qty, r.proposals[0].urgent, r.proposals[0].off_standard) == (dt.date(2026, 10, 29), 2880, True, False)
     i = r.dates.index(dt.date(2026, 10, 28))
     assert r.shortage_plan[i] == 178 and r.shortage_plan_cum[i] == 178        # the accepted shortage is shown
-    assert r.proposals_ignored and r.proposals_ignored[0].delivery_date == dt.date(2026, 10, 28) and r.proposals_ignored[0].ignored
+    assert r.proposals_ignored and r.proposals_ignored[0].delivery_date == dt.date(2026, 10, 22) and r.proposals_ignored[0].ignored
     assert r.kpis["refused_proposals"] == 1
     # a refusal dated before today has expired : nothing is counted nor blocked
     ds.flags.append(CellFlag("A1", "S1", dt.date(2026, 10, 1), "proposal_refused", qty=99))
