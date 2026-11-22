@@ -8,11 +8,13 @@ trucks that exist :
 * a day with at least one firm order and no truck gets **one truck** carrying every order of the day ; a new order of
   a day that already has its truck **rides it** ; an order that leaves a day (date changed in the ERP, closed,
   deleted, ignored) leaves the truck, and an empty truck is **cancelled** (the EM number is never reused) ;
-* a **new truck is placed once**, at its creation, and never moves by itself afterwards : only a planner replaces
-  it.  From ``HOURLY_FROM`` (30/11/2026) the truck takes **the delivery hour** (:func:`hour_of`) : the ERP hour of the
-  day's firm orders (``commandes_edi.Heure_debut``), else the hour of that weekday in the supplier's purchasing
-  logistics protocol (table Heures de livraison), else his usual hour (the most common one over his week) ; the hour
-  is kept even when the slot is full (it was agreed with the supplier) and the truck is then **à vérifier**.  Without
+* a **new truck is placed once**, at its creation : only a planner replaces it, with one exception.  From
+  ``HOURLY_FROM`` (30/11/2026) the truck takes **the delivery hour** (:func:`hour_of`) : the ERP hour of the day's
+  firm orders (``commandes_edi.Heure_debut``), else the hour of that weekday in the supplier's purchasing logistics
+  protocol (table Heures de livraison), else his usual hour (the most common one over his week) ; the hour is kept
+  even when the slot is full (it was agreed with the supplier) and the truck is then **à vérifier**.  The exception :
+  a truck of those days that the planner **never touched** (not pinned) **follows the delivery hour** when it becomes
+  known or changes (protocol loaded after the truck was born, ERP hour changed) ; a pinned truck never moves.  Without
   any hour, and for the days before ``HOURLY_FROM``, :func:`place_spread` : the automatic grid (``dock_slot_start`` →
   ``dock_slot_end`` every ``dock_slot_minutes``), never beyond ``dock_slot_capacity`` trucks per dock and slot, the
   free slot **farthest from the trucks already on the dock** (earliest on a tie).  No room at all → the last slot and
@@ -338,7 +340,7 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
     for t in trucks_all:
         if t.date >= start:
             by_day.setdefault((t.supplier_id, t.date), []).append(t)
-    counts = {"created": 0, "completed": 0, "removed": 0, "cancelled": 0}
+    counts = {"created": 0, "completed": 0, "removed": 0, "cancelled": 0, "replaced": 0}
     tomorrow = cal.next_working_day(as_of, inclusive=False)
     born: list[AppTransport] = []
     # a supplier who left the delivering modes (MAF Hambach, Messagerie, inactive) : his trucks to come are cancelled
@@ -412,18 +414,36 @@ def reconcile(session: Session, ds: Dataset, params: EngineParams, as_of: dt.dat
             audit(session, user, "create" if new else "complete", "transport", target.transport_id, None,
                   {"supplier_id": sid, "date": day.isoformat(), "orders": list(missing), "auto": True})
 
-    # ---- slots of the new trucks only : the trucks already placed never move ; a day at a time, every truck of the
-    # day counts (shuttles, EV returns, one-off trucks included), the most constrained supplier first
-    for day in sorted({t.date for t in born}):
+    # ---- slots : the new trucks, plus the untouched trucks dated from HOURLY_FROM whose delivery hour is now known and
+    # differs (the protocol was loaded or the ERP hour changed after the truck was born : a truck the planner never
+    # touched follows the agreed hour ; a pinned truck never moves).  A day at a time, every other truck of the day
+    # counts (shuttles, EV returns, one-off trucks included), the trucks with an agreed hour first
+    born_ids = {t.transport_id for t in born}
+    follow: list[AppTransport] = []
+    for t in trucks_all:
+        if t.transport_id in born_ids or t.status != "planned" or t.pinned or t.date < HOURLY_FROM or t.date <= as_of or t.mode not in ("fournisseur", "transporteur"):
+            continue
+        hour, _origin = hour_of(sups.get(t.supplier_id), t.date, list(expected.get((t.supplier_id, t.date), {}).values()))
+        if hour and hour != t.time:
+            follow.append(t)
+    moving = {t.transport_id for t in born} | {t.transport_id for t in follow}
+    for day in sorted({t.date for t in born} | {t.date for t in follow}):
         occ = Occupancy()
         for t in rows:
-            if t.date == day and t.status == "planned" and t.time:
+            if t.date == day and t.status == "planned" and t.time and t.transport_id not in moving:
                 occ.add(T.split_docks(t.docks), t.time)
-        news = [t for t in born if t.date == day]
+        news = [t for t in born + follow if t.date == day]
         hours = {t.transport_id: hour_of(sups.get(t.supplier_id), day, list(expected.get((t.supplier_id, day), {}).values())) if day >= HOURLY_FROM else ("", "")
                  for t in news}
         news.sort(key=lambda t: (not hours[t.transport_id][0], t.supplier_id, t.transport_id))   # the trucks with an agreed hour first : they do not move
         for t in news:
+            if t.transport_id not in born_ids:
+                was = t.time
+                counts["replaced"] += 1
+                audit(session, user, "move", "transport", t.transport_id, None,
+                      {"supplier_id": t.supplier_id, "date": day.isoformat(), "from": was, "to": hours[t.transport_id][0], "origin": hours[t.transport_id][1], "auto": True})
+                if t.check_reason.startswith("créneau ") and "conservée" in t.check_reason:
+                    t.check_reason = ""
             docks = T.split_docks(t.docks) or ["B15"]
             closed = [d for d in docks if day in dock_closed.get(d.upper(), set())]
             hour, origin = hours[t.transport_id]

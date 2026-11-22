@@ -685,7 +685,11 @@ créneau **le plus éloigné des camions déjà posés** sur ses quais ce jour-l
 deuxième à 15:30, le troisième vers 11:00…), au plus tôt à égalité ; plus de place dans la grille → le créneau libre le
 plus proche de la journée ; aucune place nulle part → dernier créneau et **à vérifier** (« quai B15 complet toute la
 journée : déplacer le camion »). Un quai fermé ce jour-là (table Calendriers, calendrier *quai*) → à vérifier aussi.
-Les camions créés avant le changement de règle **gardent leur créneau** (déjà communiqués aux fournisseurs).
+Les camions datés avant le 30/11 **gardent leur créneau** (déjà communiqués aux fournisseurs). Un camion daté du
+30/11 ou après que l'approvisionneur n'a **jamais touché** (ni déplacé, ni scindé, ni rétabli) **suit l'heure de
+livraison** quand elle devient connue ou change (protocole chargé après la création du camion, heure ERP modifiée) :
+il est replacé à la réconciliation suivante (journalisé, compteur `replaced`) ; un camion touché à la main ne bouge
+jamais de lui-même.
 
 **Actions de l'approvisionneur** sur ses camions et sur les navettes : un clic sur un camion (semaine ou agenda) ouvre
 son **menu** à l'endroit du clic : le camion (identifiant, à qui il est, jour, créneau, quais, ses articles, raison du

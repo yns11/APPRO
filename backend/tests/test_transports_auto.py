@@ -361,3 +361,21 @@ def test_trucks_dated_from_the_switch_take_the_delivery_hour(client, monkeypatch
     full = [t for (s, d), t in by.items() if s == "S-000032" and any(o["time"] == t["time"] and o["docks"] == t["docks"] for (s2, d2), o in by.items() if d2 == d and s2 != s)]
     for t in full:
         assert "complet" in t["check_reason"] and "conservée" in t["check_reason"]
+
+
+def test_untouched_trucks_follow_the_delivery_hour_once_known(client, monkeypatch):  # noqa: F811
+    """The protocol is loaded (or the ERP hour changes) after the trucks were born : a truck the planner never touched
+    follows the new hour at the next reconciliation ; a truck moved by hand (pinned) keeps its slot."""
+    monkeypatch.setattr(A, "HOURLY_FROM", dt.date(2026, 9, 1))
+    before = {t["transport_id"]: t for t in _planning(client)["transports"] if t["supplier_id"] == "S-000599" and t["mode"] == "fournisseur"}
+    assert before and all(t["time"] != "11:30" for t in before.values())
+    pinned_id = next(iter(before))
+    assert client.post(f"/api/transports/{pinned_id}/move", json={"time": "09:30"}).status_code == 200
+    # the protocol arrives : Tuesday and Thursday 11:30, the rest of the week at the usual hour 11:30 too
+    assert client.put("/api/reference/ref_delivery_schedule/rows", json={"values": {"supplier_id": "S-000599", "tue": "11:30", "thu": "11:30"}}).status_code in (200, 201)
+    after = {t["transport_id"]: t for t in _planning(client)["transports"] if t["supplier_id"] == "S-000599" and t["mode"] == "fournisseur"}
+    assert set(after) == set(before)
+    assert after[pinned_id]["time"] == "09:30" and after[pinned_id]["pinned"]
+    assert all(t["time"] == "11:30" for tid, t in after.items() if tid != pinned_id and t["date"] > "2026-09-19")
+    log = [a for a in client.get("/api/entries/audit", params={"limit": 500}).json() if a["entity_type"] == "transports"]
+    assert any(a["payload"].get("replaced", 0) >= 1 for a in log)
