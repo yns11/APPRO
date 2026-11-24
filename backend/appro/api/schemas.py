@@ -183,6 +183,7 @@ class OrderInfoOut(BaseModel):
     ref: str = ""
     ignored: bool = False
     transports: list[str] = Field(default_factory=list)
+    expected_time: str = ""      # ERP delivery hour (« HH:MM », empty when the extraction has none)
 
 
 class DesadvInfoOut(BaseModel):

@@ -38,6 +38,7 @@ class ErpTables:
     desadv: str = ""              # empty: no despatch advices (DESADV) read from the ERP
     prices: str = ""              # empty: no article prices (no stock valuation)
     stock: str = ""               # empty: no ERP stock snapshot (no comparison with the projected stock)
+    orders_hour: bool = True      # the orders table carries ``Heure_debut`` (delivery hour) ; False : an extraction without it (hour left empty)
     stock_warehouses: tuple[str, ...] = ("B06", "B06VRAC")
     stock_history_days: int = 400
 
@@ -45,8 +46,14 @@ class ErpTables:
         return f"`{self.catalog}`.`{self.schema}`.`{table}`"
 
 
+ORDERS_HOUR_COLUMN = "Heure_debut"      # source column of the delivery hour (added to commandes_edi on 20/11/2026 ; optional)
+
+
 def purchase_orders_sql(t: ErpTables) -> str:
-    """One row per delivery slot ``ID`` (several purchase orders may share a slot: summed)."""
+    """One row per delivery slot ``ID`` (several purchase orders may share a slot: summed).  The delivery hour is read
+    only when the extraction carries it (``t.orders_hour``) : an older extraction leaves ``expected_time`` empty
+    instead of failing on the missing column."""
+    hour = f"MIN(c.{ORDERS_HOUR_COLUMN})" if t.orders_hour else "CAST(NULL AS STRING)"
     return f"""
 SELECT
   c.ID                                                            AS order_id,
@@ -55,7 +62,7 @@ SELECT
   MAX(c.Nom_fournisseur)                                          AS supplier_name,
   CASE WHEN MAX(c.Ordre_ferme) = 'Oui' THEN 'FIRM' ELSE 'FORECAST' END AS order_type,
   CAST(MIN(c.Date_de_debut) AS DATE)                              AS expected_date,
-  MIN(c.Heure_debut)                                              AS expected_time,
+  {hour:<64s}AS expected_time,
   CAST(SUM(c.Quantite) AS DOUBLE)                                 AS qty_ordered,
   CAST(SUM(GREATEST(c.Quantite_restante, 0)) AS DOUBLE)           AS qty_open,
   CONCAT_WS(', ', SORT_ARRAY(COLLECT_SET(c.Commande)))            AS purch_id,
@@ -167,6 +174,14 @@ def fact_queries(t: ErpTables) -> dict[str, str]:
     if t.stock:
         out["fct_stock_snapshot"] = stock_snapshot_sql(t)
     return out
+
+
+def with_source_columns(t: ErpTables, order_columns: list[str] | set[str]) -> ErpTables:
+    """The tables, with the optional columns of the orders extraction switched on or off from its real columns
+    (``Heure_debut`` : the delivery hour)."""
+    import dataclasses
+    cols = {str(c).lower() for c in order_columns}
+    return dataclasses.replace(t, orders_hour=ORDERS_HOUR_COLUMN.lower() in cols)
 
 
 def source_of(t: ErpTables, name: str) -> str:

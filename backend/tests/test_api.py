@@ -135,6 +135,7 @@ def test_plan_cells_typed_erp_zero_and_backlog(client):
     assert not lane["plan_typed"][i]
     orders = {o["order_id"]: o for o in lane["orders"]}
     assert orders["PO-000016"]["qty_open"] == 1600 and orders["PO-000016"]["order_type"] == "FIRM"
+    assert orders["PO-000016"]["expected_time"] == ""      # no ERP hour on this slot : the tooltip shows none
     # the planner types: nothing on 30/09, 600 on 02/10, 1000 on 05/10 (ERP scenario unchanged)
     r = client.put("/api/entries/plan", json={"article_id": AID, "supplier_id": "S-000545", "date": "2026-09-30", "expression": "0", "note": "retard annoncé"})
     assert r.status_code == 200 and r.json()["qty"] == 0 and r.json()["note"] == "retard annoncé"
@@ -1397,3 +1398,10 @@ def test_inventory_pdf(client):
     r2 = client.get("/api/exports/inventaire.pdf", params={"planner": "QUENTIN", "q": "P-00001046", "sort": "supplier"})
     assert r2.status_code == 200 and r2.content.startswith(b"%PDF") and len(r2.content) < full
     assert client.get("/api/exports/inventaire.pdf", params={"supplier_id": ["S-000545"]}).status_code == 200
+
+
+def test_the_firm_order_info_carries_the_erp_hour(client):
+    """The ERP delivery hour of a firm order reaches the grid (tooltip of the Ordre ferme row) and the article page."""
+    proj = client.get("/api/articles/P-00005775/projection", params={"granularity": "day"}).json()
+    orders = {o["order_id"]: o for l in proj["lanes"] for o in l["orders"]}
+    assert orders["PO-000323"]["expected_time"] == "18:00" and orders["PO-000323"]["expected_date"] == "2026-09-24"

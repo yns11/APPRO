@@ -53,6 +53,7 @@ const T = {
   "firm.remaining": { fr: "restant", en: "remaining" },
   "firm.ordered": { fr: "commandé", en: "ordered" },
   "firm.ignored_short": { fr: "ignorée", en: "ignored" },
+  "firm.hour": { fr: "livraison ERP à", en: "ERP delivery at" },
   // receipts
   "rec.received": { fr: "Reçu", en: "Received" },
   "rec.transit": { fr: "En transit", en: "In transit" },

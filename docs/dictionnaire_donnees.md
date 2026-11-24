@@ -246,7 +246,7 @@ de commande d'achat peuvent partager un créneau : sommés).
 | supplier_name | texte | `Nom_fournisseur` | |
 | order_type | texte | `Ordre_ferme` | `Oui` → `FIRM`, sinon `FORECAST` (seul critère de classement ; `Niveau_engagement` reste informatif) |
 | expected_date | date | `Date_de_debut` | |
-| expected_time | texte | `Heure_debut` (`HH:MM`) | heure ERP de la livraison du jour, l'heure la plus tôt du fournisseur ce jour-là (00:00 = non renseignée) ; place le camion automatique à partir du 30/11/2026 ; colonne ajoutée le 20/11/2026 (requête `commandes_edi` avec `Heure_debut` / `Date_heure_debut`) |
+| expected_time | texte | `Heure_debut` (`HH:MM`) | heure ERP de la livraison du jour, l'heure la plus tôt du fournisseur ce jour-là (00:00 = non renseignée) ; place le camion automatique à partir du 30/11/2026 ; colonne ajoutée le 20/11/2026 (requête `commandes_edi` avec `Heure_debut` / `Date_heure_debut`) ; vide si l'extraction ne porte pas encore la colonne |
 | qty_ordered | nombre | Σ `Quantite` | |
 | qty_open | nombre | Σ `Quantite_restante` (≥ 0) | restant ERP ; non fiable une fois la date passée |
 | purch_id | texte | `Commande` (liste) | information |

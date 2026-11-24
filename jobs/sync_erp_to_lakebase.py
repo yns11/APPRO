@@ -62,7 +62,14 @@ RACINE = _amorcer_chemin_projet()
 
 from lakebase import conninfo  # noqa: E402
 
-from appro.data.erp_sql import ErpTables, carry_first_seen, fact_queries, source_of  # noqa: E402
+from appro.data.erp_sql import (  # noqa: E402
+    ORDERS_HOUR_COLUMN,
+    ErpTables,
+    carry_first_seen,
+    fact_queries,
+    source_of,
+    with_source_columns,
+)
 from appro.data.schemas import TABLES  # noqa: E402
 
 LOGGER = logging.getLogger("appro.sync")
@@ -106,6 +113,15 @@ def _table_exists(spark, fqn: str) -> bool:
         return spark.catalog.tableExists(fqn.replace("`", ""))
     except Exception:
         return False
+
+
+def _columns_of(spark, fqn: str) -> list[str]:
+    """Columns of a source table, read before building the queries so that an optional column (``Heure_debut``) is
+    only selected when the extraction carries it ; unreadable : the full extraction is assumed."""
+    try:
+        return list(spark.table(fqn.replace("`", "")).columns)
+    except Exception:
+        return [ORDERS_HOUR_COLUMN]
 
 
 def _check_sources(spark, tables: ErpTables) -> None:
@@ -199,6 +215,10 @@ def run(args: argparse.Namespace) -> dict[str, int]:
         queries = {k: v for k, v in queries.items() if k in wanted}
     spark = _spark()
     _check_sources(spark, tables)
+    tables = with_source_columns(tables, _columns_of(spark, tables.fqn(tables.orders)))
+    if not tables.orders_hour:
+        LOGGER.warning("La table %s n'a pas de colonne Heure_debut : heure de livraison laissée vide (mettre à jour la requête commandes_edi)", tables.orders)
+    queries = {k: v for k, v in fact_queries(tables).items() if k in queries}
     info = conninfo(args.endpoint or None, args.branch or None, args.pg_database, args.pg_host or None, args.pg_user or None)
     results: dict[str, int] = {}
     with psycopg.connect(info, autocommit=False) as conn:

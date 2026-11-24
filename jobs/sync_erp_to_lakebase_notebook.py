@@ -61,12 +61,21 @@ W = {k: dbutils.widgets.get(k).strip() for k in ("lakebase_endpoint", "pg_host",
 def fqn(t):
     return f"`{W['erp_catalog']}`.`{W['erp_schema']}`.`{t}`"
 
+def _columns_of(t):
+    try:
+        return [c.lower() for c in spark.table(f"{W['erp_catalog']}.{W['erp_schema']}.{t}").columns]
+    except Exception:
+        return ["heure_debut"]
+
+# l'heure de livraison (Heure_debut) n'existe que dans les extractions commandes_edi à jour : laissée vide sinon
+HOUR_EXPR = "MIN(c.Heure_debut)" if "heure_debut" in _columns_of(W["orders_table"]) else "CAST(NULL AS STRING)"
+
 QUERIES = {
     "erp_purchase_orders": (["order_id", "article_id", "supplier_id", "supplier_name", "order_type", "expected_date", "expected_time",
                              "qty_ordered", "qty_open", "purch_id", "commitment", "first_seen"], f"""
 SELECT c.ID AS order_id, c.Article AS article_id, c.Code_fournisseur AS supplier_id, MAX(c.Nom_fournisseur) AS supplier_name,
   CASE WHEN MAX(c.Ordre_ferme) = 'Oui' THEN 'FIRM' ELSE 'FORECAST' END AS order_type,
-  CAST(MIN(c.Date_de_debut) AS DATE) AS expected_date, MIN(c.Heure_debut) AS expected_time, CAST(SUM(c.Quantite) AS DOUBLE) AS qty_ordered,
+  CAST(MIN(c.Date_de_debut) AS DATE) AS expected_date, {HOUR_EXPR} AS expected_time, CAST(SUM(c.Quantite) AS DOUBLE) AS qty_ordered,
   CAST(SUM(GREATEST(c.Quantite_restante, 0)) AS DOUBLE) AS qty_open,
   CONCAT_WS(', ', SORT_ARRAY(COLLECT_SET(c.Commande))) AS purch_id, MAX(c.Niveau_engagement) AS commitment
 FROM {fqn(W['orders_table'])} c WHERE c.ID IS NOT NULL GROUP BY c.ID, c.Article, c.Code_fournisseur"""),

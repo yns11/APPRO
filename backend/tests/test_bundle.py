@@ -65,6 +65,12 @@ def test_le_job_et_l_application_partagent_le_sql_de_correspondance() -> None:
     q = fact_queries(ErpTables(consumption="prod", desadv="desadv_edi", prices="silver_base_article", stock="stock_snapshot"))
     assert set(q) == {"fct_purchase_orders", "fct_receipts", "fct_consumption_actual", "fct_desadv", "fct_prices", "fct_stock_snapshot"}
     assert "s.entrepot IN ('B06', 'B06VRAC')" in q["fct_stock_snapshot"] and "DATE_SUB(CURRENT_DATE(), 400)" in q["fct_stock_snapshot"]
+    # the delivery hour is read only when the extraction carries Heure_debut ; an older extraction gets an empty hour
+    from appro.data.erp_sql import with_source_columns
+    assert "MIN(c.Heure_debut)" in q["fct_purchase_orders"]
+    old = fact_queries(with_source_columns(ErpTables(), ["ID", "Commande", "Code_fournisseur", "Article", "Date_de_debut", "Quantite"]))
+    assert "Heure_debut" not in old["fct_purchase_orders"] and "CAST(NULL AS STRING)" in old["fct_purchase_orders"] and "AS expected_time" in old["fct_purchase_orders"]
+    assert with_source_columns(ErpTables(), ["id", "heure_debut"]).orders_hour
     job_filled = {"fct_purchase_orders": {"first_seen"}}      # columns the job computes (carried over between two copies)
     for name, sql in q.items():
         for col in TABLES[name].column_names:
@@ -107,6 +113,37 @@ def test_chaque_requete_lit_sa_table() -> None:
                    consumption=args.consumption_table or "", desadv=args.desadv_table or "")
     q = fact_queries(tj)
     assert "`desadv`" in q["fct_desadv"] and "`conso`" in q["fct_consumption_actual"]
+
+
+def test_le_job_lit_l_heure_erp_seulement_si_la_colonne_existe():
+    """The orders extraction may predate ``Heure_debut`` : the job probes the columns and leaves the hour empty."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("sync_job", RACINE / "jobs" / "sync_erp_to_lakebase.py")
+    job = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(job)
+
+    class _Table:
+        def __init__(self, columns):
+            self.columns = columns
+
+    class _Spark:
+        def __init__(self, columns):
+            self._columns = columns
+
+        def table(self, name):
+            assert "`" not in name
+            return _Table(self._columns)
+
+    class _Blind:
+        def table(self, name):
+            raise RuntimeError("no catalog")
+
+    from appro.data.erp_sql import ErpTables, fact_queries, with_source_columns
+    old = with_source_columns(ErpTables(), job._columns_of(_Spark(["ID", "Date_de_debut", "Quantite"]), "`c`.`s`.`commandes_edi`"))
+    new = with_source_columns(ErpTables(), job._columns_of(_Spark(["ID", "Heure_debut"]), "`c`.`s`.`commandes_edi`"))
+    assert not old.orders_hour and new.orders_hour
+    assert with_source_columns(ErpTables(), job._columns_of(_Blind(), "`c`.`s`.`t`")).orders_hour
+    assert "Heure_debut" not in fact_queries(old)["fct_purchase_orders"] and "Heure_debut" in fact_queries(new)["fct_purchase_orders"]
 
 
 def test_le_job_verifie_les_sources_sans_table_de_pdp() -> None:

@@ -214,7 +214,8 @@ passée et dont l'ERP garde un **restant** (`qty_open`, mis à jour à la valida
 `en retard = Σ restant ERP des commandes fermes dont la date de livraison est antérieure à aujourd'hui`
 
 Sans fenêtre et sans correction par les réceptions : c'est le restant ERP qui fait foi (cohérent avec la ligne
-*Ordre ferme*, `restant / commandé`). Une commande **ignorée** d'un clic sort de la projection mais reste en retard.
+*Ordre ferme*, `restant / commandé`, suivi de « livraison ERP à HH:MM » quand la commande porte une heure : c'est le moyen de
+vérifier que l'heure `Heure_debut` est bien lue). Une commande **ignorée** d'un clic sort de la projection mais reste en retard.
 Le retard est affiché (KPI *En retard* de la fiche, en-tête de la voie, carte *En retard* du cockpit et de la
 fiche fournisseur, **une ligne par commande** : numéro, date prévue, commandé, reçu ERP, restant) ; il **sort
 tout seul** dès que l'ERP solde la commande. Si l'approvisionneur l'attend encore, il tape la quantité dans le

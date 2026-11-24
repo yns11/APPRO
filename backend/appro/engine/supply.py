@@ -202,7 +202,7 @@ def build_lanes(links: list[SupplierLink], orders: list[OrderLine], receipts: li
         i = index.offset(day)
         ignored = bool(firm and i is not None and ln.ignored[i])
         ln.orders.append(OrderInfo(o.order_id, o.supplier_id, typ, day, float(o.qty_ordered), float(o.qty_open or 0.0),
-                                   o.ref, ignored))
+                                   o.ref, ignored, expected_time=getattr(o, "expected_time", "") or ""))
         if firm:
             add(ln.ordered, day, float(o.qty_ordered))
             add(ln.open, day, float(o.qty_open or 0.0))

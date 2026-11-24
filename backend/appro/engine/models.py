@@ -540,6 +540,7 @@ class OrderInfo:
     ref: str = ""
     ignored: bool = False
     transports: list[str] = field(default_factory=list)   # identifiers of the transports (trucks) announced for the slot
+    expected_time: str = ""                               # ERP delivery hour (« HH:MM »), shown in the tooltip of a firm order
 
 
 @dataclass

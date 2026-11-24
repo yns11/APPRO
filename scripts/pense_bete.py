@@ -493,7 +493,7 @@ def sections() -> list[dict[str, str]]:
 
     # ============================================================== A.2 Ordre ferme
     page("ferme", "A", PART_A, "2. Ordre ferme",
-         """<p>La cellule affiche la <b>quantité commandée</b> du jour ; le calcul compte le <b>restant ERP</b> à partir d'aujourd'hui, rien pour le passé. Un clic ignore les commandes du jour, un second les rétablit.</p>
+         """<p>La cellule affiche la <b>quantité commandée</b> du jour ; le calcul compte le <b>restant ERP</b> à partir d'aujourd'hui, rien pour le passé. Un clic ignore les commandes du jour, un second les rétablit. L'info-bulle détaille chaque commande (restant / commandé, n° de commande) et, quand l'ERP la fournit, l'heure de livraison : « livraison ERP à 08:00 ».</p>
 <div class="legend">
 <div><span class="k">""" + cell("1 600", "firm-open") + """</span><span>orange : en cours (restant &gt; 0)</span></div>
 <div><span class="k">""" + cell("400 / 1 600", "firm-open") + """</span><span>livraison partielle : restant / commandé</span></div>

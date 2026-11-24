@@ -36,7 +36,7 @@ export interface ProposalOut {
   /** floor : inside the lead time, only what avoids the stockout ; capped : truncated by a supplier cap ; off_standard : ◇, a feasible working day instead of the standard delivery day */
   floor: boolean; capped: boolean; off_standard: boolean;
 }
-export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; ignored: boolean; transports?: string[]; }
+export interface OrderInfo { order_id: string; supplier_id: string | null; order_type: string; expected_date: string; qty_ordered: number; qty_open: number; ref: string; ignored: boolean; transports?: string[]; expected_time?: string; }
 export interface SeriesOut { key: string; label: string; values: number[]; }
 /** One supplier of the article: its own Ferme / Prévisionnel / Reçu / Plan rows. */
 /** One despatch advice (DESADV) line of the supplier ; shown in the Reçu row while not received. */

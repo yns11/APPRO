@@ -22,7 +22,7 @@ from typing import Any, Protocol
 
 import pandas as pd
 
-from .erp_sql import ErpTables, fact_queries
+from .erp_sql import ErpTables, fact_queries, with_source_columns
 from .schemas import FACT_TABLES, TABLES, coerce
 
 log = logging.getLogger(__name__)
@@ -125,12 +125,26 @@ class UnityCatalogSource(_CachedSource):
                     )
         return self._conn
 
+    def _probe(self) -> None:
+        """Once : read the columns of the orders extraction and drop the optional ones it lacks (``Heure_debut``)."""
+        if getattr(self, "_probed", False):
+            return
+        with self._connection().cursor() as cur:
+            cur.execute(f"SELECT * FROM {self.tables.fqn(self.tables.orders)} LIMIT 0")
+            cols = [d[0] for d in (cur.description or [])]
+        self.tables = with_source_columns(self.tables, cols)
+        if not self.tables.orders_hour:
+            log.warning("%s has no Heure_debut column : delivery hour left empty", self.tables.orders)
+        self.queries = fact_queries(self.tables)
+        self._probed = True
+
     def _load(self, name: str) -> pd.DataFrame:
-        query = self.queries.get(name)
-        if query is None:
+        if name not in self.queries:
             return pd.DataFrame(columns=list(TABLES[name].column_names))
         log.info("UC query for %s", name)
         try:
+            self._probe()
+            query = self.queries[name]
             with self._connection().cursor() as cur:
                 cur.execute(query)
                 return cur.fetchall_arrow().to_pandas()

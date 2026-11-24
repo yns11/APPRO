@@ -234,8 +234,10 @@ redéployer (`scripts/deploy.sh dev PROD --var=...`) ; l'App rejoue le `GRANT` �
    des deux suivantes. Depuis le 20/11/2026 les plages habituelles, les jours de livraison et les jours stricts des
    fournisseurs sont **retirés au démarrage** (colonnes supprimées) : charger la table **Heures de livraison** du
    Référentiel depuis l'extraction PLA de Dynamics (fichier tel quel : `Fournisseur, Lundi … Vendredi`) ; la table
-   `commandes_edi` doit porter la colonne `Heure_debut` (requête mise à jour) : le job et le notebook la lisent dans
-   `expected_time`. Enfermé malgré tout ? Dans l'éditeur SQL Lakebase, sur le schéma de la cible :
+   `commandes_edi` porte de préférence la colonne `Heure_debut` (requête mise à jour) : le job, le notebook et la
+   lecture directe par entrepôt SQL la copient dans `expected_time` **seulement si elle existe** (colonnes de la table
+   lues avant de construire la requête ; sinon heure vide, un avertissement dans le journal du job, et les camions
+   automatiques se placent à l'heure du protocole ou à l'heure habituelle). Enfermé malgré tout ? Dans l'éditeur SQL Lakebase, sur le schéma de la cible :
    `UPDATE appro.ref_planners SET role = 'admin' WHERE lower(email) = '<votre e-mail>';` (ou un `INSERT` de votre
    ligne), puis recharger l'application. Les **Délégations** (délégant, destinataire, dates) se saisissent ensuite.
 6. **Stock de référence** — article, date du stock (veille au soir), stock physique, stock bloqué.

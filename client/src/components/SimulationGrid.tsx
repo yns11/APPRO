@@ -488,7 +488,7 @@ export function SimulationGrid({ cols, articles, planCells, adjustments, flags =
         const l = a.lanes[r.li];
         const ordered = laneSeries(l, "orders_firm_ordered"), open = laneSeries(l, "orders_firm_open");
         const ordersTitle = (i: number) => l.orders.filter((o) => o.order_type === "FIRM" && columnOf(cols, o.expected_date) === i)
-          .map((o) => `${fmtQty(o.qty_open, unit)} ${t("firm.remaining")} / ${fmtQty(o.qty_ordered, unit)} ${t("firm.ordered")}${o.ref ? ` · ${o.ref}` : ""}${o.ignored ? ` · ${t("firm.ignored_short")}` : ""}`).join("\n");
+          .map((o) => `${fmtQty(o.qty_open, unit)} ${t("firm.remaining")} / ${fmtQty(o.qty_ordered, unit)} ${t("firm.ordered")}${o.ref ? ` · ${o.ref}` : ""}${o.expected_time ? ` · ${t("firm.hour")} ${o.expected_time}` : ""}${o.ignored ? ` · ${t("firm.ignored_short")}` : ""}`).join("\n");
         return (
           <tr key={r.key} style={{ height: r.h }}>
             <td>{t("row.orders_firm")}</td>
