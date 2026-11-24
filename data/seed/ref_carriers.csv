@@ -1,0 +1,3 @@
+name,contacts,active
+Geodis,transport@geodis.example,true
+DB Schenker,booking@schenker.example;quai@schenker.example,true

@@ -1,0 +1,22 @@
+import { useEffect, useState } from "react";
+import type { RefValue } from "@/lib/types";
+
+/** Delivery docks of the plant (the same list as ``services/transports.py``). */
+export const DOCKS = ["B15", "B6 EST", "B2 NORD", "B6 NORD"];
+
+export function splitDocks(v: RefValue | string | null | undefined): string[] {
+  return String(v ?? "").split(/[;,]+/).map((x) => x.trim()).filter(Boolean);
+}
+
+/** Docks as one-click checkboxes (several allowed : one CSV line per dock for the transport tool). */
+export function DockPicker({ all, value, onChange, label, size, disabled }: { all: string[]; value: string[]; onChange: (v: string[]) => void; label?: string; size?: "sm"; disabled?: boolean }) {
+  // the box reacts at once ; the parent's value (saved, refetched) takes over when it changes
+  const [local, setLocal] = useState(value);
+  useEffect(() => { setLocal(value); }, [value.join(";")]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const toggle = (d: string) => { const next = local.includes(d) ? local.filter((x) => x !== d) : [...local, d]; setLocal(next); onChange(next); };
+  return (
+    <span className={`dock-picker ${size ?? ""}`} role="group" aria-label={label ?? "Quais"}>
+      {all.map((d) => <label key={d} className={`${local.includes(d) ? "on" : ""} ${disabled ? "off" : ""}`}><input type="checkbox" checked={local.includes(d)} disabled={disabled} onChange={() => toggle(d)} /> {d}</label>)}
+    </span>
+  );
+}
